@@ -52,8 +52,8 @@ export default async function LessonPage({ params }: Props) {
               {vol && (
                 <div style={{ marginBottom: "24px" }}>
                   <div style={{
-                    fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700,
-                    letterSpacing: "0.15em", color: "var(--ink-faint)", marginBottom: "12px",
+                    fontFamily: "var(--mono)", fontSize: "12.5px", fontWeight: 700,
+                    letterSpacing: "0.12em", color: "var(--ink-faint)", marginBottom: "14px",
                     textTransform: "uppercase"
                   }}>
                     卷{getZH(vol.num)} · {vol.title}
@@ -65,18 +65,18 @@ export default async function LessonPage({ params }: Props) {
                           href={`/ai-llm/lessons/${l.slug}/`}
                           style={{
                             display: "flex", alignItems: "center", gap: "10px",
-                            padding: "6px 10px", borderRadius: "6px",
-                            fontSize: "14px", textDecoration: "none",
+                            padding: "8px 10px", borderRadius: "6px",
+                            fontSize: "15px", textDecoration: "none", lineHeight: 1.4,
                             color: l.slug === slug ? "var(--accent)" : "var(--ink-soft)",
                             fontWeight: l.slug === slug ? 700 : 400,
                             background: l.slug === slug ? "var(--accent-wash)" : "transparent",
                             transition: "all 0.12s",
                           }}
                         >
-                          <span style={{ fontFamily: "var(--mono)", fontSize: "12px", minWidth: "24px", opacity: l.slug === slug ? 1 : 0.6 }}>
+                          <span style={{ fontFamily: "var(--mono)", fontSize: "13px", minWidth: "24px", opacity: l.slug === slug ? 1 : 0.6 }}>
                             {String(l.lessonNum).padStart(2, "0")}
                           </span>
-                          <span style={{ lineHeight: 1.3 }}>{l.title}</span>
+                          <span style={{ lineHeight: 1.4 }}>{l.title}</span>
                         </Link>
                       </li>
                     ))}
@@ -84,7 +84,7 @@ export default async function LessonPage({ params }: Props) {
                 </div>
               )}
               <div style={{ borderTop: "1px solid var(--line)", margin: "20px 0" }} />
-              <Link href="/ai-llm/" style={{ fontSize: "13px", color: "var(--ink-faint)", textDecoration: "none" }}>
+              <Link href="/ai-llm/" style={{ fontSize: "14px", color: "var(--ink-faint)", textDecoration: "none" }}>
                 ← 返回学习地图
               </Link>
             </div>

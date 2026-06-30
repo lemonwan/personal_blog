@@ -45,23 +45,23 @@ export default async function JavaArticlePage({ params }: Props) {
             <div style={{ position: "sticky", top: "80px" }}>
               {vol && (
                 <div style={{ marginBottom: "24px" }}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, letterSpacing: "0.15em", color: "var(--ink-faint)", marginBottom: "12px" }}>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: "12.5px", fontWeight: 700, letterSpacing: "0.12em", color: "var(--ink-faint)", marginBottom: "14px" }}>
                     卷{getZH(vol.num)} · {vol.title}
                   </div>
                   <ul style={{ listStyle: "none" }}>
                     {getJavaArticlesByVolume(meta.volume).map((a) => (
                       <li key={a.slug}>
                         <Link href={`/java-interview/${encodeURIComponent(a.slug)}/`} style={{
-                          display: "flex", alignItems: "center", gap: "10px", padding: "6px 10px", borderRadius: "6px",
-                          fontSize: "13px", textDecoration: "none",
+                          display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", borderRadius: "6px",
+                          fontSize: "15px", textDecoration: "none", lineHeight: 1.4,
                           color: a.slug === decoded ? "var(--accent)" : "var(--ink-soft)",
                           fontWeight: a.slug === decoded ? 700 : 400,
                           background: a.slug === decoded ? "var(--accent-wash)" : "transparent",
                         }}>
-                          <span style={{ fontFamily: "var(--mono)", fontSize: "11px", minWidth: "22px", opacity: a.slug === decoded ? 1 : 0.6 }}>
+                          <span style={{ fontFamily: "var(--mono)", fontSize: "13px", minWidth: "24px", opacity: a.slug === decoded ? 1 : 0.6 }}>
                             {String(a.lessonNum).padStart(2, "0")}
                           </span>
-                          <span style={{ lineHeight: 1.3 }}>{a.title.length > 14 ? a.title.slice(0, 14) + "…" : a.title}</span>
+                          <span style={{ lineHeight: 1.4 }}>{a.title.length > 14 ? a.title.slice(0, 14) + "…" : a.title}</span>
                         </Link>
                       </li>
                     ))}
@@ -69,7 +69,7 @@ export default async function JavaArticlePage({ params }: Props) {
                 </div>
               )}
               <div style={{ borderTop: "1px solid var(--line)", margin: "20px 0" }} />
-              <Link href="/java-basics/" style={{ fontSize: "13px", color: "var(--ink-faint)", textDecoration: "none" }}>← 返回 Java 笔记</Link>
+              <Link href="/java-basics/" style={{ fontSize: "14px", color: "var(--ink-faint)", textDecoration: "none" }}>← 返回 Java 笔记</Link>
             </div>
           </aside>
 
