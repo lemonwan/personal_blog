@@ -162,10 +162,42 @@ body {
 .ai-llm-scope .chip-go { cursor: pointer; }
 .ai-llm-scope .chip-go:hover { background: #F5C033; transform: translate(-1px, -1px); box-shadow: 3px 3px 0 #1C1C1C; }
 
-/* ── Station 章节标题 ── */
-.ai-llm-scope .station-head { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; padding-bottom: 18px; border-bottom: 2px solid var(--line); }
-.ai-llm-scope .station-no { display: inline-flex; align-items: center; justify-content: center; width: auto !important; min-width: fit-content; height: 2.5rem; padding-left: 1rem; padding-right: 1rem; border-radius: 0.5rem; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.875rem; white-space: nowrap; }
-.ai-llm-scope .station h2 { font-size: 1.4rem; font-weight: 800; margin: 0; line-height: 1.4; }
+/* ── Station 章节标题：杂志风大号描边序号 ── */
+.ai-llm-scope .lesson-body { counter-reset: station; }
+.ai-llm-scope .lesson-body .station { counter-increment: station; }
+/* 隐藏旧的"第X站"色块 */
+.ai-llm-scope .station-no { display: none !important; }
+.ai-llm-scope .station-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 28px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid var(--line);
+}
+/* 大号空心描边序号 */
+.ai-llm-scope .lesson-body .station-head::before {
+  content: counter(station, decimal-leading-zero);
+  font-family: var(--mono);
+  font-size: 2.8rem;
+  font-weight: 900;
+  line-height: 1;
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--accent);
+  text-stroke: 1.5px var(--accent);
+  flex-shrink: 0;
+  letter-spacing: -0.02em;
+}
+.ai-llm-scope .station h2 { font-size: 1.4rem; font-weight: 800; margin: 0; line-height: 1.4; flex: 1; }
+/* 总结 / 小测验 等特殊章节：用图标替代数字 */
+.ai-llm-scope .lesson-body .station#summary .station-head::before,
+.ai-llm-scope .lesson-body .station.quiz .station-head::before {
+  content: "✦";
+  -webkit-text-stroke: 0;
+  text-stroke: 0;
+  color: var(--accent);
+  font-size: 2.2rem;
+}
 
 /* ── 文章正文排版：增加层次感与呼吸空间 ── */
 .ai-llm-scope .lesson-body { font-size: 17px; line-height: 1.9; color: var(--ink); }
