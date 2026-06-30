@@ -62,50 +62,23 @@ export default function Home() {
           <p className="mb-2 text-sm font-black uppercase tracking-widest text-[#1C1C1C]/40">Featured · 精选</p>
           <h2 className="text-3xl font-black text-[#1C1C1C]">从这里开始探索</h2>
 
-          <div className="mt-10 grid gap-8 md:grid-cols-2">
-            {/* AI 教程卡片 */}
-            <Link href="/ai-llm/" className="nb-card group block" style={{ padding: "28px 32px" }}>
-              <div className="flex items-center gap-3 mb-4">
-                <span className="text-2xl">🧠</span>
-                <div>
-                  <h3 className="text-xl font-black text-[#1C1C1C] group-hover:text-[#C2410C] transition-colors">LLM 基础概念学习笔记</h3>
-                  <p className="text-xs text-[#1C1C1C]/40 mt-0.5">从向量到 Transformer，零基础入门</p>
-                </div>
-              </div>
-              <p className="text-sm text-[#1C1C1C]/50 leading-relaxed">
-                30 节沉浸式讲解，每课从一个你一眼就懂的问题出发，
-                先给最朴素的方案，再亲手发现不足、迭代改好——把向量、神经网络、注意力机制亲手「逼」出来。
-              </p>
-              <div className="flex items-center gap-3 mt-5">
-                <span className="chip">30 节课</span>
-                <span className="chip">5 卷内容</span>
-                <span className="inline-flex items-center gap-1 ml-auto text-sm font-bold text-[#1C1C1C]">
-                  开始学习 <span className="group-hover:translate-x-1 transition-transform">→</span>
-                </span>
-              </div>
-            </Link>
-
-            {/* Java 笔记卡片 */}
-            <Link href="/java-basics/" className="nb-card group block" style={{ padding: "28px 32px" }}>
-              <div className="flex items-center gap-3 mb-4">
-                <span className="text-2xl">☕</span>
-                <div>
-                  <h3 className="text-xl font-black text-[#1C1C1C] group-hover:text-[#C2410C] transition-colors">Java 面试笔记</h3>
-                  <p className="text-xs text-[#1C1C1C]/40 mt-0.5">从集合框架到 JVM 调优</p>
-                </div>
-              </div>
-              <p className="text-sm text-[#1C1C1C]/50 leading-relaxed">
-                系统整理 Java 核心知识，覆盖集合框架、并发编程、JVM、设计模式。
-                每篇从一道高频面试题出发，配套 JDK 源码解读、图解与生产最佳实践。
-              </p>
-              <div className="flex items-center gap-3 mt-5">
-                <span className="chip">{JAVA_ARTICLES.length} 篇文章</span>
-                <span className="chip">4 大主题</span>
-                <span className="inline-flex items-center gap-1 ml-auto text-sm font-bold text-[#1C1C1C]">
-                  查看详情 <span className="group-hover:translate-x-1 transition-transform">→</span>
-                </span>
-              </div>
-            </Link>
+          <div className="mt-10 grid gap-6 sm:grid-cols-2">
+            <FeatureCard
+              href="/ai-llm/"
+              accent="#3E6B8F"
+              label="LLM 基础概念学习笔记"
+              subtitle="从向量到 Transformer，零基础入门"
+              desc="30 节沉浸式讲解，每课从一个你一眼就懂的问题出发，亲手把向量、神经网络、注意力机制推导出来。"
+              stats={["30 节课", "5 卷内容"]}
+            />
+            <FeatureCard
+              href="/java-basics/"
+              accent="#C2410C"
+              label="Java 面试笔记"
+              subtitle="从集合框架到 JVM 调优"
+              desc="系统整理 Java 核心知识，每篇从高频面试题出发，配套 JDK 源码解读、图解与生产最佳实践。"
+              stats={[`${JAVA_ARTICLES.length} 篇文章`, "4 大主题"]}
+            />
           </div>
         </div>
       </section>
@@ -158,5 +131,82 @@ export default function Home() {
         </p>
       </section>
     </>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   可复用精美卡片组件 · FeatureCard
+   新增卡片只需传 href / accent / label / subtitle / desc / stats
+   ═══════════════════════════════════════════════════════════ */
+function FeatureCard({
+  href,
+  accent,
+  label,
+  subtitle,
+  desc,
+  stats,
+}: {
+  href: string;
+  accent: string;
+  label: string;
+  subtitle: string;
+  desc: string;
+  stats: string[];
+}) {
+  return (
+    <a
+      href={href}
+      className="group relative flex flex-col rounded-2xl border border-[#E8E3D5] bg-white p-7
+                 transition-all duration-300
+                 hover:-translate-y-1 hover:border-transparent hover:shadow-lg hover:shadow-black/[0.06]"
+    >
+      {/* 顶部彩色装饰条 */}
+      <div
+        className="absolute top-0 left-7 right-7 h-[3px] rounded-b-full opacity-60 transition-all duration-300 group-hover:opacity-100 group-hover:h-[4px]"
+        style={{ background: accent }}
+      />
+
+      {/* 标题区 */}
+      <div className="mt-2 flex items-start gap-3">
+        {/* 彩色圆点图标 */}
+        <div
+          className="mt-0.5 h-9 w-9 flex-shrink-0 rounded-xl flex items-center justify-center transition-colors duration-300"
+          style={{ background: `${accent}12` }}
+        >
+          <div className="h-3 w-3 rounded-full" style={{ background: accent }} />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-lg font-bold text-[#1C1C1C] leading-snug transition-colors duration-300 group-hover:text-[#1C1C1C]">
+            {label}
+          </h3>
+          <p className="text-[13px] text-[#1C1C1C]/40 mt-0.5">{subtitle}</p>
+        </div>
+      </div>
+
+      {/* 描述 */}
+      <p className="mt-4 text-[14px] text-[#1C1C1C]/50 leading-relaxed flex-1">
+        {desc}
+      </p>
+
+      {/* 底部：统计 + 箭头 */}
+      <div className="mt-5 flex items-center justify-between pt-4 border-t border-[#F0EDE4]">
+        <div className="flex gap-3">
+          {stats.map((s) => (
+            <span key={s} className="text-[11px] font-bold tracking-wide text-[#1C1C1C]/30 uppercase">
+              {s}
+            </span>
+          ))}
+        </div>
+        <span
+          className="inline-flex items-center gap-1 text-[13px] font-bold transition-all duration-300"
+          style={{ color: accent }}
+        >
+          探索
+          <svg className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+        </span>
+      </div>
+    </a>
   );
 }
