@@ -163,9 +163,57 @@ body {
 .ai-llm-scope .chip-go:hover { background: #F5C033; transform: translate(-1px, -1px); box-shadow: 3px 3px 0 #1C1C1C; }
 
 /* ── Station 章节标题 ── */
-.ai-llm-scope .station-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.ai-llm-scope .station-head { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; padding-bottom: 18px; border-bottom: 2px solid var(--line); }
 .ai-llm-scope .station-no { display: inline-flex; align-items: center; justify-content: center; width: auto !important; min-width: fit-content; height: 2.5rem; padding-left: 1rem; padding-right: 1rem; border-radius: 0.5rem; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.875rem; white-space: nowrap; }
-.ai-llm-scope .station h2 { font-size: 1.25rem; font-weight: 700; margin: 0; }
+.ai-llm-scope .station h2 { font-size: 1.4rem; font-weight: 800; margin: 0; line-height: 1.4; }
+
+/* ── 文章正文排版：增加层次感与呼吸空间 ── */
+.ai-llm-scope .lesson-body { font-size: 17px; line-height: 1.9; color: var(--ink); }
+.ai-llm-scope .lesson-body .station { padding: 32px 36px; margin-bottom: 32px; }
+.ai-llm-scope .lesson-body p { margin: 0 0 1.4em; line-height: 1.9; color: var(--ink); }
+.ai-llm-scope .lesson-body p + p { margin-top: 0; }
+.ai-llm-scope .lesson-body h3 { font-size: 1.15rem; font-weight: 800; color: var(--ink); margin: 2.2em 0 1em; padding-left: 14px; border-left: 4px solid var(--accent); line-height: 1.5; }
+.ai-llm-scope .lesson-body ul, .ai-llm-scope .lesson-body ol { margin: 0 0 1.6em; padding-left: 1.6em; }
+.ai-llm-scope .lesson-body li { margin-bottom: 0.7em; line-height: 1.85; padding-left: 4px; }
+.ai-llm-scope .lesson-body li::marker { color: var(--accent); font-weight: 700; }
+.ai-llm-scope .lesson-body strong { color: var(--ink); font-weight: 700; }
+.ai-llm-scope .lesson-body code { font-family: var(--mono); font-size: 0.88em; color: var(--accent); background: var(--accent-wash); padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
+.ai-llm-scope .lesson-body a { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+/* 公式块：更宽松的内距 */
+.ai-llm-scope .lesson-body .formula { background: var(--accent-wash); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 12px; padding: 22px 28px; margin: 1.8em 0; text-align: center; font-family: var(--mono); font-size: 15px; line-height: 2; color: var(--ink); overflow-x: auto; }
+
+/* 思考块 think */
+.ai-llm-scope .lesson-body .think { background: #fff; border: 2px dashed var(--accent); border-radius: 12px; padding: 22px 26px; margin: 1.8em 0; display: block; }
+.ai-llm-scope .lesson-body .think-q { color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.8; margin: 0; }
+.ai-llm-scope .lesson-body .think-q::before { content: "🤔 停下来，想一想"; display: block; font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 10px; }
+
+/* 局限/裂缝块 crack */
+.ai-llm-scope .lesson-body .crack { background: color-mix(in srgb, var(--accent) 6%, #fff); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-left: 5px solid var(--accent); border-radius: 0 12px 12px 0; padding: 22px 28px; margin: 1.8em 0; }
+.ai-llm-scope .lesson-body .crack-label { color: var(--accent); font-weight: 800; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; }
+.ai-llm-scope .lesson-body .crack p { margin-bottom: 0.9em; }
+.ai-llm-scope .lesson-body .crack p:last-child { margin-bottom: 0; }
+
+/* 要点块 takeaway */
+.ai-llm-scope .lesson-body .takeaway { background: color-mix(in srgb, var(--chart-blue) 7%, #fff); border: 2px solid var(--chart-blue); border-radius: 12px; padding: 24px 28px; margin: 2em 0; }
+.ai-llm-scope .lesson-body .takeaway-label { color: var(--chart-blue); font-weight: 800; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 14px; }
+.ai-llm-scope .lesson-body .takeaway ul { margin-bottom: 0; }
+
+/* 回顾块 recap */
+.ai-llm-scope .lesson-body .recap { background: var(--paper-deep); border: 2px solid var(--line); border-radius: 12px; padding: 24px 28px; margin: 2em 0; }
+.ai-llm-scope .lesson-body .recap h3 { margin-top: 0; border-left: none; padding-left: 0; color: var(--accent); }
+
+/* 配图 fig：上下留白 */
+.ai-llm-scope .lesson-body .fig { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px 20px; margin: 2.2em 0; text-align: center; overflow-x: auto; }
+.ai-llm-scope .lesson-body .fig svg { max-width: 100%; height: auto; }
+.ai-llm-scope .lesson-body .figcaption { margin-top: 18px; font-size: 13.5px; color: var(--ink-faint); line-height: 1.7; text-align: center; }
+.ai-llm-scope .lesson-body .fig-no { color: var(--accent); font-weight: 700; margin-right: 6px; }
+
+/* 表格：行距更舒展 */
+.ai-llm-scope .lesson-body table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 1.8em 0; border: 2px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 15px; }
+.ai-llm-scope .lesson-body th { background: var(--ink); color: var(--brand); padding: 12px 16px; text-align: left; font-weight: 700; }
+.ai-llm-scope .lesson-body td { padding: 12px 16px; border-top: 1px solid var(--line); line-height: 1.7; }
+.ai-llm-scope .lesson-body tr:nth-child(even) td { background: var(--paper-deep); }
 
 /* ── AI 学习理念（简化版，同主页）── */
 .ai-llm-scope .philosophy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }

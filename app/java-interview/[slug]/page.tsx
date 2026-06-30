@@ -94,7 +94,7 @@ export default async function JavaArticlePage({ params }: Props) {
               </div>
             </header>
 
-            <div className="lesson-body" style={{ fontSize: "17px", lineHeight: 1.95 }} dangerouslySetInnerHTML={{ __html: content }} />
+            <div className="lesson-body" dangerouslySetInnerHTML={{ __html: content }} />
 
             <nav style={{ display: "flex", justifyContent: "space-between", marginTop: "48px", paddingTop: "24px", borderTop: "1px solid var(--line)" }}>
               {prev ? (
