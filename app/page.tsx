@@ -37,7 +37,7 @@ export default function Home() {
           </div>
 
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/ai-llm/" className="btn-dark" style={{ padding: "12px 28px" }}>AI 大模型教程 →</Link>
+            <Link href="/ai-llm/" className="btn-dark" style={{ padding: "12px 28px" }}>LLM 基础概念学习笔记 →</Link>
             <Link href="/java-basics/" className="btn-white" style={{ padding: "12px 28px" }}>Java 面试笔记</Link>
           </div>
         </div>
@@ -68,7 +68,7 @@ export default function Home() {
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-2xl">🧠</span>
                 <div>
-                  <h3 className="text-xl font-black text-[#1C1C1C] group-hover:text-[#C2410C] transition-colors">AI 大模型原理教程</h3>
+                  <h3 className="text-xl font-black text-[#1C1C1C] group-hover:text-[#C2410C] transition-colors">LLM 基础概念学习笔记</h3>
                   <p className="text-xs text-[#1C1C1C]/40 mt-0.5">从向量到 Transformer，零基础入门</p>
                 </div>
               </div>

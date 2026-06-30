@@ -19,7 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <a href="/" className="flex-shrink-0 font-black text-xl text-[#FAC94A] hover:opacity-80 transition-opacity">WAN</a>
                 <nav className="hidden items-center gap-6 md:flex">
                   <a href="/" className="text-sm font-semibold text-white/60 hover:text-white transition-colors">首页</a>
-                  <a href="/ai-llm/" className="text-sm font-semibold text-[#FAC94A] transition-colors">AI 大模型教程</a>
+                  <a href="/ai-llm/" className="text-sm font-semibold text-[#FAC94A] transition-colors">LLM 基础概念学习笔记</a>
                   <a href="/java-basics/" className="text-sm font-semibold text-white/60 hover:text-white transition-colors">Java 笔记</a>
                 </nav>
               </div>

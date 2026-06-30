@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const meta = getLessonBySlug(slug);
   if (!meta) return { title: "课程未找到" };
   return {
-    title: `第${String(meta.lessonNum).padStart(2, "0")}课 · ${meta.title} | AI 大模型原理教程`,
+    title: `第${String(meta.lessonNum).padStart(2, "0")}课 · ${meta.title} | LLM 基础概念学习笔记`,
     description: meta.question,
   };
 }
@@ -99,7 +99,7 @@ export default async function LessonPage({ params }: Props) {
             <div className="lesson-breadcrumb" style={{ fontSize: "14px", color: "var(--ink-faint)", marginBottom: "32px" }}>
               <Link href="/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>首页</Link>
               {" / "}
-              <Link href="/ai-llm/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>AI 大模型教程</Link>
+              <Link href="/ai-llm/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>LLM 基础概念学习笔记</Link>
               {" / "}第 {String(meta.lessonNum).padStart(2, "0")} 课
             </div>
 

@@ -2,8 +2,8 @@ import Link from "next/link";
 import { AI_LESSONS, VOLUMES, getLessonsByVolume } from "@/lib/content";
 
 export const metadata = {
-  title: "AI大模型原理免费教程：从向量到 Transformer，新手小白零基础入门 · 轩辕的编程宇宙·AI",
-  description: "AI大模型原理免费教程，从向量到 Transformer，适合新手小白零基础入门。30 课沉浸式讲解向量、矩阵、神经网络、注意力机制与大语言模型，每课从一个具体问题出发，亲手推导到 ChatGPT。",
+  title: "LLM 基础概念学习笔记 · 从向量到 Transformer",
+  description: "LLM 基础概念学习笔记，从向量到 Transformer，零基础系统学习大模型底层原理。30 节沉浸式讲解，每课从一个问题出发，亲手推导到 ChatGPT。",
 };
 
 export default function AiLlmPage() {
@@ -25,7 +25,7 @@ export default function AiLlmPage() {
                 </svg>
               </div>
               <h1 style={{ fontFamily: "'AlimamaShuHeiTi', sans-serif" }} className="text-4xl font-black text-[#1C1C1C] sm:text-5xl">
-                AI大模型学习，从向量到
+                LLM 基础概念，从向量到
                 <span style={{ marginLeft: "6px", padding: "4px 12px" }} className="inline-block rounded-xl border-2 border-[#1C1C1C] bg-[#1C1C1C] text-[#FAC94A]">Transformer</span>
               </h1>
               <p style={{ marginTop: "14px" }} className="max-w-2xl text-base font-semibold text-[#1C1C1C]/60">
@@ -150,7 +150,7 @@ export default function AiLlmPage() {
 
       {/* ═══ CTA ═══ */}
       <section className="section-dark text-center" style={{ padding: "60px 24px", borderTop: "3px solid #FAC94A" }}>
-        <p className="text-[#FAC94A] font-black text-lg mb-4">🚀 开始你的 AI 大模型学习之旅！</p>
+        <p className="text-[#FAC94A] font-black text-lg mb-4">🚀 开始你的 LLM 学习之旅！</p>
         <p className="text-white/50 text-sm max-w-md mx-auto mb-8">
           建议从第 1 课开始，顺着学习路径一步步前进。每一课都建立在前一课的基础上，让你亲手把整个知识体系「搭建」起来。
         </p>
