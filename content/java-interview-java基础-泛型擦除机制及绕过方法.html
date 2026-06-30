@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 16 | 泛型擦除机制及绕过方法</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 16 — 泛型擦除机制及绕过方法</h1>
+  <div class="tag">模块：Java基础 · 泛型与反射</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">16</span>
+    <span class="card-title">泛型擦除机制及绕过方法</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>泛型擦除机制</h3>
+      <div class="content"><ul class="bullet-list">
+<li><span class="highlight">什么是泛型擦除？</span> Java 泛型只在编译期有效，编译后泛型信息会被擦除为原生类型（raw type），例如 List&lt;String&gt; 编译后变为 List。</li>
+<li><span class="highlight">擦除规则：</span>
+<ul>
+<li>无界泛型擦除为 Object</li>
+<li>有界泛型擦除为指定的上界类型</li>
+<li>类型变量被其第一个边界类型替换</li>
+</ul>
+</li>
+<li><span class="highlight">为什么设计为擦除？</span> 为了向后兼容 JDK 1.5 之前的代码，同时保持 JVM 的简单性。</li>
+</ul>
+
+<div class="note-box">
+<div class="note-title">示例</div>
+<div class="code-block">public class Box&lt;T&gt; {
+    private T value;
+    public T getValue() { return value; }
+    public void setValue(T v) { value = v; }
+}
+// 编译后等效于
+class Box {
+    private Object value;
+    public Object getValue() { return value; }
+}</div>
+</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>泛型擦除的绕过方法</h3>
+      <div class="content"><ul class="bullet-list">
+<li><span class="highlight">方法一：通过反射获取泛型信息</span>
+<ul>
+<li>反射可以获取 ParameterizedType 中的类型参数</li>
+<li>适用于父类/接口的泛型参数提取</li>
+<li>Spring 的 HibernateTemplate 正是利用此原理</li>
+</ul>
+</li>
+<li><span class="highlight">方法二：传入 Class&lt;T&gt; 标记</span>
+<div class="code-block">public class TypeReference&lt;T&gt; {
+    final Type type;
+    protected TypeReference() {
+        this.type = ((ParameterizedType) getClass()
+            .getGenericSuperclass()).getActualTypeArguments()[0];
+    }
+}</div>
+</li>
+<li><span class="highlight">方法三：Kotlin 的 reified 类型</span> Kotlin 通过内联函数实现真正的 reified 泛型。</li>
+</ul>
+
+<div class="note-box warning">
+<div class="note-title">面试高频</div>
+<p>问：new ArrayList&lt;String&gt;() 运行时是 ArrayList&lt;String&gt; 还是 ArrayList？<br>
+答：运行时擦除为 ArrayList，类型安全由编译器在编译期保证。</p>
+</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>反射的性能开销与框架应用</h3>
+      <div class="content"><ul class="bullet-list">
+<li><span class="highlight">反射的性能开销：</span>
+<ul>
+<li>反射比直接调用慢 10~100倍</li>
+<li>主要开销来自 Method.invoke() 的运行时检查、getDeclaredMethod() 的缓存查找</li>
+<li>频繁反射会导致 GC 压力增大（产生大量临时对象）</li>
+</ul>
+</li>
+<li><span class="highlight">性能优化手段：</span>
+<ul>
+<li>使用 method.setAccessible(true) 跳过访问检查</li>
+<li>缓存 Method/Field 对象，避免重复查找</li>
+<li>JDK 9+ 的 MethodHandles 和 VarHandle 提供了更快的替代方案</li>
+</ul>
+</li>
+</ul>
+
+<div class="note-box">
+<div class="note-title">Spring 中的反射应用</div>
+<ul>
+<li><strong>IOC 容器</strong>：通过反射实例化 Bean</li>
+<li><strong>DI 注入</strong>：反射设置字段</li>
+<li><strong>AOP</strong>：动态代理底层使用反射调用目标方法</li>
+<li><strong>@Autowired</strong>：扫描字段并反射注入依赖</li>
+</ul>
+</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>注解与元注解实战</h3>
+      <div class="content"><ul class="bullet-list">
+<li><span class="highlight">注解（Annotation）</span> 是代码中的元数据，运行时可以被反射获取。</li>
+<li><span class="highlight">元注解：</span>
+<table class="comparison-table">
+<tr><th>元注解</th><th>作用</th></tr>
+<tr><td>@Target</td><td>限定注解可以使用的地方（FIELD, METHOD, TYPE等）</td></tr>
+<tr><td>@Retention</td><td>保留策略：SOURCE/CLASS/RUNTIME</td></tr>
+<tr><td>@Documented</td><td>生成 Javadoc 时包含此注解</td></tr>
+<tr><td>@Inherited</td><td>注解可以被子类继承</td></tr>
+<tr><td>@Repeatable</td><td>允许同一位置声明多次</td></tr>
+</table>
+</li>
+</ul>
+
+<div class="note-box danger">
+<div class="note-title">面试必问：@Transactional 为什么必须用 RUNTIME？</div>
+<p>因为事务管理器需要在运行时通过反射读取 @Transactional 注解，动态创建 AOP 代理并控制事务边界。</p>
+</div>
+
+<div class="note-box">
+<div class="note-title">自定义注解示例</div>
+<div class="code-block">@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface RateLimit {
+    int value() default 100;
+    String key() default "";
+}</div>
+</div></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 24%"></div></div>
+  <div class="progress-text">16 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>明日预告：Java 8 Optional 类的使用与最佳实践 —— 如何优雅地避免 NPE</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 16/66</div>
+</body>
+</html>

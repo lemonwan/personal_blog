@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 27 · 常用参数（-Xms/-Xmx/-Xmn/-XX:MetaspaceSize 等） · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 27 / 66</div>
+            <h1>JVM 原理与调优 · JVM 调优实战</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 常用参数（-Xms/-Xmx/-Xmn/-XX:MetaspaceSize 等）</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:40%"></div>
+            </div>
+            <div class="progress-label">进度 40%（27/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念：JVM 参数分哪几类？</h2>
+        </div>
+        <div class="section-content">
+            
+<p>JVM 参数本质上是在控制 <strong>内存布局、GC 行为、诊断输出、运行时优化</strong>。面试中不要只背参数名，要能说清楚：为什么配、怎么配、配错会怎样。</p>
+<ul>
+  <li><span class='tag tag-blue'>标准参数</span>：如 <code>-version</code>、<code>-classpath</code>，各 JVM 基本通用。</li>
+  <li><span class='tag tag-yellow'>非标准参数</span>：如 <code>-Xms</code>、<code>-Xmx</code>、<code>-Xmn</code>，常用但不保证所有 JVM 完全一致。</li>
+  <li><span class='tag tag-red'>高级参数</span>：以 <code>-XX:</code> 开头，如 <code>-XX:MetaspaceSize</code>、<code>-XX:+UseG1GC</code>、<code>-XX:+HeapDumpOnOutOfMemoryError</code>。</li>
+</ul>
+<div class='highlight-box blue'><strong>一句话记忆：</strong><code>-X</code> 多用于堆大小，<code>-XX</code> 多用于 GC、元空间、诊断和高级开关。</div>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>堆内存参数：-Xms、-Xmx、-Xmn</h2>
+        </div>
+        <div class="section-content">
+            
+<table>
+  <tr><th>参数</th><th>含义</th><th>典型建议</th></tr>
+  <tr><td><code>-Xms</code></td><td>堆初始大小</td><td>生产环境通常与 <code>-Xmx</code> 设置相同，避免运行期动态扩容带来的抖动</td></tr>
+  <tr><td><code>-Xmx</code></td><td>堆最大大小</td><td>根据容器/机器内存、对象存活量、GC 目标综合设置</td></tr>
+  <tr><td><code>-Xmn</code></td><td>年轻代大小</td><td>年轻代过小会频繁 Minor GC；过大会挤压老年代，增加 Full GC 风险</td></tr>
+</table>
+<p>示例：</p>
+<pre><code>java -Xms2g -Xmx2g -Xmn768m -jar app.jar</code></pre>
+<ul>
+  <li><strong>年轻代</strong>主要存放朝生夕死的对象，Minor GC 频率与 <code>-Xmn</code> 强相关。</li>
+  <li><strong>老年代</strong>存放长期存活对象，空间不足时可能触发 Major/Full GC。</li>
+  <li>如果使用 G1，通常不强制指定 <code>-Xmn</code>，让 G1 根据暂停目标动态调整各 Region 角色更合适。</li>
+</ul>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>元空间参数：MetaspaceSize 与 MaxMetaspaceSize</h2>
+        </div>
+        <div class="section-content">
+            
+<p>JDK 8 之后永久代被 <strong>元空间 Metaspace</strong> 替代，主要存放类元数据、方法元信息、常量池相关结构等。元空间使用本地内存，不再直接占用 Java Heap。</p>
+<ul>
+  <li><code>-XX:MetaspaceSize</code>：触发元空间 GC 的初始阈值，不是固定初始占用。</li>
+  <li><code>-XX:MaxMetaspaceSize</code>：元空间最大上限；不设置时理论上受限于本机可用内存。</li>
+</ul>
+<pre><code>java -XX:MetaspaceSize=256m -XX:MaxMetaspaceSize=512m -jar app.jar</code></pre>
+<div class='highlight-box yellow'><strong>面试重点：</strong>如果系统大量动态生成类，例如 CGLIB、Javassist、Groovy 脚本、频繁热部署，可能导致元空间增长甚至 <code>OutOfMemoryError: Metaspace</code>。</div>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>GC 选择与日志诊断参数</h2>
+        </div>
+        <div class="section-content">
+            
+<p>JVM 调优不是靠感觉，必须有 GC 日志和监控数据支撑。常见组合如下：</p>
+<pre><code># JDK 8 常见 GC 日志
+-XX:+PrintGCDetails
+-XX:+PrintGCDateStamps
+-Xloggc:/data/logs/gc.log
+
+# JDK 9+ 统一日志
+-Xlog:gc*:file=/data/logs/gc.log:time,uptime,level,tags</code></pre>
+<ul>
+  <li><code>-XX:+UseG1GC</code>：启用 G1，适合较大堆、希望可预测停顿的服务。</li>
+  <li><code>-XX:MaxGCPauseMillis=200</code>：设置期望最大暂停时间，注意这是目标不是绝对承诺。</li>
+  <li><code>-XX:+UseParallelGC</code>：吞吐优先，适合后台批处理任务。</li>
+  <li><code>-XX:+UseConcMarkSweepGC</code>：CMS 在老版本常见，但 JDK 9 已废弃、JDK 14 移除。</li>
+</ul>
+<div class='highlight-box green'><strong>调优闭环：</strong>观察 GC 日志 → 判断 Minor/Full GC 频率和耗时 → 分析对象生命周期 → 调整堆、年轻代、GC 器或代码分配模式。</div>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>OOM 诊断参数：线上必备</h2>
+        </div>
+        <div class="section-content">
+            
+<p>生产环境建议提前配置 OOM 现场保留参数，否则出问题后只能靠日志猜。</p>
+<pre><code>-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/data/dump/heap.hprof
+-XX:ErrorFile=/data/logs/hs_err_pid%p.log
+-XX:+ExitOnOutOfMemoryError</code></pre>
+<ul>
+  <li><code>HeapDumpOnOutOfMemoryError</code>：OOM 时自动导出堆快照，便于 MAT/VisualVM 分析。</li>
+  <li><code>HeapDumpPath</code>：指定 dump 路径，确保磁盘空间充足且应用有写权限。</li>
+  <li><code>ErrorFile</code>：JVM 崩溃时输出错误日志。</li>
+  <li><code>ExitOnOutOfMemoryError</code>：OOM 后直接退出，让容器/守护进程拉起，避免服务处于半死不活状态。</li>
+</ul>
+<div class='highlight-box'><strong>踩坑：</strong>Heap Dump 文件可能非常大，2G 堆的 dump 可能接近数 GB；磁盘打满会引发二次故障。</div>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚖️</span>
+            <h2>容器环境下的 JVM 参数注意点</h2>
+        </div>
+        <div class="section-content">
+            
+<p>在 Docker/K8s 中，JVM 看到的不一定是宿主机资源，而是 cgroup 限制。现代 JDK 已增强容器感知，但仍建议显式规划内存。</p>
+<ul>
+  <li>堆内存不是进程全部内存，还要给 <strong>元空间、线程栈、DirectBuffer、JIT CodeCache、native 内存</strong> 预留空间。</li>
+  <li>容器内存 2G 时，不建议直接 <code>-Xmx2g</code>，否则容易被 OOM Killer 杀掉。</li>
+  <li>可使用 <code>-XX:MaxRAMPercentage</code>、<code>-XX:InitialRAMPercentage</code> 让 JVM 按容器内存比例设置堆。</li>
+</ul>
+<pre><code>-XX:InitialRAMPercentage=50.0
+-XX:MaxRAMPercentage=70.0</code></pre>
+<p>经验值：对于 Web 服务，堆通常控制在容器限制的 50%～75%，剩余空间留给堆外和系统开销。</p>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>面试真题：线上服务 JVM 参数怎么配置？</h2>
+        </div>
+        <div class="section-content">
+            
+<p><strong>参考回答结构：</strong></p>
+<ol>
+  <li>先看服务类型：Web 服务、批处理、低延迟服务的目标不同。</li>
+  <li>再看运行环境：物理机还是容器，内存限制是多少，是否有多实例部署。</li>
+  <li>基础参数：<code>-Xms</code> 与 <code>-Xmx</code> 一般设为相同；元空间设置上限；开启 GC 日志和 OOM dump。</li>
+  <li>GC 器选择：大多数中大型服务可优先考虑 G1；吞吐型批任务可考虑 Parallel GC。</li>
+  <li>最后压测和线上观测：关注 QPS、RT、GC 次数、GC 总耗时、Full GC、内存水位。</li>
+</ol>
+<div class='highlight-box green'><strong>加分表达：</strong>JVM 参数没有银弹，我会通过压测和 GC 日志验证，而不是直接套模板。</div>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>今日速记清单</h2>
+        </div>
+        <div class="section-content">
+            
+<ul>
+  <li><code>-Xms</code>：初始堆；<code>-Xmx</code>：最大堆；生产常设相等。</li>
+  <li><code>-Xmn</code>：年轻代大小；G1 下通常不建议强行固定。</li>
+  <li><code>MetaspaceSize</code> 是触发 GC 的阈值；<code>MaxMetaspaceSize</code> 是元空间上限。</li>
+  <li>必须开启 GC 日志、OOM dump、错误日志，便于问题复盘。</li>
+  <li>容器中要给非堆内存留空间，不能把 <code>-Xmx</code> 顶满容器限制。</li>
+</ul>
+
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>内存泄漏排查（Heap Dump、MAT/VisualVM 使用）</p>
+        </div>
+    </div>
+</body>
+</html>

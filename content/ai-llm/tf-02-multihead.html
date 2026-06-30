@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第20课 · 多头注意力 | AI大模型原理教程</title>
+    <meta name="description" content="注意力只能有一种看法吗？——同时关注语法、语义、指代关系">
+    <meta name="keywords" content="AI大模型教程,Transformer,多头注意力,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第20课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 20 · 卷四</div>
+            <h1>多头注意力</h1>
+            <p class="subtitle">❝ 注意力只能有一种看法吗？——同时关注语法、语义、指代关系 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="一个词，好几种关系" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>一个词，往往牵着好几种关系</h2></div><p>上一课的注意力机制解决了一件漂亮的事：读到「它」时让它回头看，发现最相关的是「小猫」，指代搞定。 但那是个<strong>只有一种关系</strong>的简单句。真实的句子，往往一个词同时牵着好几条线。读这句：</p><div class="formula" style="font-family:var(--serif);font-size:18px;line-height:2">「小明告诉小红，<span class="f-hl">他</span>喜欢<span class="f-hl">她</span>画的<span class="f-hl">那幅</span>风景画。」</div><p>单单为了读懂它，你的大脑其实<strong>同时</strong>在追好几条不同性质的线：</p><ul style="padding-left:24px;line-height:2.1"><li><strong>指代</strong>：「他」=小明，「她」=小红，「那幅」=风景画；</li><li><strong>主谓</strong>：动词「喜欢」的施动者是「他」；</li><li><strong>动宾</strong>：「喜欢」的对象是「风景画」。</li></ul><p>光盯着「喜欢」这一个词：它既要往左找主语「他」，又要往右找宾语「风景画」——<strong>这是两种不同的关系，要看向两个不同的地方</strong>。可上一课的注意力，整套 Q/K/V 只有一份， 一个词只能算出<em>一组</em>权重、问<em>一个</em>问题：「谁跟我最相关？」</p><p>那把主语和宾语都算成「相关」、一起加权进来，不就行了？我们来看看会发生什么。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 188" role="img" aria-label="单头被迫同时关注主语和宾语，混出一个语义模糊的向量"><text x="70" y="28" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#C0481E">喜欢</text><text x="70" y="46" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">的查询</text><path d="M 92 30 Q 180 16 250 56" fill="none" stroke="#3E6B8F" stroke-width="3.4" opacity="0.7"></path><path d="M 92 36 Q 180 96 250 110" fill="none" stroke="#4A8B5E" stroke-width="3.4" opacity="0.7"></path><rect x="250" y="42" width="96" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="298" y="62" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">他（主语）</text><rect x="250" y="96" width="96" height="30" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.4"></rect><text x="298" y="116" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">风景画（宾语）</text><line x1="346" y1="57" x2="392" y2="82" stroke="#C9BBA2" stroke-width="1.4"></line><line x1="346" y1="111" x2="392" y2="86" stroke="#C9BBA2" stroke-width="1.4"></line><polygon points="394,84 386,80 386,90" fill="#C9BBA2"></polygon><rect x="396" y="60" width="112" height="48" rx="6" fill="#F7E5DB" stroke="#C0481E" stroke-width="1.5"></rect><text x="452" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#9A3815">一半「他」+ 一半「画」</text><text x="452" y="97" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="700" fill="#C0481E">＝四不像</text><text x="260" y="168" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">加权平均把两个本该分开的关系揉成一团，反而谁都没看清</text></svg></div><figcaption><span class="fig-no">图 20-1</span>一个注意力头被迫同时盯主语和宾语，加权平均后混出一个「半个他、半个画」的向量——语义反而模糊了。一头只擅长一种关系。</figcaption></figure><div class="think"><div class="think-q">能不能让同一个头同时把权重分给「他」和「风景画」，一次搞定主谓和动宾？想想加权平均会混出什么。</div></div></section><section class="station reveal" data-title="开多个窗口" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>开多个窗口：并排跑好几个头</h2></div><p>既然一个头只擅长一种关系，解法就朴素到家了：<strong>同时跑好几个头</strong>。 每个头都有<em>自己独立的</em>一套 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，独立打分、独立算权重、独立混合—— 互不干扰。这样一来，让「喜欢」往左看主语的，是一个头；让它往右看宾语的，是另一个头。两种关系各算各的，再也不会糊成一团。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 540 252" role="img" aria-label="同一个词「喜欢」在两个头里关注到不同的词"><g><text x="40" y="24" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">头 A</text><text x="126" y="24" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">· 学到「主谓」</text><g><rect x="42" y="67.2" width="32" height="2.8000000000000003" rx="2" fill="#3E6B8F" opacity="0.33"></rect><text x="58" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">小明</text></g><g><rect x="96" y="66.64" width="32" height="3.36" rx="2" fill="#3E6B8F" opacity="0.34"></rect><text x="112" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">告诉</text></g><g><rect x="150" y="67.2" width="32" height="2.8000000000000003" rx="2" fill="#3E6B8F" opacity="0.33"></rect><text x="166" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">小红</text></g><g><rect x="204" y="35.28" width="32" height="34.72" rx="2" fill="#3E6B8F" opacity="0.9"></rect><text x="220" y="33.28" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">62</text><text x="220" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">他</text></g><g><text x="274" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#C0481E" font-weight="700">喜欢</text><rect x="255" y="74" width="38" height="16" rx="3" fill="none" stroke="#C0481E" stroke-width="1.3"></rect></g><g><rect x="312" y="67.76" width="32" height="2.24" rx="2" fill="#3E6B8F" opacity="0.32"></rect><text x="328" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">她</text></g><g><rect x="366" y="67.2" width="32" height="2.8000000000000003" rx="2" fill="#3E6B8F" opacity="0.33"></rect><text x="382" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">画</text></g><g><rect x="420" y="68.32" width="32" height="1.68" rx="2" fill="#3E6B8F" opacity="0.31000000000000005"></rect><text x="436" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">的</text></g><g><rect x="474" y="64.4" width="32" height="5.6000000000000005" rx="2" fill="#3E6B8F" opacity="0.38"></rect><text x="490" y="86" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">风景画</text></g></g><g><text x="40" y="140" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#4A8B5E">头 B</text><text x="126" y="140" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">· 学到「动宾」</text><g><rect x="42" y="183.76" width="32" height="2.24" rx="2" fill="#4A8B5E" opacity="0.32"></rect><text x="58" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">小明</text></g><g><rect x="96" y="183.2" width="32" height="2.8000000000000003" rx="2" fill="#4A8B5E" opacity="0.33"></rect><text x="112" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">告诉</text></g><g><rect x="150" y="183.76" width="32" height="2.24" rx="2" fill="#4A8B5E" opacity="0.32"></rect><text x="166" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">小红</text></g><g><rect x="204" y="181.52" width="32" height="4.48" rx="2" fill="#4A8B5E" opacity="0.36000000000000004"></rect><text x="220" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">他</text></g><g><text x="274" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#C0481E" font-weight="700">喜欢</text><rect x="255" y="190" width="38" height="16" rx="3" fill="none" stroke="#C0481E" stroke-width="1.3"></rect></g><g><rect x="312" y="183.2" width="32" height="2.8000000000000003" rx="2" fill="#4A8B5E" opacity="0.33"></rect><text x="328" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">她</text></g><g><rect x="366" y="179.28" width="32" height="6.72" rx="2" fill="#4A8B5E" opacity="0.4"></rect><text x="382" y="177.28" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#4A8B5E">12</text><text x="382" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">画</text></g><g><rect x="420" y="184.32" width="32" height="1.68" rx="2" fill="#4A8B5E" opacity="0.31000000000000005"></rect><text x="436" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">的</text></g><g><rect x="474" y="152.96" width="32" height="33.04" rx="2" fill="#4A8B5E" opacity="0.87"></rect><text x="490" y="150.96" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#4A8B5E">59</text><text x="490" y="202" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11.5" fill="#232F3B" font-weight="400">风景画</text></g></g><text x="270" y="246" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">同一个「喜欢」：头 A 把目光投向主语「他」，头 B 投向宾语「风景画」</text></svg></div><figcaption><span class="fig-no">图 20-2</span>同一个词「喜欢」，在两个头里算出<strong>完全不同</strong>的注意力：头 A 重重压在主语「他」(62)，头 B 重重压在宾语「风景画」(59)。两条关系被分别、清晰地抓住，互不干扰。</figcaption></figure><p>关键在于：这种「头 A 管主谓、头 B 管动宾」的分工<strong>不是人工指派的</strong>。 每个头的 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 都是从海量文本里独立训练出来的， 训练完一看，它们自然地各占了一摊。论文里标配 8 个、大模型动辄几十上百个头， 有的管指代、有的抠语法、有的盯情感色彩——全是自己「长」出来的。</p><p>那现实里到底用多少个头？给几个有代表性的数字，感受一下规模的演变：</p><div style="overflow-x:auto;margin:16px 0"><table style="border-collapse:collapse;width:100%;font-size:14px;font-family:var(--sans, sans-serif)"><thead><tr style="background:#F7F2E8"><th style="padding:7px 12px;border-bottom:2px solid #E2D8C6;text-align:left;color:#5C6B79;font-weight:700">模型</th><th style="padding:7px 12px;border-bottom:2px solid #E2D8C6;text-align:left;color:#5C6B79;font-weight:700">头数</th><th style="padding:7px 12px;border-bottom:2px solid #E2D8C6;text-align:left;color:#5C6B79;font-weight:700">每头维度</th></tr></thead><tbody><tr><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">原始 Transformer（2017）</td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B"><strong style="color:#C0481E">8</strong></td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">64</td></tr><tr><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">BERT-base / GPT-2-small</td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B"><strong style="color:#C0481E">12</strong></td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">64</td></tr><tr><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">BERT-large</td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B"><strong style="color:#C0481E">16</strong></td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">64</td></tr><tr><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">GPT-3（175B）</td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B"><strong style="color:#C0481E">96</strong></td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">128</td></tr><tr><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">LLaMA-2 / 3　70B</td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B"><strong style="color:#C0481E">64</strong> <span style="color:#93A0AC;font-size:12px">查询头</span></td><td style="padding:7px 12px;border-bottom:1px solid #EBE3D4;color:#232F3B">128</td></tr></tbody></table></div><p class="formula-note">一个规律：每头维度这些年基本稳定在 <strong>64–128 维</strong>，模型想更强，多半是「<strong>加头</strong>」而不是「把头加宽」。 另外，今天的主流开源模型（LLaMA、Mistral 等）还会用 <strong>GQA（分组查询注意力）</strong>：查询头照样几十个， 却让它们共享少数几套 K/V（比如 64 个查询头共用 8 套）——纯为省显存、提速，原理留到第 26 课。</p></section><section class="station reveal" data-title="维度的精妙账" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>一笔精妙的账：多个头，却几乎不多花钱</h2></div><p>「同时跑 8 个头」听上去得花 8 倍的计算。如果每个头都用满整个 512 维，确实如此。 但多头注意力藏了个聪明的设计：<strong>把维度切开分给各头，每个头只用 1/H</strong>。</p><p>拿真实数字算一遍（论文的设置）：词向量 512 维，8 个头——</p><div class="formula">每个头分到 <span class="f-hl">512 ÷ 8 = 64</span> 维<br/><span style="font-size:14px">8 个头 × 64 维 = 512 维　← 和单头用的总维度<strong>一模一样</strong></span></div><p>也就是说，不是「8 个 512 维的头」，而是「8 个 <strong>64 维</strong>的头」。每个头在自己那 64 维的小天地里独立打分、 混合，算完得到一个 64 维的小结果 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>；再把 8 个小结果<strong>拼接</strong>回 512 维， 过一个线性层 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">o</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 收个尾、让各头的信息互相整合一下。写成式子：</p><div class="formula formula-tex" style="text-align:left"><div>① 切维投影　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2078em;vertical-align:-0.3831em;"></span><span class="mord mathnormal">x</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8247em;"><span style="top:-2.453em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">q</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1078em;vertical-align:-0.2831em;"></span><span class="mord mathnormal">x</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8247em;"><span style="top:-2.4169em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2831em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.2222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2078em;vertical-align:-0.3831em;"></span><span class="mord mathnormal">x</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8247em;"><span style="top:-2.453em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">v</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.247em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:1em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8247em;"><span style="top:-2.453em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">q</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">512</span><span class="mbin mtight">×</span><span class="mord mtight">64</span></span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:6px">② 各头注意力　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.8091em;vertical-align:-0.65em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="delimsizing size2">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1591em;"><span style="top:-2.5864em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord sqrt mtight"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8622em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mtight" style="padding-left:0.833em;"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8222em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail mtight" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1778em;"><span></span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.5102em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">Q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.927em;"><span style="top:-2.214em;margin-left:-0.0715em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span><span style="top:-2.931em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.286em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.538em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mord"><span class="delimsizing size2">)</span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.2222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></div><div style="margin-top:6px">③ 拼接 + 收尾　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">MultiHead</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">Concat</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">8</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">o</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></div></div><p>总计算量和单个 512 维的头基本持平，却换来了<strong>同时建模 8 种关系</strong>的能力。 「免费」多看了 7 种关系——这正是多头最划算的地方。</p><p>读到这儿，很多人会卡住一个问题：把 512 维切成 8 份、每个头只拿 64 维——<strong>这不就等于把信息撕成 8 块、每个头只看到八分之一吗？那不是丢了一大半？</strong>这个担心非常合理，但答案是：<strong>不丢。</strong>问题全出在「切」这个字的误导上。</p><p>真相藏在刚才那个 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2078em;vertical-align:-0.3831em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8247em;"><span style="top:-2.453em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">q</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathbb">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">512</span><span class="mbin mtight">×</span><span class="mord mtight">64</span></span></span></span></span></span></span></span></span></span></span></span></span> 里——它是一个 <strong>512 行、64 列</strong>的矩阵。 输入 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 是完整的 512 维向量，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2078em;vertical-align:-0.3831em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8247em;"><span style="top:-2.453em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">q</span></span></span><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3831em;"><span></span></span></span></span></span></span></span></span></span></span> 这步乘法意味着：<strong>每个头都把完整的 512 维从头读到尾</strong>，再用自己那把「镜头」把它压进一个 64 维的工作空间。 没有哪个头被蒙住眼睛、只准看前 64 维。所以「切」切的不是<em>输入</em>，而是<strong>每个头工作空间的大小</strong>。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 250" role="img" aria-label="每个头都用自己的 512×64 投影矩阵读完整向量，再压到 64 维"><defs><marker id="ah-mh-b" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3E6B8F"></path></marker><marker id="ah-mh-t" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#C9BBA2"></path></marker></defs><text x="300" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#5C6B79">每个头都用自己的 Wᵢ(512×64) 读完整的 512 维，再投影到各自的 64 维</text><rect x="30" y="58" width="50" height="140" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><line x1="34" y1="64" x2="76" y2="64" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="75" x2="76" y2="75" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="86" x2="76" y2="86" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="97" x2="76" y2="97" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="108" x2="76" y2="108" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="119" x2="76" y2="119" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="130" x2="76" y2="130" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="141" x2="76" y2="141" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="152" x2="76" y2="152" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="163" x2="76" y2="163" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="174" x2="76" y2="174" stroke="#BDD2E3" stroke-width="1"></line><line x1="34" y1="185" x2="76" y2="185" stroke="#BDD2E3" stroke-width="1"></line><text x="55" y="214" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#3E6B8F">x · 512维</text><rect x="250" y="46" width="156" height="38" rx="5" fill="#FFFDF8" stroke="#5C6B79" stroke-width="1.2"></rect><text x="328" y="70" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#232F3B">头 1 · 64维（管主谓）</text><rect x="250" y="96" width="156" height="38" rx="5" fill="#FFFDF8" stroke="#5C6B79" stroke-width="1.2"></rect><text x="328" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#232F3B">头 2 · 64维（管动宾）</text><text x="328" y="156" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">⋯ 一共 8 个头 ⋯</text><rect x="250" y="166" width="156" height="38" rx="5" fill="#FFFDF8" stroke="#5C6B79" stroke-width="1.2"></rect><text x="328" y="190" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#232F3B">头 8 · 64维（管指代）</text><g stroke="#3E6B8F" stroke-width="1.5" fill="none"><path d="M 80 95 L 248 65" marker-end="url(#ah-mh-b)"></path><path d="M 80 125 L 248 115" marker-end="url(#ah-mh-b)"></path><path d="M 80 160 L 248 185" marker-end="url(#ah-mh-b)"></path></g><text x="163" y="84" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#3E6B8F">各读全 512 维</text><rect x="446" y="96" width="94" height="58" rx="5" fill="#F7E5DB" stroke="#C0481E" stroke-width="1.5"></rect><text x="493" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#9A3815">拼回 512维</text><text x="493" y="138" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#9A3815">→ Wₒ 融合</text><g stroke="#C9BBA2" stroke-width="1.4" fill="none"><path d="M 406 65 L 444 112" marker-end="url(#ah-mh-t)"></path><path d="M 406 115 L 444 122" marker-end="url(#ah-mh-t)"></path><path d="M 406 185 L 444 134" marker-end="url(#ah-mh-t)"></path></g><text x="300" y="238" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">输入端：人人读全文 · 输出端：拼回 512 维一维不少——「切」的是工作空间，不是信息</text></svg></div><figcaption><span class="fig-no">图 20-3</span>每个头并不是只分到向量的一段，而是各用一个 512×64 的投影矩阵，把<strong>完整的 512 维</strong>压进自己的 64 维工作空间。输入端人人读全文，输出端拼回 512 维一维不少——所谓「切」，切的是工作空间，不是信息。</figcaption></figure><p>而且这把镜头是<strong>学出来的</strong>：每个头可以自由地从全部 512 个特征里， 线性组合出对自己这摊关系最有用的那 64 维。管主谓的头，学着把「谁在施动」的特征投影进来； 管指代的头，学着把「谁是名词实体」的特征投影进来——各取所需，互不挡道。</p><p>那 64 维<strong>够装下一种关系吗？</strong>够，而且绰绰有余。诀窍在于：一个头只干一件<strong>窄活</strong>。 要表达「512 维的完整语义」当然得用 512 维；但只回答「这个动词的主语是谁」这<em>一个</em>问题，需要的维度少得多。 把一个 512 维的「通才」拆成 8 个 64 维的「专才」，每个专才在自己的小空间里反而看得更清。 再回头看第 1 站那个「半个他、半个画」的四不像——<strong>那才是真正的信息损失</strong>；多头恰恰是来给它<strong>止损</strong>的。</p><p>输出端同样没丢：8 个头各自的 64 维结果<strong>拼接</strong>回 512 维，一维不少，再过 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">o</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 融合。 从头到尾，信息只是被<strong>重新分工</strong>，从来没有被丢弃。</p><div class="crack reveal"><div class="crack-label">头与头之间，全程不通气</div><p>天下没有白吃的午餐。每个头从头到尾<strong>各算各的</strong>，中途彼此看不到对方的结果， 只有最末尾那一步 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">o</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 才让它们汇合一次。 于是那种需要「边看边商量」的关系——比如「它」既是「小猫」的代词、又要当后半句的主语， 两个头各抓一半却没法在过程中拼起来——只能指望最后那个线性层勉强缝合，表达力受限。</p><p style="margin-top:12px">后来的 MQA、GQA 等变体在「省显存」和「让头共享一部分」上做文章，但「多头并行、各管一摊」这个基本盘， 至今仍是每一台 Transformer 的标准配置。</p></div></section><section class="station reveal" data-title="头到底在看什么" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>掀开盖子：这些头到底在看什么</h2></div><p>多头是「自己长出分工」的，那训练完之后，把每个头的注意力画出来，到底能看到什么？ 研究者真的这么做了（把权重矩阵可视化成热力图），发现头确实分化出了一些<strong>看得懂、叫得出名字</strong>的角色：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 540 200" role="img" aria-label="几种典型注意力头：上一个词、句法、指代、分隔符"><g><text x="72" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#3E6B8F">「上一个词」头</text><rect x="30" y="34" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="52" y="34" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="74" y="34" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="96" y="34" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="30" y="56" width="20" height="20" rx="2" fill="#3E6B8F" opacity="1" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="52" y="56" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="74" y="56" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="96" y="56" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="30" y="78" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="52" y="78" width="20" height="20" rx="2" fill="#3E6B8F" opacity="1" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="74" y="78" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="96" y="78" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="30" y="100" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="52" y="100" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="74" y="100" width="20" height="20" rx="2" fill="#3E6B8F" opacity="1" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="96" y="100" width="20" height="20" rx="2" fill="#3E6B8F" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><text x="72" y="150" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">每个词都死盯前一个词</text></g><g><text x="204" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#4A8B5E">句法头</text><rect x="162" y="34" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="184" y="34" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="206" y="34" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="228" y="34" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.85" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="162" y="56" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="184" y="56" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="206" y="56" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.85" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="228" y="56" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="162" y="78" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="184" y="78" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.85" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="206" y="78" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="228" y="78" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="162" y="100" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.85" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="184" y="100" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="206" y="100" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="228" y="100" width="20" height="20" rx="2" fill="#4A8B5E" opacity="0.06" stroke="#E2D8C6" stroke-width="0.6"></rect><text x="204" y="150" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">动词找它的宾语、介词找</text><text x="204" y="164" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">名词</text></g><g><text x="336" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#8B4A7E">指代头</text><rect x="294" y="34" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.18" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="316" y="34" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="338" y="34" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="360" y="34" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="294" y="56" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="316" y="56" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.18" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="338" y="56" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="360" y="56" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="294" y="78" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="316" y="78" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="338" y="78" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.18" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="360" y="78" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="294" y="100" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.95" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="316" y="100" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="338" y="100" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="360" y="100" width="20" height="20" rx="2" fill="#8B4A7E" opacity="0.18" stroke="#E2D8C6" stroke-width="0.6"></rect><text x="336" y="150" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">代词找它指的那个名词</text></g><g><text x="468" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#B07A1E">分隔符头</text><rect x="426" y="34" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.8" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="448" y="34" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="470" y="34" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="492" y="34" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="426" y="56" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.8" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="448" y="56" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="470" y="56" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="492" y="56" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="426" y="78" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.8" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="448" y="78" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="470" y="78" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="492" y="78" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="426" y="100" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.8" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="448" y="100" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="470" y="100" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><rect x="492" y="100" width="20" height="20" rx="2" fill="#B07A1E" opacity="0.05" stroke="#E2D8C6" stroke-width="0.6"></rect><text x="468" y="150" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">没把握时，一律看句号/</text><text x="468" y="164" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">逗号</text></g><text x="270" y="192" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">每格＝某个词看另一个词的权重，越深越重；不同头的「图案」截然不同</text></svg></div><figcaption><span class="fig-no">图 20-4</span>真实模型里几种被反复发现的注意力头：盯前一个词的、抓句法搭配的、消解指代的，还有「拿不准就看标点」的。每个头的热力图都有自己鲜明的图案。</figcaption></figure><p>其中最有名的，是后来在大模型里发现的<strong>「归纳头」（induction head）</strong>： 它能完成「上文出现过 <em>A B</em>，这次又见到 <em>A</em>，那下一个多半是 <em>B</em>」的模式补全。 很多人相信，正是这类头的出现，标志着模型开始具备「照着例子现学现用」的<strong>上下文学习</strong>能力—— 也就是你给 ChatGPT 举几个例子，它就照着做的那种本事。一个个朴素的头叠加起来，竟涌现出这样的能力，这是多头最迷人的地方。</p></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>一个词常常牵着好几种关系，而一个注意力头只会算一组权重、把多个焦点<span class="tk-hl">混成一团</span>。 多头注意力的解法是<span class="tk-hl">并排跑 H 个独立的头</span>，各管一种关系； 再靠「每头只用 d/H 维」让总成本几乎不变。拼接 + 线性层收尾，分工全是自己学出来的。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>单头的死穴</strong>：加权平均把主谓、动宾揉成「半个他半个画」的模糊向量。</li><li><strong>多头的思路</strong>：H 套独立的 Q/K/V，各算各的，同一个「喜欢」在不同头里看向不同的词。</li><li><strong>维度的账</strong>：512÷8=64，8 个 64 维头拼回 512 维，总计算量≈单头，却多看 7 种关系。</li><li><strong>头会分工</strong>：上一个词头、句法头、指代头……乃至「归纳头」撑起上下文学习。</li><li><strong>遗留局限</strong>：头之间全程不通气，只在末尾 W_o 缝合一次。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="多头并行设置多个注意力头，在不同子空间关注不同类型关系。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>一句话里同时有指代、语法、情感等多种关系。多头注意力（Multi-head Attention）用什么办法来兼顾？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">用一个更大的注意力头</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">并行设置多个注意力「头」，让它们在不同子空间里各自关注不同类型的关系</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">把句子拆成多句分别处理</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">增加学习率</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="各头可并行计算，最后拼接再做一次线性变换融合。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>关于多头注意力的计算，下面哪种说法更准确？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">各个头必须串行依赖，前一个头算完才能算下一个</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">各个头可以并行计算，最后把它们的输出拼接再做一次线性变换融合</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">多个头之间会互相覆盖，只有最后一个头有效</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">头越多损失一定越小</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-transformer.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 21 课</span>
+                    <h3>Transformer 架构</h3>
+                    <p>当注意力机制遇到残差连接和层归一化——质变发生了</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第20课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

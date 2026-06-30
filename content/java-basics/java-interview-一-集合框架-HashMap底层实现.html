@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 面试卡片 - Java基础 - 集合框架 - HashMap底层实现</title>
+<style>
+:root {
+  --header-bg: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  --module-color: #e94560;
+  --accent-blue: #0ea5e9;
+  --accent-green: #10b981;
+  --accent-purple: #8b5cf6;
+  --accent-orange: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  background: #f0f2f5;
+  color: #333;
+  line-height: 1.8;
+}
+
+.header {
+  background: var(--header-bg);
+  color: #fff;
+  padding: 40px 20px 30px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.header::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(233,69,96,0.15) 0%, transparent 60%);
+  animation: pulse 8s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+.header h1 { font-size: 1.8em; position: relative; z-index: 1; font-weight: 700; }
+.header .subtitle { font-size: 1em; opacity: 0.85; margin-top: 8px; position: relative; z-index: 1; }
+.header .day-badge {
+  display: inline-block;
+  background: var(--module-color);
+  color: #fff;
+  padding: 4px 18px;
+  border-radius: 20px;
+  font-size: 0.85em;
+  margin-top: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.container {
+  max-width: 900px;
+  margin: -20px auto 40px;
+  padding: 0 16px;
+  position: relative;
+  z-index: 2;
+}
+
+.progress-bar-container {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--card-shadow);
+}
+.progress-label { font-size: 0.9em; color: #666; margin-bottom: 8px; }
+.progress-track {
+  height: 10px;
+  background: #e5e7eb;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--module-color), var(--accent-orange));
+  width: 1.5%;
+  transition: width 0.5s ease;
+}
+.progress-text { font-size: 0.85em; color: #999; margin-top: 6px; text-align: right; }
+
+.module-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.module-header {
+  padding: 20px 28px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.module-header .module-num {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4em;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.module-header h2 { font-size: 1.3em; font-weight: 700; }
+.module-header .module-tag {
+  margin-left: auto;
+  background: rgba(255,255,255,0.2);
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 0.8em;
+}
+
+.section {
+  padding: 24px 28px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.section:last-child { border-bottom: none; }
+.section-title {
+  font-size: 1.15em;
+  font-weight: 700;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-title .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+ul { list-style: none; padding-left: 22px; }
+ul li {
+  position: relative;
+  padding: 6px 0;
+  padding-left: 18px;
+}
+ul li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+ul li p { margin: 0; }
+.highlight { color: var(--module-color); font-weight: 600; }
+.code { 
+  background: #f8f9fa; 
+  border: 1px solid #e5e7eb; 
+  border-radius: 6px; 
+  padding: 2px 8px; 
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.92em;
+  color: #e94560;
+}
+.tip-box {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border-left: 4px solid var(--accent-orange);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin: 12px 0;
+  font-size: 0.95em;
+}
+.warn-box {
+  background: linear-gradient(135deg, #fee2e2, #fecaca);
+  border-left: 4px solid var(--accent-red);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin: 12px 0;
+  font-size: 0.95em;
+}
+.success-box {
+  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  border-left: 4px solid var(--accent-green);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin: 12px 0;
+  font-size: 0.95em;
+}
+
+.diagram {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 16px 0;
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.92em;
+}
+.comparison-table th {
+  background: #1a1a2e;
+  color: #fff;
+  padding: 10px 14px;
+  text-align: left;
+}
+.comparison-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.comparison-table tr:nth-child(even) td { background: #f9fafb; }
+
+.footer {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  padding: 24px 28px;
+  margin-bottom: 30px;
+}
+.footer h3 { font-size: 1.05em; margin-bottom: 10px; color: #555; }
+.next-topic {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-top: 10px;
+}
+.next-topic .arrow { font-size: 1.5em; }
+.next-topic .info { flex: 1; }
+.next-topic .info .label { font-size: 0.8em; color: #0284c7; font-weight: 600; }
+.next-topic .info .name { font-size: 1em; color: #0c4a6e; font-weight: 700; }
+
+.watermark {
+  text-align: center;
+  padding: 20px;
+  color: #aaa;
+  font-size: 0.8em;
+}
+
+@media print {
+  body { background: #fff; }
+  .header { padding: 20px; }
+  .module-card { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+  .footer { box-shadow: none; border: 1px solid #ddd; }
+}
+
+@media (max-width: 640px) {
+  .header h1 { font-size: 1.3em; }
+  .module-header { padding: 16px 18px; }
+  .section { padding: 18px; }
+  .diagram { font-size: 0.75em; padding: 16px; }
+}
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+
+<div class="header">
+  <h1>📋 Java 中高级开发面试知识点复习</h1>
+  <div class="subtitle">集合框架 · HashMap 底层实现全解析</div>
+  <div class="day-badge">Day 1 · 模块一</div>
+</div>
+
+<div class="container">
+
+  <!-- 进度条 -->
+  <div class="progress-bar-container">
+    <div class="progress-label">📚 学习进度</div>
+    <div class="progress-track"><div class="progress-fill"></div></div>
+    <div class="progress-text">1 / 66 知识点</div>
+  </div>
+
+  <!-- ===================== 一、Java 基础 ===================== -->
+  <div class="module-card">
+    <div class="module-header" style="background: linear-gradient(135deg, #e94560, #c2185b);">
+      <div class="module-num">一</div>
+      <h2>Java 基础（必考，深度掌握）</h2>
+      <div class="module-tag">模块 1/11</div>
+    </div>
+
+    <!-- 1.1 集合框架 -->
+    <div class="section" style="background: linear-gradient(135deg, #fff5f5, #fff);">
+      <div class="section-title">
+        <span class="dot" style="background: #e94560;"></span>
+        1.1 集合框架 — HashMap 底层实现
+      </div>
+
+      <!-- 1.1.1 HashMap 底层实现 -->
+      <div class="section">
+        <div class="section-title">
+          <span class="dot" style="background: #0ea5e9;"></span>
+          1.1.1 HashMap 底层实现（数组+链表+红黑树，1.8变化）
+        </div>
+
+        <p style="margin-bottom:12px;color:#555;">HashMap 是 Java 中最常用的数据结构之一，面试中几乎必考。理解其底层实现是掌握集合框架的<strong>基石</strong>。</p>
+
+        <h4 style="margin:16px 0 8px;color:#333;">核心数据结构演变</h4>
+        <div class="diagram">// JDK 1.7: 数组 + 链表（头插法）
++-------+    +----+----+----+
+| hash  | →  |[0]→[1]→[2]     |  ← 每个位置挂一条链表
++-------+    +----+----+----+
+
+// JDK 1.8+: 数组 + 链表 + 红黑树（尾插法）
++-------+    +------------------+
+| hash  | →  | Node | Node ...  |  ← 链表长度 &gt;= 8 且数组长度 &gt;= 64
++-------+    |    ↓             |
+              | TreeNode         |  ← 转为红黑树
+              |    ↓             |
+              | TreeNode         |
+              +------------------+
+
+// 节点结构（Node 实现 Map.Entry）
+static class Node&lt;K,V&gt; implements Map.Entry&lt;K,V&gt; {
+    final int hash;
+    final K key;
+    V value;
+    Node&lt;K,V&gt; next;
+}</div>
+
+        <h4 style="margin:16px 0 8px;color:#333;">1.7 → 1.8 关键变化</h4>
+        <table class="comparison-table">
+          <tr><th>特性</th><th>JDK 1.7</th><th>JDK 1.8+</th></tr>
+          <tr><td>数据结构</td><td>数组 + 链表</td><td>数组 + 链表 + 红黑树</td></tr>
+          <tr><td>插入方式</td><td>头插法</td><td>尾插法</td></tr>
+          <tr><td>扩容后链表顺序</td><td>倒序</td><td>保持原序</td></tr>
+          <tr><td>树化条件</td><td>不支持</td><td>链表长度 ≥ 8 且数组长度 ≥ 64</td></tr>
+          <tr><td>退化条件</td><td>不支持</td><td>红黑树节点 ≤ 6 时退化为链表</td></tr>
+          <tr><td>线程安全</td><td>多线程扩容可能死循环</td><td>尾插法避免死循环，但仍非线程安全</td></tr>
+        </table>
+
+        <div class="tip-box">
+          💡 <strong>面试要点：</strong>1.7 头插法在多线程扩容时可能导致环形链表（死循环），1.8 改为尾插法解决了这个问题。但 HashMap 仍然不是线程安全的！
+        </div>
+
+        <h4 style="margin:16px 0 8px;color:#333;">哈希计算（hash 方法）</h4>
+        <div class="diagram">// 高 16 位异或低 16 位，减少哈希冲突
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h ^ (h >>> 16));
+}
+// 等价于：(h = key.hashCode()) ^ (h >>> 16)
+
+// 为什么这样做？
+// 数组长度总是 2 的幂，index = (n - 1) & hash
+// 只取低位参与计算的话，高位信息丢失容易冲突
+// 高低位异或后，既保留高位信息又利用低位，分布更均匀</div>
+
+        <h4 style="margin:16px 0 8px;color:#333;">Put 操作完整流程</h4>
+        <div class="diagram">put(key, value) 流程：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. 判断数组是否为空，为空则初始化（默认容量 16，阈值 12）
+2. 计算 key 的 hash 值 → index = (n - 1) & hash
+3. 如果 bucket[i] 为空，直接新建 Node 放入
+4. 如果不为空：
+   a) key 与头节点相同 → 直接覆盖 value
+   b) 如果是 TreeNode → 调用 putTreeVal 红黑树插入
+   c) 如果是链表 → 尾插法遍历插入
+      - 遍历过程中发现 key 已存在 → 覆盖 value
+      - 插入后链表长度 >= 8 → 检查是否树化
+5. 元素个数 > 阈值 (threshold) → 扩容（翻倍）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+
+        <div class="warn-box">
+          ⚠️ <strong>踩坑经验：</strong>
+          ① 自定义对象作为 Key 必须重写 <code class="code">hashCode()</code> 和 <code class="code">equals()</code>；
+          ② Key 为 null 时，始终存放在 index=0 的位置；
+          ③ HashMap 允许一个 null key 和多个 null value。
+        </div>
+
+        <h4 style="margin:16px 0 8px;color:#333;">扩容机制（resize）</h4>
+        <table class="comparison-table">
+          <tr><th>参数</th><th>值</th><th>说明</th></tr>
+          <tr><td>默认初始容量</td><td>16 (2⁴)</td><td>必须是 2 的幂</td></tr>
+          <tr><td>负载因子 (loadFactor)</td><td>0.75</td><td>容量与阈值的比例，权衡空间和时间</td></tr>
+          <tr><td>扩容阈值</td><td>capacity × 0.75</td><td>达到阈值触发扩容</td></tr>
+          <tr><td>扩容策略</td><td>容量翻倍</td><td>从 16→32→64→128...</td></tr>
+          <tr><td>树化阈值</td><td>8 (TREEIFY_THRESHOLD)</td><td>链表长度达到 8</td></tr>
+          <tr><td>退化阈值</td><td>6 (UNTREEIFY_THRESHOLD)</td><td>红黑树节点 ≤ 6 退化</td></tr>
+        </table>
+
+        <div class="diagram">// 扩容时 1.8 的优化：不需要重新 hash！
+// 扩容后 index 只有两种可能：
+//   原 index 或 原 index + oldCapacity
+// 判断方式：(e.hash & oldCapacity) == 0 ? 原位置 : 原位置+oldCapacity
+// 链表中的元素只需遍历一次，比 1.7 需要遍历两次更高效</div>
+
+        <h4 style="margin:16px 0 8px;color:#333;">面试模拟</h4>
+        <div class="success-box">
+          <strong>Q1：为什么 HashMap 的容量必须是 2 的幂？</strong><br>
+          <strong>A：</strong>① 使得 <code class="code">(n-1) & hash</code> 等价于 <code class="code">hash % n</code>，位运算更高效；② 2 的幂减 1 全为 1，能最大程度利用 hash 值的所有位，减少碰撞。
+        </div>
+        <div class="success-box" style="margin-top:10px;">
+          <strong>Q2：为什么负载因子默认是 0.75？</strong><br>
+          <strong>A：</strong>0.75 是时间开销和空间开销的折中。值越大，空间利用率高但冲突概率增大；值越小，冲突少但浪费空间。统计表明 0.75 是较优平衡点。
+        </div>
+        <div class="success-box" style="margin-top:10px;">
+          <strong>Q3：JDK 1.7 为什么用头插法，1.8 改为尾插法？</strong><br>
+          <strong>A：</strong>头插法在多线程扩容时，逆序会导致环形链表产生死循环。尾插法保持原序，避免此问题。同时 1.8 引入红黑树后，头插法会反转树的遍历顺序，尾插法则不会。
+        </div>
+        <div class="success-box" style="margin-top:10px;">
+          <strong>Q4：HashMap 扩容的 time complexity？</strong><br>
+          <strong>A：</strong>put/get 平均 O(1)，最差（全部碰撞入树）O(log n)。扩容本身 O(n)，均摊后不影响整体效率。
+        </div>
+      </div>
+
+      <!-- 1.1.2 ConcurrentHashMap -->
+      <div class="section">
+        <div class="section-title">
+          <span class="dot" style="background: #10b981;"></span>
+          1.1.2 ConcurrentHashMap 分段锁到 CAS+synchronized 演进
+        </div>
+
+        <h4 style="margin:12px 0 8px;color:#333;">三个版本的演进路线</h4>
+        <table class="comparison-table">
+          <tr><th>版本</th><th>线程安全方案</th><th>粒度</th><th>特点</th></tr>
+          <tr><td>JDK 1.7</td><td>分段锁 (Segment)</td><td>Segment 级别</td><td>继承 ReentrantLock，默认 16 个 Segment，最多 16 线程并发</td></tr>
+          <tr><td>JDK 1.8 (初版)</td><td>CAS + synchronized (Node 级别)</td><td>Node 级别</td><td>放弃 Segment，锁粒度细化到桶节点，并发度大幅提升</td></tr>
+          <tr><td>JDK 1.8 (树化后)</td><td>synchronized (TreeNode 级别)</td><td>TreeNode 级别</td><td>红黑树节点锁竞争更小</td></tr>
+        </table>
+
+        <div class="diagram">// 1.7 Segment 结构
+┌─────────────┬──────────────────────────┐
+│  Segment[0]  │  HashMap: Node[] table   │
+│  (继承锁)     │  每个 Segment 独立锁          │
+├─────────────┼──────────────────────────┤
+│  Segment[1]  │  ...                     │
+└─────────────┴──────────────────────────┘
+// 最大并发度 = Segment 数量（默认 16）
+
+// 1.8 Node 结构 — 无 Segment，直接锁桶
+static class Node&lt;K,V&gt; {
+    volatile V value;          // volatile 保证可见性
+    final int hash;
+    final K key;
+    volatile Node&lt;K,V&gt; next;   // volatile 防扩容时链表断裂
+}
+// put 操作: CAS 插入头节点 → 失败则 synchronized 锁头节点</div>
+
+        <div class="tip-box">
+          💡 <strong>核心原理：</strong>1.8 中 put 操作先尝试 CAS 插入新节点（无锁），失败后用 synchronized 锁住桶头节点再插入。get 操作不需要同步，只读取 volatile 字段，因此是<strong>无锁读取</strong>。
+        </div>
+
+        <h4 style="margin:16px 0 8px;color:#333;">面试要点</h4>
+        <ul>
+          <li><span class="dot" style="background:#10b981;"></span> <strong>为什么 1.8 放弃分段锁？</strong> Segment 数量固定导致并发度上限，且扩容时整个 Segment 锁住影响大。Node 级别锁更细粒度。
+          <li><span class="dot" style="background:#10b981;"></span> <strong>size() 方法怎么统计？</strong> 1.8 使用 <code class="code">baseCount + CounterCell[]</code>（类似 LongAdder），通过 volatile + CAS 累加，保证近似精确。
+          <li><span class="dot" style="background:#10b981;"></span> <strong>与 HashMap 区别：</strong> 线程安全、不允许 null key/value、扩容策略不同、size() 为近似值。
+        </ul>
+
+        <div class="success-box" style="margin-top:12px;">
+          <strong>Q：ConcurrentHashMap 和 Hashtable 的区别？</strong><br>
+          <strong>A：</strong>Hashtable 用 synchronized 锁整张表，并发性能极差；ConcurrentHashMap 1.8 锁粒度为桶级别，并发度接近 Integer.MAX_VALUE。且 Hashtable 不允许 null，ConcurrentHashMap 不允许 null key/value。
+        </div>
+      </div>
+
+      <!-- 1.1.3 ArrayList vs LinkedList -->
+      <div class="section">
+        <div class="section-title">
+          <span class="dot" style="background: #8b5cf6;"></span>
+          1.1.3 ArrayList vs LinkedList 使用场景
+        </div>
+
+        <table class="comparison-table">
+          <tr><th>维度</th><th>ArrayList</th><th>LinkedList</th></tr>
+          <tr><td>底层结构</td><td>动态数组</td><td>双向链表</td></tr>
+          <tr><td>随机访问 get(i)</td><td>O(1) ⭐</td><td>O(n)</td></tr>
+          <tr><td>尾部插入 add</td><td>均摊 O(1) ⭐</td><td>O(1) ⭐</td></tr>
+          <tr><td>中间插入/删除</td><td>O(n)（需移动元素）</td><td>O(1)（找到位置后）</td></tr>
+          <tr><td>内存占用</td><td>较紧凑（仅存元素）</td><td>较大（每个节点 +2 个引用）</td></tr>
+          <tr><td>缓存友好性</td><td>高（连续内存）⭐</td><td>低（分散内存）</td></tr>
+          <tr><td>线程安全</td><td>否</td><td>否</td></tr>
+        </table>
+
+        <div class="tip-box">
+          💡 <strong>实战场景：</strong>
+          ① 读多写少、按索引访问 → ArrayList；
+          ② 频繁在头部/中间插入删除 → LinkedList（但实际项目中 ArrayList 更常用，因为缓存友好，LinkedList 的实际性能未必更好）；
+          ③ Java 9 起 LinkedList 内部结构有所优化。
+        </div>
+
+        <div class="warn-box">
+          ⚠️ <strong>面试陷阱：</strong>不要迷信"LinkedList 插入删除 O(1)"——<strong>找到位置本身就是 O(n)</strong>，所以实际使用中 ArrayList 在大多数场景下性能更好。
+        </div>
+      </div>
+
+      <!-- 1.1.4 HashSet/TreeSet -->
+      <div class="section">
+        <div class="section-title">
+          <span class="dot" style="background: #f59e0b;"></span>
+          1.1.4 HashSet / TreeSet 底层原理
+        </div>
+
+        <ul>
+          <li><span class="dot" style="background:#f59e0b;"></span> <strong>HashSet：</strong>底层就是 HashMap，新元素作为 Key 存入 HashMap，Value 固定为 <code class="code">PRESENT</code>（一个 static final Object）。因此 HashSet 也不允许重复元素。
+          <li><span class="dot" style="background:#f59e0b;"></span> <strong>TreeSet：</strong>底层是 TreeMap（基于红黑树），元素按自然顺序或 Comparator 排序。支持 <code class="code">first()/last()/subSet()</code> 等操作。
+          <li><span class="dot" style="background:#f59e0b;"></span> <strong>LinkedHashSet：</strong>在 HashSet 基础上加了双向链表维护插入顺序。
+        </ul>
+
+        <div class="success-box" style="margin-top:10px;">
+          <strong>Q：如何保证 HashSet 元素的唯一性？</strong><br>
+          <strong>A：</strong>hashCode() 和 equals() 双重校验。先比较 hash 值，hash 相同再比较 equals。两个自定义对象要视为相等，必须同时满足 hashCode 相同且 equals 返回 true。
+        </div>
+      </div>
+
+      <!-- 1.1.5 Iterator -->
+      <div class="section">
+        <div class="section-title">
+          <span class="dot" style="background: #06b6d4;"></span>
+          1.1.5 Iterator 遍历机制和 fail-fast 机制
+        </div>
+
+        <h4 style="margin:12px 0 8px;color:#333;">Iterator 工作原理</h4>
+        <div class="diagram">// 使用示例
+Iterator&lt;String&gt; it = list.iterator();
+while (it.hasNext()) {
+    String s = it.next();
+    if (s.equals("target")) {
+        it.remove(); // 正确：通过 Iterator 删除
+    }
+}
+
+// 错误做法：遍历中直接操作集合会触发 fail-fast
+for (String s : list) {
+    list.remove(s); // ❌ ConcurrentModificationException</div>
+
+        <h4 style="margin:12px 0 8px;color:#333;">fail-fast 机制</h4>
+        <ul>
+          <li><span class="dot" style="background:#06b6d4;"></span> Java 集合框架中的迭代器在遍历过程中检测到集合结构被修改（非通过迭代器的 remove），会抛出 <code class="code">ConcurrentModificationException</code>。
+          <li><span class="dot" style="background:#06b6d4;"></span> 实现原理：每个集合维护一个 <code class="code">modCount</code> 字段，每次结构修改时递增。迭代器创建时记录 <code class="code">expectedModCount</code>，每次 next() 时校验两者是否一致。
+          <li><span class="dot" style="background:#06b6d4;"></span> <strong>注意：</strong>fail-fast 是<strong>快速失败</strong>而非安全保证，不能保证 100% 检测到并发修改，仅用于检测 bug。
+          <li><span class="dot" style="background:#06b6d4;"></span> 用 fail-safe 的集合（如 ConcurrentHashMap、CopyOnWriteArrayList）遍历不会因为并发修改抛异常。
+        </ul>
+
+        <div class="tip-box">
+          💡 <strong>面试高频：</strong>fail-fast 和 fail-safe 的区别是集合框架的经典考点。HashMap 的迭代器是 fail-fast，ConcurrentHashMap 的是 fail-safe。
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 页脚 -->
+  <div class="footer">
+    <h3>📊 今日总结</h3>
+    <p style="color:#666;margin-bottom:14px;">集合框架是 Java 面试的第一道大题，HashMap 更是其中的核心。建议能手写 HashMap 的 put/get 流程，并说出 JDK 1.7 到 1.8 的每一个变化点。</p>
+    
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">
+      <div class="tip-box" style="margin:0;"><strong>核心概念</strong><br>数组+链表+红黑树</div>
+      <div class="success-box" style="margin:0;"><strong>扩容机制</strong><br>容量翻倍，2 的幂</div>
+      <div class="warn-box" style="margin:0;"><strong>线程安全</strong><br>非线程安全</div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div class="progress-label">📚 学习进度</div>
+      <div class="progress-track"><div class="progress-fill"></div></div>
+      <div class="progress-text">1 / 66 知识点</div>
+    </div>
+
+    <div class="next-topic">
+      <div class="arrow">👉</div>
+      <div class="info">
+        <div class="label">明日预告 · Day 2</div>
+        <div class="name">ConcurrentHashMap 分段锁到 CAS+synchronized 的演进</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="watermark">Java 中高级面试复习 · java-interview-outline · Day 1/66</div>
+
+</body>
+</html>

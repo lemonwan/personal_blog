@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 28 · 内存泄漏排查（Heap Dump、MAT/VisualVM 使用） · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 28 / 66</div>
+            <h1>JVM 原理与调优 · JVM 调优实战</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 内存泄漏排查（Heap Dump、MAT/VisualVM 使用）</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:42.4%"></div>
+            </div>
+            <div class="progress-label">进度 42.4%（28/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念：什么是 Java 内存泄漏</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>Java 内存泄漏</strong>不是指对象无法分配内存，而是指：某些对象已经不再被业务逻辑需要，但仍然被 GC Roots 直接或间接引用，导致 GC 无法回收，最终表现为老年代持续上涨、频繁 Full GC，甚至 <code>OutOfMemoryError: Java heap space</code>。</p>
+<ul>
+  <li><strong>内存溢出 OOM</strong>：结果，堆空间真的不够用了。</li>
+  <li><strong>内存泄漏 Leak</strong>：原因之一，无用对象被错误引用，长期无法释放。</li>
+  <li><strong>内存占用高</strong>：不一定泄漏，也可能是缓存、批处理、流量高峰或参数设置不合理。</li>
+</ul>
+<p>面试中要强调：Java 有 GC，但 GC 只能回收<strong>不可达对象</strong>，不能替程序员判断“这个可达对象是否还有业务价值”。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>排查主线：先看趋势，再抓现场，最后定位引用链</h2>
+        </div>
+        <div class="section-content">
+            <ol>
+  <li><strong>确认现象</strong>：通过监控或 <code>jstat -gcutil</code> 观察堆、老年代、Full GC 次数和耗时是否持续增长。</li>
+  <li><strong>确认是否可回收</strong>：手动触发或等待 Full GC 后，若老年代占用仍回不到低水位，并呈阶梯式上涨，泄漏概率较高。</li>
+  <li><strong>保留现场</strong>：导出 Heap Dump，必要时同时保留 GC 日志、线程栈、应用日志和 JVM 参数。</li>
+  <li><strong>离线分析</strong>：使用 MAT、VisualVM、JProfiler 等工具查看大对象、重复对象、支配树和 GC Roots 引用链。</li>
+  <li><strong>回到代码</strong>：根据引用链定位集合、缓存、ThreadLocal、监听器、连接资源等持有点，修复并压测验证。</li>
+</ol>
+<p>一句话总结：<strong>监控判断趋势，Dump 保留证据，MAT 找支配对象，引用链定位代码。</strong></p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>常用命令：如何导出 Heap Dump</h2>
+        </div>
+        <div class="section-content">
+            <p>线上排查时，常用以下方式导出堆快照：</p>
+<pre><code># 查看 Java 进程
+jps -l
+
+# 导出 live 对象，通常更适合分析泄漏
+jmap -dump:live,format=b,file=/tmp/app-live.hprof &lt;pid&gt;
+
+# 导出完整堆对象，信息更全但文件更大
+jmap -dump:format=b,file=/tmp/app-full.hprof &lt;pid&gt;
+
+# 使用 jcmd，生产环境更推荐
+jcmd &lt;pid&gt; GC.heap_dump /tmp/app.hprof</code></pre>
+<p>建议 JVM 增加兜底参数：</p>
+<pre><code>-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/data/dumps
+-XX:+ExitOnOutOfMemoryError</code></pre>
+<p><strong>注意</strong>：Dump 可能触发 Stop-The-World，并生成数 GB 文件，生产环境要评估磁盘空间和业务低峰窗口。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>MAT 分析重点：Histogram、Dominator Tree、Leak Suspects</h2>
+        </div>
+        <div class="section-content">
+            <ul>
+  <li><strong>Histogram</strong>：按类统计对象数量和浅堆大小，适合发现异常多的对象类型，如大量 <code>HashMap$Node</code>、<code>byte[]</code>、业务 DTO。</li>
+  <li><strong>Dominator Tree</strong>：查看谁“支配”了大量内存。重点看 <strong>Retained Heap</strong>，它表示释放该对象后可一并释放的内存。</li>
+  <li><strong>Leak Suspects Report</strong>：MAT 自动生成可疑泄漏报告，适合作为入口，但不能完全依赖。</li>
+  <li><strong>Path to GC Roots</strong>：定位对象为什么没有被回收。通常选择排除弱引用、软引用后的强引用链。</li>
+</ul>
+<p>面试回答要区分两个指标：<strong>Shallow Heap</strong> 是对象自身占用；<strong>Retained Heap</strong> 是对象及其支配对象释放后可回收的总内存，排查泄漏更关注 Retained Heap。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>VisualVM 怎么用：快速观察与现场辅助</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>VisualVM</strong>适合本地、测试环境或可接受 GUI 连接的场景：</p>
+<ul>
+  <li>通过 Monitor 观察堆、Metaspace、线程数量和 GC 活动。</li>
+  <li>通过 Sampler/Profiler 查看对象分配热点和 CPU 热点。</li>
+  <li>生成 Heap Dump 后查看类实例数量、对象引用关系。</li>
+  <li>结合线程页签观察是否存在大量线程、死锁或线程池堆积。</li>
+</ul>
+<p>生产环境更常见做法是：服务器上用 <code>jcmd/jmap</code> 导出 dump，再下载到本地用 MAT/VisualVM 分析，避免远程 GUI 对线上服务造成额外风险。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚖️</span>
+            <h2>高频泄漏场景：面试要能举例</h2>
+        </div>
+        <div class="section-content">
+            <ul>
+  <li><strong>静态集合</strong>：<code>static Map/List</code> 只放不删，生命周期等同 ClassLoader。</li>
+  <li><strong>本地缓存</strong>：没有容量上限、过期策略或淘汰策略，热点变化后旧数据长期驻留。</li>
+  <li><strong>ThreadLocal</strong>：线程池复用线程，业务对象放入后未 <code>remove()</code>，被 <code>ThreadLocalMap</code> 长期持有。</li>
+  <li><strong>监听器/回调</strong>：注册后未反注册，事件源持续引用业务对象。</li>
+  <li><strong>连接与流资源</strong>：数据库连接、文件流、Socket 未关闭，可能同时导致堆外资源泄漏。</li>
+  <li><strong>类加载器泄漏</strong>：热部署、插件化场景中，老 ClassLoader 被静态变量、线程、JDBC Driver 等引用。</li>
+</ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>经典面试题：线上 OOM 你怎么排查？</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>回答框架</strong>：</p>
+<ol>
+  <li>先保护现场：确认是否开启 <code>HeapDumpOnOutOfMemoryError</code>，保留 dump、GC 日志、应用日志、JVM 参数。</li>
+  <li>看监控：堆内存、老年代、Full GC、QPS、接口耗时、线程数是否异常。</li>
+  <li>判断类型：是 <code>Java heap space</code>、<code>Metaspace</code>、<code>Direct buffer memory</code> 还是 <code>unable to create new native thread</code>。</li>
+  <li>分析 dump：MAT 查看 Dominator Tree、Retained Heap、Path to GC Roots，定位谁持有大量对象。</li>
+  <li>结合代码修复：清理集合、限制缓存、ThreadLocal remove、关闭资源、修复异步队列堆积等。</li>
+  <li>验证：压测复现，观察 Full GC 后低水位是否稳定，发布后继续监控。</li>
+</ol>
+<p>加分点：说明 Dump 会影响服务，生产要在低峰或摘流后操作；大堆建议使用 MAT 的索引和离线分析机器。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>踩坑经验：别把所有内存问题都叫堆泄漏</h2>
+        </div>
+        <div class="section-content">
+            <ul>
+  <li><strong>堆外内存</strong>：Netty、NIO DirectByteBuffer、Unsafe 分配可能导致 <code>Direct buffer memory</code>，Heap Dump 不一定能完整反映。</li>
+  <li><strong>Metaspace OOM</strong>：通常与动态生成类、类加载器泄漏、热部署有关，不是普通 Java 对象泄漏。</li>
+  <li><strong>线程过多</strong>：每个线程都有栈内存，线程池无界创建会导致 native memory 不足。</li>
+  <li><strong>瞬时大对象</strong>：例如大文件一次性读入、超大 SQL 查询结果集，可能是峰值问题而不是长期泄漏。</li>
+  <li><strong>只看对象数量不够</strong>：数量多不一定占内存大，排查时优先关注 Retained Heap 和引用链。</li>
+</ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>实战建议：如何预防内存泄漏</h2>
+        </div>
+        <div class="section-content">
+            <ul>
+  <li>本地缓存使用 Caffeine/Guava，并设置最大容量、过期时间和监控指标。</li>
+  <li>线程池中的 <code>ThreadLocal</code> 必须在 <code>finally</code> 中 <code>remove()</code>。</li>
+  <li>集合、队列、Map 要有上限，避免无界堆积。</li>
+  <li>资源使用 <code>try-with-resources</code>，确保连接、流、游标关闭。</li>
+  <li>上线前压测长时间运行，观察 Full GC 后内存低水位是否持续抬升。</li>
+  <li>生产开启 GC 日志、OOM 自动 dump，并配置磁盘清理与告警。</li>
+</ul>
+<p>记忆口诀：<strong>缓存有限、ThreadLocal 清、资源必关、队列有界、Dump 留证、引用链定位。</strong></p>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>CPU 100% 排查流程（top -> jstack -> jmap）</p>
+        </div>
+    </div>
+</body>
+</html>

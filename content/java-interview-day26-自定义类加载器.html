@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 26 · 自定义类加载器 · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 26 / 66</div>
+            <h1>JVM 原理与调优 · 类加载机制</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 自定义类加载器</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:39%"></div>
+            </div>
+            <div class="progress-label">进度 39%（26/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念：什么是自定义类加载器</h2>
+        </div>
+        <div class="section-content">
+            <p>类加载器负责把 <code>.class</code> 字节码加载到 JVM，并生成对应的 <code>Class</code> 对象。自定义类加载器就是继承 <code>ClassLoader</code>，按照业务需要从特定来源读取字节码，例如本地加密 class、网络、数据库、插件目录或隔离目录。</p><ul><li><b>Bootstrap ClassLoader</b>：加载核心类库，如 <code>java.lang.*</code>。</li><li><b>Platform ClassLoader</b>：加载平台相关类。</li><li><b>Application ClassLoader</b>：加载应用 classpath 下的类。</li><li><b>Custom ClassLoader</b>：开发者扩展，用于隔离、热部署、加密保护、插件化等场景。</li></ul><p>面试时要强调：自定义类加载器不是为了随意替代双亲委派，而是在特定边界内扩展类加载来源和隔离模型。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>底层原理：loadClass 与 findClass 的分工</h2>
+        </div>
+        <div class="section-content">
+            <p><code>ClassLoader</code> 的经典流程是：</p><ol><li><code>loadClass(name, resolve)</code>：入口方法，默认遵循双亲委派，先检查是否已加载，再委托父加载器，最后调用自己的 <code>findClass</code>。</li><li><code>findClass(name)</code>：真正由子类实现从哪里读字节码。</li><li><code>defineClass(name, bytes, 0, len)</code>：把字节数组转换成 JVM 中的 <code>Class</code> 对象。</li><li><code>resolveClass(clazz)</code>：链接阶段的一部分，解析符号引用。</li></ol><p>一般推荐重写 <code>findClass</code>，不要直接重写 <code>loadClass</code>，因为直接改 <code>loadClass</code> 很容易破坏双亲委派，导致核心类冲突、类型不兼容或安全问题。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>代码模板：最小可用自定义 ClassLoader</h2>
+        </div>
+        <div class="section-content">
+            <pre><code>public class FileClassLoader extends ClassLoader {
+    private final Path baseDir;
+
+    public FileClassLoader(Path baseDir) {
+        this.baseDir = baseDir;
+    }
+
+    @Override
+    protected Class&lt;?&gt; findClass(String name) throws ClassNotFoundException {
+        try {
+            String fileName = name.replace('.', '/') + ".class";
+            byte[] bytes = Files.readAllBytes(baseDir.resolve(fileName));
+            return defineClass(name, bytes, 0, bytes.length);
+        } catch (IOException e) {
+            throw new ClassNotFoundException(name, e);
+        }
+    }
+}</code></pre><p>调用方式：</p><pre><code>ClassLoader loader = new FileClassLoader(Paths.get("/opt/plugins"));
+Class&lt;?&gt; clazz = loader.loadClass("com.demo.PluginImpl");
+Object obj = clazz.getDeclaredConstructor().newInstance();</code></pre><p>注意：同一个全限定类名，如果由不同类加载器加载，在 JVM 看来是不同的类型。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>典型应用场景</h2>
+        </div>
+        <div class="section-content">
+            <ul><li><b>Tomcat 类隔离</b>：每个 Web 应用使用独立的 WebAppClassLoader，避免不同应用依赖版本互相污染。</li><li><b>插件化系统</b>：主程序定义 SPI 或公共接口，插件 jar 由独立加载器加载，实现动态扩展。</li><li><b>热部署和热加载</b>：卸载旧 ClassLoader，创建新 ClassLoader 加载新版本类。类本身不能单独卸载，能卸载的是加载它的 ClassLoader 及其所有 Class。</li><li><b>字节码加密</b>：读取加密 class 后先解密，再 <code>defineClass</code>。</li><li><b>框架增强</b>：结合 Java Agent、ASM、ByteBuddy 做运行时增强或诊断。</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>高频面试题与答题要点</h2>
+        </div>
+        <div class="section-content">
+            <p><b>Q1：如何实现一个自定义类加载器？</b></p><p>答：继承 <code>ClassLoader</code>，优先重写 <code>findClass</code>，在其中读取字节码并调用 <code>defineClass</code>。如果需要改变委派逻辑才重写 <code>loadClass</code>，但要非常谨慎。</p><p><b>Q2：为什么两个相同类名的对象不能强转？</b></p><p>答：JVM 判断类唯一性依赖类全限定名加加载它的 ClassLoader。类名相同但加载器不同，就是两个不同类型。</p><p><b>Q3：热部署为什么要替换 ClassLoader？</b></p><p>答：JVM 中 Class 加载后通常不能单独卸载，只有当对应 ClassLoader 不可达、且其加载的 Class 和实例都不可达时，才可能被 GC 回收。因此热部署通常创建新的 ClassLoader 加载新类。</p><p><b>Q4：什么时候会破坏双亲委派？</b></p><p>答：例如 Tomcat 为了 Web 应用优先加载自己的依赖；JDBC SPI 通过线程上下文类加载器让父加载器加载的核心代码反向找到应用侧实现类。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>踩坑经验：类加载器最容易出问题的地方</h2>
+        </div>
+        <div class="section-content">
+            <ul><li><b>ClassCastException</b>：同名类被不同 ClassLoader 加载后互相强转失败。公共接口应放到父加载器可见的位置。</li><li><b>LinkageError</b>：同一个加载器重复定义同名类，或依赖版本冲突。</li><li><b>内存泄漏</b>：热部署后，线程、ThreadLocal、静态字段、Timer、线程池仍引用旧类或旧 ClassLoader，导致卸载失败。</li><li><b>误重写 loadClass</b>：破坏双亲委派后可能加载到伪造的核心类，或造成 JDK 和框架类冲突。</li><li><b>资源加载混乱</b>：<code>getResource</code>、<code>Thread.currentThread().getContextClassLoader()</code> 与当前类加载器不一致，可能读取到错误版本配置。</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>一句话总结</h2>
+        </div>
+        <div class="section-content">
+            <p>自定义类加载器的本质是自定义字节码来源，并控制类隔离边界。面试回答时围绕 <code>loadClass</code>、<code>findClass</code>、<code>defineClass</code>、双亲委派、类型唯一性、Tomcat、插件化和热部署场景展开，基本就能答到中高级深度。</p>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>JVM 调优实战：常用参数（-Xms/-Xmx/-Xmn/-XX:MetaspaceSize 等）</p>
+        </div>
+    </div>
+</body>
+</html>

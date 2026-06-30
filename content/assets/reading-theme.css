@@ -1,0 +1,237 @@
+/* ═══════════════════════════════════════════════════════════════
+   全站阅读主题 · reading-theme.css
+   目标：默认浅色护眼、可切换深色、全站统一、轻度设计感。
+   机制：
+     1) 重定义各页通用 CSS 变量(--bg/--text/--accent...)为浅色；
+        深色模式用 [data-theme="dark"] 覆盖。
+     2) 对写死颜色/装饰元素用具体选择器覆盖或隐藏。
+   作为 <link> 注入到各页内联 <style> 之后，后定义覆盖先定义。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ───────── 浅色（默认）：重定义通用变量 ───────── */
+:root {
+  /* 背景与卡片 */
+  --bg: #faf8f4;
+  --bg-primary: #faf8f4;
+  --bg-secondary: #f3efe7;
+  --card-bg: #ffffff;
+  --paper-card: #ffffff;
+  --header-bg: linear-gradient(135deg, #f3efe7 0%, #ece6da 100%);
+  --code-bg: #f5f2ec;
+  --tag-bg: #eef1f5;
+  --highlight: #fff6e6;
+
+  /* 文本 */
+  --text: #2b2b30;
+  --text-primary: #2b2b30;
+  --text-secondary: #6b6b76;
+  --text-dim: #9a9aa6;
+  --ink: #2b2b30;
+  --ink-soft: #4a4a54;
+  --ink-faint: #6b6b76;
+
+  /* 强调色（沉稳、低刺激） */
+  --accent: #c0392b;
+  --accent2: #2563eb;
+  --accent-deep: #1d4ed8;
+  --accent-red: #d64541;
+  --accent-blue: #2563eb;
+  --accent-green: #2e9e5b;
+  --accent-purple: #8b5cf6;
+  --accent-orange: #e08e0b;
+  --accent-pink: #d6457f;
+  --accent-cyan: #0e9bb5;
+  --accent3: #e08e0b;
+  --accent4: #d6457f;
+  --success: #2e9e5b;
+  --warning: #e08e0b;
+  --neon-cyan: #0e9bb5;
+  --neon-purple: #8b5cf6;
+  --neon-magenta: #d6457f;
+  --neon-blue: #2563eb;
+
+  /* 圆点色（根 Java 文章用） */
+  --dot-blue: #2563eb;
+  --dot-green: #2e9e5b;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #e08e0b;
+  --dot-pink: #d6457f;
+  --dot-red: #d64541;
+  --dot-cyan: #0e9bb5;
+
+  /* 线条与阴影 */
+  --border: #e6e0d4;
+  --line: #e6e0d4;
+  --card-shadow: 0 1px 3px rgba(40,30,20,0.06), 0 4px 16px rgba(40,30,20,0.04);
+
+  /* 排版 */
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', Consolas, 'PingFang SC', monospace;
+  --serif: 'PingFang SC', 'Songti SC', 'Microsoft YaHei', serif;
+
+  color-scheme: light;
+}
+
+/* ───────── 深色（切换）：覆盖通用变量 ───────── */
+[data-theme="dark"] {
+  --bg: #16171a;
+  --bg-primary: #16171a;
+  --bg-secondary: #1d1f23;
+  --card-bg: #1d1f23;
+  --paper-card: #1d1f23;
+  --header-bg: linear-gradient(135deg, #1d1f23 0%, #24262b 100%);
+  --code-bg: #101114;
+  --tag-bg: #25272c;
+  --highlight: #2a2620;
+
+  --text: #e6e6e8;
+  --text-primary: #e6e6e8;
+  --text-secondary: #a2a2ac;
+  --text-dim: #6f6f7a;
+  --ink: #e6e6e8;
+  --ink-soft: #c4c4cc;
+  --ink-faint: #a2a2ac;
+
+  --accent: #e8675a;
+  --accent2: #5b9bf3;
+  --accent-deep: #5b9bf3;
+  --accent-red: #e8675a;
+  --accent-blue: #5b9bf3;
+  --accent-green: #4cc47e;
+  --accent-purple: #a98bf5;
+  --accent-orange: #f0aa3c;
+  --accent-pink: #e87aa6;
+  --accent-cyan: #3ec0d6;
+  --accent3: #f0aa3c;
+  --accent4: #e87aa6;
+  --success: #4cc47e;
+  --warning: #f0aa3c;
+  --neon-cyan: #3ec0d6;
+  --neon-purple: #a98bf5;
+  --neon-magenta: #e87aa6;
+  --neon-blue: #5b9bf3;
+
+  --dot-blue: #5b9bf3;
+  --dot-green: #4cc47e;
+  --dot-purple: #a98bf5;
+  --dot-orange: #f0aa3c;
+  --dot-pink: #e87aa6;
+  --dot-red: #e8675a;
+  --dot-cyan: #3ec0d6;
+
+  --border: #2e3036;
+  --line: #2e3036;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
+
+  color-scheme: dark;
+}
+
+/* ───────── 基底排版（轻度设计感、护眼） ───────── */
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  font-family: var(--sans) !important;
+  line-height: 1.8 !important;
+  cursor: auto !important;           /* 恢复默认鼠标，去掉 cursor:none */
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* 正文段落更舒适的字号（不强行改标题，避免破坏各页层级） */
+p, li { font-size: 16.5px; }
+
+/* 链接 */
+a { color: var(--accent2); }
+
+/* 代码字体统一 */
+code, pre, .mono, .code-block { font-family: var(--mono); }
+
+/* ───────── 去除装饰性元素（主要在主页） ───────── */
+.cursor-dot, .cursor-ring, .mouse-follower,
+.scanlines, .ambient-glow, .grid-bg, #bgCanvas, .bg-canvas {
+  display: none !important;
+}
+/* 故障文字：去掉彩色错位伪影 */
+.glitch::before, .glitch::after { display: none !important; content: none !important; }
+.glitch { color: var(--text) !important; }
+
+/* ───────── 主题切换按钮（全站浮动） ───────── */
+#theme-toggle {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 9999;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--card-shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.25s ease;
+}
+#theme-toggle:hover { transform: translateY(-2px) scale(1.05); }
+#theme-toggle:active { transform: translateY(0) scale(0.97); }
+@media print { #theme-toggle { display: none !important; } }
+
+/* ───────── 主页(index)/列表页 专项微调 ───────── */
+/* 跑马灯条：原半透明深色底 → 跟随主题 */
+.ticker-strip {
+  background: var(--bg-secondary) !important;
+  border-top: 1px solid var(--border) !important;
+  border-bottom: 1px solid var(--border) !important;
+  backdrop-filter: none !important;
+}
+.ticker-item { color: var(--text-secondary) !important; }
+
+/* 主 CTA 按钮：浅色下用实心强调蓝，文字白 */
+.btn-primary {
+  background: var(--accent2) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.btn-primary:hover { background: var(--accent-deep) !important; box-shadow: var(--card-shadow) !important; }
+.btn-outline { color: var(--text) !important; border-color: var(--border) !important; }
+.btn-outline:hover { color: var(--accent2) !important; border-color: var(--accent2) !important; box-shadow: none !important; }
+
+/* 卡片：去霓虹辉光，用柔和阴影 */
+.stat-card, .project-card {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--card-shadow) !important;
+}
+.stat-card:hover, .project-card:hover {
+  box-shadow: 0 6px 24px rgba(40,30,20,0.10) !important;
+  border-color: var(--accent2) !important;
+}
+
+/* 选区高亮 */
+::selection { background: var(--accent2); color: #fff; }
+
+/* 标题渐变文字在浅色下可能过淡 → 用实色 */
+.hero-title .glitch, .contact-title .accent {
+  -webkit-text-fill-color: currentColor !important;
+  background: none !important;
+  color: var(--accent) !important;
+}
+
+/* ───────── family-guide 专项微调 ───────── */
+/* 把紫渐变 body 换成主题背景，白卡片保留 */
+body[style] { background: var(--bg) !important; }
+/* 表头渐变 → 主题强调色 */
+td[style*="#667eea"], th[style*="#667eea"],
+td[style*="#764ba2"], th[style*="#764ba2"] {
+  background: var(--accent2) !important;
+}
+/* 温和的提示条 */
+td[style*="#10b981"] { background: #a8e6cf !important; }
+[data-theme="dark"] td[style*="#10b981"] { background: #2d6a4f !important; }
+td[style*="#f59e0b"] { background: #ffe0a8 !important; }
+[data-theme="dark"] td[style*="#f59e0b"] { background: #5c3d0e !important; }

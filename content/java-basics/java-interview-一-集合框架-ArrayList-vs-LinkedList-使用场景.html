@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 面试卡片 - Java基础 - 集合框架 - ArrayList vs LinkedList 使用场景</title>
+<style>
+:root {
+  --header-bg: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  --module-color: #e94560;
+  --accent-blue: #0ea5e9;
+  --accent-green: #10b981;
+  --accent-purple: #8b5cf6;
+  --accent-orange: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  background: #f0f2f5;
+  color: #333;
+  line-height: 1.8;
+}
+
+.header {
+  background: var(--header-bg);
+  color: #fff;
+  padding: 40px 48px;
+  border-radius: 16px;
+  margin: 20px auto 24px;
+  max-width: 1080px;
+  position: relative;
+  overflow: hidden;
+}
+.header::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(233,69,96,0.15) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.header .day-badge {
+  display: inline-block;
+  background: var(--module-color);
+  color: #fff;
+  padding: 4px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  position: relative;
+}
+.header .subtitle {
+  font-size: 15px;
+  opacity: 0.8;
+  position: relative;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px 40px;
+}
+
+.module-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.module-badge .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--module-color);
+  box-shadow: 0 2px 8px rgba(233,69,96,0.3);
+}
+.module-badge span {
+  font-size: 15px;
+  color: #666;
+  font-weight: 500;
+}
+
+.section-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+  margin-bottom: 20px;
+  overflow: hidden;
+  border-top: 4px solid var(--accent-blue);
+}
+.section-card.green { border-top-color: var(--accent-green); }
+.section-card.purple { border-top-color: var(--accent-purple); }
+.section-card.orange { border-top-color: var(--accent-orange); }
+.section-card.red { border-top-color: var(--accent-red); }
+.section-card.cyan { border-top-color: var(--accent-cyan); }
+.section-card.blue { border-top-color: var(--accent-blue); }
+
+.section-card h2 {
+  font-size: 18px;
+  font-weight: 700;
+  padding: 20px 24px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #1a1a2e;
+}
+.section-card h2 .num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+.blue .num { background: var(--accent-blue); }
+.green .num { background: var(--accent-green); }
+.purple .num { background: var(--accent-purple); }
+.orange .num { background: var(--accent-orange); }
+.red .num { background: var(--accent-red); }
+.cyan .num { background: var(--accent-cyan); }
+
+.section-card .content {
+  padding: 0 24px 20px;
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+.info-list {
+  list-style: none;
+  padding: 0;
+}
+.info-list li {
+  position: relative;
+  padding: 6px 0 6px 20px;
+  margin-bottom: 4px;
+}
+.info-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.blue .info-list li::before { background: var(--accent-blue); }
+.green .info-list li::before { background: var(--accent-green); }
+.purple .info-list li::before { background: var(--accent-purple); }
+.orange .info-list li::before { background: var(--accent-orange); }
+.red .info-list li::before { background: var(--accent-red); }
+.cyan .info-list li::before { background: var(--accent-cyan); }
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 14px;
+}
+.compare-table th {
+  background: #1a1a2e;
+  color: #fff;
+  padding: 10px 14px;
+  text-align: left;
+  font-weight: 600;
+}
+.compare-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #eee;
+}
+.compare-table tr:nth-child(even) td {
+  background: #f8f9fa;
+}
+.compare-table tr:last-child td {
+  border-bottom: none;
+}
+
+.code-block {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border-radius: 8px;
+  padding: 16px 20px;
+  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.code-block .comment { color: #6c7086; }
+.code-block .keyword { color: #cba6f7; }
+.code-block .string { color: #a6e3a1; }
+.code-block .type { color: #89b4fa; }
+.code-block .method { color: #f9e2af; }
+
+.highlight-box {
+  background: #fffbeb;
+  border-left: 4px solid var(--accent-orange);
+  padding: 14px 18px;
+  border-radius: 0 8px 8px 0;
+  margin: 12px 0;
+  font-size: 14px;
+}
+.highlight-box strong {
+  color: var(--accent-orange);
+}
+
+.footer {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px 40px;
+}
+.progress-section {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+  padding: 24px;
+  margin-bottom: 16px;
+}
+.progress-section h3 {
+  font-size: 16px;
+  margin-bottom: 12px;
+  color: #1a1a2e;
+}
+.progress-bar-bg {
+  background: #e5e7eb;
+  border-radius: 10px;
+  height: 14px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--module-color), var(--accent-red));
+  transition: width 0.3s;
+}
+.progress-text {
+  font-size: 13px;
+  color: #666;
+  text-align: right;
+}
+.next-section {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+  padding: 20px 24px;
+}
+.next-section h3 {
+  font-size: 16px;
+  color: var(--module-color);
+  margin-bottom: 8px;
+}
+.next-section p {
+  font-size: 14px;
+  color: #666;
+  line-height: 1.7;
+}
+
+@media (max-width: 768px) {
+  .header { padding: 24px 20px; margin: 12px; }
+  .header h1 { font-size: 22px; }
+  .container { padding: 0 12px 30px; }
+  .section-card h2 { font-size: 16px; padding: 16px 16px 10px; }
+  .section-card .content { padding: 0 16px 16px; font-size: 14px; }
+  .compare-table { font-size: 12px; }
+  .compare-table th, .compare-table td { padding: 8px 10px; }
+  .footer { padding: 0 12px 30px; }
+}
+
+@media print {
+  body { background: #fff; }
+  .header { border-radius: 0; margin: 0; }
+  .section-card { break-inside: avoid; box-shadow: none; border: 1px solid #ddd; }
+  .footer { page-break-before: auto; }
+}
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+
+<div class="header">
+  <div class="day-badge">Day 3</div>
+  <h1>ArrayList vs LinkedList 使用场景</h1>
+  <div class="subtitle">Java 基础 · 集合框架 · 经典对比面试题</div>
+</div>
+
+<div class="container">
+
+  <div class="module-badge">
+    <div class="badge">一-1</div>
+    <span>Java 基础 → 集合框架</span>
+  </div>
+
+  <div class="section-card blue">
+    <h2><span class="num">1</span> 核心概念</h2>
+    <div class="content">
+      <ul class="info-list blue">
+        <li><strong>ArrayList</strong> 基于<strong>动态数组</strong>实现，底层是 Object[] elementData 数组，支持快速随机访问。初始容量 10，超过容量时自动扩容 1.5 倍。</li>
+        <li><strong>LinkedList</strong> 基于<strong>双向链表</strong>实现，每个节点（Node）包含 prev（前驱）、item（数据）、next（后继）三个字段，支持高效的中间位置插入/删除。</li>
+        <li>两者都实现 List、RandomAccess、Cloneable、Serializable 接口，允许 null 元素，且<strong>都不是线程安全</strong>的。</li>
+        <li>ArrayList 实现了 RandomAccess 接口标记为"支持随机访问"，LinkedList 没有实现此接口。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="section-card green">
+    <h2><span class="num">2</span> 底层结构对比</h2>
+    <div class="content">
+      <table class="compare-table">
+        <thead>
+          <tr><th>维度</th><th>ArrayList</th><th>LinkedList</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>底层结构</td><td>动态数组（连续内存）</td><td>双向链表（非连续内存）</td></tr>
+          <tr><td>get(i) 时间复杂度</td><td><strong>O(1)</strong> 直接数组索引</td><td>O(n) 需要从头/尾遍历</td></tr>
+          <tr><td>set(i, e) 时间复杂度</td><td><strong>O(1)</strong></td><td>O(n)</td></tr>
+          <tr><td>add(e) 尾部追加</td><td><strong>O(1)</strong> 均摊（扩容时 O(n)）</td><td><strong>O(1)</strong></td></tr>
+          <tr><td>add(i, e) 中间插入</td><td>O(n) 需 System.arraycopy 搬移元素</td><td>O(1)（找到节点后）</td></tr>
+          <tr><td>remove(i) 中间删除</td><td>O(n) 搬移后续元素</td><td>O(1)（找到节点后）</td></tr>
+          <tr><td>空间开销</td><td>较小，只存储数据 + 数组容量</td><td>较大，每个节点多 2 个引用指针</td></tr>
+          <tr><td>内存局部性</td><td><strong>优秀</strong>（连续内存，CPU 缓存友好）</td><td>较差（节点分散，缓存命中率低）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section-card purple">
+    <h2><span class="num">3</span> 实战场景选择指南</h2>
+    <div class="content">
+      <ul class="info-list purple">
+        <li><strong>优先选 ArrayList：</strong>90% 以上的场景都应该使用 ArrayList。读取操作多、遍历操作多、尾部添加操作多。在现代 CPU 上，由于 CPU 缓存预取和局部性原理，ArrayList 的迭代速度通常比 LinkedList 快 5-10 倍。</li>
+        <li><strong>优先选 LinkedList：</strong>频繁在列表<strong>中间</strong>插入/删除元素的场景（如实现队列、双端队列）。LinkedList 本身实现了 Queue 和 Deque 接口，可以直接作为队列使用。</li>
+        <li><strong>面试核心结论：</strong>实际开发中 ArrayList 几乎总是更好的选择。LinkedList 所谓的"插入删除优势"仅在你已经持有目标节点引用时成立，而查找节点本身就需要 O(n)。</li>
+      </ul>
+      <div class="highlight-box">
+        <strong>💡 面试要点：</strong>面试官经常追问——"你真的知道什么时候该用 LinkedList 吗？" 标准回答是：如果你的场景真的是频繁中间增删且你能用其他方式快速定位节点（如配合 Map 索引），才考虑 LinkedList。否则一律用 ArrayList。
+      </div>
+    </div>
+  </div>
+
+  <div class="section-card orange">
+    <h2><span class="num">4</span> 底层原理深度</h2>
+    <div class="content">
+      <ul class="info-list orange">
+        <li><strong>ArrayList 扩容机制：</strong>初次创建时 elementData 为空数组，第一次 add 时扩容为 10；之后每次扩容为原来的 1.5 倍（newCapacity = oldCapacity + oldCapacity/2）。扩容时用 Arrays.copyOf 创建新数组并拷贝数据。</li>
+        <li><strong>ArrayList 容量预分配：</strong>可以通过 new ArrayList(expectedSize) 指定初始容量，避免频繁扩容带来的性能损耗。这在已知数据量时非常重要。</li>
+        <li><strong>ArrayList.trimToSize()：</strong>将数组容量缩小到实际元素个数，释放多余内存。</li>
+        <li><strong>LinkedList 内部类 Node：</strong>静态内部类，包含 Node&lt;E&gt; prev, E item, Node&lt;E&gt; next。linkFirst/linkLast/linkBefore 是核心操作方法。</li>
+        <li><strong>ArrayList 的 fail-fast：</strong>通过 modCount 字段检测并发修改，迭代器调用 next() 时检查 modCount 是否变化，不一致则抛出 ConcurrentModificationException。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="section-card red">
+    <h2><span class="num">5</span> 模拟面试题</h2>
+    <div class="content">
+      <div class="code-block">
+<span class="comment">// Q1: ArrayList 的扩容机制是什么？为什么是 1.5 倍而不是 2 倍？</span>
+<span class="comment">// A: 1.5 倍是平衡内存利用率和扩容频率的折中。2 倍扩容太激进，</span>
+<span class="comment">//    可能浪费内存；1 倍扩容太保守，频繁扩容带来性能开销。</span>
+
+<span class="comment">// Q2: 遍历 ArrayList 和 LinkedList，哪种更快？为什么？</span>
+<span class="comment">// A: ArrayList 更快。因为内存连续，CPU 缓存预取命中率高。</span>
+<span class="comment">//    LinkedList 节点分散在堆上，每次访问可能触发 cache miss。</span>
+
+<span class="comment">// Q3: ArrayList 的 get(i) 和 set(i, e) 为什么是 O(1)？</span>
+<span class="comment">// A: 底层是数组，支持通过索引直接定位，无需遍历。</span>
+
+<span class="comment">// Q4: 如何线程安全地使用 ArrayList？</span>
+<span class="comment">// A: ① Collections.synchronizedList() ② CopyOnWriteArrayList</span>
+<span class="comment">//    ③ 使用并发包工具类 ④ 自行加锁</span>
+
+<span class="comment">// Q5: ArrayList 和 Vector 的区别？</span>
+<span class="comment">// A: Vector 所有方法 synchronized（线程安全但性能差）</span>
+<span class="comment">//    扩容是 2 倍，ArrayList 是 1.5 倍</span>
+<span class="comment">//    Vector 是遗留类，不推荐使用</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-card cyan">
+    <h2><span class="num">6</span> 踩坑经验与最佳实践</h2>
+    <div class="content">
+      <ul class="info-list cyan">
+        <li><strong>坑 #1：</strong>不知道数据量就 new ArrayList() 默认创建容量 10 的数组，如果数据量大（如 1000+），会触发多次扩容拷贝。应预判数据量指定初始容量。<code>new ArrayList(list.size())</code></li>
+        <li><strong>坑 #2：</strong>在 for 循环中用 <code>list.remove(i)</code> 删除元素会导致漏删或越界——因为删除后后续元素前移，索引关系变化。应倒序遍历删除，或用 Iterator.remove()。</li>
+        <li><strong>坑 #3：</strong>ArrayList 的 subList() 返回的是视图而非副本，对子列表的操作会影响原列表。修改操作可能抛出 UnsupportedOperationException（如 add/remove）。</li>
+        <li><strong>坑 #4：</strong>ArrayList 在头部频繁 insert(0, e) 时性能极差（每次都要搬移全部元素），此时考虑 LinkedList 或 ArrayDeque。</li>
+        <li><strong>最佳实践：</strong>在需要队列/双端队列语义时，用 ArrayDeque 替代 LinkedList——内存占用更小、迭代更快、API 一致。</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <div class="progress-section">
+    <h3>📚 复习进度</h3>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" style="width: 1.5%;"></div>
+    </div>
+    <div class="progress-text">已完成 3 / 约 200 个知识点（第 3/200 天）</div>
+  </div>
+
+  <div class="next-section">
+    <h3>🔜 明日预告</h3>
+    <p><strong>Java 基础 · 集合框架 → HashSet/TreeSet 底层原理</strong></p>
+    <p>了解 HashSet 如何基于 HashMap 实现，TreeSet 的排序原理，以及它们的底层数据结构差异。</p>
+  </div>
+</div>
+
+</body>
+</html>

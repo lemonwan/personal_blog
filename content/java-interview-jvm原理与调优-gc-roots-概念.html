@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 8 | GC Roots 概念</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 8 — GC Roots 概念</h1>
+  <div class="tag">模块：JVM原理与调优 · GC机制</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">08</span>
+    <span class="card-title">GC Roots 概念</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>核心概念：什么是 GC Roots？</h3>
+      <div class="content"><p>在 JVM 的<b>可达性分析算法</b>中，<strong>GC Roots</strong> 是垃圾回收的起点对象集合。从这些对象出发，通过引用链向下遍历，能够到达的对象标记为<b>存活</b>，不可达的对象则为<b>垃圾</b>。</p><div class="note-box"><div class="note-title">核心思想</div><p>不是孤立地判断对象是否被引用，而是从一组固定的"根"对象出发，看能否找到通往目标对象的路径。</p></div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>可作为 GC Roots 的对象类型</h3>
+      <div class="content"><p>以下几种对象可以作为 <strong>GC Roots</strong>：</p><ul class="bullet-list"><li><span class="highlight">栈帧中的局部变量表</span> — 正在执行的方法中的局部变量引用的对象</li><li><span class="highlight">静态变量引用的对象</span> — 方法区中类的静态属性引用的对象</li><li><span class="highlight">常量引用的对象</span> — 方法区中常量池里的引用（如 <code>String</code> 常量池中的字符串）</li><li><span class="highlight">JNI 引用</span> — Native 方法栈中 JNI 引用的对象</li><li><span class="highlight">活跃线程对象</span> — 当前所有活跃的 <code>Thread</code> 对象</li><li><span class="highlight">被 synchronized 持有的对象</span> — 作为 monitor 锁的对象</li><li><span class="highlight">JVM 内部引用</span> — 系统类加载器、基本类型的 Class 对象、常驻异常对象等</li></ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>可达性分析算法流程</h3>
+      <div class="content"><p>可达性分析从 GC Roots 出发，采用 BFS/DFS 遍历对象图，标记所有可达对象。未标记的对象即为不可达的垃圾对象。</p><div class="note-box warning"><div class="note-title">重要：Stop-The-World</div><p>可达性分析必须在 <strong>安全点（SafePoint）</strong> 执行，此时所有用户线程暂停（STW），才能保证对象引用关系在分析过程中不变。这也是 GC 停顿的主要原因之一。</p></div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>引用计数 vs 可达性分析（回顾对比）</h3>
+      <div class="content"><table class="comparison-table"><tr><th>对比维度</th><th>引用计数法</th><th>可达性分析</th></tr><tr><td>原理</td><td>每个对象维护引用计数器，为0时回收</td><td>从 GC Roots 遍历对象图，不可达则回收</td></tr><tr><td>循环引用</td><td>无法解决</td><td>天然解决</td></tr><tr><td>效率</td><td>高，增量式，无需STW</td><td>需要STW，有停顿</td></tr><tr><td>实现复杂度</td><td>低</td><td>高（OopMap、安全点）</td></tr><tr><td>代表语言</td><td>Python、Swift</td><td>Java、Go、C#</td></tr></table><div class="note-box danger"><div class="note-title">面试重点</div><p><strong>两个对象互相引用会被GC回收吗？</strong> 会！可达性分析从 GC Roots 出发，找不到路径就判定为垃圾，循环引用不影响判断。</p></div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试高频问题</h3>
+      <div class="content"><ol><li><strong>GC Roots 具体包含哪些？</strong> — 7类：栈帧局部变量、静态变量、常量引用、JNI引用、活跃线程、synchronized持有对象、JVM内部引用</li><li><strong>为什么选这些对象作为根？</strong> — 它们是程序执行所必需"活的"对象</li><li><strong>什么是不可达对象？</strong> — 从所有GC Roots出发都无法到达的对象</li><li><strong>finalize() 复活机制？</strong> — 对象第一次被标记不可达时，若覆盖了finalize()且未执行，进入F-Queue，执行中可重新关联GC Roots"复活"（仅一次）</li><li><strong>三色标记算法？</strong> — CMS/G1并发标记用：白色（未访问）、灰色（已访问未扫完引用）、黑色（全部完成）</li></ol><div class="note-box"><div class="note-title">记忆口诀</div><p><strong>"栈静常，JNI线"</strong> — 栈帧局部变量、静态变量、常量池引用、JNI引用、活跃线程</p></div></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 12%"></div></div>
+  <div class="progress-text">8 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>各代垃圾收集器：Serial、ParNew、Parallel Scavenge、CMS、G1、ZGC</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 8/66</div>
+</body>
+</html>

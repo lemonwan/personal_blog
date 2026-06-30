@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 31 · 线程创建方式 · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 31 / 66</div>
+            <h1>多线程与并发编程 · 线程基础</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 线程创建方式</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:46.97%"></div>
+            </div>
+            <div class="progress-label">进度 46.97%（31/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念：线程创建的四种方式</h2>
+        </div>
+        <div class="section-content">
+            <p>Java 中创建线程主要有<strong>四种方式</strong>，每种都有其适用场景和设计考量：</p><ul><li><strong>继承 Thread 类</strong>：最简单的方式，但 Java 不支持多继承，灵活性受限</li><li><strong>实现 Runnable 接口</strong>：解耦任务逻辑与线程控制，推荐方式</li><li><strong>实现 Callable 接口</strong>：支持返回结果和抛出检查异常，配合 Future 使用</li><li><strong>线程池</strong>：生产环境唯一正确方式，避免频繁创建销毁线程的开销</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>面试真题：Thread vs Runnable 区别</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>面试官常问</strong>："Thread 和 Runnable 有什么区别？为什么推荐使用 Runnable？"</p><p><strong>答题要点</strong>：</p><ol><li><strong>Java 单继承限制</strong>：继承 Thread 后不能再继承其他类，而 Runnable 是接口，可以多实现</li><li><strong>解耦设计</strong>：Runnable 将任务逻辑与线程执行机制分离，同一 Runnable 可提交给多个线程执行</li><li><strong>资源共享</strong>：多个线程共享同一个 Runnable 实例，便于实现数据共享</li><li><strong>线程池兼容</strong>：Runnable 和 Callable 是线程池接受的标准任务类型</li></ol>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>底层原理：Callable + FutureTask</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>Callable 与 Runnable 的本质区别</strong>：</p><pre>@FunctionalInterface
+public interface Callable&lt;V&gt; {
+    V call() throws Exception;
+}
+
+@FunctionalInterface
+public interface Runnable {
+    void run();
+}</pre><p><strong>FutureTask 的桥梁作用</strong>：</p><p>Thread 只接受 Runnable，所以需要 FutureTask 作为适配器。FutureTask 同时实现了 Runnable 和 Future 接口，内部包装 Callable。调用 get() 方法时：</p><ul><li>任务未完成 → 阻塞等待</li><li>任务完成 → 返回结果或抛出异常（包装为 ExecutionException）</li><li>任务取消 → 抛出 CancellationException</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>实际运用：生产环境只用线程池</h2>
+        </div>
+        <div class="section-content">
+            <p><strong style="color:#e74c3c">重要警告</strong>：生产环境<strong>绝对禁止</strong>直接 new Thread！</p><p><strong>线程池的优势</strong>：</p><ul><li><strong>复用线程</strong>：避免线程创建销毁的昂贵开销（每个线程栈默认 1MB）</li><li><strong>控制并发数</strong>：防止系统资源耗尽（OOM: unable to create native thread）</li><li><strong>任务管理</strong>：提供任务队列、拒绝策略、监控统计</li><li><strong>生命周期管理</strong>：优雅关闭、钩子函数</li></ul><p><strong>创建线程池的正确姿势</strong>：</p><pre>// 手动创建，不使用 Executors 工厂方法
+ThreadPoolExecutor executor = new ThreadPoolExecutor(
+    corePoolSize,      // 核心线程数
+    maximumPoolSize,   // 最大线程数
+    keepAliveTime,     // 空闲线程存活时间
+    TimeUnit.SECONDS,  // 时间单位
+    new LinkedBlockingQueue&lt;&gt;(1000),  // 有界队列！
+    new ThreadFactoryBuilder().setNameFormat("my-pool-%d").build(),
+    new ThreadPoolExecutor.CallerRunsPolicy()  // 拒绝策略
+);</pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>踩坑经验：Executors 的隐藏陷阱</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>JDK 自带 Executors 工厂方法的坑</strong>：</p><table border="1" cellpadding="8" style="border-collapse:collapse"><tr style="background:#f5f5f5"><th>方法</th><th>问题</th></tr><tr><td>FixedThreadPool</td><td>队列长度 Integer.MAX_VALUE，可能 OOM</td></tr><tr><td>CachedThreadPool</td><td>最大线程数 Integer.MAX_VALUE，可能耗尽系统资源</td></tr><tr><td>SingleThreadExecutor</td><td>同样是无界队列</td></tr></table><p><strong>真实事故</strong>：某电商系统在大促时使用 Executors.newFixedThreadPool(10)，任务队列瞬间积压数十万任务，导致 GC 频繁停顿，服务不可用。</p><p><strong>解决方案</strong>：<strong>永远手动 new ThreadPoolExecutor</strong>，使用有界队列，自定义拒绝策略！</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>面试延伸：线程的 start() vs run()</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>经典面试题</strong>："直接调用 run() 方法和调用 start() 有什么区别？"</p><p><strong>答案</strong>：</p><ul><li><strong>start()</strong>：<span style="color:#27ae60">真正启动新线程</span>，调用 native 方法 start0()，由 JVM 调用 run() 方法</li><li><strong>run()</strong>：<span style="color:#e74c3c">普通方法调用</span>，在当前线程执行，不会启动新线程</li></ul><p><strong>代码验证</strong>：</p><pre>Thread t = new Thread(() -&gt; {
+    System.out.println(Thread.currentThread().getName());
+});
+t.run();   // 输出: main （主线程执行）
+t.start(); // 输出: Thread-0 （新线程执行）</pre>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>线程状态与转换</p>
+        </div>
+    </div>
+</body>
+</html>

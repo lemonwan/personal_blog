@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第11课 · Softmax | AI大模型原理教程</title>
+    <meta name="description" content="一组任意大小的分数，怎么变成一组加起来等于1的概率？">
+    <meta name="keywords" content="AI大模型教程,Transformer,Softmax,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第11课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 11 · 卷二</div>
+            <h1>Softmax</h1>
+            <p class="subtitle">❝ 一组任意大小的分数，怎么变成一组加起来等于1的概率？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="分类器的输出是什么" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>分类器的最后一层输出什么？</h2></div><p>回到那台猜水果的机器。它最后一层给每种水果配了一个神经元——这一课先用<strong>苹果、香蕉、西瓜</strong>三种举例。 经过若干层 Wx + b 和 ReLU 之后，假设三个神经元的输出是：</p><div class="formula">[🍎 苹果: 2.1，  🍌 香蕉: −0.5，  🍉 西瓜: 1.8]</div><p>这三个数叫 <strong>logits</strong>（原始分数）。它们的大小可以比较——2.1 > 1.8 > −0.5， 说明网络认为「苹果」的可能性最高。但有两个问题：</p><ul style="margin-top:16px;padding-left:24px;line-height:2.1"><li>「苹果」的概率是多少？2.1 这个数字本身没有概率意义。</li><li>三个数加起来等于 3.4，不等于 1。概率必须加起来等于 1。</li></ul><p>交叉熵损失需要的输入是概率。所以需要一个转换：<strong>把三个任意实数变成三个加起来等于 1 的非负数</strong>。</p><div class="think"><div class="think-q">最简单的想法：把三个数都除以它们的总和，这样不就加起来等于 1 了？试试看，有什么问题？</div></div></section><section class="station reveal" data-title="修补负数问题" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>修补负数：先变成正数再归一化</h2></div><p>负数的问题在于：直接除以总和后，原来是负数的项仍然是负数。 要让所有项变成正数，再归一化。 最直觉的修补：把所有数都加上最小值的绝对值，平移到非负区间。</p><div class="formula">2.1 + 0.5 = 2.6<br/>−0.5 + 0.5 = 0<br/>1.8 + 0.5 = 2.3<br/>总和 = 4.9<br/>概率 = [2.6/4.9, 0/4.9, 2.3/4.9] ≈ [0.53, 0, 0.47]</div><div class="crack reveal"><div class="crack-label">平移量是任意的</div><p>「加上 0.5」是因为最小值是 −0.5，我们选择了把它平移到 0。 但为什么必须是 0？如果把最小值平移到 1，结果就完全不同了： [3.1/6.9, 1/6.9, 2.8/6.9] ≈ [0.45, 0.14, 0.41]。<strong>概率的分布随着任意选择的平移量而改变</strong>——这不合理。 我们需要一种不依赖「平移量」的转换方法。</p></div><p>问题的核心是：需要一个函数，能把任意实数（包括负数）变成正数， 而且<strong>不依赖其他数的绝对大小</strong>，只保留相对排序信息。</p></section><section class="station reveal" data-title="指数函数：天然的解法" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>指数函数：天然无负数</h2></div><p>有一个函数对所有实数输出都是正数，而且不需要知道其他项是多少——就是指数函数 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6644em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">x</span></span></span></span></span></span></span></span></span></span></span></span></span>。 先看它长什么样：</p><figure class="fig"><div class="fig-frame"><div class="plotly-fig"></div></div><figcaption><span class="fig-no">图 11-1</span>指数函数 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6644em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">x</span></span></span></span></span></span></span></span></span></span></span></span></span>：不管输入是正、是负、还是零，输出<strong>永远在 0 以上</strong>（曲线始终不碰横轴）。而且输入越大、输出涨得越快——这两条性质正是 Softmax 看中它的原因。</figcaption></figure><p>把三个 logit（苹果 2.1、香蕉 −0.5、西瓜 1.8）分别代进去，负数也变成了正数：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8641em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2.1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8641em;"></span><span class="mord">8.17</span><span class="mspace" style="margin-right:2em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">0.5</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8641em;"></span><span class="mord">0.61</span><span class="mspace" style="margin-right:2em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1.8</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">6.05</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">14.83</span></span></span></span></span></span></div><p>全部除以总和：</p><div class="formula formula-tex"><div>🍎 苹果：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1901em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">14.83</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">8.17</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">0.551</span></span></span></span></span></div><div style="margin-top:6px">🍌 香蕉：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1901em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">14.83</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">0.61</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">0.041</span></span></span></span></span></div><div style="margin-top:6px">🍉 西瓜：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1901em;vertical-align:-0.345em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">14.83</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">6.05</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">0.408</span></span></span></span></span></div><span class="formula-tex-note">三者之和 = 1.000 ✓</span></div><p>这就是 <strong>Softmax</strong>：对每个 logit 取 e 的指数，再整体归一化。 （第 6 课埋过一个伏笔——「把任意一组实数变成概率分布，正是 Softmax 的工作」。这一课就是来兑现承诺的。）</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">Softmax</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.044em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4632em;vertical-align:-1.1218em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3414em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.162em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4358em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6065em;"><span style="top:-3.0051em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.044em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.044em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em;">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2819em;"><span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.044em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3281em;"><span style="top:-2.357em;margin-left:-0.044em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.1218em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></span></div><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 160" role="img" aria-label="Softmax 变换前后的对比"><text x="110" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#232F3B">Logits（原始分数）</text><g><text x="42" y="46" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B">苹果</text><rect x="48" y="32" width="180" height="22" rx="3" fill="#3E6B8F" opacity="0.3"></rect><text x="236" y="46" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">2.1</text></g><g><text x="42" y="78" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B">香蕉</text><rect x="48" y="64" width="20" height="22" rx="3" fill="#93A0AC" opacity="0.3"></rect><text x="76" y="78" font-family="JetBrains Mono, monospace" font-size="12" fill="#93A0AC">−0.5</text></g><g><text x="42" y="110" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B">西瓜</text><rect x="48" y="96" width="148" height="22" rx="3" fill="#5C6B79" opacity="0.3"></rect><text x="204" y="110" font-family="JetBrains Mono, monospace" font-size="12" fill="#5C6B79">1.8</text></g><text x="295" y="80" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="26" fill="#93A0AC">→</text><text x="295" y="98" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">Softmax</text><text x="430" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#232F3B">概率分布</text><g><text x="340" y="46" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B">苹果</text><rect x="346" y="32" width="160" height="22" rx="3" fill="#3E6B8F" opacity="0.7"></rect><text x="514" y="46" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">0.551</text></g><g><text x="340" y="78" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B">香蕉</text><rect x="346" y="64" width="12" height="22" rx="3" fill="#93A0AC" opacity="0.7"></rect><text x="366" y="78" font-family="JetBrains Mono, monospace" font-size="12" fill="#93A0AC">0.041</text></g><g><text x="340" y="110" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B">西瓜</text><rect x="346" y="96" width="118" height="22" rx="3" fill="#5C6B79" opacity="0.7"></rect><text x="472" y="110" font-family="JetBrains Mono, monospace" font-size="12" fill="#5C6B79">0.408</text></g><text x="530" y="140" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">Σ=1 ✓</text></svg></div><figcaption><span class="fig-no">图 11-2</span>Softmax 把 logits 变成概率：所有值非负，和为 1。指数放大了原本的差距——苹果 2.1 比西瓜 1.8 只大一点，但概率大了 35%。</figcaption></figure><p>这正是第 7 课见过的那台机器的<strong>输出层</strong>——当时只说「softmax 把分数挤成概率」，现在你知道它在里面具体做了什么了。 下面把那台四种水果的机器再搬出来：转旋钮改变四个神经元的<strong>分数</strong>，看 softmax 如何把它们实时换算成一组加起来 = 100% 的概率：</p><figure class="fig"><div class="fruit-lab"><div class="fruit-knobs"><div class="knob-title">🎛 四个旋钮 = 四个输入特征</div><div class="knob-row"><div class="knob-head"><span class="knob-name">尺寸大小</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">小</span><input type="range" min="0" max="1" step="0.01" aria-label="尺寸大小" value="0.5"/><span class="knob-end">大</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">颜色</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">偏绿</span><input type="range" min="0" max="1" step="0.01" aria-label="颜色" value="0.5"/><span class="knob-end">偏红</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">酸甜度</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">酸</span><input type="range" min="0" max="1" step="0.01" aria-label="酸甜度" value="0.5"/><span class="knob-end">甜</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">水分</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">干</span><input type="range" min="0" max="1" step="0.01" aria-label="水分" value="0.5"/><span class="knob-end">多汁</span></div></div></div><div class="fruit-out"><svg class="neuron-svg" viewBox="0 0 380 250" role="img" aria-label="四个神经元加 softmax 的结构图，分数随旋钮实时变化"><line x1="78" y1="34" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="34" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="34" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="34" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><g><rect x="6" y="19" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="32" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">尺寸大小</text><text x="14" y="45" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><rect x="6" y="77" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="90" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">颜色</text><text x="14" y="103" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><rect x="6" y="135" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="148" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">酸甜度</text><text x="14" y="161" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><rect x="6" y="193" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="206" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">水分</text><text x="14" y="219" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><line x1="216" y1="34" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="34" r="20" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><text x="196" y="40" text-anchor="middle" font-size="16">🍎</text><text x="223" y="38" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">2.4</text></g><g><line x1="216" y1="92" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="92" r="20" fill="#FDF6EC" stroke="#C9A227" stroke-width="2"></circle><text x="196" y="98" text-anchor="middle" font-size="16">🍌</text><text x="223" y="96" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C9A227">2.2</text></g><g><line x1="216" y1="150" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="150" r="20" fill="#FDF6EC" stroke="#3E8F5A" stroke-width="2"></circle><text x="196" y="156" text-anchor="middle" font-size="16">🍉</text><text x="223" y="154" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#3E8F5A">1.4</text></g><g><line x1="216" y1="208" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="208" r="20" fill="#FDF6EC" stroke="#B8A21E" stroke-width="2"></circle><text x="196" y="214" text-anchor="middle" font-size="16">🍋</text><text x="223" y="212" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#B8A21E">2.1</text></g><rect x="300" y="72" width="66" height="106" rx="8" fill="#F5F0E8" stroke="#5C6B79" stroke-width="1.6"></rect><text x="333" y="122" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#5C6B79">softmax</text><text x="333" y="140" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">分数→概率</text><text x="196" y="244" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">每个神经元给一种水果打分</text></svg><div class="winner-line">机器觉得最像：<b>🍎<!-- --> <!-- -->苹果</b></div><div class="prob-block"><div class="prob-row prob-win"><span class="prob-name">🍎<!-- --> <!-- -->苹果</span><span class="prob-bar"><span class="prob-fill" style="width:36%;background:#C0481E"></span></span><span class="prob-pct">36%</span></div><div class="prob-row"><span class="prob-name">🍌<!-- --> <!-- -->香蕉</span><span class="prob-bar"><span class="prob-fill" style="width:27%;background:#C9A227"></span></span><span class="prob-pct">27%</span></div><div class="prob-row"><span class="prob-name">🍉<!-- --> <!-- -->西瓜</span><span class="prob-bar"><span class="prob-fill" style="width:13%;background:#3E8F5A"></span></span><span class="prob-pct">13%</span></div><div class="prob-row"><span class="prob-name">🍋<!-- --> <!-- -->柠檬</span><span class="prob-bar"><span class="prob-fill" style="width:24%;background:#B8A21E"></span></span><span class="prob-pct">24%</span></div></div><div class="lab-hint">四个神经元各给一种水果打分（圆圈旁的数字），softmax 把四个分数挤成一组加起来 = 100% 的概率。试试把旋钮调到「大 + 多汁」，看西瓜怎么后来居上。</div></div></div><figcaption><span class="fig-no">互动 11-A</span>softmax 在四个水果神经元上的现场演算：每个分数先取 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6644em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6644em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.044em;">z</span></span></span></span></span></span></span></span></span></span></span></span></span>（消除负数），再整体归一化。把旋钮调到「大 + 多汁」，看西瓜的分数和概率一起被推高。</figcaption></figure></section><section class="station reveal" data-title="温度：ChatGPT 的旋钮" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>一个意外的发现：温度参数</h2></div><p>指数函数有一个有趣的副效应：它<em>放大</em>了 logits 之间的差距。 2.1 比 1.8 大 17%，但 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2.1</span></span></span></span></span></span></span></span></span><span class="mord">/</span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1.8</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1.35</span></span></span></span></span>——差距被扩大了 35%。 差距越大，最大值的概率越接近 1，其他值越接近 0。</p><p>这个「放大程度」是可以调节的——引入一个<strong>温度参数 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.1389em;">T</span></span></span></span></span></strong>，把 logits 先除以 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.1389em;">T</span></span></span></span></span>，再做 Softmax：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.836em;vertical-align:-0.686em;"></span><span class="mord"><span class="mord mathrm">Softmax</span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size2">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.1076em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">T</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal" style="margin-right:0.044em;">z</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.044em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size2">)</span></span></span></span></span></span></span></span></div><figure class="fig"><div class="fig-frame"><div class="plotly-fig"></div></div><figcaption><span class="fig-no">图 11-3</span>同一组 logits，三种温度下的概率分布。<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.1389em;">T</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span> 时模型极度自信（几乎全押苹果）；<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.1389em;">T</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span> 时分布趋于均匀（更多随机性）。这就是 ChatGPT 里 temperature 参数的数学来源。</figcaption></figure><p>这就是你使用 ChatGPT 时看到的「temperature」旋钮： 低温（如 0.2）让输出更确定、更保守——适合写代码、做数学； 高温（如 0.8~1.0）让输出更多样、更有创意——适合写故事、头脑风暴。</p><div class="crack reveal"><div class="crack-label">数值不稳定</div><p>当某个 logit 是 1000 时，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1000</span></span></span></span></span></span></span></span></span></span></span></span></span> 超出浮点数上限（上溢出）。 解法：先把所有 logit 减去最大值再取指数——数学上等价（分子分母同乘 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7713em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7713em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mspace mtight" style="margin-right:0.1952em;"></span><span class="mop mtight"><span class="mtight">m</span><span class="mtight">a</span><span class="mtight">x</span></span></span></span></span></span></span></span></span></span></span></span></span></span> 抵消），但数值上稳定。 这叫 log-sum-exp 技巧，PyTorch 的 <code>F.cross_entropy</code> 已经内置，直接传 logits 即可。</p></div></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>Softmax 解决了「分数→概率」的两个问题（负数 + 不加和为 1）： 对每个 logit 取 <span class="tk-hl">eˣ</span>（天然非负），再整体归一化。 指数放大差距，温度参数可以反向调节这个放大—— 这就是<span class="tk-hl">ChatGPT temperature</span> 的数学来源。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>Logits</strong>：分类网络最后一层的原始分数，有正有负，不是概率。</li><li><strong>直接归一化的问题</strong>：有负数时会出现负概率；平移量任意导致结果不稳定。</li><li><strong>Softmax</strong>：eᶻⁱ / Σeᶻʲ，先取指数消除负数，再归一化；差距被放大。</li><li><strong>温度参数 T</strong>：Softmax(z/T)；T 越小越果断，T 越大越随机。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="Softmax 先取指数保证非负，再归一化保证和为 1。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>Softmax 要解决的核心问题是：把一组任意实数的 logits 变成概率。它分两步，正确的是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">先取绝对值，再除以个数</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">先对每个数取指数 eˣ（保证非负），再整体归一化（保证和为 1）</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">先排序，再取最大值</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">先减去平均值，再四舍五入</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="低温 T 使分布尖锐果断，高温 T 使分布平缓随机。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>Softmax 里的「温度参数 T」（把 logits 先除以 T 再做 Softmax）有什么效果？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">T 越大输出越确定，T 越小越随机</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">T 越小（低温）分布越尖锐果断，T 越大（高温）分布越平缓随机</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">T 只影响速度，不影响结果</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">T 必须等于 1，否则结果错误</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nn-05-sgd.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 12 课</span>
+                    <h3>梯度下降与优化器</h3>
+                    <p>知道了往哪走是下坡，一步该迈多大？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷二 · 第11课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

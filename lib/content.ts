@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { cache } from "react";
 
-const BACKUP_DIR = path.join(process.cwd(), "..", "static-backup");
+const BACKUP_DIR = path.join(process.cwd(), "content");
 const AI_LLM_DIR = path.join(BACKUP_DIR, "ai-llm");
 
 export interface LessonMeta {

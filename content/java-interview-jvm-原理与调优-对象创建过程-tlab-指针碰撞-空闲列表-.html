@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 19 | 对象创建过程（TLAB、指针碰撞/空闲列表）</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 19 — 对象创建过程（TLAB、指针碰撞/空闲列表）</h1>
+  <div class="tag">模块：JVM 原理与调优 · 内存模型</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">19</span>
+    <span class="card-title">对象创建过程（TLAB、指针碰撞/空闲列表）</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>对象创建全流程：从 new 到内存分配</h3>
+      <div class="content"><p>在 Java 中，一个对象从代码 <code>new Object()</code> 到真正 usable，要经历以下完整流程：</p>
+<ol>
+<li><span class='highlight'>类加载检查</span> — JVM 遇到 <code>new</code> 指令时，首先会去检查这个指令的参数能否在 <span class='highlight'>常量池</span> 中定位到一个类的符号引用，并对该类进行<u>加载、校验、准备、解析、初始化</u>（如果还没做过）。</li>
+<li><span class='highlight'>内存分配</span> — 类检查通过后，JVM 需要在堆中划分一块确定大小的内存空间。对象所需内存大小在类加载完成后即可确定。</li>
+<li><span class='highlight'>初始化零值</span> — 分配到的内存空间都初始化为零值（不包含对象头），保证对象的实例字段在 Java 代码中可以不赋初值就直接使用。</li>
+<li><span class='highlight'>设置对象头</span> — 进行对象头的设置，包括 <span class='highlight'>哈希码（@Object.hashCode）</span>、<span class='highlight'>GC 分代年龄</span>、<span class='highlight'>锁状态标志</span>、<span class='highlight'>线程持有的锁</span>、<span class='highlight'>偏向线程 ID</span>、<span class='highlight'>偏向时间戳</span>等。</li>
+<li><span class='highlight'>初始化（执行 &lt;init&gt;）</span> — 执行 <code>&lt;init&gt;</code> 方法，按照程序流程进行属性的赋值和代码块执行，完成对象的真正初始化。</li>
+</ol>
+</div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>指针碰撞 vs 空闲列表：堆内存分配策略</h3>
+      <div class="content"><p>JVM 在堆中分配内存时，根据堆的规整程度选择不同的分配方式：</p>
+<div class='note-box'><div class='note-title'>📌 前提</div>堆内存必须是<u>规整</u>的，即已使用的内存块集中在某一区域，空闲的在另一区域，中间放一个指针作为分界。</div>
+<table class='comparison-table'><thead><tr><th>分配方式</th><th>适用堆类型</th><th>原理</th><th>优点</th><th>缺点</th></tr></thead><tbody>
+<tr><td><strong>指针碰撞（Bump the Pointer）</strong></td><td>规整的堆（如 Serial、ParNew 收集器）</td><td>使用一个指针，分配时将指针向空闲方向移动一段对象大小的距离</td><td>分配速度快，只需一次指针移动</td><td>前提是堆必须规整</td></tr>
+<tr><td><strong>空闲列表（Free List）</td><td>不规整的堆（如 CMS 收集器）</td><td>虚拟机维护一个记录空闲内存块的列表，分配时从列表中找到足够大的空间划分</td><td>适用于碎片化严重的堆</td><td>分配时需要遍历列表，性能略低</td></tr>
+</tbody></table>
+<div class='note-box warning'><div class='note-title'>⚠️ 并发安全问题</div>多个线程同时创建对象时，指针碰撞或修改空闲列表都需要 <u>CAS + 失败重试</u> 或 <u>TLAB</u> 来保证线程安全。</div>
+</div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>TLAB（Thread Local Allocation Buffer）线程私有的分配缓冲区</h3>
+      <div class="content"><p><span class='highlight'>TLAB</span> 是 Thread Local Allocation Buffer 的缩写，是 JVM 为每个线程在 Eden 区分配的<u>线程私有</u>的分配缓冲区。</p>
+<ul class='bullet-list'>
+<li><span class='highlight'>目的</span>：避免多个线程在同一 Eden 区域分配对象时产生并发竞争，消除 <code>CAS + 失败重试</code> 的开销。</li>
+<li><span class='highlight'>工作原理</span>：每个线程在 Eden 中拥有一块小的缓冲区，线程在自己 TLAB 内分配对象时<u>不需要加锁</u>，只需移动指针即可。</li>
+<li><span class='highlight'>分配规则</span>：当 TLAB 空间不足时，JVM 要么重新分配一块 TLAB，要么<u>直接在 Eden 上通过 CAS 竞争分配</u>。</li>
+</ul>
+<p><strong>TLAB 不是强制的</strong>，默认开启（<code>-XX:+UseTLAB</code>），也可以通过参数关闭。</p>
+<p><strong>为什么不用 100% TLAB 分配？</strong> 因为对象的实际大小可能大于 TLAB 剩余空间，此时需要在 Eden 上重新分配；另外 TLAB 空间很小（默认 Eden 的 1%），很多情况下仍然需要全局分配。</p>
+</div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>对象内存布局与 OOP-Klass 模型</h3>
+      <div class="content"><p>对象在内存中的布局分为三块（HotSpot VM）：</p>
+<table class='comparison-table'><thead><tr><th>区域</th><th>说明</th></tr></thead><tbody>
+<tr><td><strong>对象头（Header）</strong></td><td>包含两部分：① <u>Mark Word</u>：存储哈希码、GC 年龄、锁信息等；② <u>Klass Pointer</u>：指向类元数据的指针（在 64 位开启指针压缩时为 4 字节）</td></tr>
+<tr><td><strong>实例数据（Instance Data）</strong></td><td>对象真正有效的信息，包括父类字段和自身字段，需要<u>对齐填充</u></td></tr>
+<tr><td><strong>对齐填充（Padding）</strong></td><td>HotSpot 要求对象起始地址必须是 8 字节的整数倍，不足的用零值填充</td></tr>
+</tbody></table>
+<div class='note-box'><div class='note-title'>📌 OOP-Klass 模型</div>HotSpot 使用 <strong>OOP-Klass</strong> 模型管理对象类型信息：<br>• <strong>OOP（Ordinary Object Pointer）</strong>：对象头中的 Klass Pointer，指向 Klass 元数据<br>• <strong>Klass</strong>：描述类的元数据（字段、方法等），存储在 <span class='highlight'>元空间（Metaspace）</span> 中<br>• 这种设计将对象实例和类元数据分离，便于 <u>对象压缩指针（Compressed Oops）</u> 优化</div>
+</div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试官常考：对象分配相关的深度问题</h3>
+      <div class="content"><ul class='bullet-list'>
+<li><span class='highlight'>Q: 对象一定在堆上吗？</span> — 不一定，JIT 编译后的 <u>逃逸分析</u> 可能将对象栈上分配；<u>标量替换</u> 后甚至不上内存。</li>
+<li><span class='highlight'>Q: 为什么用 B+ 树做索引却用指针碰撞分配内存？</span> — 索引需要稳定结构用 B+ 树，内存分配追求速度，规整堆上指针碰撞最快。</li>
+<li><span class='highlight'>Q: TLAB 满了怎么办？</span> — 尝试分配新的 TLAB；如果仍然放不下，直接在 Eden 的共享区域通过 CAS 分配。</li>
+<li><span class='highlight'>Q: 开启指针压缩后对象头有什么变化？</span> — Mark Word 大小不变（8 字节），Klass Pointer 从 8 字节压缩为 4 字节。</li>
+<li><span class='highlight'>Q: 如何查看对象的内存布局？</span> — 使用 <code>-XX:+PrintLiveDump</code> 或在 JVM 启动时开启 <code>-XX:+UnlockDiagnosticVMOptions -XX:+PrintOOMemoryLayout</code>。</li>
+</ul>
+</div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 29%"></div></div>
+  <div class="progress-text">19 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>判断对象存活的方法（引用计数 vs 可达性分析）</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 19/66</div>
+</body>
+</html>

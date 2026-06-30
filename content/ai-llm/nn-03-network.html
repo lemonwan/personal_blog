@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第09课 · 神经网络与训练 | AI大模型原理教程</title>
+    <meta name="description" content="神经网络是怎么「学习」的？——前向传播与反向传播">
+    <meta name="keywords" content="AI大模型教程,Transformer,神经网络与训练,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第09课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 09 · 卷二</div>
+            <h1>神经网络与训练</h1>
+            <p class="subtitle">❝ 神经网络是怎么「学习」的？——前向传播与反向传播 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="从神经元到网络" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>一个神经元不够，那就织一张网</h2></div><p>前两课，我们把那台<strong>猜水果的机器</strong>从零造了出来：第 7 课造好<strong>神经元</strong>（加权求和 + 偏置 + 激活）， 第 8 课给它装上<strong>激活函数</strong>，让多层叠起来真正有了表达能力。可到现在，我们手里始终是<em>零件</em>—— 这一课，把零件正式拼成整机：<strong>神经网络</strong>，再讲清楚它是怎么「学」会本事的。</p><p>先回顾一个已经见过的拼法。第 7 课末尾，我们给每种水果配一个神经元、并排站成一排， 再用 softmax 把它们的分数压成一组概率——<strong>这「一排神经元」，就是一<span class="tk-hl">层</span>（layer）</strong>。 下面这台就是那一层，转旋钮再感受一下：</p><figure class="fig"><div class="fruit-lab"><div class="fruit-knobs"><div class="knob-title">🎛 四个旋钮 = 四个输入特征</div><div class="knob-row"><div class="knob-head"><span class="knob-name">尺寸大小</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">小</span><input type="range" min="0" max="1" step="0.01" aria-label="尺寸大小" value="0.5"/><span class="knob-end">大</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">颜色</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">偏绿</span><input type="range" min="0" max="1" step="0.01" aria-label="颜色" value="0.5"/><span class="knob-end">偏红</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">酸甜度</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">酸</span><input type="range" min="0" max="1" step="0.01" aria-label="酸甜度" value="0.5"/><span class="knob-end">甜</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">水分</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">干</span><input type="range" min="0" max="1" step="0.01" aria-label="水分" value="0.5"/><span class="knob-end">多汁</span></div></div></div><div class="fruit-out"><svg class="neuron-svg" viewBox="0 0 380 250" role="img" aria-label="四个神经元加 softmax 的结构图，分数随旋钮实时变化"><line x1="78" y1="34" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="34" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="34" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="34" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="92" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="150" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="34" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="92" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="150" stroke="#E6DECD" stroke-width="1"></line><line x1="78" y1="208" x2="176" y2="208" stroke="#E6DECD" stroke-width="1"></line><g><rect x="6" y="19" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="32" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">尺寸大小</text><text x="14" y="45" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><rect x="6" y="77" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="90" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">颜色</text><text x="14" y="103" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><rect x="6" y="135" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="148" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">酸甜度</text><text x="14" y="161" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><rect x="6" y="193" width="72" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="14" y="206" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">水分</text><text x="14" y="219" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">0.50</text></g><g><line x1="216" y1="34" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="34" r="20" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><text x="196" y="40" text-anchor="middle" font-size="16">🍎</text><text x="223" y="38" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">2.4</text></g><g><line x1="216" y1="92" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="92" r="20" fill="#FDF6EC" stroke="#C9A227" stroke-width="2"></circle><text x="196" y="98" text-anchor="middle" font-size="16">🍌</text><text x="223" y="96" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C9A227">2.2</text></g><g><line x1="216" y1="150" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="150" r="20" fill="#FDF6EC" stroke="#3E8F5A" stroke-width="2"></circle><text x="196" y="156" text-anchor="middle" font-size="16">🍉</text><text x="223" y="154" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#3E8F5A">1.4</text></g><g><line x1="216" y1="208" x2="300" y2="125" stroke="#DCD2BF" stroke-width="1"></line><circle cx="196" cy="208" r="20" fill="#FDF6EC" stroke="#B8A21E" stroke-width="2"></circle><text x="196" y="214" text-anchor="middle" font-size="16">🍋</text><text x="223" y="212" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#B8A21E">2.1</text></g><rect x="300" y="72" width="66" height="106" rx="8" fill="#F5F0E8" stroke="#5C6B79" stroke-width="1.6"></rect><text x="333" y="122" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#5C6B79">softmax</text><text x="333" y="140" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">分数→概率</text><text x="196" y="244" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">每个神经元给一种水果打分</text></svg><div class="winner-line">机器觉得最像：<b>🍎<!-- --> <!-- -->苹果</b></div><div class="prob-block"><div class="prob-row prob-win"><span class="prob-name">🍎<!-- --> <!-- -->苹果</span><span class="prob-bar"><span class="prob-fill" style="width:36%;background:#C0481E"></span></span><span class="prob-pct">36%</span></div><div class="prob-row"><span class="prob-name">🍌<!-- --> <!-- -->香蕉</span><span class="prob-bar"><span class="prob-fill" style="width:27%;background:#C9A227"></span></span><span class="prob-pct">27%</span></div><div class="prob-row"><span class="prob-name">🍉<!-- --> <!-- -->西瓜</span><span class="prob-bar"><span class="prob-fill" style="width:13%;background:#3E8F5A"></span></span><span class="prob-pct">13%</span></div><div class="prob-row"><span class="prob-name">🍋<!-- --> <!-- -->柠檬</span><span class="prob-bar"><span class="prob-fill" style="width:24%;background:#B8A21E"></span></span><span class="prob-pct">24%</span></div></div><div class="lab-hint">四个神经元各给一种水果打分（圆圈旁的数字），softmax 把四个分数挤成一组加起来 = 100% 的概率。试试把旋钮调到「大 + 多汁」，看西瓜怎么后来居上。</div></div></div><figcaption><span class="fig-no">互动 9-A</span>一层网络：四个神经元各看同样的四条线索，各算各的分数，softmax 合成一个概率分布。把旋钮调向「又大又多汁」，看西瓜的概率怎么爬到最高。</figcaption></figure><p>关键的一步来了：<strong>把前一层的输出，当作后一层的输入</strong>，一层接一层叠下去——这就是<strong>神经网络</strong>。 最前面接收原始特征的叫<strong>输入层</strong>，最后给出答案的叫<strong>输出层</strong>，夹在中间、不直接和外界打交道的，统称<strong>隐藏层</strong>。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 620 300" role="img" aria-label="多层全连接神经网络：输入层、两个隐藏层、输出层"><text x="70" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">输入层（4 特征）</text><text x="230" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">隐藏层</text><text x="390" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">隐藏层</text><text x="550" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">输出层（4 水果）</text><line x1="84" y1="80" x2="216" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="80" x2="216" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="80" x2="216" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="80" x2="216" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="80" x2="216" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="140" x2="216" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="140" x2="216" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="140" x2="216" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="140" x2="216" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="140" x2="216" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="200" x2="216" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="200" x2="216" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="200" x2="216" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="200" x2="216" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="200" x2="216" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="260" x2="216" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="260" x2="216" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="260" x2="216" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="260" x2="216" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="84" y1="260" x2="216" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="55" x2="376" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="55" x2="376" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="55" x2="376" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="55" x2="376" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="55" x2="376" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="105" x2="376" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="105" x2="376" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="105" x2="376" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="105" x2="376" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="105" x2="376" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="155" x2="376" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="155" x2="376" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="155" x2="376" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="155" x2="376" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="155" x2="376" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="205" x2="376" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="205" x2="376" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="205" x2="376" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="205" x2="376" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="205" x2="376" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="255" x2="376" y2="55" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="255" x2="376" y2="105" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="255" x2="376" y2="155" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="255" x2="376" y2="205" stroke="#E2D8C6" stroke-width="1"></line><line x1="244" y1="255" x2="376" y2="255" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="55" x2="536" y2="80" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="55" x2="536" y2="140" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="55" x2="536" y2="200" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="55" x2="536" y2="260" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="105" x2="536" y2="80" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="105" x2="536" y2="140" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="105" x2="536" y2="200" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="105" x2="536" y2="260" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="155" x2="536" y2="80" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="155" x2="536" y2="140" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="155" x2="536" y2="200" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="155" x2="536" y2="260" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="205" x2="536" y2="80" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="205" x2="536" y2="140" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="205" x2="536" y2="200" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="205" x2="536" y2="260" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="255" x2="536" y2="80" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="255" x2="536" y2="140" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="255" x2="536" y2="200" stroke="#E2D8C6" stroke-width="1"></line><line x1="404" y1="255" x2="536" y2="260" stroke="#E2D8C6" stroke-width="1"></line><circle cx="70" cy="80" r="14" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></circle><circle cx="70" cy="140" r="14" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></circle><circle cx="70" cy="200" r="14" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></circle><circle cx="70" cy="260" r="14" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></circle><circle cx="230" cy="55" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="230" cy="105" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="230" cy="155" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="230" cy="205" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="230" cy="255" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="390" cy="55" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="390" cy="105" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="390" cy="155" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="390" cy="205" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><circle cx="390" cy="255" r="14" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></circle><text x="550" y="85" text-anchor="middle" font-size="15">🍎</text><text x="550" y="145" text-anchor="middle" font-size="15">🍌</text><text x="550" y="205" text-anchor="middle" font-size="15">🍉</text><text x="550" y="265" text-anchor="middle" font-size="15">🍋</text><circle cx="550" cy="80" r="14" fill="none" stroke="#5C6B79" stroke-width="2"></circle><circle cx="550" cy="140" r="14" fill="none" stroke="#5C6B79" stroke-width="2"></circle><circle cx="550" cy="200" r="14" fill="none" stroke="#5C6B79" stroke-width="2"></circle><circle cx="550" cy="260" r="14" fill="none" stroke="#5C6B79" stroke-width="2"></circle><text x="310" y="292" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">深度 = 层数；宽度 = 每层神经元个数；相邻两层「全连接」（每条线是一个权重）</text></svg></div><figcaption><span class="fig-no">图 9-1</span>一张全连接神经网络。节点是神经元，连线是权重。<strong>层数</strong>叫网络的「深度」，<strong>每层神经元个数</strong>叫「宽度」。第 8 课证过：层与层之间必须夹着激活函数，否则再深也等于一层。</figcaption></figure></section><section class="station reveal" data-title="网络是个大函数" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>整张网络，其实是「一个带参数的大函数」</h2></div><p>别被那张网吓住。从头到尾看一遍：输入 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4444em;"></span><span class="mord mathbf">x</span></span></span></span></span> 进来，每一层做的都是同一件事—— 先来个线性变换 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="mord mathbf">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathbf">b</span></span></span></span></span>，再过一道激活函数，把结果交给下一层。整张网络不过是这套动作<strong>重复几次</strong>：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9023em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7079em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathbf" style="margin-right:0.016em;">y</span></span><span style="top:-3.0134em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">网络</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathbf">x</span><span class="mpunct">;</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">θ</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">θ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathbf">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathbf">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mclose">}</span></span></span></span></span></span></div><p>换句话说，<strong>整张网络就是一个大函数</strong>：喂它一组特征，它吐出一个预测 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9023em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.7079em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathbf" style="margin-right:0.016em;">y</span></span><span style="top:-3.0134em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.25em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span>。 而函数的「脾气」全由那一大堆<strong>权重 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.1389em;">W</span></span></span></span></span> 和偏置 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathbf">b</span></span></span></span></span></strong> 决定—— 它们合在一起，记作 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">θ</span></span></span></span></span>，就是网络的<strong>参数</strong>。</p><p>参数有多少？数一数上面那张小网（4 → 5 → 5 → 4）：第一层权重 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">4</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">20</span></span></span></span></span> 个、偏置 5 个； 第二层 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">25</span></span></span></span></span> + 5；第三层 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">4</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">5</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">20</span></span></span></span></span> + 4——加起来 <strong>79 个参数</strong>。 这么小的网就有近百个旋钮；GPT-3 则有 <strong>1750 亿</strong> 个。</p><div class="crack"><div class="crack-label">一句话抓住要害</div><p><strong>网络的全部「本事」，就藏在这堆参数 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">θ</span></span></span></span></span> 里。</strong>结构（多少层、多少神经元）定下了它<em>能</em>表达多复杂的规律；而具体表达成什么样、是会认水果还是会写诗， 完全取决于这些数取什么值。换一组参数，就是换一套判断规则。</p></div><div class="think"><div class="think-q">一张网有成千上万个参数，总不能像第 7 课那样一个个手工去猜吧？那它们到底从哪来？</div></div></section><section class="station reveal" data-title="训练是什么" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>「训练」：把参数交给数据去定</h2></div><p>网络刚出生时，参数是<strong>随机</strong>的——这时喂它一个苹果，它多半瞎猜「30% 像香蕉」。 所谓<strong>训练（training）</strong>，就是拿一大批<strong>已知正确答案</strong>的例子（带标签的数据）， 一点一点地微调参数，让网络的预测越来越贴近真实答案。</p><p>打个比方：第 7 课你手动把颜色的权重调大、把门槛挪到 2.4，是为了让那台机器「分对」手里的水果。 训练做的是<strong>同一件事，只不过交给机器自动完成、而且面对的是成千上万个例子</strong>。它靠的是一个不断重复的循环：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 620 250" role="img" aria-label="训练循环：前向计算、算损失、求梯度、更新参数，不断重复"><text x="95" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">训练数据（带正确答案）</text><line x1="95" y1="36" x2="95" y2="66" stroke="#5C6B79" stroke-width="1.6"></line><polygon points="95,72 90,62 100,62" fill="#5C6B79"></polygon><g><rect x="30" y="78" width="112" height="58" rx="9" fill="#FCFAF4" stroke="#3E6B8F" stroke-width="2"></rect><text x="86" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E6B8F">① 前向计算</text><text x="86" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">网络算出预测 ŷ</text></g><g><rect x="185" y="78" width="112" height="58" rx="9" fill="#FCFAF4" stroke="#C0481E" stroke-width="2"></rect><text x="241" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">② 算损失</text><text x="241" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">错得有多离谱 L</text></g><g><rect x="340" y="78" width="112" height="58" rx="9" fill="#FCFAF4" stroke="#C0481E" stroke-width="2"></rect><text x="396" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">③ 求梯度</text><text x="396" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">每个参数该往哪调</text></g><g><rect x="495" y="78" width="112" height="58" rx="9" fill="#FCFAF4" stroke="#3E8F5A" stroke-width="2"></rect><text x="551" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E8F5A">④ 更新参数</text><text x="551" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">θ ← θ − 学习率×梯度</text></g><g><line x1="142" y1="107" x2="183" y2="107" stroke="#93A0AC" stroke-width="1.6"></line><polygon points="185,107 176,102 176,112" fill="#93A0AC"></polygon></g><g><line x1="297" y1="107" x2="338" y2="107" stroke="#93A0AC" stroke-width="1.6"></line><polygon points="340,107 331,102 331,112" fill="#93A0AC"></polygon></g><g><line x1="452" y1="107" x2="493" y2="107" stroke="#93A0AC" stroke-width="1.6"></line><polygon points="495,107 486,102 486,112" fill="#93A0AC"></polygon></g><path d="M 551 136 L 551 200 L 86 200 L 86 136" fill="none" stroke="#C0481E" stroke-width="1.8" stroke-dasharray="6 4"></path><polygon points="86,138 81,148 91,148" fill="#C0481E"></polygon><text x="310" y="220" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">重复成千上万次：损失一步步变小，参数一步步变好</text></svg></div><figcaption><span class="fig-no">图 9-2</span>训练的循环。喂一批数据 → 网络<strong>前向</strong>算出预测 → <strong>损失函数</strong>量出错多少 → 反推每个参数的<strong>梯度</strong>（该往哪调）→ <strong>更新参数</strong>，迈出一小步。如此往复，直到损失足够小。</figcaption></figure><p>这四步里，每一步都对应着接下来要专门讲的一课——把它们看成一张地图：</p><ul class="check-list"><li><strong>② 算损失</strong> → 第 10 课《损失函数》：怎么把「错得有多离谱」算成一个可比较的数。</li><li><strong>④ 更新参数</strong> → 第 12 课《梯度下降与优化器》：知道了往哪走是下坡，一步该迈多大。</li><li><strong>③ 求梯度</strong> → 第 13 课《反向传播》：怎么高效算出「每个参数该负多大责任」。</li></ul><p>最后区分两个常被混淆的词：<strong>训练</strong>是「调参数」的过程，要用到正确答案、要算损失和梯度，很费算力； 训练完成后，参数就<strong>固定</strong>下来，拿去对新数据做预测，叫<strong>推理（inference）</strong>——你平时用 ChatGPT，用的就是它训练好、参数冻住后的样子。</p></section><section class="station reveal" data-title="总结" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>把神经元一层层叠起来、前一层的输出喂给后一层，就成了<span class="tk-hl">神经网络</span>：输入层、隐藏层、输出层。 整张网络本质是<span class="tk-hl">一个带参数 θ 的大函数</span>，它的全部本事都藏在权重和偏置里。<span class="tk-hl">训练</span>，就是拿带答案的数据，靠「前向 → 算损失 → 求梯度 → 更新参数」的循环， 让网络自己把这堆参数调到最好——后面三课，正是把这个循环的每一步拆开细讲。</p></div><div class="recap"><h3>这一课你建立了全局图景</h3><ul><li><strong>网络结构</strong>：层的堆叠；输入层 / 隐藏层 / 输出层；深度与宽度；相邻层全连接。</li><li><strong>参数 θ</strong>：所有权重 W 与偏置 b 的总和，网络的「本事」全在其中。</li><li><strong>训练</strong>：用带标签的数据自动调参，让预测逼近真实答案。</li><li><strong>训练循环</strong>：前向计算 → 算损失 → 求梯度 → 更新参数，重复成千上万次。</li><li><strong>训练 vs 推理</strong>：训练调参、推理用固定参数做预测。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="训练即根据误差反复微调权重和偏置，让误差变小。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>所谓「训练」一个神经网络，本质上是在做什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">不断增加网络的层数</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">根据预测误差，反复微调网络里的权重和偏置，让误差越来越小</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">把训练数据全部背下来</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">手动为每个神经元设定规则</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="标准循环：前向传播→计算损失→反向传播求梯度→更新权重。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>在标准的训练循环中，下列步骤的正确顺序是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">更新权重 → 前向传播 → 计算损失</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">前向传播（算预测）→ 计算损失 → 反向传播求梯度 → 更新权重</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">计算损失 → 更新权重 → 前向传播</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">反向传播 → 前向传播 → 计算损失</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nn-03-loss.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 10 课</span>
+                    <h3>损失函数</h3>
+                    <p>怎么衡量「预测错了」？——从MSE到交叉熵</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷二 · 第09课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

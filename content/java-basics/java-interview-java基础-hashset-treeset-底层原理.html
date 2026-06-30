@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 14 | HashSet/TreeSet 底层原理</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 14 — HashSet/TreeSet 底层原理</h1>
+  <div class="tag">模块：Java基础 · 集合框架</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">14</span>
+    <span class="card-title">HashSet/TreeSet 底层原理</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>HashSet 底层原理</h3>
+      <div class="content"><p><strong>HashSet 底层基于 HashMap 实现。</strong></p><ul class="bullet-list"><li>底层使用 <code>HashMap&lt;Object, Object&gt;</code>，每个元素作为 HashMap 的 key 存储，value 固定为一个 <code>static final Object PRESENT = new Object()</code></li><li>插入元素时，先计算 hash 值，再通过 HashMap 的 put 方法存入</li><li>不允许重复元素，因为 HashMap 的 key 不允许重复</li><li>不保证元素的迭代顺序（无序集合）</li></ul><p><strong>核心方法映射：</strong></p><ul class="bullet-list"><li><code>add(e)</code> → <code>map.put(e, PRESENT)</code></li><li><code>remove(e)</code> → <code>map.remove(e)</code></li><li><code>contains(e)</code> → <code>map.containsKey(e)</code></li></ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>TreeSet 底层原理</h3>
+      <div class="content"><p><strong>TreeSet 底层基于 TreeMap 实现，是有序集合。</strong></p><ul class="bullet-list"><li>底层使用 <code>TreeMap&lt;E, Object&gt;</code>，元素作为 TreeMap 的 key 存储</li><li>基于 <strong>红黑树（自平衡二叉查找树）</strong> 实现</li><li>元素按照自然顺序排序（实现 <code>Comparable</code> 接口）或自定义 Comparator 排序</li><li>支持 <code>ceiling()</code>、<code>floor()</code>、<code>higher()</code>、<code>lower()</code> 等导航方法</li><li>不允许重复元素（key 不可重复）</li></ul><p><strong>时间复杂度：</strong></p><ul class="bullet-list"><li>插入/删除/查询：O(log n)</li><li>遍历（中序遍历）：O(n)，元素按升序排列</li></ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>HashSet vs TreeSet 对比</h3>
+      <div class="content"><table class="comparison-table"><thead><tr><th>特性</th><th>HashSet</th><th>TreeSet</th></tr></thead><tbody><tr><td>底层数据结构</td><td>HashMap（哈希表）</td><td>TreeMap（红黑树）</td></tr><tr><td>是否有序</td><td>无序</td><td>有序（自然顺序/自定义）</td></tr><tr><td>插入/查询时间</td><td>O(1) 平均</td><td>O(log n)</td></tr><tr><td>是否允许null</td><td>允许一个null</td><td>不允许null</td></tr><tr><td>排序支持</td><td>不支持</td><td>支持（Comparable/Comparator）</td></tr><tr><td>使用场景</td><td>去重、快速查找</td><td>需要排序、范围查询</td></tr></tbody></table></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试常考问题</h3>
+      <div class="content"><p><strong>Q: HashSet 如何保证元素不重复？</strong></p><p>A: 依赖 <code>equals()</code> 和 <code>hashCode()</code> 方法。插入时先比较 hashCode，相同再比较 equals。必须同时重写这两个方法。</p><p><strong>Q: 为什么重写 equals 必须重写 hashCode？</strong></p><p>A: HashMap/HashSet 先用 hashCode 定位桶位置，再用 equals 比较内容。如果只重写 equals 不重写 hashCode，两个"相等"的对象可能有不同 hashCode，导致 HashSet 认为它们是不同的元素。</p><p><strong>Q: TreeSet 如何实现排序？</strong></p><p>A: 通过 Comparable 接口的 <code>compareTo()</code> 或 Comparator 的 <code>compare()</code> 方法，在红黑树插入时进行比较定位。</p></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 21%"></div></div>
+  <div class="progress-text">14 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>明日将学习：泛型擦除机制及绕过方法，揭开 Java 泛型的神秘面纱。</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 14/66</div>
+</body>
+</html>

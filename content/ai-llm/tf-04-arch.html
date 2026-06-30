@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第23课 · 编码器、解码器与大语言模型 | AI大模型原理教程</title>
+    <meta name="description" content="同样是Transformer，BERT为什么不能生成文章，GPT为什么是主流？">
+    <meta name="keywords" content="AI大模型教程,Transformer,编码器、解码器与大语言模型,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第23课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 23 · 卷四</div>
+            <h1>编码器、解码器与大语言模型</h1>
+            <p class="subtitle">❝ 同样是Transformer，BERT为什么不能生成文章，GPT为什么是主流？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="两种任务" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>先别背名字，先分清它到底在干什么</h2></div><p>上几课我们已经搭出了一块通用积木：<strong>Transformer Block</strong>。可真正把它拿去干活时，你会发现语言任务大致只有两大类， 而且这两类的工作方式差很多。</p><ul style="padding-left:24px;line-height:2.2"><li><strong>第一类：理解</strong>。给模型一句话，让它读懂，再给出判断。比如：「这部电影真的让我很失望」→ 判断为负面。</li><li><strong>第二类：生成</strong>。给模型一个开头，让它往下写。比如：「从前有一只小猫，它每天最喜欢做的事就是」→ 一个词一个词续写后面的故事。</li></ul><p>这两类任务看上去都在处理语言，但对模型的要求完全不同。理解任务像考试里的阅读理解：<strong>整句都读完了，才能下结论</strong>。 生成任务更像接龙：<strong>你只能根据已经写出来的内容，决定下一个词写什么</strong>。</p><p>于是问题就来了：<strong>同样是 Transformer，它到底该“前后都看”，还是“只能往左看”？</strong>这里有个特别容易糊涂的点，下面说的「前后左右」，参照物都不是整句话， 而是<strong>当前正在处理的那个位置</strong>。</p><p>也就是说，模型不是把整句一起“扫一眼”就完了，而是对句子里的<strong>每个位置</strong>，分别决定它能看见哪些别的位置。 比如在「猫 / 追 / 球」里，如果当前处理的是中间这个位置「追」：</p><ul style="padding-left:24px;line-height:2.1"><li><strong>前后都看</strong>，意思是「追」既能看左边的「猫」，也能看右边的「球」。</li><li><strong>只能往左看</strong>，意思是这个位置只能看它左边已经出现的内容，不能看右边未来的内容。</li></ul><p>一旦把这个参照物说清楚，编码器和解码器的差别就非常具体了：<strong>它们不是在“整句层面”不同，而是在“当前位置能看见哪些位置”这件事上不同。</strong></p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 168" role="img" aria-label="理解任务双向、生成任务单向的对比"><defs><marker id="arch-b" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#3E6B8F"></polygon></marker><marker id="arch-a" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0, 7 3, 0 6" fill="#C0481E"></polygon></marker></defs><line x1="280" y1="12" x2="280" y2="126" stroke="#E5DECF" stroke-width="1" stroke-dasharray="3 3"></line><text x="140" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E6B8F">任务 A · 理解</text><text x="140" y="36" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">双向：前后都能看</text><path d="M102 70 Q73 50 44 70" fill="none" stroke="#3E6B8F" stroke-width="1.4" marker-end="url(#arch-b)"></path><path d="M102 70 Q131 50 160 70" fill="none" stroke="#3E6B8F" stroke-width="1.4" marker-end="url(#arch-b)"></path><path d="M102 70 Q160 40 218 70" fill="none" stroke="#3E6B8F" stroke-width="1.4" marker-end="url(#arch-b)"></path><g><rect x="22" y="70" width="44" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="44" y="90" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">猫</text></g><g><rect x="80" y="70" width="44" height="30" rx="5" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="0"></rect><text x="102" y="90" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#FFFFFF">追</text></g><g><rect x="138" y="70" width="80" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="178" y="90" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">球</text></g><text x="140" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">当前处理「追」这个位置：左右都能看</text><text x="420" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">任务 B · 生成</text><text x="420" y="36" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">单向：只能看左边</text><path d="M438 70 Q380 40 322 70" fill="none" stroke="#C0481E" stroke-width="1.4" marker-end="url(#arch-a)"></path><path d="M438 70 Q409 50 380 70" fill="none" stroke="#C0481E" stroke-width="1.4" marker-end="url(#arch-a)"></path><g><rect x="300" y="70" width="44" height="30" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.5"></rect><text x="322" y="90" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#C0481E">它</text></g><g><rect x="358" y="70" width="44" height="30" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.5"></rect><text x="380" y="90" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#C0481E">最</text></g><g><rect x="416" y="70" width="44" height="30" rx="5" fill="#C0481E" stroke="#C0481E" stroke-width="0"></rect><text x="438" y="90" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">爱</text></g><g><rect x="474" y="70" width="44" height="30" rx="5" fill="#F2EEE6" stroke="#C9BFA8" stroke-width="1.5" stroke-dasharray="4 3"></rect><text x="496" y="90" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#A99C82">未来?</text></g><text x="420" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">当前处理「爱」这个位置：只能回看左边</text><text x="280" y="152" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="600" fill="#232F3B">同一块 Transformer Block，关键差别只在：注意力能不能看见未来</text></svg></div><figcaption><span class="fig-no">图 23-1</span>理解任务需要双向视野；生成任务必须遮住未来，只能单向往右写。</figcaption></figure><div class="think"><div class="think-q">如果一个模型前后都能看，那它能不能直接拿来做“一个词一个词往下写”的生成任务？</div></div></section><section class="station reveal" data-title="名字从哪来" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>“编码器”和“解码器”这两个名字，其实很好懂</h2></div><p>现在再来看名字，就不神秘了。</p><p>当模型在做<strong>理解</strong>时，它做的事情是：把一句自然语言<strong>读进去</strong>，变成内部的一排表示。 比如一句「这部电影很无聊」，最后会变成一排向量，里面已经揉进了“谁修饰谁”“整体情绪偏负面”这些信息。 这一步像是在把原始文字<strong>编码</strong>成机器内部更好用的形式，所以叫<strong>编码器（Encoder）</strong>。</p><p>当模型在做<strong>生成</strong>时，方向反过来：它手里已经有前文和内部表示了，接下来要把这些信息<strong>一步步还原成文字</strong>， 也就是一个词一个词往外吐。这一步像是在把内部表示<strong>解</strong>回自然语言，所以叫<strong>解码器（Decoder）</strong>。</p><p>所以不要把它们想成两个很玄的名词。你只要记住：</p><ul style="padding-left:24px;line-height:2.2"><li><strong>编码器</strong>更像“先把一句话读懂”。</li><li><strong>解码器</strong>更像“根据已有内容继续往下写”。</li></ul><p>下面我们就分别看：这两台机器在 Transformer 里到底长什么样。</p></section><section class="station reveal" data-title="编码器" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>编码器：整句一起看，任务是“读懂”</h2></div><p>先看编码器。它最重要的特点只有一句话：<strong>对句子里的每一个位置，它都允许这个位置看见整句里的所有位置</strong>。 没有遮挡，没有眼罩，左边右边都能看。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 160" role="img" aria-label="编码器的双向注意力：每个词都能看到所有其他词"><defs><marker id="enc-arr" markerWidth="5" markerHeight="4" refX="5" refY="2" orient="auto"><polygon points="0 0, 5 2, 0 4" fill="#3E6B8F" opacity="0.4"></polygon></marker></defs><g><rect x="80" y="30" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="110" y="50" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="16" font-weight="700" fill="#3E6B8F">我</text></g><g><rect x="180" y="30" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="210" y="50" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="16" font-weight="700" fill="#3E6B8F">爱</text></g><g><rect x="280" y="30" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="310" y="50" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="16" font-weight="700" fill="#3E6B8F">巴</text></g><g><rect x="380" y="30" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="410" y="50" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="16" font-weight="700" fill="#3E6B8F">黎</text></g><line x1="110" y1="60" x2="210" y2="30" stroke="#3E6B8F" stroke-width="1" opacity="0.3" marker-end="url(#enc-arr)"></line><line x1="110" y1="60" x2="310" y2="30" stroke="#3E6B8F" stroke-width="1" opacity="0.3" marker-end="url(#enc-arr)"></line><line x1="110" y1="60" x2="410" y2="30" stroke="#3E6B8F" stroke-width="1" opacity="0.3" marker-end="url(#enc-arr)"></line><line x1="210" y1="60" x2="310" y2="30" stroke="#3E6B8F" stroke-width="1" opacity="0.3" marker-end="url(#enc-arr)"></line><line x1="210" y1="60" x2="410" y2="30" stroke="#3E6B8F" stroke-width="1" opacity="0.3" marker-end="url(#enc-arr)"></line><line x1="310" y1="60" x2="410" y2="30" stroke="#3E6B8F" stroke-width="1" opacity="0.3" marker-end="url(#enc-arr)"></line><text x="280" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F" font-weight="600">每个词都能和所有词互相注意 → 双向</text><g><rect x="80" y="120" width="60" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F"></rect><text x="110" y="137" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">富语义向量</text></g><g><rect x="180" y="120" width="60" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F"></rect><text x="210" y="137" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">富语义向量</text></g><g><rect x="280" y="120" width="60" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F"></rect><text x="310" y="137" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">富语义向量</text></g><g><rect x="380" y="120" width="60" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F"></rect><text x="410" y="137" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">富语义向量</text></g><text x="280" y="158" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">输出：每个位置都融合了全句上下文</text></svg></div><figcaption><span class="fig-no">图 23-2</span>编码器的关键是“双向”。它不是往下写，而是先把整句吃透。</figcaption></figure><p>这很适合理解类任务。因为你在判断一句话情感时，往往真的需要让某个位置同时参考左边和右边： 前面说“本来我很期待”，后面突然来一句“结果非常失望”，整句语义就翻了。</p><p>编码器的输出，不是“下一个词”，而是<strong>每个位置一个已经融入上下文的向量</strong>。 你可以把它理解成：句子读完之后，模型在每个位置上都做了一份“读后笔记”。</p><p>代表模型是 <strong>BERT</strong>。它的训练方式也很符合这个定位：不是让它续写，而是让它做<strong>完形填空</strong>。 比如把「巴黎是法国的 [MASK]」里的一个词挖掉，让它同时利用左右两边把缺词猜回来。</p><p>所以 BERT 很擅长“读懂一句话以后做判断”，但不擅长“一个词一个词往下写文章”。因为它压根不是按那个方向训练出来的。</p></section><section class="station reveal" data-title="解码器" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>解码器：蒙住未来，任务是“往下写”</h2></div><p>再看解码器。它和编码器最大的不同，不是 block 长得多么不一样，而是它的注意力上多了一条规矩：<strong>当前这个位置不能看右边未来的位置</strong>。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 150" role="img" aria-label="解码器的掩码注意力矩阵"><text x="30" y="22" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#232F3B">掩码注意力表（续写「它 最 爱 晒太阳」）</text><g><text x="120" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">它</text><text x="60" y="82" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">它</text></g><g><text x="200" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">最</text><text x="60" y="114" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">最</text></g><g><text x="280" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">爱</text><text x="60" y="146" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">爱</text></g><g><rect x="80" y="60" width="70" height="26" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="115" y="77" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">✓</text></g><g><rect x="160" y="60" width="70" height="26" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="195" y="77" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#DCD2BF">✗</text></g><g><rect x="240" y="60" width="70" height="26" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="275" y="77" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#DCD2BF">✗</text></g><g><rect x="80" y="92" width="70" height="26" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="115" y="109" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">✓</text></g><g><rect x="160" y="92" width="70" height="26" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="195" y="109" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">✓</text></g><g><rect x="240" y="92" width="70" height="26" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="275" y="109" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#DCD2BF">✗</text></g><g><rect x="80" y="124" width="70" height="26" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="115" y="141" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">✓</text></g><g><rect x="160" y="124" width="70" height="26" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="195" y="141" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">✓</text></g><g><rect x="240" y="124" width="70" height="26" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="275" y="141" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">✓</text></g><text x="320" y="100" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">← 处理「爱」这个位置时</text><text x="320" y="114" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">只能回看左边，看不到后面的「晒太阳」</text></svg></div><figcaption><span class="fig-no">图 23-3</span>解码器必须把未来遮住。否则训练时它会直接偷看标准答案。</figcaption></figure><p>为什么必须这样？因为解码器是拿来生成的。假设它正在续写一句话，目标是慢慢写出「它最爱晒太阳」：</p><ul style="padding-left:24px;line-height:2.1"><li>当它处理第 1 个生成位置时，只能根据输入和已有开头，猜下一个词可能是「它」。</li><li>当它处理第 2 个生成位置时，只能看见左边已经有的「它」，再猜下一个词可能是「最」。</li><li>当它处理第 3 个生成位置时，只能看见左边已经有的「它 最」，再猜下一个词可能是「爱」。</li></ul><p>这个“当前位置只能根据左边内容预测下一个词”的训练目标，正是 <strong>GPT</strong> 这类模型的核心。</p><p>它还有一个工程上非常漂亮的点：训练时虽然逻辑上是“一个个往后猜”，但因为整句都喂进去了， 模型可以在一次前向计算里同时算出每个位置的“下一个词预测题”。所以它既遵守了单向规则，又能并行训练。</p><p>这就是为什么 GPT 擅长写作、对话、代码续写：它从出生那天起，训练目标就是“继续往下写”。</p></section><section class="station reveal" data-title="三种结构" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>现在再看三种结构，就不会乱了</h2></div><p>到这里，其实已经能把三种常见结构一次性理顺了。</p><ul style="padding-left:24px;line-height:2.2"><li><strong>只有编码器</strong>：适合“先读懂，再判断”。代表是 BERT。</li><li><strong>只有解码器</strong>：适合“给个开头，继续往下写”。代表是 GPT。</li><li><strong>编码器 + 解码器</strong>：适合“先把输入读懂，再根据它生成输出”。代表是原始 Transformer、T5。</li></ul><p>其中第三种最容易卡住，因为它同时用了两台机器。最通俗的理解方式是：<strong>编码器先负责读题，解码器再负责答题</strong>。</p><p>以翻译为例：</p><ul style="padding-left:24px;line-height:2.1"><li>编码器先把中文「这只小猫最爱晒太阳」整句读懂。</li><li>解码器再根据这份读懂后的表示，一个词一个词写出英文。</li></ul><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 210" role="img" aria-label="三种 Transformer 架构：仅编码器、仅解码器、编码器-解码器"><text x="90" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#3E6B8F">仅编码器</text><rect x="40" y="32" width="100" height="48" rx="6" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.8"></rect><text x="90" y="52" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">双向理解</text><text x="90" y="68" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">BERT</text><text x="90" y="104" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">分类 · 问答 · 提取</text><text x="280" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">仅解码器</text><rect x="230" y="32" width="100" height="48" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.8"></rect><text x="280" y="52" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#C0481E">掩码生成</text><text x="280" y="68" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">GPT · Claude</text><text x="280" y="104" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">写作 · 对话 · 代码</text><text x="470" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#4A8B5E">编码器-解码器</text><rect x="418" y="32" width="48" height="48" rx="6" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.6"></rect><text x="442" y="60" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">编码器</text><rect x="482" y="32" width="48" height="48" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.6"></rect><text x="506" y="60" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">解码器</text><line x1="466" y1="56" x2="482" y2="56" stroke="#4A8B5E" stroke-width="2" marker-end="url(#ar-arr2)"></line><defs><marker id="ar-arr2" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#4A8B5E"></polygon></marker></defs><text x="474" y="96" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#4A8B5E">交叉注意力</text><text x="474" y="108" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">T5 · 翻译</text><line x1="20" y1="130" x2="540" y2="130" stroke="#E2D8C6" stroke-width="1"></line><text x="280" y="152" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#5C6B79">交叉注意力＝解码器生成时，回头去查编码器已经读懂的输入</text><text x="280" y="174" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">编码器先理解输入，解码器再边参考输入边生成输出</text><text x="280" y="196" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">最适合翻译、摘要这类“读一段，再写一段”的任务</text></svg></div><figcaption><span class="fig-no">图 23-5</span>三种常见结构其实对应三种工作方式：只理解、只生成、先理解后生成。根本差别仍然落在“当前位置能看见哪些位置”。</figcaption></figure></section><section class="station reveal" data-title="为什么流行解码器" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>为什么今天的大模型几乎都偏爱解码器？</h2></div><p>既然三种结构都能用，为什么今天最火的大模型大多走的是 GPT 这条纯解码器路线？ 核心原因很简单：<strong>“生成”非常统一，很多任务都能改写成续写问题。</strong></p><ul style="padding-left:24px;line-height:2.1"><li>情感分析可以改写成：这条评论是正面还是负面？答：<strong>负面</strong></li><li>翻译可以改写成：把“这只小猫最爱晒太阳”翻成英文：<strong>This kitten loves sunbathing.</strong></li><li>问答可以改写成：法国的首都是：<strong>巴黎</strong></li><li>写代码本来就是续写：写一个快排函数：<strong>def quicksort(...)</strong></li></ul><p>也就是说，很多看上去不一样的任务，最后都能塞进“给你一段上下文，你把后面补出来”这个统一框架。 这样一来，用一套纯解码器架构、一个训练目标，就能覆盖大部分任务。</p><div class="crack reveal"><div class="crack-label">顺手还带来了一个非常强的能力</div><p>当模型把“根据前文继续往下写”练到极致以后，它会顺便学会另一件事： 你只要在提示里先给它几个例子，它就能照着例子的格式继续做下去。 这就是<strong>上下文学习</strong>。今天我们写 prompt、给 few-shot 示例，本质都在利用这个能力。</p></div><p>所以不是编码器没用，而是<strong>纯解码器太通用了</strong>。它足够统一，足够简单，又足够适合大规模预训练。</p></section><section class="station reveal" data-title="总结" data-num="7" id="s7"><div class="station-head"><span class="station-no">第 7 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p><span class="tk-hl">编码器</span>做的事是“先把整句读懂”，所以它是双向的，适合理解任务；<span class="tk-hl">解码器</span>做的事是“根据已有内容继续往下写”，所以它必须遮住未来，适合生成任务。 只用编码器，就是 BERT；只用解码器，就是 GPT；两者合起来，就是“先理解、再生成”的编码器-解码器结构。</p></div><div class="recap"><h3>这一课真正要记住的是</h3><ul><li><strong>先分任务</strong>：理解和生成不是一回事，所以对注意力视野的要求不同。</li><li><strong>编码器</strong>：双向，前后都看，目标是把一句话读懂。</li><li><strong>解码器</strong>：单向，遮住未来，目标是一个词一个词往下写。</li><li><strong>编码器-解码器</strong>：先让编码器读懂输入，再让解码器边参考输入边生成输出。</li><li><strong>今天为何多用解码器</strong>：因为很多任务都能统一改写成“续写”。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="BERT 双向编码可看左右文，GPT 自回归只能看左侧已生成内容。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>同样基于 Transformer，BERT（编码器）与 GPT（解码器）最关键的区别是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">BERT 用注意力，GPT 不用</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">BERT 是双向编码（能同时看左右文），GPT 是自回归、只能看左侧已生成的内容</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">BERT 参数一定比 GPT 多</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">两者完全相同</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="GPT 自回归地预测下一个 token，再接上循环往复。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>GPT 这类「解码器式」语言模型生成文本的基本方式是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">一次性输出整段文字</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">自回归：根据已有内容预测下一个 token，再把它接上、循环往复</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">从字典里随机抽句子</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">先写结尾再写开头</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-05-residual.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 24 课</span>
+                    <h3>残差连接与层归一化</h3>
+                    <p>96层Transformer——梯度怎么从第96层传回第1层而不消失？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第23课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

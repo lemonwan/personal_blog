@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 32 · 线程状态与转换 · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 32 / 66</div>
+            <h1>多线程与并发编程 · 线程基础</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 线程状态与转换</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:48%"></div>
+            </div>
+            <div class="progress-label">进度 48%（32/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念</h2>
+        </div>
+        <div class="section-content">
+            <p>Java 线程在生命周期中存在 6 种不同的状态，特定条件下会相互转换。这是并发编程的基础，也是面试高频考点。</p><p><strong>线程的 6 种状态（Thread.State 枚举）：</strong></p><ul><li><strong>NEW（新建）</strong>：线程对象已创建，但尚未调用 start() 方法</li><li><strong>RUNNABLE（可运行）</strong>：Java 虚拟机中正在执行或等待 CPU 时间片</li><li><strong>BLOCKED（阻塞）</strong>：等待获取监视器锁（synchronized）</li><li><strong>WAITING（等待）</strong>：无限期等待另一个线程执行特定动作（需被唤醒）</li><li><strong>TIMED_WAITING（计时等待）</strong>：指定等待时间，超时自动返回</li><li><strong>TERMINATED（终止）</strong>：线程执行完毕退出</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>线程状态转换图</h2>
+        </div>
+        <div class="section-content">
+            <pre style='background:#f5f5f5;padding:15px;border-radius:8px;overflow-x:auto'>NEW → start() → RUNNABLE
+
+RUNNABLE → 获取不到锁 → BLOCKED
+RUNNABLE → wait() → WAITING
+RUNNABLE → sleep(time)/wait(time)/join(time) → TIMED_WAITING
+RUNNABLE → 执行完成 → TERMINATED
+
+BLOCKED → 获取到锁 → RUNNABLE
+
+WAITING → notify()/notifyAll() → RUNNABLE
+WAITING → 中断 → InterruptedException
+
+TIMED_WAITING → 超时/唤醒 → RUNNABLE
+TIMED_WAITING → 中断 → InterruptedException</pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚖️</span>
+            <h2>易混淆概念对比</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>❶ BLOCKED vs WAITING</strong></p><table style='width:100%;border-collapse:collapse'><thead><tr style='background:#e3f2fd'><th>BLOCKED</th><th>WAITING</th></tr></thead><tbody><tr><td>等待获取监视器锁</td><td>等待另一个线程的唤醒动作</td></tr><tr><td>synchronized 锁池</td><td>wait() 等待池</td></tr><tr><td>被动等待，无法控制</td><td>主动调用，可中断</td></tr></tbody></table><br><p><strong>❷ RUNNABLE 状态的特殊性</strong></p><p>Java 的 RUNNABLE ≠ 操作系统中的 Running。它包含两种情况：</p><ul><li><strong>Running</strong>：正在 CPU 上执行</li><li><strong>Ready</strong>：就绪队列中等待调度</li></ul><p>JVM 不区分这两种子状态，因为线程切换太快，JVM 认为它们是同一状态。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>底层原理深入</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>HotSpot 中的线程状态映射：</strong></p><p>OSThread 维护 _thread_state 变量，JVM 将其映射为 Java Thread.State：</p><ul><li>NEW：线程对象在 Java 堆中，OS 线程尚未创建</li><li>RUNNABLE：调用 os::start_thread()，内核线程启动</li><li>BLOCKED：进入 ObjectMonitor 的 _cxq 或 EntryList</li><li>WAITING：在 ObjectMonitor 的 WaitSet 中 park</li></ul><p><strong>park/unpark 机制</strong>（LockSupport）：</p><p>JDK 1.5+ 引入的底层线程挂起/唤醒机制，比 wait/notify 更灵活：</p><ul><li>支持先 unpark 再 park（无唤醒丢失问题）</li><li>不需要锁对象，可随时调用</li><li>是 AQS、LockSupport 等的基础</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>面试真题要点</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>【真题1】调用 start() 和 run() 的区别？</strong></p><ul><li>start()：<strong>启动新线程</strong>，进入 RUNNABLE，由 JVM 调度执行 run()</li><li>run()：<strong>普通方法调用</strong>，在当前线程执行，不启动新线程</li></ul><p><strong>【真题2】如何强制线程状态dump？</strong></p><pre>jstack &lt;pid&gt;  # 查看所有线程状态
+kill -3 &lt;pid&gt;  # 输出线程dump到控制台
+Thread.getAllStackTraces()  # 代码中获取</pre><p><strong>【真题3】线程可以多次 start() 吗？</strong></p><p>不能。一旦启动，线程状态不再是 NEW，再次调用 start() 会抛出 <code>IllegalThreadStateException</code>。这是不可逆的状态转换。</p><p><strong>【真题4】WAITING 状态的线程如何被唤醒？</strong></p><ul><li>notify() / notifyAll()</li><li>线程被中断（interrupt()）</li><li>虚假唤醒（Spurious Wakeup，罕见但必须处理）</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>实际运用场景</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>场景1：线程池监控</strong></p><p>通过 ThreadPoolExecutor 的 getActiveCount()、getTaskCount() 监控线程状态，及时发现线程阻塞。</p><p><strong>场景2：死锁检测</strong></p><p>大量 BLOCKED 状态线程 + 循环等待 → 死锁特征。jstack 自动检测死锁信息。</p><p><strong>场景3：性能调优</strong></p><ul><li>大量 TIMED_WAITING：检查锁粒度是否过大</li><li>线程卡在 WAITING：检查是否有 notify 丢失</li><li>RUNNABLE 但无CPU消耗：可能在阻塞IO（网络/磁盘）</li></ul><p><strong>场景4：优雅停机</strong></p><pre>executor.shutdown();
+if (!executor.awaitTermination(60, SECONDS)) {
+    executor.shutdownNow(); // 中断正在执行的任务
+}</pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>踩坑经验</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>💣 坑1：TIMED_WAITING 不是释放锁的信号</strong></p><p>sleep(time) 不释放锁！wait(time) 才释放锁。用 sleep 控制并发是常见错误。</p><p><strong>💣 坑2：虚假唤醒</strong></p><p>WAITING 状态的线程可能在没有 notify 的情况下醒来。必须在循环中检查条件：</p><pre>while (条件不满足) {
+    wait();  // 不能用 if！
+}</pre><p><strong>💣 坑3：interrupted() 清除中断标记</strong></p><p>Thread.interrupted() 是静态方法，返回后会清除中断标记。而 isInterrupted() 仅查询不清除。</p><p><strong>💣 坑4：线程 TERMINATED 后无法复活</strong></p><p>线程一旦终止，无法再次启动。需要复用线程请使用线程池，不要自己再造轮子。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>Q&A 速记</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>Q: 线程状态有几种？分别是什么？</strong><br>A: 6种：NEW、RUNNABLE、BLOCKED、WAITING、TIMED_WAITING、TERMINATED</p><p><strong>Q: wait() 和 sleep() 对锁的影响？</strong><br>A: wait() 释放锁，sleep() 不释放</p><p><strong>Q: RUNNABLE 就是正在运行吗？</strong><br>A: 不一定，还包括就绪等待调度的状态</p><p><strong>Q: 一个线程两次调用 start() 会怎样？</strong><br>A: 抛出 IllegalThreadStateException</p><p><strong>Q: 如何查看线程状态？</strong><br>A: jstack、jconsole、VisualVM、Thread.getState()</p>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>synchronized 原理（monitor对象、锁升级）</p>
+        </div>
+    </div>
+</body>
+</html>

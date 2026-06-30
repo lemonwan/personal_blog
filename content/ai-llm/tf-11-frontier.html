@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第30课 · 前沿与未来：下一程 | AI大模型原理教程</title>
+    <meta name="description" content="ChatGPT之后呢？——当下最活跃的研究方向，与大模型可能的演变">
+    <meta name="keywords" content="AI大模型教程,Transformer,前沿与未来：下一程,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第30课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 30 · 卷四</div>
+            <h1>前沿与未来：下一程</h1>
+            <p class="subtitle">❝ ChatGPT之后呢？——当下最活跃的研究方向，与大模型可能的演变 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="现在进行时" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>从「已经发生的历史」到「正在发生的故事」</h2></div><p>前面 29 课讲的，是一段<strong>已经定型的历史</strong>——从向量到 ChatGPT，每一步都有清晰的因果。 这最后一课换个姿势：看「正在发生」和「可能发生」的事。</p><div class="crack reveal"><div class="crack-label">先打个预防针</div><p>前沿之所以叫前沿，就是因为它<strong>还没有标准答案</strong>。下面这些方向，有的已经落地、有的还在争论、有的可能两年后就被证伪。 所以这一课不求「记住结论」，只求你建立一张<strong>地图</strong>：知道大家在往哪几个方向使劲、各自要解决什么问题。</p></div><p>当下最活跃的探索，大致可以归到这几条线上：</p><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin:24px 0"><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">THINK</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">想得更深</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">让模型先「想」再答——把算力从训练挪到推理。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">SEE</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">看得更广</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">多模态：图像、音频、视频和文字统一进同一个模型。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">ACT</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">做得更多</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">智能体：会调用工具、执行多步任务，而不只是聊天。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">REMEMBER</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">记得更牢</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">更长的上下文与外部记忆，处理整本书、跨会话记住你。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">CHEAPER</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">跑得更省</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">更小、更快、能装进手机的模型，让智能变得廉价。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">WALLS</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">几道硬墙</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">数据耗尽、对齐与安全、O(n²) 架构——绕不开的难题。</div></div></div></section><section class="station reveal" data-title="想得更深" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>想得更深：让模型「先想一会儿」再回答</h2></div><p>早期模型是「脱口而出」——读完问题立刻吐答案。可人遇到难题会先在草稿纸上推演。<strong>推理模型</strong>就把这件事教给了模型：先生成一长串「思维链」（一步步推导），再给出最终答案。 难题（数学、代码、逻辑）的正确率因此大幅提升。</p><p>这背后是一个观念转变：以前提升能力主要靠<strong>训练时</strong>砸算力（更大模型、更多数据）； 现在发现，<strong>推理时</strong>多花算力让模型「多想几步」，同样能换来能力——这叫<strong>测试时计算（test-time compute）</strong>。 训练这种「会想」的能力，常用一种朴素而有效的奖励：<strong>答对了才给分</strong>（可验证奖励，RLVR）， 让模型在反复试错中自己摸索出好的推理路径。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 150" role="img" aria-label="脱口而出 vs 先想再答的正确率示意"><text x="150" y="22" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#93A0AC">脱口而出</text><rect x="70" y="44" width="160" height="22" rx="3" fill="#93A0AC" opacity="0.35"></rect><rect x="70" y="44" width="60" height="22" rx="3" fill="#93A0AC"></rect><text x="240" y="60" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">≈ 38%</text><text x="150" y="98" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#C0481E">先想一长串再答</text><rect x="70" y="116" width="160" height="22" rx="3" fill="#C0481E" opacity="0.25"></rect><rect x="70" y="116" width="138" height="22" rx="3" fill="#C0481E"></rect><text x="240" y="132" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E">≈ 86%</text><text x="400" y="90" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">同一个模型，</text><text x="400" y="108" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">只是允许它「多想几步」</text></svg></div><figcaption><span class="fig-no">图 30-1</span>同一个模型，在难题上「脱口而出」与「先想一长串再答」的正确率差距（示意）。这就是测试时计算的威力：不改模型，只是让它在推理时多花算力思考。</figcaption></figure></section><section class="station reveal" data-title="看得更广" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>看得更广：把图像、声音、视频都变成 token</h2></div><p>世界不只有文字。<strong>多模态</strong>的思路其实你早就懂了——还记得第 1 课「万物皆向量」、第 22 课「文字先切成 token」吗？ 只要能把一张图、一段音频、一帧视频也<strong>切成 token、变成向量</strong>，它们就能和文字一起喂进同一个 Transformer。</p><p>于是模型可以「看着图回答问题」「听着语音对话」「描述一段视频」。更深一层的野心是： 文字是人类对世界的二手转述，而图像和视频是更接近世界本身的信号——多模态或许是模型真正<strong>理解物理世界</strong>的入口。</p></section><section class="station reveal" data-title="做得更多" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>做得更多：从「会说」到「会做」的智能体</h2></div><p>一个只会聊天的模型，本事困在对话框里。<strong>智能体（Agent）</strong>给它装上手脚： 让它能<strong>调用工具</strong>（搜索、运行代码、读写文件、调 API），并把一个大任务<strong>拆成多步</strong>、 一步步执行、看结果再决定下一步。</p><p>这正是「测试时计算」的另一种形态——不只是「想得久」，而是「<strong>边做边想、用行动获取新信息</strong>」。 从「帮我写封邮件」到「帮我把这个项目从头跑通」，难点不在单步多聪明，而在长链条里<strong>少犯错、能纠错、不偏航</strong>。 这也是当下落地最热、坑也最多的方向。</p></section><section class="station reveal" data-title="记得更牢 · 跑得更省" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>记得更牢，又跑得更省</h2></div><p><strong>记得更牢</strong>：模型的上下文窗口在飞速变长（从几千 token 到上百万），让它能一次读完整本书、整个代码库。 但光靠塞进上下文还不够——还需要<strong>外部记忆</strong>：用检索（RAG）即时翻查资料、跨会话记住你是谁。 说到底，这是在补 Transformer 那个老毛病：注意力是 <strong>O(n²)</strong> 的（第 26 课），上下文越长越贵。</p><p><strong>跑得更省</strong>：最强的模型动辄千亿参数，又慢又贵。于是另一条线反方向使劲—— 用你学过的 <strong>MoE</strong>（第 27 课，每次只激活一小部分）、<strong>量化</strong>（用更少的位数存权重）、<strong>蒸馏</strong>（第 28 课，大模型教小模型），把模型压到能跑在一台笔记本、甚至一部手机上。 智能越廉价，能渗透的角落就越多。</p></section><section class="station reveal" data-title="几道硬墙" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>几道绕不开的硬墙</h2></div><p>能力一路狂奔，但前方有几堵真正难啃的墙，决定了这条路能走多远：</p><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin:24px 0"><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">DATA WALL</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">数据快用完了</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">互联网上的高质量文本是有限的，而模型的胃口近乎无限。<strong>合成数据</strong>（让模型生成训练数据）和「自我提升」是出路，但也怕「近亲繁殖」式的质量退化。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">ALIGNMENT</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">对齐与安全</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">模型越强，「让它做我们真正想要的、且可信可控」就越关键。还有<strong>可解释性</strong>：我们至今无法完全看懂几千亿参数里到底在算什么。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">ARCHITECTURE</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">架构会变吗</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">O(n²) 的注意力是悬在头顶的成本。线性注意力、状态空间模型（如 Mamba）等新架构想绕开它——Transformer 未必是终点。</div></div><div style="border:1px solid var(--line);border-top:3px solid var(--accent);background:var(--paper-card);padding:14px 16px;border-radius:4px"><div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--accent-deep);margin-bottom:6px">EVALUATION</div><div style="font-family:var(--sans);font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:6px">怎么算「更好」</div><div style="font-size:13px;line-height:1.7;color:var(--ink-soft)">当模型在大多数考试上超过人类，旧的评测标准纷纷失效。<strong>如何衡量进步</strong>本身，正在变成一个前沿问题。</div></div></div></section><section class="station reveal" data-title="没有终点的阶梯" data-num="7" id="s7"><div class="station-head"><span class="station-no">第 7 站</span><h2>一架没有终点的阶梯</h2></div><p>回看这 30 课：从一根数轴上的向量，到会推理、会看、会做的大模型——每一阶都不是天才的灵光一现， 而是「<strong>发现一个死结，再用一个朴素的想法解开它</strong>」的循环。前沿，不过是这循环还在继续。</p><p>所以你已经具备了读懂未来的底子。下次看到一个新名词——某某注意力、某某对齐、某某架构——别慌， 先问那三个老问题：<strong>它为什么诞生？解决了上一代的什么死结？又会留下什么新麻烦？</strong>这套追问，从第 1 课到今天，一直管用，以后也会。</p><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>大模型的下一程，沿着几条线展开：<span class="tk-hl">想得更深</span>（推理 / 测试时计算）、<span class="tk-hl">看得更广</span>（多模态）、<span class="tk-hl">做得更多</span>（智能体）、<span class="tk-hl">记得更牢、跑得更省</span>（长上下文 / 效率），以及几道硬墙——<span class="tk-hl">数据、对齐、架构</span>。理解它们，靠的还是那三个老问题。</p></div><div class="recap"><h3>这一课你拿到的「前沿地图」</h3><ul><li><strong>想得更深</strong>：思维链 + 测试时计算，把算力从训练挪到推理。</li><li><strong>看得更广</strong>：把图像/音频/视频也变成 token，统一进 Transformer。</li><li><strong>做得更多</strong>：智能体调用工具、拆解多步任务，从「会说」到「会做」。</li><li><strong>记得更牢 / 跑得更省</strong>：长上下文 + 检索记忆；MoE / 量化 / 蒸馏做轻量化。</li><li><strong>硬墙</strong>：数据耗尽、对齐与安全、O(n²) 架构、评测失效。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="测试时计算指推理阶段让模型多想几步（如思维链）换取正确率。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>「测试时计算（test-time compute）」指的是什么思路？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">只在训练阶段堆更多算力和数据</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">在推理阶段让模型「多想几步」（如生成思维链）来换取更高的正确率</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">测试模型跑得快不快</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">把模型部署到更多服务器上</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="对新技术都可追问：为何诞生、解决什么死结、又留下什么新麻烦。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>关于大模型前沿，下面哪种说法符合这一课的态度？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">前沿方向都已有定论，背下来即可</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">面对任何新技术，都可以追问「它为什么诞生、解决了什么死结、又留下什么新麻烦」</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">Transformer 是终极架构，不会再被替代</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">多模态、智能体只是噱头，没有实际方向</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="appendix-transformer-3d.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 31 课</span>
+                    <h3>Transformer 3D 全景图</h3>
+                    <p>一图看尽Transformer的每一层、每一个组件</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第30课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

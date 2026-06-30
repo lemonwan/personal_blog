@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第03课 · 什么是矩阵 | AI大模型原理教程</title>
+    <meta name="description" content="神经网络每一层把一组数字变成另一组数字——这个变换用什么来表示？">
+    <meta name="keywords" content="AI大模型教程,Transformer,什么是矩阵,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第03课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 03 · 卷一</div>
+            <h1>什么是矩阵</h1>
+            <p class="subtitle">❝ 神经网络每一层把一组数字变成另一组数字——这个变换用什么来表示？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="多条规则，一张表格" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>多条规则，一张表格</h2></div><p>先把数学放一边。想象你盘下了一家<strong>奶茶店</strong>，菜单上有 3 款招牌饮品， 每一款都按自己的配方，用到同样的 4 种原料——<strong>茶叶、牛奶、糖、珍珠</strong>。</p><p>配方是这样的（数字是「份数」）：</p><ul style="padding-left:24px;line-height:2.1"><li><strong>珍珠奶茶</strong>：2 份茶 + 1 份奶 + 0 份糖 + 3 份珍珠</li><li><strong>奶霸布丁</strong>：0 份茶 + 4 份奶 + 1 份糖 + 2 份珍珠</li><li><strong>古早甜茶</strong>：1 份茶 + 0 份奶 + 3 份糖 + 1 份珍珠</li></ul><p>今天进货，4 种原料每份的价格分别记作 x₁、x₂、x₃、x₄。 你想立刻知道：<strong>每款饮品的成本各是多少？</strong>很简单——把配方里的份数当权重，给原料价格做一次加权求和：</p><div class="formula" style="line-height:2.2;font-size:15px"><span style="color:#3E6B8F">珍珠奶茶</span> y₁ = <span class="f-hl">2</span>x₁ + <span class="f-hl">1</span>x₂ + <span class="f-hl">0</span>x₃ + <span class="f-hl">3</span>x₄<br/><span style="color:#C0481E">奶霸布丁</span> y₂ = <span class="f-hl">0</span>x₁ + <span class="f-hl">4</span>x₂ + <span class="f-hl">1</span>x₃ + <span class="f-hl">2</span>x₄<br/><span style="color:#5C6B79">古早甜茶</span> y₃ = <span class="f-hl">1</span>x₁ + <span class="f-hl">0</span>x₂ + <span class="f-hl">3</span>x₃ + <span class="f-hl">1</span>x₄</div><p>三款饮品，就是三条加权求和——权重正好是配方里每种原料的份数。 现实中可能是几百款产品、上百种原料，神经网络里更是几百万个权重。 与其把每条公式分开写，数学家干脆把所有配方的份数<strong>排成一张矩形表格</strong>， 叫做<strong>矩阵</strong>（matrix）。<em>一张配方表，就是一个矩阵。</em></p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 200" role="img" aria-label="3×4矩阵W把三组方程的权重整齐排列"><path d="M 128,34 L 122,34 L 122,174 L 128,174" fill="none" stroke="#232F3B" stroke-width="2.5"></path><path d="M 386,34 L 392,34 L 392,174 L 386,174" fill="none" stroke="#232F3B" stroke-width="2.5"></path><text x="162" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">茶</text><text x="226" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">奶</text><text x="290" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">糖</text><text x="354" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">珠</text><text x="116" y="67" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#3E6B8F">珍珠奶茶</text><text x="116" y="114" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#C0481E">奶霸布丁</text><text x="116" y="161" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">古早甜茶</text><g><rect x="130" y="42" width="60" height="40" rx="3" fill="#EBF2FA" stroke="#3E6B8F" stroke-width="1"></rect><text x="160" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#1A3F5C">2</text></g><g><rect x="194" y="42" width="60" height="40" rx="3" fill="#EBF2FA" stroke="#3E6B8F" stroke-width="1"></rect><text x="224" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#1A3F5C">1</text></g><g><rect x="258" y="42" width="60" height="40" rx="3" fill="#EBF2FA" stroke="#3E6B8F" stroke-width="1"></rect><text x="288" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#1A3F5C">0</text></g><g><rect x="322" y="42" width="60" height="40" rx="3" fill="#EBF2FA" stroke="#3E6B8F" stroke-width="1"></rect><text x="352" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#1A3F5C">3</text></g><g><rect x="130" y="89" width="60" height="40" rx="3" fill="#FDF3EE" stroke="#C0481E" stroke-width="1"></rect><text x="160" y="114" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#7A2A0F">0</text></g><g><rect x="194" y="89" width="60" height="40" rx="3" fill="#FDF3EE" stroke="#C0481E" stroke-width="1"></rect><text x="224" y="114" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#7A2A0F">4</text></g><g><rect x="258" y="89" width="60" height="40" rx="3" fill="#FDF3EE" stroke="#C0481E" stroke-width="1"></rect><text x="288" y="114" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#7A2A0F">1</text></g><g><rect x="322" y="89" width="60" height="40" rx="3" fill="#FDF3EE" stroke="#C0481E" stroke-width="1"></rect><text x="352" y="114" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#7A2A0F">2</text></g><g><rect x="130" y="136" width="60" height="40" rx="3" fill="#F5F0E8" stroke="#5C6B79" stroke-width="1"></rect><text x="160" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#2E3D47">1</text></g><g><rect x="194" y="136" width="60" height="40" rx="3" fill="#F5F0E8" stroke="#5C6B79" stroke-width="1"></rect><text x="224" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#2E3D47">0</text></g><g><rect x="258" y="136" width="60" height="40" rx="3" fill="#F5F0E8" stroke="#5C6B79" stroke-width="1"></rect><text x="288" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#2E3D47">3</text></g><g><rect x="322" y="136" width="60" height="40" rx="3" fill="#F5F0E8" stroke="#5C6B79" stroke-width="1"></rect><text x="352" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="16" font-weight="700" fill="#2E3D47">1</text></g><text x="257" y="192" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#93A0AC">W（3 × 4）：3 行 = 3 款饮品的配方，4 列 = 4 种原料</text></svg></div><figcaption><span class="fig-no">图 3-1</span>把三款饮品的配方整齐排成矩阵 W（3×4）：每一行是一份配方，每一列是一种原料。「3×4」读作「3 行 4 列」。</figcaption></figure><p>矩阵用 <strong>m × n</strong> 描述大小：<strong>m 行</strong>（这里是饮品数，也就是输出的数量）、<strong>n 列</strong>（这里是原料数，也就是输入的数量）。这个例子里 m=3、n=4。 记住这个画面：<em>一行一份配方，一列一种原料</em>——后面所有关于矩阵的运算，都能退回这张表来理解。</p></section><section class="station reveal" data-title="矩阵乘向量：一行一次点积" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>矩阵乘向量：一行一次点积</h2></div><p>接着上面的奶茶店。假设今天的原料价格是 茶 1 元、奶 2 元、糖 1 元、珍珠 0 元（珍珠正在促销免费）， 写成列向量 <strong>x</strong> = [1, 2, 1, 0]。 要一次算出三款饮品的成本，就是做矩阵乘法 <strong>Wx</strong>——它的意思是：<strong>用 W 的每一行（每份配方）和 x（原料价格）做点积</strong>，结果拼成成本向量。 点积是上一课学的：对应位置相乘再相加。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 220" role="img" aria-label="矩阵乘向量：每行与x做点积"><text x="110" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#232F3B">W</text><path d="M 28,32 L 22,32 L 22,188 L 28,188" fill="none" stroke="#232F3B" stroke-width="2"></path><path d="M 192,32 L 198,32 L 198,188 L 192,188" fill="none" stroke="#232F3B" stroke-width="2"></path><g><rect x="30" y="38" width="36" height="36" rx="3" fill="#D6E8F5" stroke="#3E6B8F" stroke-width="2"></rect><text x="48" y="61" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#1A3F5C">2</text></g><g><rect x="70" y="38" width="36" height="36" rx="3" fill="#D6E8F5" stroke="#3E6B8F" stroke-width="2"></rect><text x="88" y="61" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#1A3F5C">1</text></g><g><rect x="110" y="38" width="36" height="36" rx="3" fill="#D6E8F5" stroke="#3E6B8F" stroke-width="2"></rect><text x="128" y="61" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#1A3F5C">0</text></g><g><rect x="150" y="38" width="36" height="36" rx="3" fill="#D6E8F5" stroke="#3E6B8F" stroke-width="2"></rect><text x="168" y="61" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700" fill="#1A3F5C">3</text></g><g><rect x="30" y="88" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="48" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">0</text></g><g><rect x="70" y="88" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="88" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">4</text></g><g><rect x="110" y="88" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="128" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">1</text></g><g><rect x="150" y="88" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="168" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">2</text></g><g><rect x="30" y="138" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="48" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">1</text></g><g><rect x="70" y="138" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="88" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">0</text></g><g><rect x="110" y="138" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="128" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">3</text></g><g><rect x="150" y="138" width="36" height="36" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="168" y="161" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" font-weight="400" fill="#8A8070">1</text></g><text x="14" y="62" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">①</text><text x="14" y="112" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#C5C0B8">②</text><text x="14" y="162" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#C5C0B8">③</text><text x="265" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#232F3B">x</text><path d="M 238,32 L 232,32 L 232,188 L 238,188" fill="none" stroke="#232F3B" stroke-width="2"></path><path d="M 292,32 L 298,32 L 298,188 L 292,188" fill="none" stroke="#232F3B" stroke-width="2"></path><g><rect x="240" y="38" width="50" height="33" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="265" y="60" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" fill="#232F3B">1</text></g><g><rect x="240" y="75" width="50" height="33" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="265" y="97" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" fill="#232F3B">2</text></g><g><rect x="240" y="112" width="50" height="33" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="265" y="134" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" fill="#232F3B">1</text></g><g><rect x="240" y="149" width="50" height="33" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="265" y="171" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" fill="#232F3B">0</text></g><line x1="66" y1="56" x2="240" y2="54" stroke="#3E6B8F" stroke-width="1.2" stroke-dasharray="4 2" opacity="0.7"></line><line x1="106" y1="56" x2="240" y2="91" stroke="#3E6B8F" stroke-width="1.2" stroke-dasharray="4 2" opacity="0.7"></line><line x1="146" y1="56" x2="240" y2="128" stroke="#3E6B8F" stroke-width="1.2" stroke-dasharray="4 2" opacity="0.7"></line><line x1="186" y1="56" x2="240" y2="165" stroke="#3E6B8F" stroke-width="1.2" stroke-dasharray="4 2" opacity="0.7"></line><text x="330" y="118" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="24" fill="#232F3B">=</text><text x="420" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#232F3B">y</text><path d="M 358,32 L 352,32 L 352,188 L 358,188" fill="none" stroke="#232F3B" stroke-width="2"></path><path d="M 482,32 L 488,32 L 488,188 L 482,188" fill="none" stroke="#232F3B" stroke-width="2"></path><g><rect x="360" y="38" width="118" height="40" rx="3" fill="#D6E8F5" stroke="#3E6B8F" stroke-width="2"></rect><text x="419" y="54" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5C6B79">2×1+1×2+0×1+3×0</text><text x="419" y="70" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#1A3F5C">= 4</text></g><g><rect x="360" y="88" width="118" height="40" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="419" y="104" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5C6B79">0×1+4×2+1×1+2×0</text><text x="419" y="120" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="400" fill="#8A8070">= 9</text></g><g><rect x="360" y="138" width="118" height="40" rx="3" fill="#F5F0E8" stroke="#C5C0B8" stroke-width="1"></rect><text x="419" y="154" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5C6B79">1×1+0×2+3×1+1×0</text><text x="419" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="400" fill="#8A8070">= 4</text></g></svg></div><figcaption><span class="fig-no">图 3-2</span>行 ① 与 x 做点积：2×1 + 1×2 + 0×1 + 3×0 = 4，得到 y₁。行 ② 和 ③ 同理，结果拼成输出向量 y = [4, 9, 4]。</figcaption></figure><p>于是<strong>珍珠奶茶 4 元、奶霸布丁 9 元、古早甜茶 4 元</strong>—— 一次矩阵乘法，整张菜单的成本一起算完了。这正是矩阵的用处：<strong>把「同时做很多组加权求和」这件事，压缩成一个动作。</strong>神经网络的每一层，做的就是这一个动作，只不过配方表大得多。</p><div class="think"><div class="think-q">矩阵 W 是 3×4，为什么 x 必须是 4 维向量，而不能是 3 维或 5 维？</div></div></section><section class="station reveal" data-title="维度：从几维到几维" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>维度：从几维到几维</h2></div><p>矩阵乘法的核心规则只有一条，记住形状就够了：</p><div class="formula" style="font-size:18px">W <sub style="font-size:13px">m×n</sub>  ×  x <sub style="font-size:13px">n</sub>  =  y <sub style="font-size:13px">m</sub></div><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 180" role="img" aria-label="矩阵乘向量的维度匹配规则"><rect x="40" y="30" width="110" height="120" rx="6" fill="#EBF2FA" stroke="#3E6B8F" stroke-width="2"></rect><text x="95" y="87" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700" fill="#3E6B8F">W</text><text x="95" y="108" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3E6B8F">m × n</text><text x="24" y="93" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">m</text><line x1="34" y1="30" x2="34" y2="150" stroke="#3E6B8F" stroke-width="1" stroke-dasharray="3 2"></line><text x="95" y="168" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#C0481E">n</text><line x1="40" y1="158" x2="150" y2="158" stroke="#C0481E" stroke-width="1" stroke-dasharray="3 2"></line><text x="185" y="97" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="22" fill="#232F3B">×</text><rect x="210" y="30" width="50" height="120" rx="6" fill="#FDF3EE" stroke="#C0481E" stroke-width="2"></rect><text x="235" y="87" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700" fill="#C0481E">x</text><text x="235" y="108" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#C0481E">n维</text><text x="278" y="93" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#C0481E">n</text><line x1="268" y1="30" x2="268" y2="150" stroke="#C0481E" stroke-width="1" stroke-dasharray="3 2"></line><path d="M 95,162 Q 180,175 235,162" fill="none" stroke="#C0481E" stroke-width="2"></path><text x="165" y="180" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">必须相等！</text><text x="330" y="97" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="22" fill="#232F3B">=</text><rect x="360" y="30" width="50" height="90" rx="6" fill="#E8F5EE" stroke="#2E7D52" stroke-width="2"></rect><text x="385" y="73" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700" fill="#2E7D52">y</text><text x="385" y="95" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#2E7D52">m维</text><text x="424" y="77" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">m</text><line x1="418" y1="30" x2="418" y2="120" stroke="#3E6B8F" stroke-width="1" stroke-dasharray="3 2"></line><text x="385" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">行数决定输出维度</text></svg></div><figcaption><span class="fig-no">图 3-3</span>维度匹配规则：W 的列数必须等于 x 的维度（内层维度相等）；输出维度等于 W 的行数（外层维度保留）。</figcaption></figure><p>两个关键点：</p><ul><li><strong>列数必须匹配</strong>：W 有 n 列，x 就必须是 n 维。维度不符则无法计算。</li><li><strong>行数决定输出</strong>：W 有 m 行，输出 y 就是 m 维。矩阵是把「n 维空间」变成「m 维空间」的工具。</li></ul><p>这个「从几维变到几维」的性质，是下一课《线性变换》的核心：矩阵不只是计算工具， 它在几何上代表一次<strong>空间变换</strong>——旋转、缩放、压缩或拉伸。</p></section><section class="station reveal" data-title="总结" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>矩阵是<span class="tk-hl">把多组权重整齐排列</span>的工具：每行是一组系数，每列对应一个输入。 矩阵乘向量（Wx）就是<span class="tk-hl">每行与 x 做点积</span>——m 行产生 m 个结果，拼成 m 维输出向量。 维度规则：W（m×n）× x（n维）= y（<span class="tk-hl">m 维</span>），内层必须相等，外层决定结果。</p></div><div class="recap"><h3>这一课你亲手发现了</h3><ul><li><strong>矩阵</strong>：m×n 的数字表格，m 行 n 列；把多组系数整理成一个对象。</li><li><strong>矩阵乘向量</strong>：Wx = 「每行与 x 做点积」，本质是同时计算多个加权求和。</li><li><strong>维度规则</strong>：（m×n）×（n维）=（m维）；W 把 n 维输入变成 m 维输出。</li><li><strong>内层匹配</strong>：W 的列数必须等于 x 的维度，否则点积无从对齐。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="2" data-explain="矩阵正是描述“整组数字→整组数字”线性变换的自然对象。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>神经网络的某一层会把一组数字变成另一组数字。用来描述这种「整组到整组」的线性变换，最自然的数学对象是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">一个单独的数字</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">一个向量</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">一个矩阵</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">一段文字规则</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="0" data-explain="3×4 矩阵需乘 4 维向量，输出为 3 维（行数=输出维度）。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>一个形状为 3×4 的矩阵，乘以一个向量时，对该向量的维度有什么要求，结果又是几维？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">输入必须是 4 维，输出是 3 维</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">输入必须是 3 维，输出是 4 维</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">输入输出都必须是 3 维</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">任意维度都可以，结果不变</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="math-03-transform.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 04 课</span>
+                    <h3>什么是线性变换</h3>
+                    <p>矩阵乘法到底在做什么？——把整个空间一起旋转、拉伸、搬动</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷一 · 第03课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

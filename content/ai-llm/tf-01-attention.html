@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第19课 · 注意力机制 | AI大模型原理教程</title>
+    <meta name="description" content="翻译「它」的时候，该看句子里的哪个词？">
+    <meta name="keywords" content="AI大模型教程,Transformer,注意力机制,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第19课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 19 · 卷四</div>
+            <h1>注意力机制</h1>
+            <p class="subtitle">❝ 翻译「它」的时候，该看句子里的哪个词？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="「它」指谁？" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>「它」指谁？</h2></div><p>先读两句几乎一样的话：</p><div class="formula" style="font-family:var(--serif);font-size:18px;line-height:2.2">小猫没有过马路，因为<span class="f-hl">它</span>太<strong>累</strong>了。<br/>小猫没有过马路，因为<span class="f-hl">它</span>太<strong>堵</strong>了。</div><p>两个「它」，指的东西完全不同：第一句指<strong>小猫</strong>，第二句指<strong>马路</strong>。 你几乎是无意识就分辨出来了。但请注意你是怎么做到的—— 读到「它」时，你的目光<em>回头扫了一眼前文</em>，并且只在「小猫」和「马路」之间挑了一个， 其余的字几乎被忽略。</p><p>这个「回头看、且看得有轻有重」的动作，就是人类的注意力。 问题是：<strong>怎么让一个神经网络也学会这个动作？</strong></p></section><section class="station reveal" data-title="旧方案的局限" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>旧方案的局限：一条太窄的门缝</h2></div><p>卷三的终点站还记得吗？RNN / LSTM 处理句子的方式，是从左到右逐词读入， 把读过的一切<strong>不断压缩进一个固定大小的向量</strong>里，像滚雪球：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 640 240" role="img" aria-label="RNN 把整句话压缩进一个固定大小的向量"><g font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#232F3B" text-anchor="middle"><text x="60" y="40">小猫</text><text x="160" y="40">没有</text><text x="260" y="40">过</text><text x="360" y="40">马路</text><text x="460" y="40">…</text></g><g stroke="#93A0AC" stroke-width="1.2"><line x1="60" y1="52" x2="60" y2="86"></line><line x1="160" y1="52" x2="160" y2="86"></line><line x1="260" y1="52" x2="260" y2="86"></line><line x1="360" y1="52" x2="360" y2="86"></line><line x1="460" y1="52" x2="460" y2="86"></line></g><g><rect x="35" y="90" width="50" height="40" fill="#FFFDF8" stroke="#5C6B79"></rect><rect x="135" y="90" width="50" height="40" fill="#FFFDF8" stroke="#5C6B79"></rect><rect x="235" y="90" width="50" height="40" fill="#FFFDF8" stroke="#5C6B79"></rect><rect x="335" y="90" width="50" height="40" fill="#FFFDF8" stroke="#5C6B79"></rect><rect x="435" y="90" width="50" height="40" fill="#FFFDF8" stroke="#5C6B79"></rect><g font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79" text-anchor="middle"><text x="60" y="114">h₁</text><text x="160" y="114">h₂</text><text x="260" y="114">h₃</text><text x="360" y="114">h₄</text><text x="460" y="114">h₅</text></g><g stroke="#5C6B79" stroke-width="1.4"><line x1="85" y1="110" x2="135" y2="110"></line><polygon points="135,110 127,106 127,114" fill="#5C6B79"></polygon><line x1="185" y1="110" x2="235" y2="110"></line><polygon points="235,110 227,106 227,114" fill="#5C6B79"></polygon><line x1="285" y1="110" x2="335" y2="110"></line><polygon points="335,110 327,106 327,114" fill="#5C6B79"></polygon><line x1="385" y1="110" x2="435" y2="110"></line><polygon points="435,110 427,106 427,114" fill="#5C6B79"></polygon></g></g><line x1="485" y1="110" x2="545" y2="110" stroke="#C0481E" stroke-width="1.6"></line><polygon points="545,110 537,106 537,114" fill="#C0481E"></polygon><rect x="548" y="84" width="34" height="52" fill="#C0481E"></rect><text x="565" y="160" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E" text-anchor="middle">最终向量</text><text x="60" y="200" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">整句话的全部信息，必须挤进右边那个固定大小的「行李箱」。</text><text x="60" y="222" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">句子越长，越早装进去的东西，越容易被压变形。</text></svg></div><figcaption><span class="fig-no">图 19-1</span>RNN 的「行李箱」：无论句子多长，都要塞进同一个固定大小的向量。</figcaption></figure><div class="crack reveal"><div class="crack-label">方案的局限</div><p>等网络读到「它」时，「小猫」已经是五步之前的记忆，在行李箱里被反复挤压。 句子再长一点——比如一整段话——开头的信息几乎荡然无存。 LSTM 的「阀门」缓解了遗忘，却没有解决根本问题：<strong>所有历史共用一条固定宽度的门缝。</strong></p></div><div class="think"><div class="think-q">激进一点：如果根本<strong>不压缩</strong>呢？所有词的向量都原样留在桌面上， 「它」需要谁就直接去看谁。这个方案缺什么？</div></div></section><section class="station reveal" data-title="新想法：回头看 + 打分" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>新想法：不压缩，回头看，按分配</h2></div><p>新方案只有三步，每一步都用的是你已经会的东西：</p><p><strong>第一步，打分。</strong>「它」想知道每个词和自己的相关度。 卷一第 2 课说过：两个向量的<em>点积</em>越大，方向越一致，越「相关」。 那就让「它」的向量和每个词的向量分别做点积，得到一排分数。</p><p><strong>第二步，变成权重。</strong>这排分数有大有小、有正有负，不好直接用。 卷二第 11 课的 <em>Softmax</em> 正是干这个的：把任意一排分数变成一排加起来等于 1 的比例。 比如「小猫 62%、马路 9%、累 13%、其他词分剩下的」。</p><p><strong>第三步，按比例混合。</strong>用这些百分比对所有词的向量做加权求和， 得到一个新向量——它代表的不再是孤零零的「它」， 而是「<em>一个主要由小猫构成、掺了一点累的它</em>」。指代问题，就这样被算出来了。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 640 230" role="img" aria-label="「它」按权重回头看所有词"><g font-family="Noto Serif SC, serif" font-size="16" font-weight="700" fill="#232F3B" text-anchor="middle"><text x="55" y="190">小猫</text><text x="145" y="190">没有</text><text x="225" y="190">过</text><text x="305" y="190">马路</text><text x="375" y="190">因为</text><text x="445" y="190" fill="#C0481E">它</text><text x="510" y="190">太</text><text x="570" y="190">累</text></g><g fill="none" stroke="#C0481E"><path d="M 445 168 Q 250 30 55 168" stroke-width="6" opacity="0.85"></path><path d="M 445 168 Q 295 92 145 168" stroke-width="1" opacity="0.30"></path><path d="M 445 168 Q 335 116 225 168" stroke-width="1" opacity="0.30"></path><path d="M 445 168 Q 375 122 305 168" stroke-width="2.2" opacity="0.45"></path><path d="M 445 168 Q 410 142 375 168" stroke-width="1" opacity="0.30"></path><path d="M 445 168 Q 478 146 510 168" stroke-width="1.6" opacity="0.38"></path><path d="M 445 168 Q 508 124 570 168" stroke-width="3.4" opacity="0.6"></path></g><g font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E" text-anchor="middle"><text x="55" y="214">62%</text><text x="305" y="214">9%</text><text x="570" y="214">13%</text></g><text x="55" y="40" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">线越粗 = 分到的注意力越多</text></svg></div><figcaption><span class="fig-no">图 19-2</span>处理「它」时的注意力分布：大头给了「小猫」，一小份给「累」——正是消解指代所需的两块信息。</figcaption></figure></section><section class="station reveal" data-title="三个分身：Q · K · V" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>一个问题，三个角色：Q、K、V</h2></div><p>上一站的方案直接拿词向量互相点积，藏着一个微妙的毛病：<strong>一个词「想找什么」和「能提供什么」根本是两回事。</strong>「它」作为代词，想找的是「前文里某个具体事物」； 而「它」能提供给别的词的信息，只是「这里有个代词」。一个向量身兼两职，会互相打架。</p><p>修补的办法依然是最小的：别用原始向量直接对话， 让每个词先通过三个<em>线性变换</em>（卷一第 3 课的矩阵，参数可学习）生成三个分身—— 就像在图书馆里：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 640 260" role="img" aria-label="每个词通过三个矩阵生成 Q、K、V 三个分身"><rect x="40" y="100" width="120" height="56" fill="#FFFDF8" stroke="#232F3B" stroke-width="1.5"></rect><text x="100" y="125" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="16" font-weight="700" fill="#232F3B">词向量</text><text x="100" y="146" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#93A0AC">x</text><g stroke="#5C6B79" stroke-width="1.3" fill="none"><path d="M 160 112 C 230 112 230 50 296 50"></path><path d="M 160 128 L 296 128"></path><path d="M 160 144 C 230 144 230 206 296 206"></path></g><g font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E"><text x="216" y="68">× W_Q</text><text x="216" y="120">× W_K</text><text x="216" y="188">× W_V</text></g><g><rect x="300" y="26" width="300" height="52" fill="#F7E5DB" stroke="#C0481E"></rect><text x="318" y="49" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#9A3815">Q · 查询单</text><text x="318" y="68" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#5C6B79">「我在找：前文里一个具体事物」</text><rect x="300" y="104" width="300" height="52" fill="#FFFDF8" stroke="#5C6B79"></rect><text x="318" y="127" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#232F3B">K · 书脊标签</text><text x="318" y="146" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#5C6B79">「我这里有：一只动物，名词，主语」</text><rect x="300" y="182" width="300" height="52" fill="#FFFDF8" stroke="#5C6B79"></rect><text x="318" y="205" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#232F3B">V · 书的内容</text><text x="318" y="224" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#5C6B79">「真正被取走混合的信息本体」</text></g></svg></div><figcaption><span class="fig-no">图 19-3</span>查询单（Query）拿去和每本书的书脊标签（Key）对分数，分数高的书，取出内容（Value）来读。</figcaption></figure><p>于是打分规则修正为：<strong>用「它」的 Q，去点积每个词的 K</strong>； 权重算好后，<strong>混合的是每个词的 V</strong>。 三个矩阵 W<sub>Q</sub>、W<sub>K</sub>、W<sub>V</sub> 都是训练中学出来的—— 也就是说，<em>「该注意什么」这件事本身，是模型自己学会的。</em></p></section><section class="station reveal" data-title="从一个词到整句" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>从「它」一个词，到整句话</h2></div><p>第 4 站收尾时，我们已经为「它」配齐了一整套动作：用它的 Q 去点积每个词的 K 打分、用 softmax 把分数变成权重、 再照权重混合每个词的 V。漂亮——可这套动作只照顾了「它」<strong>一个词</strong>。 真实的句子里，<strong>每个词</strong>都得这样回头看一遍：「累」要找它修饰谁，「过」要找它的宾语…… 与其一个词一个词地循环，不如把「对所有词各做一遍」用矩阵<strong>一次写完</strong>。</p><p>而当我们把它写到最紧凑，整套流程会<strong>坍缩成一个式子</strong>——这个式子不是我们生造的， 它正是 2017 年 Google 论文《Attention Is All You Need》的核心（3.2.1 节，<strong>Scaled Dot-Product Attention</strong>，缩放点积注意力）。 那篇论文提出了 <strong>Transformer</strong> 架构，甩开了统治十年的 RNN / LSTM；今天的 GPT、BERT、几乎所有大模型，骨架都从这里长出来：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 348" role="img" aria-label="论文《Attention Is All You Need》示意：标题、作者与核心公式"><rect x="48" y="22" width="440" height="314" rx="3" fill="#00000010"></rect><rect x="42" y="16" width="440" height="314" rx="3" fill="#FFFFFF" stroke="#DCD2BF" stroke-width="1.2"></rect><text x="262" y="56" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="20" font-weight="700" fill="#1E2B38">Attention Is All You Need</text><text x="262" y="78" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="9" fill="#5C6B79">Ashish Vaswani · Noam Shazeer · Niki Parmar · Jakob Uszkoreit</text><text x="262" y="91" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="9" fill="#5C6B79">Llion Jones · Aidan N. Gomez · Łukasz Kaiser · Illia Polosukhin</text><text x="262" y="106" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="8.5" fill="#93A0AC">Google Brain · Google Research · University of Toronto　|　NeurIPS 2017</text><text x="72" y="134" font-family="Noto Serif SC, serif" font-size="9.5" font-weight="700" fill="#7A8794">Abstract</text><rect x="72" y="142" width="390" height="4" rx="2" fill="#EBE3D4"></rect><rect x="72" y="151" width="390" height="4" rx="2" fill="#EBE3D4"></rect><rect x="72" y="160" width="388" height="4" rx="2" fill="#EBE3D4"></rect><rect x="72" y="169" width="360" height="4" rx="2" fill="#EBE3D4"></rect><rect x="72" y="178" width="210" height="4" rx="2" fill="#EBE3D4"></rect><rect x="92" y="206" width="340" height="66" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.6"></rect><text x="102" y="226" font-family="Noto Sans SC, sans-serif" font-size="9.5" font-weight="700" fill="#9A3815">3.2.1　Scaled Dot-Product Attention</text><text x="258" y="254" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-style="italic" fill="#1E2B38">Attention(Q, K, V) = softmax(QKᵀ / √d̲ₖ) V</text><text x="418" y="254" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#5C6B79">(1)</text><text x="262" y="296" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">↑ 整篇论文的核心，就这一行</text><text x="262" y="316" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">这一站，我们就用前几站亲手造的零件，把它拼出来</text></svg></div><figcaption><span class="fig-no">图 19-4</span>《Attention Is All You Need》（Vaswani 等，2017）示意。论文最有名的，除了那句口号般的标题，就是框里这个公式——它如今是所有大模型的地基。下面我们就一步步把它拼出来。</figcaption></figure><p>别被一堆大写字母唬住——这一行里的每个零件，你在前三站都已经亲手造过了。 下面就把上面说的「用矩阵一次写完」<strong>摊开</strong>，看这一行到底是怎么拼出来的。</p><p>关键的一步，是<strong>把所有词的零件摞成矩阵</strong>。把每个词的查询单 q 当成一行，<strong>从上到下摞起来</strong>， 就得到一个矩阵 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span></span></span></span></span>（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 个词就是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 行）；同理把所有 k 摞成 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">K</span></span></span></span></span>、所有 v 摞成 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span>。<strong>大写的 Q、K、V，就是上一站那些小写分身「摞起来」的整捆版本</strong>——内容半点没变，只是排好了队，好让一次矩阵乘法把全句都算了。</p><p>于是上一站那套动作，原封不动地升级成四步矩阵运算：</p><div class="formula formula-tex"><div>第一步 打分　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord"><span class="mord mathrm">score</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span></span></div><div style="margin-top:6px">第二步 降温　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1072em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">score</span></span><span class="mord">/</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span></span></span></span></span></div><div style="margin-top:6px">第三步 归一　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathrm">weights</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mord">⋅</span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:6px">第四步 混合　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8095em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathrm">output</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathrm">weights</span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span></div></div><p>一步一步看，每一步到底在搬动什么：</p><p><strong>第一步　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span></span>：一次把所有词对所有词的分数都打出来。</strong>上一站「它」的 q 点积每个词的 k，得到<em>一行</em>分数。现在 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span></span></span></span></span> 里有 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 行查询、<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">K</span></span></span></span></span> 里有 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 行标签，两者一乘，就同时打出 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 张分数表： 第 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 行第 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0572em;">j</span></span></span></span></span> 格，就是「第 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span></span></span></span></span> 个词该看第 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0572em;">j</span></span></span></span></span> 个词多少」。 （那个转置 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8491em;"></span><span class="mord"><span class="mord"></span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span></span> 只是把 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">K</span></span></span></span></span> 立起来，让维度对得上、能做点积，不必深究。） 上一站图 19-2 算的，正是下面这张表里<strong>「它」那一行</strong>——现在我们一口气把每一行都算了出来：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 452" role="img" aria-label="QKᵀ 得到的 n×n 注意力分数表，高亮「它」这一行"><text x="137" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">小猫</text><text x="179" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">没有</text><text x="221" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">过</text><text x="263" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">马路</text><text x="305" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">因为</text><text x="347" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">它</text><text x="389" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">太</text><text x="431" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">累</text><text x="284" y="22" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#5C6B79">被看的词（K）→</text><text x="20" y="246" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#5C6B79" transform="rotate(-90 20 246)">发出查询的词（Q）↓</text><g><text x="104" y="103" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="400" fill="#232F3B">小猫</text><g><rect x="116" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="158" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="284" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="368" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="78" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g></g><g><text x="104" y="145" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="400" fill="#232F3B">没有</text><g><rect x="116" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="158" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="284" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="368" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="120" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g></g><g><text x="104" y="187" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="400" fill="#232F3B">过</text><g><rect x="116" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="158" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="284" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="368" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="162" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g></g><g><text x="104" y="229" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="400" fill="#232F3B">马路</text><g><rect x="116" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="158" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="284" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="368" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="204" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g></g><g><text x="104" y="271" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="400" fill="#232F3B">因为</text><g><rect x="116" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="158" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="284" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="368" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="246" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g></g><g><text x="104" y="313" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="700" fill="#C0481E">它</text><g><rect x="116" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.6284)" stroke="#E2D8C6" stroke-width="0.8"></rect><text x="136" y="313" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#7A2D11">62</text></g><g><rect x="158" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.1364)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.1364)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.19379999999999997)" stroke="#E2D8C6" stroke-width="0.8"></rect><text x="262" y="313" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#7A2D11">9</text></g><g><rect x="284" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.1446)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.1774)" stroke="#E2D8C6" stroke-width="0.8"></rect><text x="346" y="313" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#7A2D11">7</text></g><g><rect x="368" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.1364)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="288" width="40" height="40" rx="3" fill="rgba(192,72,30,0.2266)" stroke="#E2D8C6" stroke-width="0.8"></rect><text x="430" y="313" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#7A2D11">13</text></g></g><g><text x="104" y="355" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="400" fill="#232F3B">太</text><g><rect x="116" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="158" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="284" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="368" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="330" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g></g><g><text x="104" y="397" text-anchor="end" font-family="Noto Serif SC, serif" font-size="12" font-weight="400" fill="#232F3B">累</text><g><rect x="116" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="158" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="200" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="242" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="284" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="326" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="368" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g><g><rect x="410" y="372" width="40" height="40" rx="3" fill="rgba(62,107,143,0.05)" stroke="#E2D8C6" stroke-width="0.8"></rect></g></g><rect x="116" y="288" width="334" height="40" rx="3" fill="none" stroke="#C0481E" stroke-width="2.2"></rect><text x="284" y="440" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#93A0AC">为看得清，只点亮了「它」这一行；其余每个词也各有这样一行权重</text></svg></div><figcaption><span class="fig-no">图 19-5</span><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span></span> 一次算出整张 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 的分数表：每一行是「某个词该看全句各词多少」。「它」那一行的大头落在「小猫」(62)，正是图 19-2 的内容——只不过现在每一行都被同时算了出来。</figcaption></figure><p><strong>第二步　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1828em;"></span><span class="mord">÷</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span></span></span></span></span>：给分数「降温」。</strong>这一步上一站没提，因为单看一行不明显，可一上规模就必须有。问题出在维度：论文里每个 q、k 是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">64</span></span></span></span></span> 维， 点积是 64 个乘积相加，数值很容易累积得很大——粗算下来分数常在 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">±</span><span class="mord">16</span></span></span></span></span> 上下晃。 把 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">16</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mclose">]</span></span></span></span></span> 这种悬殊的分数喂进 softmax，结果几乎是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mclose">]</span></span></span></span></span>——<strong>softmax「饱和」了，注意力变成非黑即白</strong>，只死盯一个词、其余一律不看，梯度也几乎为零、学不动。 解法很省事：整张表统一除以 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1828em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1328em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9072em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord">64</span></span></span><span style="top:-2.8672em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1328em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">8</span></span></span></span></span>，分数缩回 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">±</span><span class="mord">2</span></span></span></span></span> 的温和范围，softmax 重新变得「有轻有重」而不极端。</p><p><strong>第三步　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span></span></span></span></span>：把每一行变成一组百分比。</strong>降温后的分数还是有正有负的实数，不能直接当权重。对分数表的<strong>每一行</strong>各做一次 softmax（第 11 课那一套）， 这一行就变成一组加起来正好等于 1 的比例——也就是图 19-5 里「它」那行的 62%、9%、13%……<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 行各归一一次，整张表就成了一张干净的<strong>权重表</strong>。</p><p><strong>第四步　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">×</span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span>：照权重把内容混合出来。</strong>拿权重表去乘 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span>（每行是一个词的内容分身）。具体到「它」这一行：用 62% 取「小猫」的 V、13% 取「累」的 V……加权相加， 得到「它」的<strong>新向量</strong>——一个主要由小猫、掺了点累构成的「它」。每一行都这么混一次， 输出就是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 个被全句上下文重新润色过的新词向量。 注意：前三步只是算出「<em>该看谁</em>」的计划，<strong>这一步才把计划真正执行成「信息搬进了词里」</strong>； 这些新向量会顶替掉原来的词向量继续往上走。下一站把它代成具体数字，你就会看清这个「搬运」到底有什么用。</p><p>把这四步接成一条流水线，写成一行，就是 2017 年那篇论文里的原式：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">Attention</span></span><span class="mopen">(</span><span class="mord mathnormal">Q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.4761em;vertical-align:-0.95em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span><span class="mspace" style="margin-right:-0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;"><span class="delimsizing size3">(</span></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.5261em;"><span style="top:-2.2528em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">Q</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.93em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mclose delimcenter" style="top:0em;"><span class="delimsizing size3">)</span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span></span></div><p class="formula-note">从里到外读：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span></span> 打分 → <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1828em;"></span><span class="mord">÷</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span></span></span></span></span> 降温 → <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span></span></span></span></span> 归一成权重 → 乘 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span> 混合。四步，正好对应上面四行。</p><p>值得停下来欣赏一下这个设计的两个「免费赠品」： 其一，所有词的回头看是<strong>同时</strong>发生的——矩阵一乘全算完，不像 RNN 必须逐词排队； 其二，「小猫」距离「它」是 5 个词还是 500 个词，<strong>都是一次直达</strong>，不存在传着传着丢了的问题。 行李箱被彻底扔掉了。</p></section><section class="station reveal" data-title="把公式代进数字" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>把公式代进数字：一个 2 维的小例子</h2></div><p>公式拼好了，可一行符号终究还是抽象。这一站我们把它彻底<strong>落地</strong>： 用一个小到能用纸笔验算的例子，把 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.1072em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">softmax</span></span><span class="mopen">(</span><span class="mord mathnormal">Q</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span><span class="mord">/</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span> 从头到尾算一遍。 为了算得清爽，<strong>每个向量只取 2 维</strong>（真实模型是 64 维）——但每一步的动作，和真实 Transformer 里发生的<strong>一模一样</strong>，只是数字小。</p><p>取句子里最要紧的三个词：<strong>小猫、累、它</strong>。回忆第 4 站——每个词过 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">Q</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0715em;">K</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.2222em;">V</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 三个矩阵， 生成 q、k、v 三个分身。为了把注意力都集中在公式本身，这里直接把算好的 2 维分身列出来 （真实模型里，这些数字是训练学出来的）：</p><div class="formula" style="font-family:var(--mono, monospace);font-size:15px;line-height:2.2"><div>小猫　　q = [0.3, 0.3]　　k = [1.2, 0.0]　　v = [1.0, 0.0]</div><div>累　　　q = [0.2, 1.5]　　k = [0.0, 1.0]　　v = [0.0, 1.0]</div><div>它　　　<span style="color:#C0481E;font-weight:700">q = [2.0, 0.2]</span>　　k = [0.1, 0.0]　　v = [0.5, 0.5]</div></div><p class="formula-note">一个小约定：这里把 v 的<strong>两个维度</strong>设计成可以「读」的——第 1 维代表「动物味」，第 2 维代表「疲惫味」。 所以小猫的 v=[1,0] 是纯动物味，累的 v=[0,1] 是纯疲惫味。等会儿看「它」最后混出的 v 落在哪， 就知道模型把「它」理解成了什么。下面我们只算<strong>「它」这一行</strong>（它该看谁、看多少），其余两行同理。</p><p><strong>第一步 · 打分 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0435em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">Q</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">K</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8491em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">⊤</span></span></span></span></span></span></span></span></span></span></span></span></span>。</strong>拿「它」的查询 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">q</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">2.0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.2</span><span class="mclose">]</span></span></span></span></span>，分别和三个词的 k 做点积：</p><div class="calc"><div class="calc-line">它 · 小猫 ＝ 2.0×1.2 ＋ 0.2×0.0 ＝ <strong>2.4</strong></div><div class="calc-line">它 · 累　 ＝ 2.0×0.0 ＋ 0.2×1.0 ＝ <strong>0.2</strong></div><div class="calc-line">它 · 它　 ＝ 2.0×0.1 ＋ 0.2×0.0 ＝ <strong>0.2</strong></div></div><p>对「小猫」的分数 <strong>2.4</strong>，把另外两个 <strong>0.2</strong> 远远甩开。为什么差这么多？ 因为点积衡量的是<em>两个向量方向有多一致</em>——而「它」的查询，几乎和「小猫」的 key 指向同一个方向。 把这四个向量画在 2 维平面上，一眼就能看明白：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 300" role="img" aria-label="在二维平面上画出「它」的查询向量 q 和三个词的 key 向量，q 几乎与小猫的 key 同向"><defs><marker id="ah-q" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#C0481E"></path></marker><marker id="ah-k" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3E6B8F"></path></marker><marker id="ah-ax" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#93A0AC"></path></marker></defs><g stroke="#EBE3D4" stroke-width="1" stroke-dasharray="3 3"><line x1="210" y1="60" x2="210" y2="250"></line><line x1="310" y1="60" x2="310" y2="250"></line><line x1="110" y1="150" x2="420" y2="150"></line></g><line x1="70" y1="250" x2="520" y2="250" stroke="#93A0AC" stroke-width="1.4" marker-end="url(#ah-ax)"></line><line x1="110" y1="275" x2="110" y2="45" stroke="#93A0AC" stroke-width="1.4" marker-end="url(#ah-ax)"></line><g font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC" text-anchor="middle"><text x="210" y="265">1</text><text x="310" y="265">2</text><text x="98" y="154">1</text></g><text x="360" y="244" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">「动物 / 主语」方向</text><text x="120" y="58" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">「疲惫 / 状态」方向</text><line x1="110" y1="250" x2="226" y2="250" stroke="#3E6B8F" stroke-width="2" marker-end="url(#ah-k)"></line><line x1="110" y1="250" x2="110" y2="154" stroke="#3E6B8F" stroke-width="2" marker-end="url(#ah-k)"></line><line x1="110" y1="250" x2="124" y2="250" stroke="#3E6B8F" stroke-width="2" marker-end="url(#ah-k)"></line><line x1="110" y1="250" x2="306" y2="230" stroke="#C0481E" stroke-width="3" marker-end="url(#ah-q)"></line><g font-family="JetBrains Mono, monospace" font-size="12" font-weight="700"><text x="312" y="226" fill="#C0481E">q(它)</text><text x="232" y="244" fill="#3E6B8F">k(小猫)</text><text x="118" y="150" fill="#3E6B8F">k(累)</text><text x="128" y="272" fill="#3E6B8F" font-size="10" font-weight="400">k(它)·很短</text></g><text x="330" y="92" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">q 与 k(小猫) 几乎同向，</text><text x="330" y="110" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">夹角最小 → 点积最大 →</text><text x="330" y="128" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">分到的注意力最多。</text></svg></div><figcaption><span class="fig-no">图 19-6</span>把 q、k 画成 2 维平面上的箭头：点积大 = 方向一致。「它」的查询箭头几乎压在「小猫」的 key 上，所以打分远高于另外两个——这就是第一步分数悬殊的几何原因。</figcaption></figure><p><strong>第二步 · 降温 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1828em;"></span><span class="mord">÷</span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em;"><span></span></span></span></span></span></span></span></span></span>。</strong>这里维度 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2</span></span></span></span></span>，所以除以 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1328em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9072em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord">2</span></span></span><span style="top:-2.8672em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1328em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1.41</span></span></span></span></span>。整行分数同除这个数：</p><div class="calc"><div class="calc-line">2.4 ÷ 1.41 ＝ <strong>1.70</strong></div><div class="calc-line">0.2 ÷ 1.41 ＝ <strong>0.14</strong></div><div class="calc-line">0.2 ÷ 1.41 ＝ <strong>0.14</strong></div></div><p class="formula-note">（真实模型 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">64</span></span></span></span></span>、除以 8，原理完全一样，只是这里维度小、缩放也小，效果不明显——但流程一步不少。）</p><p><strong>第三步 · 归一 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mop"><span class="mord mathrm">softmax</span></span></span></span></span></span>。</strong>把降温后的 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">1.70</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.14</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.14</span><span class="mclose">]</span></span></span></span></span> 喂进 softmax：先取 e 的幂，再各自除以总和。</p><div class="calc"><div class="calc-line">e^1.70 ≈ 5.46　　e^0.14 ≈ 1.15　　e^0.14 ≈ 1.15</div><div class="calc-line">总和 ＝ 5.46 ＋ 1.15 ＋ 1.15 ＝ 7.76</div><div class="calc-line">小猫：5.46 ÷ 7.76 ＝ <strong>0.703</strong></div><div class="calc-line">累　：1.15 ÷ 7.76 ＝ <strong>0.148</strong></div><div class="calc-line">它　：1.15 ÷ 7.76 ＝ <strong>0.148</strong></div></div><div class="prob-block"><div class="prob-row"><span class="prob-name">小猫</span><span class="prob-bar"><span class="prob-fill" style="width:70.3%"></span></span><span class="prob-pct">70.3%</span></div><div class="prob-row"><span class="prob-name">累</span><span class="prob-bar"><span class="prob-fill" style="width:14.8%"></span></span><span class="prob-pct">14.8%</span></div><div class="prob-row"><span class="prob-name">它</span><span class="prob-bar"><span class="prob-fill" style="width:14.8%"></span></span><span class="prob-pct">14.8%</span></div></div><p class="formula-note">三个数加起来正好 100%——这就是「它」分配给全句的目光：七成给了小猫。</p><p><strong>第四步 · 混合 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord">×</span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span>。</strong>拿这组权重去加权混合三个词的 v，逐维相加：</p><div class="calc"><div class="calc-line">out ＝ 0.703×[1.0, 0.0] ＋ 0.148×[0.0, 1.0] ＋ 0.148×[0.5, 0.5]</div><div class="calc-line">第 1 维：0.703×1.0 ＋ 0.148×0.0 ＋ 0.148×0.5 ＝ <strong>0.78</strong></div><div class="calc-line">第 2 维：0.703×0.0 ＋ 0.148×1.0 ＋ 0.148×0.5 ＝ <strong>0.22</strong></div><div class="calc-line">→ 「它」的新向量 ＝ <strong style="color:#C0481E">[0.78, 0.22]</strong></div></div><p>还记得 v 的两维是「动物味 / 疲惫味」吗？「它」原本是个意思模糊的代词， 经过这一轮注意力，它的新向量变成了 <strong>[0.78, 0.22]</strong>——<strong>0.78 的动物味 ＋ 0.22 的疲惫味</strong>。换句话说，模型已经算出：这个「它」≈ 一只（有点累的）小猫。 第 1 站那个「它指谁」的悬念，到这里被四步算术<strong>实实在在地解决了</strong>。</p><p><strong>可是——费这么大劲混出这个新向量，到底有什么用？</strong>这才是整套机制的落点，值得说透。</p><p>前面三步（打分、降温、softmax）算出来的，只是一张「<strong>该看谁、看多少</strong>」的<strong>计划表</strong>： 70% 小猫、15% 累……可计划表本身并不会让模型变聪明——它只是「<em>知道</em>该看小猫」，还没「<em>真的看到</em>」。<strong>第四步 ×V，才是把计划付诸执行</strong>：照这组比例，把小猫的内容（V）真的取过来，<strong>装进「它」自己的向量里</strong>。少了这一步，前面辛苦算出的权重就只是一份没人读的报告， 「它」的向量纹丝不动，整层等于白忙。<strong>混合 V，就是注意力真正「搬运信息」的那一下。</strong></p><p>而这个装好了料的新向量，会<strong>顶替掉</strong>原来那个空洞的「它」，继续往上走—— 送进下一层注意力去抓更多关系，最终送到输出层去预测下一个词。 关键在于：因为现在「它」的向量里<strong>真的写着「小猫」</strong>，模型后面所有的判断， 都是在对「<strong>一只小猫</strong>」做，而不再是对一个谁也不知道指什么的空代词做。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 184" role="img" aria-label="混合 V 产出的新向量顶替原向量，继续送往下一层与预测"><defs><marker id="ah-flow-o" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#C0481E"></path></marker><marker id="ah-flow-s" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5C6B79"></path></marker></defs><rect x="24" y="50" width="132" height="62" rx="5" fill="#F4F1EA" stroke="#B8AE99" stroke-width="1.3" stroke-dasharray="4 3"></rect><text x="90" y="78" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#7A8794">原始「它」</text><text x="90" y="98" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">查词表得到 · 空洞</text><text x="90" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">与上下文无关，每句都一样</text><line x1="158" y1="81" x2="222" y2="81" stroke="#C0481E" stroke-width="2" marker-end="url(#ah-flow-o)"></line><text x="192" y="60" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="700" fill="#C0481E">注意力层</text><text x="192" y="73" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#C0481E">混合 V</text><rect x="226" y="50" width="186" height="62" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.6"></rect><text x="319" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#9A3815">新「它」= [0.78, 0.22]</text><text x="319" y="97" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#5C6B79">0.78 动物味 ＋ 0.22 疲惫味</text><text x="319" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="700" fill="#C0481E">装进了小猫的信息，随上下文而变</text><line x1="414" y1="81" x2="446" y2="81" stroke="#5C6B79" stroke-width="1.6" marker-end="url(#ah-flow-s)"></line><rect x="450" y="54" width="86" height="54" rx="5" fill="#FFFDF8" stroke="#5C6B79" stroke-width="1.2"></rect><text x="493" y="78" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#5C6B79">下一层</text><text x="493" y="96" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#5C6B79">／预测下一词</text></svg></div><figcaption><span class="fig-no">图 19-7</span>混合 V 的产物是一个「装好了上下文」的新向量：它顶替原来空洞的「它」，带着小猫的信息继续往上走，喂给下一层、最终喂给预测。注意力的价值，全在这次「搬运」里。</figcaption></figure><p>这也正好回扣第 1 站：原始的「它」是从词表里查出来的<strong>固定向量</strong>，与上下文无关—— 在哪句话里都长一个样。经过这一层注意力，它变成了<strong>随上下文而变</strong>的向量： 在「小猫累了」里偏向小猫，换成「马路堵了」就会偏向马路。 「同一个词，不同语境，得到不同向量」——这正是注意力存在的<strong>全部理由</strong>， 也是 GPT 们能「读懂上下文」的底层机制。</p><div class="takeaway"><div class="takeaway-label">把维度放大回去</div><p>把这里的 2 维换回 64 维、把「只算它一行」换成「<span class="tk-hl">n 行一起算</span>」， 就是真实 Transformer 每一层每时每刻在做的事——同样的四步：打分、降温、归一、混合， 只是更大、更并行。你刚刚用纸笔走完的，正是大模型内部最核心的那个动作。</p></div></section><section class="station reveal" data-title="亲手点一点" data-num="7" id="s7"><div class="station-head"><span class="station-no">第 7 站</span><h2>亲手点一点</h2></div><p>回到开头那对句子。下面是一个迷你注意力面板：<strong>点击任意一个词</strong>， 看它的注意力都分给了谁；再切换句子，观察同一个「它」的目光如何移动。</p><div class="lab"><div class="lab-head"><span class="lab-tag">动手实验</span><span class="lab-title">「它」的目光 —— 点击词语，查看注意力分布</span></div><div class="lab-body"><div style="display:flex;gap:10px;justify-content:center;margin-bottom:26px"><button class="think-btn" type="button" style="opacity:1">句子 A ·「它太累了」</button><button class="think-btn" type="button" style="opacity:0.55">句子 B ·「它太堵了」</button></div><div class="token-row"><button type="button" class="token" style="background:rgba(192,72,30,0.550);border-color:#C0481E">小猫<span class="token-w">60%</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.030)">没有<span class="token-w">2%</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.030)">过<span class="token-w">2%</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.120)">马路<span class="token-w">7%</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.030)">，<span class="token-w">2%</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.030)">因为<span class="token-w">2%</span></button><button type="button" class="token selected">它<span class="token-w">Q</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.030)">太<span class="token-w">2%</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.224)">累<span class="token-w">14%</span></button><button type="button" class="token" style="background:rgba(192,72,30,0.030)">了<span class="token-w">2%</span></button></div><p class="readout">「<strong>它</strong>」的目光主要落在「<strong>小猫</strong>」上（<!-- -->60<!-- -->%）</p></div><p class="lab-hint">百分比 = softmax 后的注意力权重（演示用的手工数据）。注意切换句子时，「它」的最大权重从「小猫」跳到「马路」——决定目光去向的，是「累 / 堵」这一个字的差别。</p></div><div class="think"><div class="think-q">这个面板里的注意力似乎只关心「指代」。可一句话里还有语法搭配、修饰关系、情感色彩…… 一套 Q/K/V 打出来的一种分数，照顾得过来吗？</div></div></section><section class="station reveal" data-title="总结" data-num="8" id="s8"><div class="station-head"><span class="station-no">第 8 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>注意力机制，就是让每个词带着自己的问题（Q）去查所有词的标签（K）， 按匹配程度<span class="tk-hl">分配目光</span>，再把对应的内容（V）<span class="tk-hl">按比例混合</span>成自己的新含义—— 从此，理解一个词不再依赖一条会遗忘的传话链。</p></div><div class="recap"><h3>这一课你亲手发明了</h3><ul><li><strong>注意力权重</strong>：点积打分 + softmax 归一，得到「该看谁多少」的百分比。</li><li><strong>Q / K / V</strong>：查询单、书脊标签、书的内容——一个词的三个分身，由三个可学习的矩阵生成。</li><li><strong>缩放因子 √d_k</strong>：给高维点积「降温」，防止 softmax 饱和。</li><li><strong>两个免费赠品</strong>：全句并行计算；任意距离一步直达。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="注意力让每个词按相关性为所有词分配权重并加权汇总。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>注意力机制要解决「它太累了——『它』指谁？」这类问题。它的核心做法是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">按固定窗口取最近几个词</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">让每个词根据相关性，动态地为序列中所有词分配不同的「关注权重」并加权汇总</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">把所有词的向量直接相加</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">只看句子的第一个词</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="0" data-explain="Query=我在找什么，Key=我能提供什么供匹配，Value=匹配后取走的内容。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>自注意力中的 Query、Key、Value 分别大致扮演什么角色？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">Query 是「我在找什么」，Key 是「我能提供什么以供匹配」，Value 是「匹配后实际取走的内容」</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">三者完全相同，只是名字不同</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">Query 决定层数，Key 决定学习率，Value 决定损失</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">Q、K、V 都是固定常数</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-02-multihead.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 20 课</span>
+                    <h3>多头注意力</h3>
+                    <p>注意力只能有一种看法吗？——同时关注语法、语义、指代关系</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第19课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

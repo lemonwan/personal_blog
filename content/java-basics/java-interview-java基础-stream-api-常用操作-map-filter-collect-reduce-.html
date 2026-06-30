@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 13 | Stream API 常用操作（map/filter/collect/reduce）</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 13 — Stream API 常用操作（map/filter/collect/reduce）</h1>
+  <div class="tag">模块：Java基础 · Java 8+新特性</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">13</span>
+    <span class="card-title">Stream API 常用操作（map/filter/collect/reduce）</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>Stream API 概述</h3>
+      <div class="content"><p>Stream 是 Java 8 引入的函数式数据处理抽象，它不是数据结构，不存储数据，而是对数据来源（集合、数组、I/O 通道等）执行函数式操作。</p>
+<p><strong>核心特性：</strong></p>
+<ul class="bullet-list">
+<li><span class="highlight">函数式风格</span>：支持 Lambda 表达式，链式调用，代码简洁</li>
+<li><span class="highlight">惰性求值</span>：中间操作不会立即执行，只有终端操作触发时才计算</li>
+<li><span class="highlight">内部迭代</span>：由 Stream 框架控制迭代，开发者只需声明"做什么"而非"怎么做"</li>
+<li><span class="highlight">可消费性</span>：一个 Stream 只能被消费一次，消费后需重新生成</li>
+<li><span class="highlight">支持并行</span>：parallelStream() 可自动利用多核并行处理</li>
+</ul>
+<div class="note-box"><div class="note-title">📌 Stream vs Iterator</div>Stream 关注"做什么"（声明式），Iterator 关注"怎么做"（命令式）。Stream 支持组合操作和并行，Iterator 只能逐个遍历。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>Stream 创建方式</h3>
+      <div class="content"><p>常用的 Stream 创建方式有以下几种：</p>
+<div class="code-block"><span class="comment">// 1. 从集合创建</span>
+List&lt;String&gt; list = Arrays.asList("a", "b", "c");
+Stream&lt;String&gt; stream1 = list.stream();          // 串行流
+Stream&lt;String&gt; stream2 = list.parallelStream();  // 并行流
+
+<span class="comment">// 2. 从数组创建</span>
+String[] arr = {"a", "b", "c"};
+Stream&lt;String&gt; stream3 = Arrays.stream(arr);
+
+<span class="comment">// 3. 使用 Stream.of() 创建</span>
+Stream&lt;String&gt; stream4 = Stream.of("a", "b", "c");
+Stream&lt;Integer&gt; stream5 = Stream.of(1, 2, 3);
+
+<span class="comment">// 4. 从文件创建</span>
+Stream&lt;String&gt; lines = Files.lines(Paths.get("file.txt"));
+
+<span class="comment">// 5. 生成无限流（需要 limit 截断）</span>
+Stream&lt;Integer&gt; even = Stream.iterate(0, n -&gt; n + 2);
+Stream&lt;Double&gt; randoms = Stream.generate(Math::random);</div>
+<div class="note-box warning"><div class="note-title">⚠️ 注意</div>无限流必须配合 limit()、filter() 等中间操作截断，否则终端操作会无限执行导致 OOM 或死循环。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>map — 元素转换</h3>
+      <div class="content"><p><strong>map()</strong>：将 Stream 中的每个元素通过映射函数转换为新元素，1对1转换。</p>
+<div class="code-block">// 将字符串转为大写
+List&lt;String&gt; names = Arrays.asList("alice", "bob", "charlie");
+List&lt;String&gt; upper = names.stream()
+    .map(String::toUpperCase)
+    .collect(Collectors.toList());
+// ["ALICE", "BOB", "CHARLIE"]
+
+// 对象字段提取
+List&lt;User&gt; users = ...;
+List&lt;String&gt; emails = users.stream()
+    .map(User::getEmail)
+    .collect(Collectors.toList());
+
+// map 与 flatMap 的对比
+List&lt;List&lt;Integer&gt;&gt; nested = Arrays.asList(
+    Arrays.asList(1, 2),
+    Arrays.asList(3, 4, 5));
+
+// map: 嵌套列表（List&lt;List&lt;Integer&gt;&gt;）
+List&lt;List&lt;Integer&gt;&gt; mapped = nested.stream()
+    .map(list -&gt; list.stream().map(x -&gt; x * 2).collect(Collectors.toList()))
+    .collect(Collectors.toList());
+
+// flatMap: 扁平化为一维列表（List&lt;Integer&gt;）
+List&lt;Integer&gt; flattened = nested.stream()
+    .flatMap(list -&gt; list.stream().map(x -&gt; x * 2))
+    .collect(Collectors.toList());
+// [2, 4, 6, 8, 10]</div>
+<p><strong>map 与 flatMap 的区别</strong>：map 是 1→1 转换，flatMap 是 1→N 然后扁平化合并。</p></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>filter — 元素过滤</h3>
+      <div class="content"><p><strong>filter()</strong>：根据谓词条件保留满足条件的元素。</p>
+<div class="code-block">List&lt;Integer&gt; nums = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
+// 筛选偶数
+List&lt;Integer&gt; evens = nums.stream()
+    .filter(n -&gt; n % 2 == 0)
+    .collect(Collectors.toList());
+// [2, 4, 6, 8, 10]
+
+// 多个条件组合
+List&lt;String&gt; words = Arrays.asList("java", "Stream", "API", "JAVA8");
+List&lt;String&gt; result = words.stream()
+    .filter(w -&gt; w.length() &gt; 3)       // 长度大于3
+    .filter(w -&gt; w.startsWith("J"))     // 以J开头
+    .map(String::toUpperCase)
+    .collect(Collectors.toList());
+// ["JAVA", "JAVA8"]
+
+// 非空过滤
+List&lt;String&gt; list = Arrays.asList("a", null, "b", null);
+List&lt;String&gt; nonNull = list.stream()
+    .filter(Objects::nonNull)
+    .collect(Collectors.toList());</div>
+<p><strong>filter 可以链式组合</strong>，每个 filter 独立判断，效果等同于 AND 条件。若需要 OR 条件，在单个 filter 中用 <code>||</code> 连接。</p></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>collect — 元素收集</h3>
+      <div class="content"><p><strong>collect()</strong>：将 Stream 中的元素收集到结果容器中，是最常用的终端操作。</p>
+<div class="code-block">List&lt;String&gt; names = Arrays.asList("Alice", "Bob", "Charlie", "David");
+
+// 收集为 List
+List&lt;String&gt; list = names.stream()
+    .filter(n -&gt; n.length() &gt; 3)
+    .collect(Collectors.toList());
+
+// 收集为 Set（去重）
+Set&lt;String&gt; set = names.stream()
+    .collect(Collectors.toSet());
+
+// 收集为 Map（key-mapper, value-mapper）
+Map&lt;String, Integer&gt; map = names.stream()
+    .collect(Collectors.toMap(
+        Function.identity(),           // key: 元素本身
+        String::length                 // value: 字符串长度
+    ));
+// {Alice=5, Bob=3, Charlie=7, David=5}
+
+// 收集为 Map（处理 key 冲突）
+Map&lt;String, List&lt;String&gt;&gt; byLength = names.stream()
+    .collect(Collectors.groupingBy(String::length));
+// {5=[Alice, David], 3=[Bob], 7=[Charlie]}
+
+// 字符串拼接
+String joined = names.stream()
+    .collect(Collectors.joining(", "));
+// "Alice, Bob, Charlie, David"
+
+// 自定义收集器
+UserSummary summary = names.stream()
+    .collect(
+        UserSummary::new,                           // supplier
+        (r, name) -&gt; r.addName(name),              // accumulator
+        (r1, r2) -&gt; r1.merge(r2)                   // combiner（并行用）
+    );</div>
+<div class="note-box"><div class="note-title">📌 Collectors 常用方法</div><code>toList()</code> / <code>toSet()</code> / <code>toMap()</code> / <code>groupingBy()</code> / <code>partitioningBy()</code> / <code>joining()</code> / <code>averagingInt()</code> / <code>summingInt()</code> / <code>maxBy()</code> / <code>minBy()</code> / <code>reducing()</code> / <code>counting()</code></div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>reduce — 归约聚合</h3>
+      <div class="content"><p><strong>reduce()</strong>：将 Stream 中的所有元素合并为一个值，是函数式编程中的核心概念。</p>
+<div class="code-block">List&lt;Integer&gt; nums = Arrays.asList(1, 2, 3, 4, 5);
+
+// 方式1：无初始值（返回 Optional）
+Optional&lt;Integer&gt; sum = nums.stream()
+    .reduce((a, b) -&gt; a + b);
+// Optional[15]
+
+// 方式2：有初始值
+int total = nums.stream()
+    .reduce(0, (a, b) -&gt; a + b);
+// 15
+
+// 方式3：结合收集器
+int total2 = nums.stream()
+    .reduce(0, Integer::sum);
+// 15
+
+// 实际场景：求最大长度字符串
+String longest = names.stream()
+    .reduce("", (a, b) -&gt; a.length() &gt;= b.length() ? a : b);
+
+// 复杂对象归约：合并列表
+List&lt;String&gt; allNames = departments.stream()
+    .map(Department::getMembers)
+    .flatMap(List::stream)
+    .reduce(new ArrayList&lt;&gt;(), 
+        (list, member) -&gt; { list.add(member); return list; },
+        (list1, list2) -&gt; { list1.addAll(list2); return list1; });
+
+// 使用 reduce 做统计
+Map&lt;String, Long&gt; wordCount = sentence.stream()
+    .flatMap(w -&gt; Arrays.stream(w.split(" ")))
+    .collect(Collectors.groupingBy(
+        Function.identity(),
+        Collectors.counting()
+    ));</div>
+<div class="note-box warning"><div class="note-title">⚠️ reduce 注意事项</div>并行流中使用 reduce 时，累积函数和组合函数必须满足结合律，否则结果可能不正确。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>Stream 实战示例</h3>
+      <div class="content"><div class="code-block">// 场景：员工薪资分析
+class Employee {
+    String name; String dept; double salary; int age;
+    // 构造函数、getter 省略
+}</div>
+
+<div class="code-block">// 1. 找出销售部门30岁以上员工的姓名，按薪资降序排列
+List&lt;String&gt; names = employees.stream()
+    .filter(e -&gt; "Sales".equals(e.getDept()))
+    .filter(e -&gt; e.getAge() &gt; 30)
+    .sorted(Comparator.comparingDouble(Employee::getSalary).reversed())
+    .map(Employee::getName)
+    .collect(Collectors.toList());
+
+// 2. 按部门分组，计算各部门平均薪资
+Map&lt;String, Double&gt; avgSalaryByDept = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::getDept,
+        Collectors.averagingDouble(Employee::getSalary)
+    ));
+
+// 3. 找出薪资最高的前3名员工
+List&lt;Employee&gt; top3 = employees.stream()
+    .sorted(Comparator.comparingDouble(Employee::getSalary).reversed())
+    .limit(3)
+    .collect(Collectors.toList());
+
+// 4. 统计各部门人数
+Map&lt;String, Long&gt; countByDept = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::getDept,
+        Collectors.counting()
+    ));
+
+// 5. 部门名→薪资最高的员工（groupingBy 嵌套收集器）
+Map&lt;String, Employee&gt; topPerDept = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::getDept,
+        Collectors.collectingAndThen(
+            Collectors.reducing((a, b) -&gt; a.getSalary() &gt; b.getSalary() ? a : b),
+            Optional::get
+        )
+    ));</div>
+<p><strong>关键思维</strong>：写 Stream 时先确定"数据来源" → 再链式加中间操作（filter/sort/map） → 最后确定"要什么结果"（collect/reduce）。中间操作可自由组合，无需关心执行顺序。</p></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试高频问题</h3>
+      <div class="content"><div class="code-block">// Q1: Stream 的中间操作和终端操作有什么区别？
+// A: 中间操作（filter/map/sorted/skip/limit/distinct/peek）返回 Stream，惰性求值；
+//    终端操作（collect/count/forEach/anyMatch/reduce）触发执行，返回具体结果，且 Stream 不可复用。</div>
+
+<div class="code-block">// Q2: map 和 flatMap 的区别？
+// A: map 是 1→1 映射；flatMap 是 1→N 映射后扁平化合并。
+//    典型场景：扁平化嵌套集合、拆分字符串后处理。</div>
+
+<div class="code-block">// Q3: Stream 并行和串行有什么区别？什么时候用 parallelStream？
+// A: parallelStream 将任务拆分到 ForkJoinPool 并行执行。
+//    适用：数据量大、操作计算密集、无外部依赖。
+//    不适用：数据量小、操作本身慢（如IO）、有状态操作（sorted/limit）、线程安全问题。</div>
+
+<div class="code-block">// Q4: forEach 和 forEachOrdered 的区别？
+// A: forEach 不保证顺序（并行时尤其明显）；
+//    forEachOrdered 保证遇到顺序 Stream 时的元素顺序。</div>
+
+<div class="code-block">// Q5: 如何排查 Stream 的性能问题？
+// A: 1) 确认中间操作是否惰性（用 peek() 调试）；
+//     2) 避免在 Stream 中做重 IO 操作；
+//     3) 避免装箱拆箱（intStream/longStream/doubleStream 原始类型流）；
+//     4) 并行流时检查 ForkJoinPool 线程数是否合理。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">💥</span>常见坑点与最佳实践</h3>
+      <div class="content"><p><strong>⚠️ 常见坑点：</strong></p>
+<ul class="bullet-list">
+<li><span class="highlight">流复用错误</span>：Stream 消费一次后失效，<code>stream.collect(...)</code> 后再 <code>stream.filter(...)</code> 会抛 <code>IllegalStateException</code></li>
+<li><span class="highlight">并行流的线程安全</span>：并行流中用 <code>forEach</code> 修改共享集合需加锁或用线程安全的 <code>ConcurrentHashMap</code></li>
+<li><span class="highlight">无限流忘记 limit</span>：<code>Stream.iterate()</code> 和 <code>Stream.generate()</code> 是无限的，必须配合 <code>limit()</code></li>
+<li><span class="highlight">装箱拆箱性能</span>：对大量基本类型数据用 <code>IntStream</code> / <code>LongStream</code> / <code>DoubleStream</code> 避免装箱</li>
+<li><span class="highlight">短路操作放前面</span>：先 filter 再 map，减少不必要的对象创建</li>
+<li><span class="highlight">collect 收集为可变集合</span>：<code>collect(Collectors.toList())</code> 返回的列表在某些实现中不可变（如 <code>Collectors.toUnmodifiableList()</code>），注意区分</li>
+</ul>
+<p><strong>✅ 最佳实践：</strong></p>
+<ul class="bullet-list">
+<li>Stream 链尽量控制在 3-5 步以内，超过考虑拆分或使用临时变量</li>
+<li>优先使用命名方法引用 <code>(String::toUpperCase)</code> 而非 Lambda，更简洁可读</li>
+<li>需要并行时，先用串行 Stream 调试正确性，再切换 parallelStream</li>
+<li>用 <code>Optional</code> 封装 reduce 返回值，避免 <code>Optional.get()</code> 抛异常</li>
+</ul></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 13.0%"></div></div>
+  <div class="progress-text">13 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>Optional 的使用 — 告别 if-null 判空，优雅处理可选值</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 13/66</div>
+</body>
+</html>

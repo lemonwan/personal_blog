@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第28课 · 模型蒸馏 | AI大模型原理教程</title>
+    <meta name="description" content="大模型的能力能「传授」给小模型吗？——软标签里藏着什么「暗知识」？">
+    <meta name="keywords" content="AI大模型教程,Transformer,模型蒸馏,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第28课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 28 · 卷四</div>
+            <h1>模型蒸馏</h1>
+            <p class="subtitle">❝ 大模型的能力能「传授」给小模型吗？——软标签里藏着什么「暗知识」？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="大模型好但太贵" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>大模型很聪明，可惜用不起</h2></div><p>走到这里，我们已经能造出一台 GPT-4 级别的庞然大物——会写论文、读合同、解数学、调代码。可它<strong>太贵</strong>： 每生成 1000 个 token 约 0.03 美元，一家中型公司若拿它扛下全部客服对话，一年 API 账单轻松上百万美元。</p><p>而一个 7B 的小模型，在一张消费级显卡（16GB 显存）上就能跑，成本是前者的<strong>几百分之一</strong>—— 但它笨得多，尤其在推理、写作、代码这些硬任务上。一边是聪明但烧钱，一边是便宜但平庸。</p><p>能不能把大模型的本事，<strong>「教」给</strong>一个小模型？</p><div class="think"><div class="think-q">用大模型给一堆问题生成标准答案，再拿这批数据训小模型——行不行？漏了什么？</div></div></section><section class="station reveal" data-title="软标签：暗知识" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>「软标签」里，藏着硬答案没有的「暗知识」</h2></div><p>考一道选择题：「法国的首都是？　A. 巴黎　B. 伦敦　C. 罗马　D. 柏林」。告诉学生答案，有两种讲法：</p><ul style="padding-left:24px;line-height:2.1"><li><strong>硬标签</strong>：「选 A。」——只传了一个比特：对，还是错。</li><li><strong>软标签</strong>：「A 99.6%、<strong>B 0.25%、C 0.09%、D 0.05%</strong>」—— 还顺带告诉你：错误项里<strong>伦敦比罗马、柏林更像个首都</strong>。这层「错得有讲究」的信息，硬标签里完全没有。</li></ul><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 124" role="img" aria-label="硬标签 vs 软标签信息量对比"><text x="130" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">硬标签（非对即错）</text><g><rect x="20" y="30" width="50" height="50" rx="4" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><rect x="24" y="32" width="42" height="46" rx="2" fill="#C0481E" opacity="0.6"></rect><text x="45" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">巴黎</text><text x="45" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#C0481E">100%</text></g><g><rect x="80" y="30" width="50" height="50" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><rect x="84" y="75" width="42" height="3" rx="2" fill="#DCD2BF" opacity="0.6"></rect><text x="105" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">伦敦</text><text x="105" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#DCD2BF">0%</text></g><g><rect x="140" y="30" width="50" height="50" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><rect x="144" y="75" width="42" height="3" rx="2" fill="#DCD2BF" opacity="0.6"></rect><text x="165" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">罗马</text><text x="165" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#DCD2BF">0%</text></g><g><rect x="200" y="30" width="50" height="50" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><rect x="204" y="75" width="42" height="3" rx="2" fill="#DCD2BF" opacity="0.6"></rect><text x="225" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">柏林</text><text x="225" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#DCD2BF">0%</text></g><text x="420" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#3E6B8F">软标签（概率分布）</text><g><rect x="300" y="30" width="50" height="50" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><rect x="304" y="32" width="42" height="46" rx="2" fill="#3E6B8F" opacity="0.7"></rect><text x="325" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">巴黎</text><text x="325" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#3E6B8F">100%</text></g><g><rect x="360" y="30" width="50" height="50" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><rect x="364" y="75" width="42" height="3" rx="2" fill="#93A0AC" opacity="0.7"></rect><text x="385" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">伦敦</text><text x="385" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#5C6B79">0.25%</text></g><g><rect x="420" y="30" width="50" height="50" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><rect x="424" y="75" width="42" height="3" rx="2" fill="#93A0AC" opacity="0.7"></rect><text x="445" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">罗马</text><text x="445" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#5C6B79">0.09%</text></g><g><rect x="480" y="30" width="50" height="50" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><rect x="484" y="75" width="42" height="3" rx="2" fill="#93A0AC" opacity="0.7"></rect><text x="505" y="93" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="10" fill="#5C6B79">柏林</text><text x="505" y="106" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#5C6B79">0.05%</text></g><text x="420" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">（柱高按 √概率 画，否则小项看不见）</text></svg></div><figcaption><span class="fig-no">图 28-1</span>硬标签只有「对/错」；软标签是教师完整的概率分布，连错误项之间的<strong>相对高低</strong>也带着信息——「伦敦比罗马更像首都」。Hinton 把这层信息叫<strong>「暗知识」（dark knowledge）</strong>。</figcaption></figure><p>这正是 Hinton（深度学习三位先驱之一）2014 年提出的<strong>知识蒸馏</strong>： 让小模型（学生）去模仿大模型（教师）的<strong>输出分布</strong>，而不只是抄那个正确答案。学生学的是教师的「判断纹理」，不只是结论。</p></section><section class="station reveal" data-title="用温度把暗知识逼出来" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>难题：暗知识藏得太深，得用「温度」逼出来</h2></div><p>有个麻烦：教师太自信了。它的原始分布常常 99.6% 全压在正确答案上，错误项小到 0.05%—— 暗知识虽在，却淹没在小数点后好几位，学生几乎看不见、学不到。怎么办？请回第 11 课那个老朋友：<strong>温度 T</strong>。</p><p>softmax 之前把每个分数都<strong>除以 T</strong>，T 越大、分布越「软」。拿一组教师打分 logits 手算一遍，体会暗知识怎么浮出来：</p><div class="formula" style="text-align:left;font-size:13.5px;line-height:2">教师 logits（巴黎/伦敦/罗马/柏林）：<span class="f-hl">[8, 2, 1, 0.5]</span><br/><strong>T=1</strong>（原始）：softmax → [<span class="f-hl">99.6%</span>, 0.25%, 0.09%, 0.05%]　<span class="f-dim">← 暗知识被压没了</span><br/><strong>T=4</strong>（除以 4 再 softmax）：[2, 0.5, 0.25, 0.125] → [<span class="f-hl">64%</span>, 14%, 11%, 10%]<br/><span class="f-dim">→ 巴黎仍最高，但「伦敦 14% > 罗马 11% > 柏林 10%」的<strong>相对纹理</strong>清清楚楚地露了出来</span></div><p>升温不改变谁高谁低，却把被压扁的差距<strong>拉开成学生看得见、学得到的信号</strong>。 于是蒸馏训练时，小模型同时背两个目标——既要像被升温软化的教师，也要答对真答案：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3813em;vertical-align:-1.698em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span style="top:-1.477em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">KL</span><span class="mord cjk_fallback mtight">：贴近教师分布</span><span class="mord mtight">(T>1)</span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span class="svg-align" style="top:-2.202em;"><span class="pstrut" style="height:3em;"></span><span class="stretchy" style="height:0.548em;min-width:1.6em;"><span class="brace-left" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMinYMin slice"><path d="M0 6l6-6h17c12.688 0 19.313.3 20 1 4 4 7.313 8.3 10 13
+ 35.313 51.3 80.813 93.8 136.5 127.5 55.688 33.7 117.188 55.8 184.5 66.5.688
+ 0 2 .3 4 1 18.688 2.7 76 4.3 172 5h399450v120H429l-6-1c-124.688-8-235-61.7
+-331-161C60.687 138.7 32.312 99.3 7 54L0 41V6z"/></svg></span><span class="brace-center" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMidYMin slice"><path d="M199572 214
+c100.7 8.3 195.3 44 280 108 55.3 42 101.7 93 139 153l9 14c2.7-4 5.7-8.7 9-14
+ 53.3-86.7 123.7-153 211-199 66.7-36 137.3-56.3 212-62h199568v120H200432c-178.3
+ 11.7-311.7 78.3-403 201-6 8-9.7 12-11 12-.7.7-6.7 1-18 1s-17.3-.3-18-1c-1.3 0
+-5-4-11-12-44.7-59.3-101.3-106.3-170-141s-145.3-54.3-229-60H0V214z"/></svg></span><span class="brace-right" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMaxYMin slice"><path d="M399994 0l6 6v35l-6 11c-56 104-135.3 181.3-238 232-57.3
+ 28.7-117 45-179 50H-300V214h399897c43.3-7 81-15 113-26 100.7-33 179.7-91 237
+-174 2.7-5 6-9 10-13 .7-1 7.3-1 20-1h17z"/></svg></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">soft</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.798em;"><span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.698em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.2263em;vertical-align:-1.4763em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span style="top:-1.5237em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">交叉熵：对照真答案</span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span class="svg-align" style="top:-2.202em;"><span class="pstrut" style="height:3em;"></span><span class="stretchy" style="height:0.548em;min-width:1.6em;"><span class="brace-left" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMinYMin slice"><path d="M0 6l6-6h17c12.688 0 19.313.3 20 1 4 4 7.313 8.3 10 13
+ 35.313 51.3 80.813 93.8 136.5 127.5 55.688 33.7 117.188 55.8 184.5 66.5.688
+ 0 2 .3 4 1 18.688 2.7 76 4.3 172 5h399450v120H429l-6-1c-124.688-8-235-61.7
+-331-161C60.687 138.7 32.312 99.3 7 54L0 41V6z"/></svg></span><span class="brace-center" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMidYMin slice"><path d="M199572 214
+c100.7 8.3 195.3 44 280 108 55.3 42 101.7 93 139 153l9 14c2.7-4 5.7-8.7 9-14
+ 53.3-86.7 123.7-153 211-199 66.7-36 137.3-56.3 212-62h199568v120H200432c-178.3
+ 11.7-311.7 78.3-403 201-6 8-9.7 12-11 12-.7.7-6.7 1-18 1s-17.3-.3-18-1c-1.3 0
+-5-4-11-12-44.7-59.3-101.3-106.3-170-141s-145.3-54.3-229-60H0V214z"/></svg></span><span class="brace-right" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMaxYMin slice"><path d="M399994 0l6 6v35l-6 11c-56 104-135.3 181.3-238 232-57.3
+ 28.7-117 45-179 50H-300V214h399897c43.3-7 81-15 113-26 100.7-33 179.7-91 237
+-174 2.7-5 6-9 10-13 .7-1 7.3-1 20-1h17z"/></svg></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">hard</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.798em;"><span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.4763em;"><span></span></span></span></span></span></span></span></span></span></span></div><p><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 调两者轻重（常取 0.5~0.9，软标签为主）。值得回味的是，这一课<strong>三件工具没一件是新的</strong>：<strong>软标签</strong>是第 11 课 softmax 的概率分布，<strong>温度 T</strong> 是第 11 课那个调软硬的旋钮，<strong>KL 散度</strong>是第 6 课量「两个分布差多远」的尺子。临近终点，整门课的零件来了一次小小的会师。</p></section><section class="station reveal" data-title="两种蒸馏" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>现实里其实有两种「蒸馏」</h2></div><p>上面讲的是 Hinton 的经典版，但它有个前提：你得拿得到教师<strong>每一步、整个词表上的概率分布</strong>。 这只有在你<strong>自己拥有教师模型</strong>（白盒）时才行。可大多数人只能通过 API 调 GPT-4——它只吐文字，不给你内部分布（黑盒）。于是现实分出两条路：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 178" role="img" aria-label="白盒分布蒸馏 vs 黑盒序列蒸馏"><defs><marker id="ds-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5C6B79"></polygon></marker></defs><text x="20" y="20" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">① 白盒 · 分布蒸馏（经典）</text><rect x="20" y="32" width="90" height="36" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.5"></rect><text x="65" y="54" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#C0481E">教师模型</text><line x1="110" y1="50" x2="146" y2="50" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#ds-arr)"></line><rect x="148" y="32" width="150" height="36" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="223" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">每步完整概率分布</text><text x="223" y="62" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#93A0AC">[0.64, 0.14, 0.11, …]</text><line x1="300" y1="50" x2="336" y2="50" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#ds-arr)"></line><rect x="338" y="32" width="150" height="36" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.4"></rect><text x="413" y="54" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#2F8F76">学生用 KL 对齐分布</text><text x="500" y="52" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">需</text><text x="500" y="64" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">白盒</text><text x="20" y="104" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#B07A1E">② 黑盒 · 序列蒸馏（API 时代主流）</text><rect x="20" y="116" width="90" height="36" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.5"></rect><text x="65" y="138" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#C0481E">教师（API）</text><line x1="110" y1="134" x2="146" y2="134" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#ds-arr)"></line><rect x="148" y="116" width="150" height="36" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1.2"></rect><text x="223" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">只给生成的文本/推理</text><text x="223" y="146" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="9" fill="#93A0AC">「巴黎是法国首都……」</text><line x1="300" y1="134" x2="336" y2="134" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#ds-arr)"></line><rect x="338" y="116" width="150" height="36" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.4"></rect><text x="413" y="138" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#2F8F76">学生当普通 SFT 训</text><text x="500" y="130" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">仅需</text><text x="500" y="142" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">黑盒</text></svg></div><figcaption><span class="fig-no">图 28-2</span>两种蒸馏：白盒「分布蒸馏」让学生用 KL 对齐教师每一步的完整概率（信息最全，但要拥有教师内部）；黑盒「序列蒸馏」只拿教师<strong>生成的文本</strong>当数据、给学生做普通 SFT（信息少些，但一个 API 就够）。如今很多「蒸馏版」开源模型，走的其实是第二条。</figcaption></figure><p>第二条路看着「只学了硬答案」，可一旦教师够强、数据够多够好，效果惊人。 尤其 2024 年起火热的<strong>推理蒸馏</strong>：让 DeepSeek-R1、o1 这类<em>会一步步思考</em>的强教师， 把完整的<strong>思维链</strong>写出来，小模型照着这些「解题过程」训——竟能把「慢慢想」的本事也学个八九分。 DeepSeek-R1-Distill 把推理能力蒸进 7B/14B，正是这条路。</p></section><section class="station reveal" data-title="现实与局限" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>现实中的蒸馏，与它的天花板</h2></div><p>蒸馏早已是工业界压小模型、降成本的标准操作：</p><ul style="padding-left:24px;line-height:2.2"><li><strong>DistilBERT</strong>（HuggingFace）：把 BERT 蒸到 60% 大小，保留约 97% 的性能。</li><li><strong>Phi 系列</strong>（微软）：小到 3.8B，靠精选「教科书级」数据 + 大模型输出，多项基准上压过更大的模型。</li><li><strong>DeepSeek-R1-Distill</strong>：把强推理大模型的思维链蒸进 7B/14B，推理能力大幅保留。</li></ul><div class="crack reveal"><div class="crack-label">天花板：学生翻不过教师这座山</div><p>蒸馏有个铁律：<strong>学生的上限就是教师</strong>，它在模仿，不会凭空超越源头。 而且参数量是硬约束——小模型就那么点容量，哪怕完美复刻了教师的分布，也<strong>装不下</strong>教师那么多知识， 细节处终会露怯。</p><p style="margin-top:12px">还有笔成本账：要生成软标签或大量高质量文本，得让昂贵的教师<strong>把整个训练集跑一遍</strong>， 数据越多这步越贵。蒸馏是把「一次性的教师推理成本」<strong>提前付掉</strong>，换来日后小模型的廉价部署—— 划不划算，要看你之后要跑多少次。</p></div></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>蒸馏：让小模型学大模型的<span class="tk-hl">输出分布</span>，而不只是正确答案。 软标签藏着「暗知识」（错误项的相对高低），靠<span class="tk-hl">温度 T</span> 升温才看得见； 损失 = α·KL（贴近教师）+ (1−α)·交叉熵（对照真答案）。 白盒可做分布蒸馏，黑盒（API）只能做序列蒸馏——后者正撑起今天的推理蒸馏热潮。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>动机</strong>：大模型贵、小模型笨；蒸馏让小模型接近大模型。</li><li><strong>软标签 vs 硬标签</strong>：分布里的「暗知识」——错误项之间也有相对信息。</li><li><strong>温度</strong>：logits [8,2,1,0.5] 在 T=1 暗知识被压没，T=4 拉出「伦敦>罗马>柏林」。</li><li><strong>损失</strong>：α·KL散度（对齐升温后的教师）+ (1−α)·交叉熵（对照真答案）。</li><li><strong>两种路 + 局限</strong>：白盒分布蒸馏 / 黑盒序列蒸馏（含推理蒸馏）；学生翻不过教师，且教师推理本身有成本。</li></ul></div><div class="recap" style="margin-top:24px;border-left-color:#C0481E"><h3 style="color:#C0481E">大语言模型 · 核心技术栈，到此拼齐</h3><p style="line-height:1.8">这一卷从「注意力机制」一路走到「ChatGPT 诞生」： 注意力 → 多头 → Transformer 架构（FFN/位置编码）→ 分词器 → 编码器与解码器（自回归）→ 残差与归一化 → 预训练·SFT·RLHF → 长上下文（稀疏/KV缓存/FlashAttention）→ MoE → 蒸馏。</p><p style="line-height:1.8;margin-top:12px">从第 1 课的一根数轴，到这一课的模型蒸馏——大语言模型的核心技术栈，到此就拼齐了。 AI 并不神秘：它是一步一步、都能追溯的数学与工程决策，垒起来的。 后面还有两课「加餐」：先把从 N-gram 到 Transformer 的整条路串讲一遍，再望一眼前沿与未来。</p></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="蒸馏靠大模型的“软标签”——完整概率分布里藏着类别间关系等暗知识。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>模型蒸馏（distillation）让小模型「学」大模型的能力，关键依赖大模型输出的什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">只用非对即错的硬标签</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">「软标签」——大模型给各类别的完整概率分布，里面藏着类别间关系等「暗知识」</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">大模型的参数文件</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">大模型的训练日志</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="高温软化分布，放大非目标类别概率，暴露更多暗知识给学生。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>在蒸馏中常对 Softmax 使用较高的「温度 T」，目的是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">让训练更慢</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">软化概率分布，放大那些很小的非目标类别概率，暴露更多「暗知识」给学生学习</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">让大模型变得更大</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">把概率全部变成 0 或 1</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-10-recap.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 29 课</span>
+                    <h3>串讲：从 N-gram 到 Transformer</h3>
+                    <p>学了这么多细节，怎么把它们重新串成一条线？——每一代技术，都是来解上一代死结的</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第28课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

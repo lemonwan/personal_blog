@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 9 | 受检异常 vs 非受检异常的设计哲学</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 9 — 受检异常 vs 非受检异常的设计哲学</h1>
+  <div class="tag">模块：Java基础 · 异常与断言</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">09</span>
+    <span class="card-title">受检异常 vs 非受检异常的设计哲学</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>受检异常与非受检异常的区别</h3>
+      <div class="content"><p>Java 的异常体系分为两大类：</p><ul class="bullet-list"><li><span class="highlight">受检异常（Checked Exception）</span>：编译器强制要求处理，必须 try-catch 或 throws 声明。继承自 Exception 但排除 RuntimeException 及其子类。代表外部环境问题，<strong>客户端可以合理恢复</strong>，如 IOException、SQLException。</li><li><span class="highlight">非受检异常（Unchecked Exception）</span>：编译器不强制处理，继承自 RuntimeException。代表编程错误，<strong>客户端无法合理恢复</strong>，如 NullPointerException、IllegalArgumentException。</li></ul><div class="note-box"><div class="note-title">核心判断标准</div>客户端能否从异常中恢复？能 → 受检异常；不能 → 非受检异常。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>设计哲学争议</h3>
+      <div class="content"><p>Java 引入受检异常是语言设计中最具争议的决定之一：</p><ul class="bullet-list"><li><span class="highlight">支持者观点</span>：强制处理让异常不可忽略，提高代码健壮性；调用方 API 签名明确暴露了可能出现的异常；推动开发者编写更可靠的错误处理代码。</li><li><span class="highlight">反对者观点</span>：样板代码泛滥（大量 try-catch-throw 向上传递）；破坏封装性——底层实现的异常被迫暴露在 API 中；Java 标准库设计不一致（如 I/O 用受检，集合用非受检）；Martin Fowler 称其为 "千亿美元的重大错误"。</li><li><span class="highlight">替代方案</span>：C#、Go 等语言完全摒弃受检异常；Kotlin 采用非受检异常 + 结果类型（Result/Optional）模式。</li></ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>Java 设计者的考量</h3>
+      <div class="content"><p>Java 的受检异常设计基于以下理念：</p><ul class="bullet-list"><li><span class="highlight">"失败必须被处理"</span>：调用者不能假装方法调用成功，必须面对失败的可能性</li><li><span class="highlight">类型系统保障</span>：方法签名包含异常信息，API 文档更完整</li><li><span class="highlight">可恢复性假设</span>：对于文件、网络等资源操作，调用方应有策略处理失败（重试、降级、fallback）</li></ul><p>但实际应用中，这个假设常常不成立。很多企业级应用中，异常只是简单地向上传播到顶层统一处理。</p><div class="note-box warning"><div class="note-title">面试陷阱</div>面试官可能问："你觉得受检异常好不好？" 最佳回答：承认设计初衷是好的，但承认实际使用中存在问题，并说明现代 Java 开发中更倾向于非受检异常 + 统一异常处理的模式。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>实战最佳实践</h3>
+      <div class="content"><p>现代 Java 开发中的推荐做法：</p><ul class="bullet-list"><li><span class="highlight">应用层</span>：自定义非受检异常（如 BusinessException），统一捕获并转换为 HTTP 响应</li><li><span class="highlight">边界层</span>：在 I/O、DB 等边界处，将受检异常包装为非受检异常抛出</li><li><span class="highlight">框架层</span>：Spring 的 RuntimeException 传播机制是主流模式</li><li><span class="highlight">@ExceptionHandler</span>：Spring Boot 中用全局异常处理器统一响应格式</li></ul><pre class="code-block"><span class="keyword">public</span> User getUser(<span class="keyword">Long</span> id) {
+    <span class="keyword">try</span> {
+        <span class="keyword">return</span> userRepository.findById(id).orElse(<span class="keyword">null</span>);
+    } <span class="keyword">catch</span> (DataAccessException e) {
+        <span class="comment">// 将受检异常包装为非受检异常</span>
+        <span class="keyword">throw new</span> UserServiceException(<span class="string">"获取用户失败"</span>, e);
+    }
+}</pre></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试高频问题</h3>
+      <div class="content"><ul class="bullet-list"><li><span class="highlight">"请说明受检异常和非受检异常的区别？"</span>：从继承关系、编译器处理、使用场景三个维度回答</li><li><span class="highlight">"Java 为什么设计受检异常？"</span>：强调 "强制处理" 的设计哲学和可恢复性假设</li><li><span class="highlight">"你项目中如何处理异常？"</span>：推荐回答：自定义非受检异常 + 全局异常处理器 + 统一响应格式</li><li><span class="highlight">"@Transactional 回滚默认对哪些异常生效？"</span>：默认只对 RuntimeException 和 Error 回滚，受检异常不会触发回滚（除非显式配置）——这是非常经典的面试陷阱题！</li></ul><div class="note-box danger"><div class="note-title">重要陷阱</div>Spring 事务默认只对非受检异常回滚！如果抛出了受检异常，事务不会回滚，这是一个极其常见且致命的 Bug 来源。</div></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 13.6%"></div></div>
+  <div class="progress-text">9 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>try-with-resources 原理</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 9/66</div>
+</body>
+</html>

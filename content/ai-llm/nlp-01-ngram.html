@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第14课 · 语言的概率游戏：N-gram | AI大模型原理教程</title>
+    <meta name="description" content="在「我爱」后面，最可能接哪个字？——统计语言模型的开端">
+    <meta name="keywords" content="AI大模型教程,Transformer,语言的概率游戏：N-gram,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第14课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 14 · 卷三</div>
+            <h1>语言的概率游戏：N-gram</h1>
+            <p class="subtitle">❝ 在「我爱」后面，最可能接哪个字？——统计语言模型的开端 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="手机怎么猜下一个字" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>手机怎么猜下一个字</h2></div><p>你用手机打字，输入「今天天气」，键盘弹出三个候选词：<strong>「真好」「不错」「怎么样」</strong>。 它是怎么猜出来的？</p><p>手机没有读懂「天气」这个概念，没有联网查天气预报，也没有问过你今天心情好不好。 它做的事情极其简单：<strong>翻历史记录，数数</strong>。</p><p>想象手机偷偷读过几千万条中文消息。每次看到「今天天气」这四个字后面跟着什么，就记一笔：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 180" role="img" aria-label="「今天天气」之后的词频统计"><text x="30" y="28" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#232F3B">在几千万条消息里，「今天天气」后面跟着……</text><g><text x="80" y="58" text-anchor="end" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">真好</text><rect x="88" y="43" width="311.2888888888889" height="18" rx="3" fill="#3E6B8F" opacity="0.6"></rect><text x="407.2888888888889" y="57" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">4,120<!-- --> 次</text></g><g><text x="80" y="84" text-anchor="end" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">不错</text><rect x="88" y="69" width="293.9111111111111" height="18" rx="3" fill="#3E6B8F" opacity="0.6"></rect><text x="389.9111111111111" y="83" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">3,890<!-- --> 次</text></g><g><text x="80" y="110" text-anchor="end" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">怎么样</text><rect x="88" y="95" width="191.9111111111111" height="18" rx="3" fill="#5C6B79" opacity="0.6"></rect><text x="287.9111111111111" y="109" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">2,540<!-- --> 次</text></g><g><text x="80" y="136" text-anchor="end" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">好热</text><rect x="88" y="121" width="141.2888888888889" height="18" rx="3" fill="#5C6B79" opacity="0.6"></rect><text x="237.2888888888889" y="135" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">1,870<!-- --> 次</text></g><g><text x="80" y="162" text-anchor="end" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">太差了</text><rect x="88" y="147" width="74.04444444444444" height="18" rx="3" fill="#93A0AC" opacity="0.6"></rect><text x="170.04444444444442" y="161" font-family="JetBrains Mono, monospace" font-size="11" fill="#93A0AC">980<!-- --> 次</text></g></svg></div><figcaption><span class="fig-no">图 14-1</span>「今天天气」后面出现频率最高的词。手机只需按频率排序，就能给出三个候选。</figcaption></figure><p>下次你输入「今天天气」，手机就把出现最多的几个词推给你。<strong>这就是手机输入法的基本原理——纯粹的数数，和「理解语言」毫无关系。</strong></p><div class="think"><div class="think-q">手机是不是真的「懂」你在说什么？如果你前面刚写了「最近身体不太好」， 它还会推荐「今天天气真好」吗？</div></div></section><section class="station reveal" data-title="让方法更通用" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>让方法更通用：看最近 N 个词</h2></div><p>上面的方法每次都看整段「今天天气」这个固定短语—— 如果用户输入的是「今天的天气」，历史记录就完全对不上号了，方法失效。</p><p>更实用的做法：不管前面说了多少，<strong>只看最近的几个词</strong>，用它们来预测下一个词。 看最近 1 个词，叫「一元模型」；看最近 2 个词，叫「二元模型」； 看最近 N 个词，就叫 <strong>N-gram</strong>（N 元语言模型）。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 160" role="img" aria-label="N-gram 预测示意：看最近 N 个词预测下一个"><text x="280" y="22" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#5C6B79">句子：「我 昨天 买 了 一 只 猫」，预测下一个词</text><g><rect x="20" y="40" width="58" height="40" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="49" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#93A0AC">我</text></g><g><rect x="85" y="40" width="58" height="40" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="114" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#93A0AC">昨天</text></g><g><rect x="150" y="40" width="58" height="40" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="179" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#93A0AC">买</text></g><g><rect x="215" y="40" width="58" height="40" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="244" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#93A0AC">了</text></g><g><rect x="280" y="40" width="58" height="40" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="309" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#93A0AC">一</text></g><g><rect x="345" y="40" width="58" height="40" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="374" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">只</text></g><g><rect x="410" y="40" width="58" height="40" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="439" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">猫</text></g><g><rect x="475" y="40" width="58" height="40" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="504" y="66" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#C0481E">？</text></g><path d="M 350 90 L 350 110 L 473 110 L 473 90" fill="none" stroke="#3E6B8F" stroke-width="1.5"></path><text x="411" y="130" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">N=2：看「只」「猫」</text><text x="411" y="145" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">→ 预测「咪」「叫」「跑」？</text></svg></div><figcaption><span class="fig-no">图 14-2</span>N-gram 只看最近 N 个词（蓝色部分），忽略更早的内容。N=2 时，无论前面说了什么，都只用「只」和「猫」来预测下一个词。</figcaption></figure><p>实际上，大部分手机输入法和早期语音助手都在用 N=2 或 N=3 的版本。 这个方法简单、快速，而且训练方式也很简单： 爬下大量文本，把每一段连续的 N 个词都数一遍，统计频率，存成一张巨大的表格就完成了。<strong>不需要理解语言，不需要语法规则，只需要数数。</strong></p><p>这张表长什么样、又怎么「查」？以二元模型（N=2）为例：想预测「天气」后面接什么，就翻到 <strong>前文 =「天气」</strong> 这一块， 数一数语料里它后面各个词分别出现过多少次，再除以「天气」的总出现次数，就得到每个候选词的概率：</p><figure class="fig"><div class="fig-frame"><div class="freq-head">前文 =「天气」　·　语料中 <span class="freq-mono">count(「天气」) = 10,000</span></div><div style="overflow-x:auto"><table class="freq-table"><thead><tr><th>下一个词 w</th><th>共现次数 count(「天气」, w)</th><th>概率 P(w │「天气」) = 次数 ÷ 10,000</th></tr></thead><tbody><tr class=""><td class="word">真好</td><td>2,300</td><td><div class="freq-p"><span class="freq-bar"><span class="freq-bar-fill" style="width:100%;background:#3E6B8F"></span></span><span class="freq-pct">23.0<!-- -->%</span></div></td></tr><tr class=""><td class="word">不错</td><td>2,100</td><td><div class="freq-p"><span class="freq-bar"><span class="freq-bar-fill" style="width:91.30434782608695%;background:#3E6B8F"></span></span><span class="freq-pct">21.0<!-- -->%</span></div></td></tr><tr class=""><td class="word">预报</td><td>1,800</td><td><div class="freq-p"><span class="freq-bar"><span class="freq-bar-fill" style="width:78.26086956521739%;background:#3E6B8F"></span></span><span class="freq-pct">18.0<!-- -->%</span></div></td></tr><tr class=""><td class="word">怎么样</td><td>1,500</td><td><div class="freq-p"><span class="freq-bar"><span class="freq-bar-fill" style="width:65.21739130434783%;background:#3E6B8F"></span></span><span class="freq-pct">15.0<!-- -->%</span></div></td></tr><tr class=""><td class="word">好热</td><td>1,000</td><td><div class="freq-p"><span class="freq-bar"><span class="freq-bar-fill" style="width:43.47826086956522%;background:#3E6B8F"></span></span><span class="freq-pct">10.0<!-- -->%</span></div></td></tr><tr class="rare"><td class="word">香蕉</td><td>3</td><td><div class="freq-p"><span class="freq-bar"><span class="freq-bar-fill" style="width:0.13043478260869565%;background:#C0481E"></span></span><span class="freq-pct">0.03<!-- -->%</span></div></td></tr><tr class="other"><td class="word">（其余几千个词合计）</td><td>1,297</td><td><div class="freq-p"><span class="freq-bar"><span class="freq-bar-fill" style="width:56.52173913043478%;background:#3E6B8F"></span></span><span class="freq-pct">13.0<!-- -->%</span></div></td></tr></tbody></table></div></div><figcaption><span class="fig-no">图 14-3</span>N-gram 的「查表」长这样（二元模型，前文 =「天气」）。预测时就找到当前前文那一行区块，按概率挑下一个词。注意「香蕉」只共现 3 次、概率几乎为零——语料里没怎么数到的组合，N-gram 就只能给个近乎 0 的概率。整本表里，<strong>每一个可能的前文都对应这样一行区块</strong>。</figcaption></figure><p>换个角度看，这张频率表其实就是<strong>条件概率</strong>：给定前面 N 个词，下一个词出现的可能性有多大。 第 6 课说过，一个语言模型的本质，就是给「下一个词」分配一张概率分布表—— 「今天天气」之后，「真好」占 23%、「不错」占 21%、「香蕉」占 0.001%…… N-gram 就是这个想法<strong>最朴素的实现</strong>：直接拿历史频率当概率，能数则数，数不到就抓瞎。 后面几课要做的事，都是在换更聪明的方式去估计这同一张概率表。</p></section><section class="station reveal" data-title="局限：记性只有两三个词" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>局限：记性只有两三个词</h2></div><p>试着用 N=2 的模型来补完这句话：</p><div class="formula" style="font-family:var(--serif);font-size:18px;line-height:2">「那只从小在胡同里长大、非常怕生人的小猫，今天第一次__」</div><p>真正要填的词，应该和「小猫」「怕生人」「第一次」都有关—— 也许是「出门」「见生人」「叫出声来」。 但 N=2 的模型只看最后两个词：<strong>「第一次」__</strong>。 「第一次」后面最常见的搭配是什么？大概是「听说」「尝试」「见到」…… 完全不知道前面在说一只猫的事。</p><div class="crack reveal"><div class="crack-label">加大 N 也救不了</div><p>你可能想说：N 调大一点不就好了？把 N 从 2 改成 5，看最近 5 个词。 问题是：训练数据里，见过「怕生人的小猫，今天第一次」这整个组合的概率几乎为零。 N 越大，每个具体组合出现的次数越少，大量组合根本从未出现过。</p><p style="margin-top:12px">打个比方：你统计了 100 亿条对话，但「非常怕生人的小猫今天第一次出门」这整句话， 一次也没出现过。N-gram 对「没见过的组合」完全束手无策，只能乱猜或者返回「不知道」。 N 越大，「没见过的组合」就越多——两难困境。</p></div><div class="think"><div class="think-q">N-gram 还有一个更根本的毛病。即使见过「猫」后面接「出门」，也没法推断「小猫」后面能接「出门」。为什么？</div></div></section><section class="station reveal" data-title="N-gram 能做什么" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>N-gram 能做什么，不能做什么</h2></div><p>尽管有这些局限，N-gram 在几十年间一直是语言技术的支柱：</p><ul style="margin-top:16px;padding-left:24px;line-height:2.1"><li>手机输入法的候选词推荐</li><li>早期语音识别（把声音转成文字时，用 N-gram 过滤掉"听起来像但文法奇怪"的结果）</li><li>垃圾邮件过滤（某些词组合在一起高度可疑）</li><li>机器翻译的初级版本</li></ul><p>它之所以有用，是因为<strong>语言里大量的短距离搭配是非常固定的</strong>。 「天气」后面接「预报」的概率，远高于接「香蕉」的概率。 这些规律靠数数就能捕捉到，不需要任何深层理解。</p><p>但它做不到的事情同样明显：长句子、跨句子的理解、词义的灵活性—— 这些都需要一个能「理解词的含义」而不只是「认识词的形状」的工具。 下一课解决「词」本身的问题。</p></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>N-gram 是语言预测的<span class="tk-hl">「数数法」</span>： 看最近 N 个词，查历史统计，找最常见的下一个词。 不需要理解语言，只需要一张巨大的频率表。 但它的记性只有 N 个词——超出这个范围的上下文，完全看不到。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>N-gram 的思路</strong>：看最近 N 个词 → 查频率表 → 预测下一个词。</li><li><strong>训练方式</strong>：爬大量文本，统计每段连续词组出现的频率，存成表格。</li><li><strong>局限①</strong>：只有 N 个词的记性，无法处理长距离依赖。</li><li><strong>局限②</strong>：把词当成符号，「猫」和「小猫」是两个毫不相关的符号。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="N-gram 基于“数数”，统计前 N−1 个词后各词出现频率来估计概率。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>N-gram 语言模型预测下一个词时，用的是什么思路？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">理解整句话的语法和语义</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">基于「数数」：统计前 N−1 个词后面各个词出现的频率来估计概率</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">随机猜一个词</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">查字典里的释义</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="稀疏性指许多合理组合在语料中从未出现，概率被估成 0。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>N-gram 模型最致命的问题之一是「稀疏性」，它指的是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">模型文件太大装不下</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">很多合理的词组合在训练语料里从没出现过，于是概率被估成 0</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">训练速度太慢</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">词向量维度太低</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nlp-02-word2vec.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 15 课</span>
+                    <h3>词向量</h3>
+                    <p>「国王 - 男人 + 女人 ≈ 女王」是怎么做到的？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷三 · 第14课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

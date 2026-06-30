@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第26课 · KV 缓存、稀疏注意力与 FlashAttention | AI大模型原理教程</title>
+    <meta name="description" content="注意力的账单是O(n²)——处理一本书，工程师用什么手段把它变快？">
+    <meta name="keywords" content="AI大模型教程,Transformer,KV 缓存、稀疏注意力与 FlashAttention,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第26课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 26 · 卷四</div>
+            <h1>KV 缓存、稀疏注意力与 FlashAttention</h1>
+            <p class="subtitle">❝ 注意力的账单是O(n²)——处理一本书，工程师用什么手段把它变快？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="注意力的账单" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>注意力的账单：O(n²)</h2></div><p>第 21 课结尾我们记了一笔账：注意力要让每个 token 和所有 token 两两比较，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 个 token 就有 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span> 个格子。当时一带而过，这一课来还这笔账。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 130" role="img" aria-label="注意力矩阵大小随序列长度爆炸增长"><g><text x="45" y="22" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">1k<!-- --> tokens</text><rect x="52" y="8" width="80" height="18" rx="3" fill="#4A8B5E" opacity="0.65"></rect><text x="140" y="21" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">100万<!-- --> 次比较（<!-- -->一段文字<!-- -->）</text></g><g><text x="45" y="50" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">8k<!-- --> tokens</text><rect x="52" y="36" width="200" height="18" rx="3" fill="#3E6B8F" opacity="0.65"></rect><text x="260" y="49" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">6400万<!-- --> 次比较（<!-- -->一篇长文<!-- -->）</text></g><g><text x="45" y="78" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">32k<!-- --> tokens</text><rect x="52" y="64" width="340" height="18" rx="3" fill="#C0481E" opacity="0.65"></rect><text x="400" y="77" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">10亿<!-- --> 次比较（<!-- -->一本书<!-- -->）</text></g><g><text x="45" y="106" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">1M<!-- --> tokens</text><rect x="52" y="92" width="380" height="18" rx="3" fill="#8B4A7E" opacity="0.65"></rect><text x="440" y="105" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#8B4A7E">万亿<!-- --> 次比较（<!-- -->一部百科全书<!-- -->）</text></g><text x="280" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">序列长度翻倍，计算量翻 4 倍——O(n²) 涨得吓人</text></svg></div><figcaption><span class="fig-no">图 26-1</span>注意力矩阵的大小是序列长度的<strong>平方</strong>。32k token（约一本书）就有 10 亿个格子，而且<strong>每一层都要重算一遍</strong>。</figcaption></figure><p>把数字摆具体：GPT-4 上下文 128k token，若全用标准注意力，一层的注意力表就有 128000² ≈ <strong>164 亿</strong>个格子，乘上约 120 层——一次推理光注意力就得算<strong>两万亿次</strong>，FFN 还没算进去。 这道平方的账单，是长上下文路上最硬的一堵墙。</p><div class="think"><div class="think-q">n² 个权重，难道个个同等重要？能不能只算关键的那一小撮？</div></div></section><section class="station reveal" data-title="稀疏注意力：只看附近" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>第一条路：稀疏注意力——干脆别算那么多</h2></div><p>最直觉的省法：每个 token 别再看全部 n 个位置，只看左右 W 个<strong>邻居</strong>。 这叫<strong>滑动窗口注意力</strong>，计算量从 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 一下降到 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">O</span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="mclose">)</span></span></span></span></span>（W 固定，相当于随 n 线性增长）：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 188" role="img" aria-label="滑动窗口注意力：每个 token 只看周围 W 个词"><text x="100" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">标准注意力（全部 n²）</text><rect x="20" y="28" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="38" y="28" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="56" y="28" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="74" y="28" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="92" y="28" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="110" y="28" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="128" y="28" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="20" y="46" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="38" y="46" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="56" y="46" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="74" y="46" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="92" y="46" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="110" y="46" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="128" y="46" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="20" y="64" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="38" y="64" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="56" y="64" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="74" y="64" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="92" y="64" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="110" y="64" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="128" y="64" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="20" y="82" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="38" y="82" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="56" y="82" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="74" y="82" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="92" y="82" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="110" y="82" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="128" y="82" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="20" y="100" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="38" y="100" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="56" y="100" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="74" y="100" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="92" y="100" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="110" y="100" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="128" y="100" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="20" y="118" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="38" y="118" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="56" y="118" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="74" y="118" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="92" y="118" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="110" y="118" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="128" y="118" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="20" y="136" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="38" y="136" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="56" y="136" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="74" y="136" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="92" y="136" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="110" y="136" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><rect x="128" y="136" width="16" height="16" rx="1" fill="#C0481E" opacity="0.4"></rect><text x="380" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#3E6B8F">滑动窗口（W=2）</text><rect x="300" y="28" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="318" y="28" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="336" y="28" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="354" y="28" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="372" y="28" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="390" y="28" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="408" y="28" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="300" y="46" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="318" y="46" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="336" y="46" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="354" y="46" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="372" y="46" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="390" y="46" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="408" y="46" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="300" y="64" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="318" y="64" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="336" y="64" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="354" y="64" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="372" y="64" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="390" y="64" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="408" y="64" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="300" y="82" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="318" y="82" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="336" y="82" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="354" y="82" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="372" y="82" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="390" y="82" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="408" y="82" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="300" y="100" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="318" y="100" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="336" y="100" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="354" y="100" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="372" y="100" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="390" y="100" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="408" y="100" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="300" y="118" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="318" y="118" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="336" y="118" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="354" y="118" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="372" y="118" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="390" y="118" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="408" y="118" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="300" y="136" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="318" y="136" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="336" y="136" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="354" y="136" width="16" height="16" rx="1" fill="#F5F0E8" opacity="1" stroke="#DCD2BF" stroke-width="0.5"></rect><rect x="372" y="136" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="390" y="136" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="408" y="136" width="16" height="16" rx="1" fill="#3E6B8F" opacity="0.7" stroke="none" stroke-width="0.5"></rect><rect x="20" y="166" width="14" height="14" rx="2" fill="#C0481E" opacity="0.4"></rect><text x="40" y="178" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">全算 → 49 个格子</text><rect x="300" y="166" width="14" height="14" rx="2" fill="#3E6B8F" opacity="0.7"></rect><text x="320" y="178" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">只算对角带 → 31 个（n 越大，省得越多）</text></svg></div><figcaption><span class="fig-no">图 26-2</span>滑动窗口只算对角带（每个词与左右 W 个邻居），大片空格直接跳过。序列越长，省得越夸张。</figcaption></figure><p>可只看邻居有个明显代价：<strong>看不到远处</strong>——开头那句关键信息，到结尾就盲了。 所以实战中会打几个补丁：留几个<strong>「全局 token」</strong>（比如开头的指令）让所有位置都能看到它、它也能看到全文； 或者让窗口<strong>「跳着看」</strong>（膨胀窗口），用同样的格子数覆盖更远。Longformer（2020）、Mistral（2023）就靠这类组合，把上下文撑到几十万 token。</p><div class="crack reveal"><div class="crack-label">这条路是「近似」，会丢东西</div><p>稀疏注意力<strong>改变了数学结果</strong>——它赌「远处不重要」，赌对了省钱、赌错了漏信息。 可有时候我们就是想要<strong>完整、精确</strong>的注意力（每个词看所有词），一格不漏， 只是嫌它太慢、太占内存。这就引出了第二条、完全不同的路。</p></div></section><section class="station reveal" data-title="KV 缓存：生成时别重算" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>先摘个唾手可得的果子：KV 缓存</h2></div><p>在动用聪明算法之前，<strong>生成</strong>阶段有一笔纯属浪费的重复账，白送的优化。回想第 23 课的自回归：模型一个词一个词地吐， 每吐一个，就把它接到末尾再跑一遍。问题来了——每跑一遍，它都把<strong>前面所有词的 K、V 从头又算了一次</strong>。</p><p>可那些词没变啊！「I」的 K、V，在第 2 步、第 3 步、第 100 步都是同一个值。 于是有了 <strong>KV 缓存</strong>：算过的 K、V <strong>存起来</strong>，下一步只算<em>新来的那一个词</em>，其余直接从缓存取：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 150" role="img" aria-label="KV 缓存：生成新词时只算新词的 K/V，旧的从缓存取"><text x="20" y="20" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#5C6B79">生成第 5 个词时，前 4 个词的 K/V 早就算过了</text><g><rect x="20" y="36" width="84" height="40" rx="5" fill="#F2EFE8" stroke="#C9BBA2" stroke-width="1.2"></rect><text x="62" y="54" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#93A0AC">I</text><text x="62" y="69" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#93A0AC">K,V 已缓存 ✓</text></g><g><rect x="112" y="36" width="84" height="40" rx="5" fill="#F2EFE8" stroke="#C9BBA2" stroke-width="1.2"></rect><text x="154" y="54" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#93A0AC">love</text><text x="154" y="69" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#93A0AC">K,V 已缓存 ✓</text></g><g><rect x="204" y="36" width="84" height="40" rx="5" fill="#F2EFE8" stroke="#C9BBA2" stroke-width="1.2"></rect><text x="246" y="54" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#93A0AC">this</text><text x="246" y="69" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#93A0AC">K,V 已缓存 ✓</text></g><g><rect x="296" y="36" width="84" height="40" rx="5" fill="#F2EFE8" stroke="#C9BBA2" stroke-width="1.2"></rect><text x="338" y="54" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#93A0AC">sunny</text><text x="338" y="69" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#93A0AC">K,V 已缓存 ✓</text></g><rect x="388" y="36" width="84" height="40" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="430" y="54" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" font-weight="700" fill="#C0481E">day</text><text x="430" y="69" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#C0481E">只算这一个！</text><text x="280" y="112" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">没缓存：每步重算全部 → 生成 n 个词总共 O(n²)</text><text x="280" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#3E8F5A">有缓存：每步只算 1 个 → 每步 O(n)，省掉大量重复</text></svg></div><figcaption><span class="fig-no">图 26-3</span>KV 缓存：已经生成的词，它们的 Key/Value 存进缓存，再不重算；每生成一个新词，只为这<strong>一个</strong>词算 K/V，然后拿它的 Query 去和「缓存里全部 K/V」做注意力。这是所有大模型推理的标配加速。</figcaption></figure><p>代价是拿<strong>显存换速度</strong>：缓存要一直占着内存，序列越长、占得越多—— 这也是为什么超长对话特别吃显存。后来的 MQA / GQA（第 20 课提过的多头变体）就是为了<strong>缩小这个缓存</strong>而生的： 让多个头共享同一份 K、V，缓存立刻小一大截。<strong>省内存这件事，从注意力一路追到了缓存。</strong></p></section><section class="station reveal" data-title="FlashAttention：只改顺序" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>第二条路：FlashAttention——不减计算，只改顺序</h2></div><p>这条路最反直觉：<strong>一格都不少算</strong>，结果和标准注意力分毫不差，却能快好几倍。秘密不在「算」，在「搬」。GPU 有两层存储：</p><ul style="padding-left:24px;line-height:2.1"><li><strong>HBM（显存）</strong>：几十 GB，容量大，但读写<strong>慢</strong>；</li><li><strong>SRAM（片上缓存）</strong>：只有几十 MB，但读写<strong>快十几倍</strong>。</li></ul><p>标准注意力的真正瓶颈，是那张 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">n</span></span></span></span></span> 的大矩阵：它太大，塞不进 SRAM， 只能<strong>写进慢吞吞的 HBM，再读回来做 softmax，再写回去……</strong>来回搬运几趟。瓶颈根本不是计算，是搬运。</p><p>可这里有个拦路虎：softmax 要先看到<strong>一整行</strong>所有分数（求最大值、求总和）才能归一化。 要是把行切成小块、一块一块进 SRAM，看第一块时还不知道后面有没有更大的数，怎么算？<strong>FlashAttention（2022，斯坦福）</strong>的核心绝活，就是一招<strong>「在线 softmax」</strong>：边读边修。</p><div class="formula" style="text-align:left;font-size:13.5px;line-height:2">要对一行分数 <span class="f-hl">[2, 1, 4, 0]</span> 做 softmax，但每次只来两个数：<br/>先来 [2, 1]：记下<strong>当前最大 m=2</strong>，<strong>当前分母 ℓ</strong> = e<sup>2−2</sup>+e<sup>1−2</sup> = 1+0.37 = <span class="f-hl">1.37</span><br/>再来 [4, 0]：发现 <strong>4 比旧最大 2 还大</strong> → 把旧账按 e<sup>2−4</sup>=0.14 缩小一下：1.37×0.14 = 0.19<br/>　　　　　新分母 ℓ = 0.19 + e<sup>4−4</sup>+e<sup>0−4</sup> = 0.19 + 1 + 0.02 = <span class="f-hl">1.21</span><br/>直接对 [2,1,4,0] 整行算：e<sup>−2</sup>+e<sup>−3</sup>+e<sup>0</sup>+e<sup>−4</sup> = 0.14+0.05+1+0.02 = <span class="f-hl">1.21</span>　✓ 完全一致</div><p>诀窍就在那句「<strong>发现更大的数，就把已经算的部分等比缩小一下</strong>」。靠一个<strong>running 最大值</strong>和一个<strong>running 分母</strong>， softmax 不用一次看到整行，也能流着算、且结果精确。于是注意力可以<strong>分块塞进 SRAM 算完就走</strong>，那张 n² 大矩阵<strong>压根不用落地到 HBM</strong>：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 150" role="img" aria-label="标准注意力 vs FlashAttention 的内存访问方式"><text x="130" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">标准：大矩阵反复进出 HBM</text><g><rect x="20" y="30" width="220" height="22" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="130" y="45" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">Q,K,V (HBM)</text></g><g><rect x="20" y="60" width="220" height="22" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="130" y="75" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">QKᵀ → 写回 HBM</text></g><g><rect x="20" y="90" width="220" height="22" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="130" y="105" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">Softmax → 写回 HBM</text></g><g><rect x="20" y="120" width="220" height="22" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="130" y="135" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">× V → 输出</text></g><text x="420" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#3E6B8F">Flash：分块在 SRAM 算完</text><g><rect x="300" y="30" width="240" height="22" rx="3" fill="#3E6B8F20" stroke="#3E6B8F" stroke-width="1"></rect><text x="420" y="45" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">分块读 Q,K,V → SRAM</text></g><g><rect x="300" y="60" width="240" height="22" rx="3" fill="#3E6B8F20" stroke="#3E6B8F" stroke-width="1"></rect><text x="420" y="75" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">SRAM 内在线 softmax</text></g><g><rect x="300" y="90" width="240" height="22" rx="3" fill="#3E6B8F20" stroke="#3E6B8F" stroke-width="1"></rect><text x="420" y="105" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">只把最终结果写回 HBM</text></g><text x="420" y="125" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">大矩阵不落地，快 2~4 倍、省显存数倍</text></svg></div><figcaption><span class="fig-no">图 26-4</span>FlashAttention 的关键：靠在线 softmax，把注意力<strong>分块</strong>在快速的 SRAM 里算完，那张巨大的 n² 矩阵从不写进慢速 HBM。数学结果和标准注意力一字不差，只是搬运少了——快 2~4 倍，显存省好几倍。</figcaption></figure><p>它不改变结果、不丢信息，所以成了<strong>无脑就该开</strong>的默认项：今天 PyTorch、各大训练框架都内置了它。 稀疏注意力（省算）和 FlashAttention（省搬）还能叠加使用，长上下文这才真正跑得起来。</p></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>注意力的 O(n²) 墙有几种攻法：<span class="tk-hl">稀疏注意力</span>少算（只看邻居，是近似、会丢远处）；<span class="tk-hl">KV 缓存</span>不重算（生成时存下旧词的 K/V）；<span class="tk-hl">FlashAttention</span> 不减计算、只改搬运（在线 softmax 让大矩阵不落显存，结果还精确）。 正是这些工程把 128k+ 的长上下文从妄想变成了日常。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>账单</strong>：注意力 O(n²)，128k token 一层就 164 亿格子 × 120 层。</li><li><strong>稀疏注意力</strong>：滑动窗口 O(n·W) + 全局 token / 膨胀窗口补远处；代价是近似。</li><li><strong>KV 缓存</strong>：生成时缓存旧词 K/V，每步只算新词，从 O(n²) 降到每步 O(n)；MQA/GQA 进一步缩缓存。</li><li><strong>FlashAttention</strong>：在线 softmax（[2,1,4,0] 流式算出同样的分母 1.21）让大矩阵不落 HBM，快 2~4 倍且精确。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="标准自注意力是 O(n²)，每个词与其他所有词两两计算。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>标准自注意力处理长度为 n 的序列，其计算/内存开销大致是？这是长文本的主要瓶颈。</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">O(n)：与长度成正比</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">O(n²)：每个词都要和其他所有词两两计算注意力</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">O(1)：与长度无关</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">O(log n)</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="0" data-explain="KV 缓存避免重复计算已处理 token 的 Key/Value。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>下面哪一项的目的是「在自回归生成时，避免重复计算已经处理过的 token 的 Key/Value」？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">KV 缓存（KV Cache）</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">层归一化</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">词向量</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">交叉熵损失</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-08-moe.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 27 课</span>
+                    <h3>MoE 混合专家架构</h3>
+                    <p>GPT-4据说有1.8万亿参数——推理每次却只用其中一小部分，怎么做到的？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第26课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

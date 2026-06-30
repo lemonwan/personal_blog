@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n-title="title">WAN — Java 开发工程师</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════
+   CSS VARIABLES
+   ═══════════════════════════════════════════ */
+:root {
+  --bg-primary: #06080f;
+  --bg-secondary: #0c1020;
+  --bg-card: rgba(12, 16, 32, 0.6);
+  --neon-cyan: #00f5d4;
+  --neon-blue: #4361ee;
+  --neon-magenta: #f72585;
+  --neon-purple: #7209b7;
+  --text-primary: #e8e8f0;
+  --text-secondary: #7a8099;
+  --text-dim: #3d4258;
+  --grid-color: rgba(67, 97, 238, 0.06);
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --glow-cyan: 0 0 20px rgba(0, 245, 212, 0.4), 0 0 60px rgba(0, 245, 212, 0.15);
+  --glow-magenta: 0 0 20px rgba(247, 37, 133, 0.4), 0 0 60px rgba(247, 37, 133, 0.15);
+}
+
+/* ═══════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: var(--neon-cyan) var(--bg-primary);
+}
+
+body {
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  cursor: none;
+  line-height: 1.6;
+}
+
+::selection {
+  background: var(--neon-cyan);
+  color: var(--bg-primary);
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--neon-cyan); border-radius: 2px; }
+
+/* ═══════════════════════════════════════════
+   CUSTOM CURSOR
+   ═══════════════════════════════════════════ */
+.cursor-dot {
+  position: fixed;
+  width: 8px; height: 8px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10000;
+  transition: transform 0.1s ease;
+  mix-blend-mode: screen;
+  box-shadow: var(--glow-cyan);
+}
+
+.cursor-ring {
+  position: fixed;
+  width: 40px; height: 40px;
+  border: 1.5px solid rgba(0, 245, 212, 0.4);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10000;
+  transition: all 0.15s ease-out;
+}
+
+.cursor-ring.hover {
+  width: 60px; height: 60px;
+  border-color: var(--neon-magenta);
+  background: rgba(247, 37, 133, 0.05);
+}
+
+/* ═══════════════════════════════════════════
+   BACKGROUND LAYERS
+   ═══════════════════════════════════════════ */
+.bg-canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Grid */
+.grid-bg {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: radial-gradient(ellipse at 50% 50%, black 20%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, black 20%, transparent 70%);
+}
+
+/* Scanlines */
+.scanlines {
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(6, 8, 15, 0.08) 2px,
+    rgba(6, 8, 15, 0.08) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Ambient glow */
+.ambient-glow {
+  position: fixed;
+  width: 600px; height: 600px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.3;
+  pointer-events: none;
+  z-index: 0;
+  animation: ambientFloat 12s ease-in-out infinite alternate;
+}
+
+.ambient-glow.cyan {
+  background: var(--neon-cyan);
+  top: -200px; right: -100px;
+}
+
+.ambient-glow.magenta {
+  background: var(--neon-magenta);
+  bottom: -200px; left: -100px;
+  animation-delay: -6s;
+  animation-direction: alternate-reverse;
+}
+
+@keyframes ambientFloat {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(60px, 40px) scale(1.2); }
+}
+
+/* ═══════════════════════════════════════════
+   MOUSE FOLLOWER
+   ═══════════════════════════════════════════ */
+.mouse-follower {
+  position: fixed;
+  width: 300px; height: 300px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,245,212,0.06) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.3s;
+}
+
+/* ═══════════════════════════════════════════
+   NAVIGATION
+   ═══════════════════════════════════════════ */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 24px 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(180deg, var(--bg-primary) 0%, transparent 100%);
+}
+
+.nav-logo {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  text-decoration: none;
+  position: relative;
+}
+
+.nav-logo::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--neon-cyan), transparent);
+}
+
+.nav-links {
+  display: flex; gap: 36px; list-style: none;
+}
+
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  transition: color 0.3s, text-shadow 0.3s;
+  position: relative;
+}
+
+.nav-links a::before {
+  content: '//';
+  margin-right: 4px;
+  opacity: 0;
+  color: var(--neon-cyan);
+  transition: opacity 0.3s;
+}
+
+.nav-links a:hover {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 12px rgba(0, 245, 212, 0.4);
+}
+
+.nav-links a:hover::before {
+  opacity: 1;
+}
+
+/* Language Switcher */
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 8px;
+}
+
+.lang-btn {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: none;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: color 0.3s, text-shadow 0.3s;
+}
+
+.lang-btn:hover {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 12px rgba(0, 245, 212, 0.4);
+}
+
+.lang-btn.active {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 12px rgba(0, 245, 212, 0.4);
+}
+
+.lang-divider {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════
+   MAIN CONTENT
+   ═══════════════════════════════════════════ */
+main {
+  position: relative;
+  z-index: 2;
+}
+
+/* ═══════════════════════════════════════════
+   HERO SECTION
+   ═══════════════════════════════════════════ */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 0 48px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-content {
+  max-width: 900px;
+  position: relative;
+}
+
+.hero-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--neon-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  margin-bottom: 32px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 0.3s forwards;
+}
+
+.hero-tag .status-dot {
+  width: 6px; height: 6px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+  box-shadow: var(--glow-cyan);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 7.5vw, 6.5rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 28px;
+  position: relative;
+}
+
+.hero-title .line {
+  display: block;
+  overflow: hidden;
+}
+
+.hero-title .line span {
+  display: inline-block;
+  opacity: 0;
+  animation: reveal 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.hero-title .line:nth-child(1) span { animation-delay: 0.5s; }
+.hero-title .line:nth-child(2) span { animation-delay: 0.65s; }
+.hero-title .line:nth-child(3) span { animation-delay: 0.8s; }
+
+@keyframes reveal {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes fadeUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Glitch text */
+.glitch {
+  position: relative;
+  color: var(--text-primary);
+}
+
+.glitch::before,
+.glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+}
+
+.glitch::before {
+  color: var(--neon-cyan);
+  z-index: -1;
+  animation: glitch1 4s infinite;
+}
+
+.glitch::after {
+  color: var(--neon-magenta);
+  z-index: -2;
+  animation: glitch2 4s infinite;
+}
+
+@keyframes glitch1 {
+  0%, 90%, 100% { opacity: 0; transform: translate(0); }
+  92% { opacity: 0.8; transform: translate(-4px, -2px); }
+  94% { opacity: 0; transform: translate(4px, 1px); }
+  96% { opacity: 0.6; transform: translate(2px, -1px); }
+}
+
+@keyframes glitch2 {
+  0%, 88%, 100% { opacity: 0; transform: translate(0); }
+  90% { opacity: 0.7; transform: translate(3px, 2px); }
+  93% { opacity: 0; transform: translate(-3px, -1px); }
+  95% { opacity: 0.5; transform: translate(-2px, 1px); }
+}
+
+.hero-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  max-width: 520px;
+  line-height: 1.8;
+  margin-bottom: 48px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 1s forwards;
+}
+
+.hero-subtitle .accent {
+  color: var(--neon-cyan);
+}
+
+/* CTA Buttons */
+.hero-cta {
+  display: flex; gap: 20px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 1.2s forwards;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 32px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  text-decoration: none;
+  border: none;
+  cursor: none;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-primary {
+  background: var(--neon-cyan);
+  color: var(--bg-primary);
+  font-weight: 700;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.btn-primary:hover {
+  background: #fff;
+  box-shadow: var(--glow-cyan);
+  transform: translateY(-2px);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--text-dim);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.btn-outline:hover {
+  border-color: var(--neon-magenta);
+  color: var(--neon-magenta);
+  box-shadow: var(--glow-magenta);
+  transform: translateY(-2px);
+}
+
+/* Corner decoration on hero */
+.hero-decoration {
+  position: absolute;
+  right: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 380px; height: 420px;
+  opacity: 0;
+  animation: fadeIn 1s ease 1.5s forwards;
+}
+
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+
+.hero-decoration .hex-grid {
+  width: 100%; height: 100%;
+  position: relative;
+}
+
+.hex-border {
+  position: absolute;
+  border: 1px solid rgba(0, 245, 212, 0.15);
+}
+
+.hex-border.top {
+  top: 0; left: 0;
+  width: 200px; height: 200px;
+  clip-path: polygon(0 0, 100% 0, 100% 40%, 40% 100%, 0 100%);
+}
+
+.hex-border.bottom {
+  bottom: 0; right: 0;
+  width: 200px; height: 220px;
+  clip-path: polygon(60% 0, 100% 0, 100% 100%, 0 100%, 0 40%);
+  border-left: none; border-top: none;
+}
+
+.hex-line {
+  position: absolute;
+  background: linear-gradient(180deg, var(--neon-cyan), transparent);
+  opacity: 0.1;
+}
+
+.hex-line.v1 { right: 100px; top: 0; width: 1px; height: 100%; }
+.hex-line.v2 { right: 180px; top: 10%; width: 1px; height: 80%; opacity: 0.06; }
+
+/* Floating data points */
+.data-point {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+
+.data-point::before {
+  content: '';
+  display: inline-block;
+  width: 4px; height: 4px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 6px;
+  opacity: 0.4;
+}
+
+.dp1 { right: 40px; top: 60px; }
+.dp2 { right: 120px; bottom: 80px; }
+.dp3 { right: 200px; top: 160px; }
+
+/* ═══════════════════════════════════════════
+   TICKER STRIP
+   ═══════════════════════════════════════════ */
+.ticker-strip {
+  position: relative;
+  z-index: 2;
+  padding: 20px 0;
+  border-top: 1px solid rgba(67, 97, 238, 0.1);
+  border-bottom: 1px solid rgba(67, 97, 238, 0.1);
+  overflow: hidden;
+  background: rgba(12, 16, 32, 0.3);
+  backdrop-filter: blur(8px);
+}
+
+.ticker-track {
+  display: flex;
+  gap: 60px;
+  animation: ticker 20s linear infinite;
+  width: max-content;
+}
+
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.ticker-item {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.ticker-item .sep {
+  width: 4px; height: 4px;
+  background: var(--neon-cyan);
+  transform: rotate(45deg);
+  opacity: 0.4;
+}
+
+/* ═══════════════════════════════════════════
+   ABOUT / STATS SECTION
+   ═══════════════════════════════════════════ */
+.section {
+  padding: 120px 48px;
+  position: relative;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 64px;
+}
+
+.section-number {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--neon-cyan);
+  letter-spacing: 0.1em;
+}
+
+.section-line {
+  flex: 0 0 60px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--neon-cyan), transparent);
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 80px;
+  max-width: 1200px;
+}
+
+.about-text {
+  font-size: 1.05rem;
+  line-height: 2;
+  color: var(--text-secondary);
+}
+
+.about-text strong {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.about-text .highlight {
+  color: var(--neon-cyan);
+  font-weight: 500;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(67, 97, 238, 0.08);
+  padding: 28px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+
+.stat-card:hover {
+  border-color: rgba(0, 245, 212, 0.2);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(0, 245, 212, 0.08);
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--neon-cyan), transparent);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.stat-card:hover::before { opacity: 1; }
+
+.stat-value {
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.stat-value .unit {
+  font-size: 1rem;
+  color: var(--neon-cyan);
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.stat-label {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+
+.stat-card.magenta .stat-value .unit {
+  color: var(--neon-magenta);
+}
+
+.stat-card.magenta::before {
+  background: linear-gradient(90deg, var(--neon-magenta), transparent);
+}
+
+.stat-card.magenta:hover {
+  border-color: rgba(247, 37, 133, 0.2);
+  box-shadow: 0 8px 32px rgba(247, 37, 133, 0.08);
+}
+
+/* ═══════════════════════════════════════════
+   PROJECTS SECTION
+   ═══════════════════════════════════════════ */
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 32px;
+  max-width: 1200px;
+}
+
+.project-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(67, 97, 238, 0.08);
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  cursor: none;
+}
+
+.project-card:hover {
+  border-color: rgba(0, 245, 212, 0.25);
+  transform: translateY(-6px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3), 0 0 32px rgba(0, 245, 212, 0.06);
+}
+
+.project-card:nth-child(2):hover {
+  border-color: rgba(247, 37, 133, 0.25);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3), 0 0 32px rgba(247, 37, 133, 0.06);
+}
+
+.project-header {
+  padding: 28px 28px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.project-index {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.project-tags {
+  display: flex; gap: 8px;
+}
+
+.project-tag {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  padding: 3px 10px;
+  background: rgba(0, 245, 212, 0.08);
+  color: var(--neon-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.project-card:nth-child(2) .project-tag {
+  background: rgba(247, 37, 133, 0.08);
+  color: var(--neon-magenta);
+}
+
+.project-card:nth-child(3) .project-tag {
+  background: rgba(114, 9, 183, 0.08);
+  color: var(--neon-purple);
+}
+
+.project-card:nth-child(4) .project-tag {
+  background: rgba(67, 97, 238, 0.08);
+  color: var(--neon-blue);
+}
+
+.project-body {
+  padding: 20px 28px 28px;
+}
+
+.project-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  transition: color 0.3s;
+}
+
+.project-card:hover .project-title { color: var(--neon-cyan); }
+.project-card:nth-child(2):hover .project-title { color: var(--neon-magenta); }
+.project-card:nth-child(3):hover .project-title { color: var(--neon-purple); }
+.project-card:nth-child(4):hover .project-title { color: var(--neon-blue); }
+
+.project-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+
+.project-link {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.3s;
+}
+
+.project-link .arrow {
+  display: inline-block;
+  transition: transform 0.3s;
+}
+
+.project-card:hover .project-link { color: var(--text-primary); }
+.project-card:hover .project-link .arrow { transform: translateX(4px); }
+
+/* Anchor-based project cards (article links) */
+a.project-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Notes grid: single full-width project card */
+.notes-grid {
+  grid-template-columns: 1fr;
+  max-width: 1200px;
+}
+
+.notes-grid .project-tag,
+.notes-grid .project-card:nth-child(n) .project-tag {
+  background: rgba(0, 245, 212, 0.08);
+  color: var(--neon-cyan);
+}
+
+.notes-grid .project-card:nth-child(n):hover {
+  border-color: rgba(0, 245, 212, 0.25);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3), 0 0 32px rgba(0, 245, 212, 0.06);
+}
+
+.notes-grid .project-card:nth-child(n):hover .project-title {
+  color: var(--neon-cyan);
+}
+
+/* ═══════════════════════════════════════════
+   SKILLS / TECH STACK
+   ═══════════════════════════════════════════ */
+.skills-container {
+  max-width: 1200px;
+}
+
+.skills-row {
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.skills-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  min-width: 140px;
+  padding-top: 8px;
+}
+
+.skill-pill {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  padding: 8px 18px;
+  border: 1px solid rgba(67, 97, 238, 0.1);
+  margin-right: 8px;
+  margin-bottom: 8px;
+  transition: all 0.3s;
+  background: transparent;
+}
+
+.skill-pill:hover {
+  color: var(--neon-cyan);
+  border-color: rgba(0, 245, 212, 0.3);
+  background: rgba(0, 245, 212, 0.04);
+}
+
+/* ═══════════════════════════════════════════
+   CONTACT / FOOTER
+   ═══════════════════════════════════════════ */
+.contact-section {
+  padding: 120px 48px;
+  text-align: center;
+  position: relative;
+}
+
+.contact-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 24px;
+}
+
+.contact-title .accent {
+  background: linear-gradient(135deg, var(--neon-cyan), var(--neon-magenta));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.contact-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  max-width: 460px;
+  margin: 0 auto 48px;
+  line-height: 1.8;
+}
+
+.contact-links {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  margin-bottom: 80px;
+}
+
+.contact-link {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  transition: all 0.3s;
+  position: relative;
+}
+
+.contact-link::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 0; height: 1px;
+  background: var(--neon-cyan);
+  transition: width 0.3s;
+}
+
+.contact-link:hover {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 12px rgba(0, 245, 212, 0.3);
+}
+
+.contact-link:hover::after { width: 100%; }
+
+/* Footer */
+.footer {
+  border-top: 1px solid rgba(67, 97, 238, 0.08);
+  padding: 32px 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer-text {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.footer-coord {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-dim);
+}
+
+.footer-icp {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.3s;
+  white-space: nowrap;
+}
+
+.footer-icp:hover {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 8px rgba(0, 245, 212, 0.3);
+}
+
+.footer-icp .icp-icon {
+  display: inline-block;
+  width: 12px; height: 12px;
+  background: var(--text-dim);
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z'/></svg>");
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z'/></svg>");
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  transition: background 0.3s;
+}
+
+.footer-icp:hover .icp-icon {
+  background: var(--neon-cyan);
+}
+
+/* ═══════════════════════════════════════════
+   SCROLL REVEAL
+   ═══════════════════════════════════════════ */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════ */
+@media (max-width: 1100px) {
+  .notes-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .nav { padding: 20px 24px; }
+  .nav-links { gap: 20px; }
+  .hero { padding: 0 24px; }
+  .hero-decoration { display: none; }
+  .section { padding: 80px 24px; }
+  .about-grid { grid-template-columns: 1fr; gap: 48px; }
+  .projects-grid { grid-template-columns: 1fr; }
+  .notes-grid { grid-template-columns: 1fr; }
+  .contact-section { padding: 80px 24px; }
+  .contact-links { flex-wrap: wrap; gap: 24px; }
+  .footer { flex-direction: column; gap: 12px; }
+  .cursor-dot, .cursor-ring, .mouse-follower { display: none; }
+  body { cursor: auto; }
+}
+
+@media (max-width: 600px) {
+  .nav-links { display: none; }
+  .hero-cta { flex-direction: column; }
+  .btn { justify-content: center; }
+  .stats-grid { grid-template-columns: 1fr; }
+}
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+
+<!-- Custom Cursor -->
+<div class="cursor-dot" id="cursorDot"></div>
+<div class="cursor-ring" id="cursorRing"></div>
+
+<!-- Mouse Follower Glow -->
+<div class="mouse-follower" id="mouseFollower"></div>
+
+<!-- Background Layers -->
+<canvas class="bg-canvas" id="bgCanvas"></canvas>
+<div class="grid-bg"></div>
+<div class="scanlines"></div>
+<div class="ambient-glow cyan"></div>
+<div class="ambient-glow magenta"></div>
+
+<!-- Navigation -->
+<nav class="nav">
+  <a href="#" class="nav-logo">WAN</a>
+  <ul class="nav-links">
+    <li><a href="#about" data-i18n="nav.about">关于</a></li>
+    <li><a href="#notes" data-i18n="nav.work">笔记</a></li>
+    <li><a href="#skills" data-i18n="nav.skills">技能</a></li>
+    <li><a href="#contact" data-i18n="nav.contact">联系</a></li>
+  </ul>
+  <div class="lang-switch" role="group" aria-label="Language">
+    <button class="lang-btn active" data-lang="zh" type="button" aria-pressed="true">中</button>
+    <span class="lang-divider" aria-hidden="true">|</span>
+    <button class="lang-btn" data-lang="en" type="button" aria-pressed="false">EN</button>
+  </div>
+</nav>
+
+<!-- Main Content -->
+<main>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-tag">
+        <span class="status-dot"></span>
+        <span data-i18n="hero.tag">技术笔记 · 持续更新 — 2026</span>
+      </div>
+
+      <h1 class="hero-title">
+        <span class="line"><span data-i18n="hero.line1">Java 开发</span></span>
+        <span class="line"><span class="glitch" data-text="工程师" data-i18n="hero.line2">工程师</span></span>
+        <span class="line"><span data-i18n="hero.line3">与知识记录者</span></span>
+      </h1>
+
+      <p class="hero-subtitle" data-i18n-html="hero.subtitle">专注 <span class="accent">Java 后端开发</span>，深耕 JVM、并发编程与系统设计。在这里持续记录学习笔记与技术思考，沉淀对底层原理的理解。</p>
+
+      <div class="hero-cta">
+        <a href="#notes" class="btn btn-primary" data-i18n="hero.cta1">查看笔记 →</a>
+        <a href="#contact" class="btn btn-outline" data-i18n="hero.cta2">联系我</a>
+      </div>
+    </div>
+
+    <div class="hero-decoration">
+      <div class="hex-grid">
+        <div class="hex-border top"></div>
+        <div class="hex-border bottom"></div>
+        <div class="hex-line v1"></div>
+        <div class="hex-line v2"></div>
+        <div class="data-point dp1" data-i18n="dp.status">系统状态: 在线</div>
+        <div class="data-point dp2">LAT 39.9042° N</div>
+        <div class="data-point dp3" data-i18n="dp.uptime">在线率 99.97%</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Ticker Strip -->
+  <div class="ticker-strip">
+    <div class="ticker-track">
+      <span class="ticker-item">Java <span class="sep"></span></span>
+      <span class="ticker-item">Spring Boot <span class="sep"></span></span>
+      <span class="ticker-item">JVM <span class="sep"></span></span>
+      <span class="ticker-item">Concurrency <span class="sep"></span></span>
+      <span class="ticker-item">MySQL <span class="sep"></span></span>
+      <span class="ticker-item">Redis <span class="sep"></span></span>
+      <span class="ticker-item">System Design <span class="sep"></span></span>
+      <span class="ticker-item">LLM <span class="sep"></span></span>
+      <span class="ticker-item">Transformer <span class="sep"></span></span>
+      <span class="ticker-item">Java <span class="sep"></span></span>
+      <span class="ticker-item">Spring Boot <span class="sep"></span></span>
+      <span class="ticker-item">JVM <span class="sep"></span></span>
+      <span class="ticker-item">Concurrency <span class="sep"></span></span>
+      <span class="ticker-item">MySQL <span class="sep"></span></span>
+      <span class="ticker-item">Redis <span class="sep"></span></span>
+      <span class="ticker-item">System Design <span class="sep"></span></span>
+      <span class="ticker-item">LLM <span class="sep"></span></span>
+      <span class="ticker-item">Transformer <span class="sep"></span></span>
+    </div>
+  </div>
+
+  <!-- About Section -->
+  <section class="section" id="about">
+    <div class="section-header reveal">
+      <span class="section-number">01</span>
+      <span class="section-line"></span>
+      <span class="section-title" data-i18n="sec.about">关于</span>
+    </div>
+
+    <div class="about-grid">
+      <div class="about-text reveal" data-i18n-html="about.body">
+        <p>我是 <strong>wan</strong>，一名 <strong>Java 开发工程师</strong>，常驻<span class="highlight">中国北京</span>。热爱 Java 技术，<strong>持续记录</strong>学习与实践过程中的思考。</p>
+        <br>
+        <p>内容涵盖 <strong>Java 基础</strong>、<span class="highlight">集合与并发</span>、JVM、设计模式等核心主题。希望通过系统化的梳理，帮助更多开发者<span class="highlight">深入理解</span>Java 技术的底层原理与设计哲学。</p>
+      </div>
+
+      <div class="stats-grid reveal">
+        <div class="stat-card">
+          <div class="stat-value">35<span class="unit">+</span></div>
+          <div class="stat-label" data-i18n="stat.articles">Java 技术笔记</div>
+        </div>
+        <div class="stat-card magenta">
+          <div class="stat-value">30<span class="unit">+</span></div>
+          <div class="stat-label" data-i18n="stat.lessons">AI 大模型课程</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">12<span class="unit">+</span></div>
+          <div class="stat-label" data-i18n="stat.topics">覆盖主题</div>
+        </div>
+        <div class="stat-card magenta">
+          <div class="stat-value">4<span class="unit">+</span></div>
+          <div class="stat-label" data-i18n="stat.exp">年 Java 经验</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Notes Section -->
+  <section class="section" id="notes">
+    <div class="section-header reveal">
+      <span class="section-number">02</span>
+      <span class="section-line"></span>
+      <span class="section-title" data-i18n="sec.notes">笔记</span>
+    </div>
+
+    <div class="projects-grid notes-grid">
+      <a class="project-card reveal" href="java-basics/">
+        <div class="project-header">
+          <span class="project-index">J-001</span>
+          <div class="project-tags">
+            <span class="project-tag" data-i18n="project.tag.articles">15 篇文章</span>
+            <span class="project-tag" data-i18n="project.tag.topics">7 主题</span>
+          </div>
+        </div>
+        <div class="project-body">
+          <h3 class="project-title" data-i18n="project.title">Java 面试笔记</h3>
+          <p class="project-desc" data-i18n="project.desc">系统整理 Java 核心知识，覆盖集合框架、并发编程、JVM、设计模式等高频面试主题。</p>
+          <span class="project-link">
+            <span data-i18n="link.details">查看详情 →</span> <span class="arrow">→</span>
+          </span>
+        </div>
+      </a>
+      <a class="project-card reveal" href="ai-llm/">
+        <div class="project-header">
+          <span class="project-index">AI-001</span>
+          <div class="project-tags">
+            <span class="project-tag">32 节课</span>
+            <span class="project-tag">5 卷内容</span>
+          </div>
+        </div>
+        <div class="project-body">
+          <h3 class="project-title">AI 大模型原理教程</h3>
+          <p class="project-desc">从向量到 Transformer，零基础入门 AI 大模型核心原理。30 节沉浸式讲解，亲手把整个知识体系搭建起来。</p>
+          <span class="project-link">
+            <span>开始学习 →</span> <span class="arrow">→</span>
+          </span>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Skills Section -->
+  <section class="section" id="skills">
+    <div class="section-header reveal">
+      <span class="section-number">03</span>
+      <span class="section-line"></span>
+      <span class="section-title" data-i18n="sec.skills">能力</span>
+    </div>
+
+    <div class="skills-container reveal">
+      <div class="skills-row">
+        <span class="skills-label" data-i18n="skill.lang">语言 & 核心</span>
+        <span class="skill-pill">Java</span>
+        <span class="skill-pill">JVM</span>
+        <span class="skill-pill">并发编程</span>
+        <span class="skill-pill">集合框架</span>
+        <span class="skill-pill">设计模式</span>
+      </div>
+      <div class="skills-row">
+        <span class="skills-label" data-i18n="skill.framework">框架 & 中间件</span>
+        <span class="skill-pill">Spring</span>
+        <span class="skill-pill">Spring Boot</span>
+        <span class="skill-pill">MyBatis</span>
+        <span class="skill-pill">Redis</span>
+        <span class="skill-pill">Kafka</span>
+      </div>
+      <div class="skills-row">
+        <span class="skills-label" data-i18n="skill.storage">存储 & 数据</span>
+        <span class="skill-pill">MySQL</span>
+        <span class="skill-pill">Redis</span>
+        <span class="skill-pill">Elasticsearch</span>
+      </div>
+      <div class="skills-row">
+        <span class="skills-label" data-i18n="skill.devops">工程 & 运维</span>
+        <span class="skill-pill">Git</span>
+        <span class="skill-pill">Maven</span>
+        <span class="skill-pill">Docker</span>
+        <span class="skill-pill">Linux</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact Section -->
+  <section class="contact-section" id="contact">
+    <div class="reveal">
+      <div class="section-header" style="justify-content: center; margin-bottom: 40px;">
+        <span class="section-number">04</span>
+        <span class="section-line"></span>
+        <span class="section-title" data-i18n="sec.contact">联系</span>
+        <span class="section-line" style="transform: rotate(180deg); margin-left: 16px;"></span>
+      </div>
+
+      <h2 class="contact-title" data-i18n-html="contact.title">一起交流<br><span class="accent">技术与成长。</span></h2>
+      <p class="contact-subtitle" data-i18n="contact.subtitle">对笔记内容有想法，或想交流 Java、JVM、AI 大模型等话题？欢迎随时联系我。</p>
+
+      <div class="contact-links">
+        <a href="mailto:hello@example.com" class="contact-link" data-i18n="contact.email">邮箱</a>
+        <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="contact-link" data-i18n="contact.github">GitHub</a>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <span class="footer-text" data-i18n="footer.text">© 2026 wan. 匠心打造。</span>
+      <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer" class="footer-icp">
+        <span class="icp-icon" aria-hidden="true"></span>
+        <span>浙ICP备2022022811号-1</span>
+      </a>
+      <span class="footer-coord">39.9042° N, 116.4074° E</span>
+    </footer>
+  </section>
+
+</main>
+
+<script>
+// ═══════════════════════════════════════════
+// PARTICLE CANVAS BACKGROUND
+// ═══════════════════════════════════════════
+(function() {
+  const canvas = document.getElementById('bgCanvas');
+  const ctx = canvas.getContext('2d');
+  let w, h, particles = [], mouse = { x: -1000, y: -1000 };
+
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+
+  function createParticles() {
+    particles = [];
+    const count = Math.floor((w * h) / 18000);
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 0.5,
+        o: Math.random() * 0.4 + 0.1,
+      });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0) p.x = w;
+      if (p.x > w) p.x = 0;
+      if (p.y < 0) p.y = h;
+      if (p.y > h) p.y = 0;
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(0, 245, 212, ${p.o})`;
+      ctx.fill();
+
+      // Connect nearby particles
+      for (let j = i + 1; j < particles.length; j++) {
+        const q = particles[j];
+        const dx = p.x - q.x;
+        const dy = p.y - q.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(q.x, q.y);
+          ctx.strokeStyle = `rgba(67, 97, 238, ${0.06 * (1 - dist / 120)})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', () => { resize(); createParticles(); });
+  resize();
+  createParticles();
+  draw();
+})();
+
+// ═══════════════════════════════════════════
+// CUSTOM CURSOR
+// ═══════════════════════════════════════════
+(function() {
+  const dot = document.getElementById('cursorDot');
+  const ring = document.getElementById('cursorRing');
+  const follower = document.getElementById('mouseFollower');
+  let curX = 0, curY = 0, ringX = 0, ringY = 0, followX = 0, followY = 0;
+
+  document.addEventListener('mousemove', e => {
+    curX = e.clientX;
+    curY = e.clientY;
+  });
+
+  function animate() {
+    // Dot follows immediately
+    dot.style.left = curX - 4 + 'px';
+    dot.style.top = curY - 4 + 'px';
+
+    // Ring follows with delay
+    ringX += (curX - ringX) * 0.12;
+    ringY += (curY - ringY) * 0.12;
+    ring.style.left = ringX - 20 + 'px';
+    ring.style.top = ringY - 20 + 'px';
+
+    // Follower follows slower
+    followX += (curX - followX) * 0.05;
+    followY += (curY - followY) * 0.05;
+    follower.style.left = followX + 'px';
+    follower.style.top = followY + 'px';
+
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  // Hover effects
+  const hoverTargets = document.querySelectorAll('a, .btn, .project-card, .skill-pill, .stat-card');
+  hoverTargets.forEach(el => {
+    el.addEventListener('mouseenter', () => ring.classList.add('hover'));
+    el.addEventListener('mouseleave', () => ring.classList.remove('hover'));
+  });
+})();
+
+// ═══════════════════════════════════════════
+// SCROLL REVEAL
+// ═══════════════════════════════════════════
+(function() {
+  const reveals = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+
+  reveals.forEach(el => observer.observe(el));
+})();
+
+// ═══════════════════════════════════════════
+// SMOOTH ANCHOR SCROLL
+// ═══════════════════════════════════════════
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+});
+
+// ═══════════════════════════════════════════
+// NAV FADE ON SCROLL
+// ═══════════════════════════════════════════
+(function() {
+  const nav = document.querySelector('.nav');
+  let lastScroll = 0;
+  window.addEventListener('scroll', () => {
+    const scroll = window.pageYOffset;
+    if (scroll > 100) {
+      nav.style.background = 'color-mix(in srgb, var(--bg-primary) 88%, transparent)';
+      nav.style.backdropFilter = 'blur(12px)';
+    } else {
+      nav.style.background = 'linear-gradient(180deg, var(--bg-primary) 0%, transparent 100%)';
+      nav.style.backdropFilter = 'none';
+    }
+    lastScroll = scroll;
+  });
+})();
+
+// ═══════════════════════════════════════════
+// PARALLAX DATA POINTS
+// ═══════════════════════════════════════════
+(function() {
+  const points = document.querySelectorAll('.data-point');
+  window.addEventListener('scroll', () => {
+    const scroll = window.pageYOffset;
+    points.forEach((p, i) => {
+      const speed = 0.02 + i * 0.01;
+      p.style.transform = `translateY(${scroll * speed}px)`;
+    });
+  });
+})();
+
+// ═══════════════════════════════════════════
+// I18N (ZH / EN)
+// ═══════════════════════════════════════════
+const i18n = {
+  zh: {
+    'title':            'WAN — Java 开发工程师',
+    'nav.about':        '关于',
+    'nav.work':         '笔记',
+    'nav.skills':       '技能',
+    'nav.contact':      '联系',
+    'hero.tag':         '技术笔记 · 持续更新 — 2026',
+    'hero.line1':       'Java 开发',
+    'hero.line2':       '工程师',
+    'hero.line3':       '与知识记录者',
+    'hero.subtitle':    '专注 <span class="accent">Java 后端开发</span>，深耕 JVM、并发编程与系统设计。在这里持续记录学习笔记与技术思考，沉淀对底层原理的理解。',
+    'hero.cta1':        '查看笔记 →',
+    'hero.cta2':        '联系我',
+    'dp.status':        '系统状态: 在线',
+    'dp.uptime':        '在线率 99.97%',
+    'sec.about':        '关于',
+    'about.body':       '<p>我是 <strong>wan</strong>，一名 <strong>Java 开发工程师</strong>，常驻<span class="highlight">中国北京</span>。热爱 Java 技术，<strong>持续记录</strong>学习与实践过程中的思考。</p><br><p>内容涵盖 <strong>Java 基础</strong>、<span class="highlight">集合与并发</span>、JVM、设计模式等核心主题，并延伸到 <span class="highlight">AI 大模型原理</span>。希望通过系统化的梳理，帮助更多开发者<span class="highlight">深入理解</span>技术的底层原理与设计哲学。</p>',
+    'stat.articles':    'Java 技术笔记',
+    'stat.lessons':     'AI 大模型课程',
+    'stat.topics':      '覆盖主题',
+    'stat.exp':         '年 Java 经验',
+    'sec.notes':        '笔记',
+    'project.title':    'Java 面试笔记',
+    'project.desc':     '系统整理 Java 核心知识，覆盖集合框架、并发编程、JVM、设计模式等高频面试主题。',
+    'project.tag.articles': '15 篇文章',
+    'project.tag.topics':   '7 主题',
+    'sec.skills':       '能力',
+    'skill.lang':       '语言 & 核心',
+    'skill.framework':  '框架 & 中间件',
+    'skill.storage':    '存储 & 数据',
+    'skill.devops':     '工程 & 运维',
+    'sec.contact':      '联系',
+    'contact.title':    '一起交流<br><span class="accent">技术与成长。</span>',
+    'contact.subtitle': '对笔记内容有想法，或想交流 Java、JVM、AI 大模型等话题？欢迎随时联系我。',
+    'contact.email':    '邮箱',
+    'contact.github':   'GitHub',
+    'footer.text':      '© 2026 wan. 匠心打造。',
+    'link.details':     '查看详情 →'
+  },
+  en: {
+    'title':            'WAN — Java Developer',
+    'nav.about':        'About',
+    'nav.work':         'Notes',
+    'nav.skills':       'Skills',
+    'nav.contact':      'Contact',
+    'hero.tag':         'Tech Notes · Continuously Updated — 2026',
+    'hero.line1':       'Java',
+    'hero.line2':       'Developer',
+    'hero.line3':       '& Knowledge Keeper',
+    'hero.subtitle':    'Focused on <span class="accent">Java backend development</span> — diving deep into the JVM, concurrency, and system design. Here I continuously document my learning notes and technical reflections.',
+    'hero.cta1':        'View Notes →',
+    'hero.cta2':        'Get in Touch',
+    'dp.status':        'SYS.STATUS: ONLINE',
+    'dp.uptime':        'UPTIME: 99.97%',
+    'sec.about':        'About',
+    'about.body':       '<p>I\'m <strong>wan</strong>, a <strong>Java developer</strong> based in <span class="highlight">Beijing, China</span>. Passionate about Java technology, I <strong>continuously document</strong> my learning and practical insights.</p><br><p>My content covers <strong>Java fundamentals</strong>, <span class="highlight">collections & concurrency</span>, the JVM, and design patterns, and extends into <span class="highlight">how large AI models work</span>. I hope to help more developers <span class="highlight">deeply understand</span> the underlying principles and design philosophy behind the technology.</p>',
+    'stat.articles':    'Java Tech Notes',
+    'stat.lessons':     'AI / LLM Lessons',
+    'stat.topics':      'Topics Covered',
+    'stat.exp':         'Years with Java',
+    'sec.notes':        'Notes',
+    'project.title':    'Java Interview Notes',
+    'project.desc':     'A systematic collection of core Java knowledge — collections, concurrency, JVM, design patterns, and other high-frequency interview topics.',
+    'project.tag.articles': '15 articles',
+    'project.tag.topics':   '7 topics',
+    'sec.skills':       'Capabilities',
+    'skill.lang':       'Language & Core',
+    'skill.framework':  'Frameworks & Middleware',
+    'skill.storage':    'Storage & Data',
+    'skill.devops':     'Engineering & Ops',
+    'sec.contact':      'Contact',
+    'contact.title':    'Let\'s talk<br><span class="accent">tech & growth.</span>',
+    'contact.subtitle': 'Thoughts on the notes, or want to chat about Java, the JVM, or large AI models? Feel free to reach out anytime.',
+    'contact.email':    'Email',
+    'contact.github':   'GitHub',
+    'footer.text':      '© 2026 wan. Crafted with intent.',
+    'link.details':     'View Details →'
+  }
+};
+
+function applyLang(lang) {
+  const dict = i18n[lang];
+  if (!dict) return;
+
+  // <html lang>
+  document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+
+  // <title>
+  const titleEl = document.querySelector('title[data-i18n-title]');
+  if (titleEl) {
+    const key = titleEl.getAttribute('data-i18n-title');
+    if (dict[key]) document.title = dict[key];
+  }
+
+  // Plain text nodes
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key] !== undefined) {
+      el.textContent = dict[key];
+      // Glitch effect: also update the data-text used for the chromatic split
+      if (el.classList && el.classList.contains('glitch')) {
+        el.setAttribute('data-text', dict[key]);
+      }
+    }
+  });
+
+  // HTML nodes (preserves inner tags like <span class="accent">)
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    const key = el.getAttribute('data-i18n-html');
+    if (dict[key] !== undefined) {
+      el.innerHTML = dict[key];
+      if (el.classList && el.classList.contains('glitch')) {
+        el.setAttribute('data-text', el.textContent);
+      }
+    }
+  });
+
+  // Switcher active state
+  document.querySelectorAll('.lang-btn').forEach(btn => {
+    const isActive = btn.getAttribute('data-lang') === lang;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
+
+  // Persist preference
+  try { localStorage.setItem('lang', lang); } catch (e) {}
+}
+
+document.querySelectorAll('.lang-btn').forEach(btn => {
+  btn.addEventListener('click', () => applyLang(btn.getAttribute('data-lang')));
+});
+
+(function initLang() {
+  let saved = 'zh';
+  try { saved = localStorage.getItem('lang') || 'zh'; } catch (e) {}
+  if (saved !== 'zh') applyLang(saved);
+})();
+</script>
+
+</body>
+</html>

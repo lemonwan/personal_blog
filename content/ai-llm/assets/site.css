@@ -1,0 +1,454 @@
+/* ═══════════════════════════════════════════════════════════════
+   AI-LLM 教程 · 全站共享样式
+   目标：把源站搬来的页面对齐到个人主页的霓虹赛博朋克风格，
+   并补全静态化后丢失的所有 CSS 变量与组件样式。
+   作为覆盖层在各页 <style> 之后加载（后写覆盖先写）。
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ---- 字体（与主页一致） ---- */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* ---- 变量重定义：浅色护眼基调（深色由根 reading-theme.css 的 [data-theme=dark] 接管） ---- */
+:root {
+  /* 背景与卡片 */
+  --bg: #faf8f4;
+  --card-bg: #ffffff;
+  --paper-card: #ffffff;
+  --code-bg: #f5f2ec;
+  --tag-bg: #eef1f5;
+  --header-bg: linear-gradient(135deg, #f3efe7 0%, #ece6da 100%);
+  --highlight: #fff6e6;
+
+  /* 主题色（沉稳、低刺激） */
+  --accent: #2563eb;        /* 主强调：链接蓝 */
+  --accent2: #2563eb;
+  --accent-deep: #1d4ed8;
+  --accent3: #e08e0b;       /* 琥珀 */
+  --accent4: #d6457f;       /* 品红 */
+  --neon-cyan: #0e9bb5;
+  --neon-purple: #8b5cf6;
+  --success: #2e9e5b;
+  --warning: #e08e0b;
+
+  /* 文本体系 */
+  --text: #2b2b30;
+  --text-secondary: #6b6b76;
+  --ink: #2b2b30;
+  --ink-soft: #4a4a54;
+  --ink-faint: #6b6b76;
+
+  /* 线条 */
+  --border: #e6e0d4;
+  --line: #e6e0d4;
+
+  /* 字体族 */
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --serif: 'PingFang SC', 'Songti SC', 'Microsoft YaHei', serif;
+  --mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+[data-theme="dark"] {
+  --bg: #16171a;
+  --card-bg: #1d1f23;
+  --paper-card: #1d1f23;
+  --code-bg: #101114;
+  --tag-bg: #25272c;
+  --header-bg: linear-gradient(135deg, #1d1f23 0%, #24262b 100%);
+  --highlight: #2a2620;
+  --accent: #5b9bf3;
+  --accent2: #5b9bf3;
+  --accent-deep: #5b9bf3;
+  --accent3: #f0aa3c;
+  --accent4: #e87aa6;
+  --neon-cyan: #3ec0d6;
+  --neon-purple: #a98bf5;
+  --success: #4cc47e;
+  --warning: #f0aa3c;
+  --text: #e6e6e8;
+  --text-secondary: #a2a2ac;
+  --ink: #e6e6e8;
+  --ink-soft: #c4c4cc;
+  --ink-faint: #a2a2ac;
+  --border: #2e3036;
+  --line: #2e3036;
+}
+
+/* ---- 基底 ---- */
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* 标题统一用 display 字体 */
+h1, h2, h3, h4, .header h1, .section-title h2, .station h2 {
+  font-family: var(--sans);
+  letter-spacing: -0.01em;
+}
+
+/* ---- 链接 / 强调 ---- */
+a { color: var(--accent); }
+strong { color: var(--text); }
+.station strong, .accent { color: var(--accent); }
+code {
+  font-family: var(--mono);
+  background: var(--code-bg);
+  color: var(--accent);
+  border: 1px solid rgba(37, 99, 235, 0.12);
+}
+pre { font-family: var(--mono); }
+pre code { color: #9ef5e4; border: none; }
+
+/* ---- 头部卡片：切角 + 霓虹辉光（对齐主页 stat/project 卡片） ---- */
+.header {
+  border-radius: 0 !important;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  box-shadow: 0 8px 40px rgba(37, 99, 235, 0.08), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.header h1 {
+  background: linear-gradient(135deg, #fff, var(--accent) 55%, var(--accent4));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.course-badge, .lesson-badge, .volume-badge {
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep)) !important;
+  color: var(--bg) !important;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* ---- 统计数字 ---- */
+.stat-number {
+  font-family: var(--sans);
+  background: linear-gradient(135deg, var(--accent), var(--accent4));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ---- 内容卡片（station / section / 各类 box）：切角化 ---- */
+.station, .section, .learning-philosophy, .takeaway, .recap,
+.quiz, .next-card, .fig, .lab, .crack, .think,
+.book-def, .freq-table, .bpx-card, .bpx-fruit-card {
+  border-radius: 10px;
+}
+.station, .section {
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  backdrop-filter: blur(6px);
+}
+.station-no, .section-icon {
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep)) !important;
+  color: var(--bg) !important;
+  font-family: var(--mono);
+}
+
+/* ---- 公式块 ---- */
+.formula {
+  font-family: var(--mono);
+  background: rgba(37, 99, 235, 0.06);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  color: var(--text);
+}
+.f-hl { color: var(--accent); font-weight: 700; }
+.f-dim { color: var(--text-secondary); }
+.formula-note, .formula-tex-note { color: var(--text-secondary); font-size: 13px; }
+
+/* ---- 思考块 think（保留思考题，按钮在 HTML 中已删除） ---- */
+.think {
+  background: rgba(37, 99, 235, 0.06);
+  border: 1px dashed rgba(37, 99, 235, 0.45);
+}
+.think::before { background: var(--card-bg); }
+.think-q { color: var(--accent); }
+
+/* ---- 局限/裂缝块 crack ---- */
+.crack {
+  background: rgba(214, 69, 127, 0.07);
+  border: 1px solid rgba(214, 69, 127, 0.30);
+  border-left: 4px solid var(--accent4);
+  padding: 18px 22px;
+  margin: 22px 0;
+}
+.crack-label {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent4);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+
+/* ---- TAKEAWAY / RECAP ---- */
+.takeaway {
+  background: linear-gradient(135deg, rgba(37, 99, 235,0.08), rgba(67,97,238,0.08));
+  border: 1px solid rgba(37, 99, 235, 0.28);
+}
+.takeaway-label { color: var(--accent); font-family: var(--mono); }
+.tk-hl { color: var(--accent); font-weight: 700; }
+.recap {
+  background: rgba(247, 179, 43, 0.07);
+  border: 1px solid rgba(247, 179, 43, 0.28);
+}
+.recap h3 { color: var(--accent3); }
+
+/* ---- 配图 fig ---- */
+.fig, .fig-frame {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.fig-frame { border: none; }
+.figcaption { color: var(--text-secondary); }
+.fig-no { color: var(--accent); font-weight: 600; }
+.fig-hint { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+.svg-axis { stroke: #5b6680; }
+.svg-label { fill: var(--text); font-size: 12px; font-family: var(--sans); }
+.svg-note { fill: var(--text-secondary); font-size: 11px; font-family: var(--mono); }
+
+/* ---- highlight-box ---- */
+.highlight-box { background: rgba(37, 99, 235,0.07); border-left: 4px solid var(--accent); }
+.highlight-box.green { background: rgba(37, 99, 235,0.07); border-left-color: var(--accent); }
+.highlight-box.cyan  { background: rgba(67,97,238,0.07); border-left-color: var(--accent-deep); }
+
+/* ═══════════════════════════════════════════
+   小测验 QUIZ —— 可交互判分样式
+   ═══════════════════════════════════════════ */
+.quiz {
+  background: rgba(214, 69, 127, 0.06);
+  border: 1px solid rgba(214, 69, 127, 0.25);
+}
+.quiz-title, .quiz .station-no { color: var(--accent4); }
+.quiz-intro { color: var(--text-secondary); margin-bottom: 18px; }
+.quiz-item {
+  margin-bottom: 22px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+.quiz-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.quiz-q { font-weight: 600; margin-bottom: 14px; display: flex; gap: 10px; align-items: baseline; }
+.quiz-q-no {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--accent4);
+  flex-shrink: 0;
+}
+.quiz-options { padding-left: 0; display: flex; flex-direction: column; gap: 10px; }
+.quiz-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.quiz-option:hover { border-color: rgba(37, 99, 235,0.4); background: rgba(37, 99, 235,0.05); }
+.quiz-option-key {
+  width: 28px; height: 28px;
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  background: var(--tag-bg);
+  font-family: var(--mono); font-weight: 700; font-size: 13px;
+  color: var(--accent);
+}
+.quiz-option[aria-checked="true"] {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235,0.08);
+}
+.quiz-option[aria-checked="true"] .quiz-option-key {
+  background: var(--accent); color: var(--bg);
+}
+/* 判分后状态 */
+.quiz-option.is-correct {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235,0.14);
+}
+.quiz-option.is-correct .quiz-option-key { background: #2563eb; color: var(--bg); }
+.quiz-option.is-wrong {
+  border-color: var(--accent4);
+  background: rgba(214, 69, 127,0.12);
+}
+.quiz-option.is-wrong .quiz-option-key { background: var(--accent4); color: #fff; }
+.quiz-option:disabled { cursor: default; }
+.quiz-submit {
+  margin-top: 16px;
+  padding: 10px 28px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  transition: all 0.2s;
+}
+.quiz-submit:hover:not(:disabled) { background: var(--accent-deep); color:#fff; box-shadow: 0 0 20px rgba(37, 99, 235,0.4); }
+.quiz-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 判分后出现的讲解条 */
+.quiz-explain {
+  margin-top: 14px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  background: rgba(67,97,238,0.08);
+  border-left: 3px solid var(--accent-deep);
+  color: var(--ink-soft);
+}
+.quiz-explain.verdict-right { background: rgba(37, 99, 235,0.08); border-left-color: var(--accent); }
+.quiz-explain.verdict-wrong { background: rgba(214, 69, 127,0.08); border-left-color: var(--accent4); }
+.quiz-explain .verdict { font-weight: 700; margin-right: 6px; }
+.quiz-explain.verdict-right .verdict { color: var(--accent); }
+.quiz-explain.verdict-wrong .verdict { color: var(--accent4); }
+
+/* ═══════════════════════════════════════════
+   NEXT 卡片 / 页脚 / 面包屑
+   ═══════════════════════════════════════════ */
+.next-card {
+  background: linear-gradient(135deg, var(--card-bg), rgba(37, 99, 235,0.06));
+  border: 1px solid var(--border);
+}
+.next-card:hover { border-color: var(--accent); box-shadow: 0 8px 30px rgba(37, 99, 235,0.14); }
+.next-card h3 { color: var(--accent); }
+.next-label { color: var(--text-secondary); font-family: var(--mono); }
+.breadcrumb a, .lesson-footer a, .footer-nav a { color: var(--accent); }
+.footer-nav a:hover, .lesson-footer a:hover { color: #fff; }
+.lesson-count { color: var(--accent); background: var(--tag-bg); font-family: var(--mono); }
+
+/* ---- 标签 tag ---- */
+.tag { background: var(--tag-bg); color: var(--text-secondary); }
+.tag-purple { color: var(--accent4); border-color: var(--accent4); }
+.tag-cyan   { color: var(--accent); border-color: var(--accent); }
+.tag-amber  { color: var(--accent3); border-color: var(--accent3); }
+.tag-red    { color: var(--accent4); border-color: var(--accent4); }
+
+/* ---- reveal：源站滚动入场动画类，静态下确保可见 ---- */
+.reveal { opacity: 1 !important; transform: none !important; }
+
+/* ═══════════════════════════════════════════
+   交互实验组件通用样式（lab / knob / gd / fruit / prob / neuron / tf3d）
+   这些类在源站靠 CSS-in-JS，搬来后无定义；此处补全外观。
+   行为由 site.js 提供。
+   ═══════════════════════════════════════════ */
+.lab, .fruit-lab, .bpx, .freq-table {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin: 24px 0;
+}
+.lab-head, .lab-tag, .knob-head, .gd-controls { font-family: var(--mono); }
+.lab-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.lab-tag {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--bg); background: var(--accent); padding: 4px 10px; border-radius: 6px;
+}
+.lab-title { font-weight: 600; }
+.lab-hint, .fig-hint, .gd-readout, .readout, .knob-end { color: var(--text-secondary); font-size: 13px; }
+.readout { margin-top: 10px; font-family: var(--mono); }
+.lab-body { margin-top: 8px; }
+
+/* 旋钮 / 滑块 */
+.knob-row, .gd-controls, .knobs-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 12px 0; }
+.knob-title, .knob-name, .gd-alpha { font-family: var(--mono); font-size: 13px; color: var(--text-secondary); }
+.knob-val, .gd-readout { font-family: var(--mono); color: var(--accent); font-weight: 700; }
+input[type="range"].knob-slider, .knob-slider, input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 2px;
+  background: rgba(67,97,238,0.3);
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb, .knob-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+  box-shadow: 0 0 10px rgba(37, 99, 235,0.5);
+}
+input[type="range"]::-moz-range-thumb, .knob-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%; border: none;
+  background: var(--accent); cursor: pointer;
+}
+
+/* 按钮（act-btn / bpx-nav-btn / tf3d-play 等交互按钮） */
+.act-btn, .bpx-nav-btn, .tf3d-play, .tf3d-full {
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  color: var(--accent); background: rgba(37, 99, 235,0.08);
+  border: 1px solid rgba(37, 99, 235,0.3); border-radius: 6px;
+  padding: 8px 16px; cursor: pointer; transition: all 0.2s;
+}
+.act-btn:hover, .bpx-nav-btn:hover, .tf3d-play:hover, .tf3d-full:hover {
+  background: var(--accent); color: var(--bg);
+}
+.act-btn.on, .act-btn.active, .act-btn.selected {
+  background: var(--accent); color: var(--bg);
+}
+.act-btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.act-btns-label, .knob-head, .gd-log-head, .gd-loss-head, .gd-spark-label { font-size: 13px; color: var(--text-secondary); font-family: var(--mono); margin-bottom: 6px; }
+
+/* 概率条 prob- / 频率条 freq- */
+.prob-row, .freq-bar { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.prob-name, .freq-mono { font-family: var(--mono); font-size: 13px; min-width: 56px; color: var(--text-secondary); }
+.prob-bar, .freq-bar-fill, .prob-block {
+  position: relative; flex: 1; height: 22px;
+  background: rgba(67,97,238,0.12); border-radius: 4px; overflow: hidden;
+}
+.prob-fill, .freq-bar-fill > i {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent));
+  border-radius: 4px; transition: width 0.4s ease;
+}
+.prob-pct, .freq-pct { font-family: var(--mono); font-size: 13px; color: var(--accent); min-width: 48px; text-align: right; }
+.prob-win .prob-fill { background: linear-gradient(90deg, var(--accent4), var(--accent)); }
+.prob-win .prob-name { color: var(--accent); }
+
+/* 书本定义块 book-def */
+.book-def {
+  background: rgba(67,97,238,0.07);
+  border: 1px solid rgba(67,97,238,0.25);
+  border-radius: 10px; padding: 18px 22px; margin: 22px 0;
+}
+.book-def-label { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-deep); margin-bottom: 8px; }
+
+/* 频率表 freq- */
+.freq-table { padding: 18px; }
+.freq-head, .freq-p { color: var(--text-secondary); font-size: 13px; margin-bottom: 10px; }
+.freq-bar-fill { background: rgba(67,97,238,0.12); }
+
+/* 3D 可视化容器 tf3d- */
+.tf3d, .tf3d-shell, .tf3d-stage {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border); border-radius: 10px;
+}
+.tf3d-stage { min-height: 320px; position: relative; }
+.tf3d-legend, .tf3d-note, .tf3d-hint { color: var(--text-secondary); font-size: 13px; }
+.tf3d-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 6px; }
+
+/* 论文作者卡（appendix） */
+.paper-author-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 18px; margin: 16px 0;
+}
+.paper-author-kicker, .paper-author-company { color: var(--text-secondary); font-size: 13px; }
+.paper-author-photo { border-radius: 8px; }
+
+/* 选中/激活态通用 */
+.selected, .is-selected { outline: 2px solid var(--accent); }
+.yes { color: var(--accent); }
+.no  { color: var(--accent4); }

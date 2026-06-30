@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 35 · volatile关键字（可见性、有序性、不保证原子性、happens-before） · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 35 / 66</div>
+            <h1>多线程并发编程 · java.util.concurrent包</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 volatile关键字（可见性、有序性、不保证原子性、happens-before）</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:53%"></div>
+            </div>
+            <div class="progress-label">进度 53%（35/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>volatile</strong> 是Java提供的最轻量级的同步机制，保证<strong>可见性</strong>和<strong>有序性</strong>，但<strong>不保证原子性</strong>。</p><div class="highlight-box"><strong>本质：</strong>volatile 修饰的变量，在读取和写入时都会直接操作主内存（Main Memory），不经过线程工作内存的缓存，从而保证多个线程之间对变量的修改是立即可见的。</div><p>volatile 适用于一个线程写、多个线程读的场景，但不适用于多个线程同时写的场景（此时需要加锁或使用Atomic类）。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>可见性原理</h2>
+        </div>
+        <div class="section-content">
+            <p>Java内存模型（JMM）规定：</p><ul><li>每个线程有自己的<strong>工作内存</strong>（本地缓存）</li><li>线程对共享变量的所有操作必须在工作内存中进行</li><li>不同线程之间无法直接访问对方的工作内存</li><li>线程间变量值的传递需要通过<strong>主内存</strong>完成</li></ul><p>当变量被 <code>volatile</code> 修饰时：</p><ul><li><strong>写操作：</strong>立即将工作内存中的值<strong>强制刷新</strong>到主内存</li><li><strong>读操作：</strong>从主内存中<strong>重新读取</strong>最新值，而不是用工作内存的缓存</li></ul><div class="highlight-box yellow"><strong>底层实现：</strong>volatile 的可见性是通过添加 <strong>Lock 前缀指令</strong>实现的。该指令会立即将缓存行数据写回主内存，并使其他CPU核心中缓存了该变量的缓存行失效（MESI缓存一致性协议）。</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>有序性 & happens-before</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>happens-before 规则</strong>是JMM中判断数据是否存在竞争、线程是否安全的主要依据。</p><p>volatile 相关规则：</p><div class="highlight-box blue"><strong>Volatile变量规则：</strong>对一个volatile变量的<strong>写操作</strong> happens-before 于后续对同一变量的<strong>读操作</strong>。</div><p>这就保证了：写线程写入volatile变量前的所有操作，对读线程都是可见的。</p><p><strong>禁止指令重排序：</strong></p><p>编译器/处理器为了优化性能，可能会对指令进行重排序（Reordering）。volatile 通过<strong>内存屏障</strong>禁止重排序：</p><pre><code>// 写volatile变量时，JMM会在写操作前后插入StoreStore和StoreLoad屏障
+// 读volatile变量时，JMM会在读操作前后插入LoadLoad和LoadStore屏障</code></pre><p>四种内存屏障：</p><ul><li><strong>StoreStore：</strong>禁止前面的普通写与后面的volatile写重排序</li><li><strong>StoreLoad：</strong>禁止前面的volatile写与后面可能的volatile读/写重排序</li><li><strong>LoadLoad：</strong>禁止后面的普通读与前面的volatile读重排序</li><li><strong>LoadStore：</strong>禁止后面的普通写与前面的volatile读重排序</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>不保证原子性</h2>
+        </div>
+        <div class="section-content">
+            <p>这是 volatile 最常见的面试考点和踩坑点。</p><div class="highlight-box red"><strong>关键理解：</strong>volatile 不保证复合操作的原子性！即使变量被 volatile 修饰，<code>count++</code> 这样的操作仍然是线程不安全的。</div><p>原因分析（<code>count++</code> 包含三步）：</p><ol><li>读取 <code>count</code> 的值（可见性保证）</li><li>对 <code>count</code> 加1（不是原子操作）</li><li>写回 <code>count</code> 的新值（可见性保证）</li></ol><div class="highlight-box yellow"><strong>举例：</strong>两个线程同时执行 count++，初始值0。<br>线程A和线程B都读取到0，各自加1后写回，结果count=1而不是2。<br>因为 volatile 不能保证<strong>读取-修改-写入</strong>这个操作序列是原子的。</div><p><strong>解决方案：</strong></p><ul><li>使用 <code>synchronized</code> 加锁</li><li>使用 <code>AtomicInteger</code> / <code>AtomicLong</code> 等原子类（基于CAS实现）</li><li>使用 <code>ReentrantLock</code> 显示锁</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚖️</span>
+            <h2>volatile vs synchronized</h2>
+        </div>
+        <div class="section-content">
+            <table><tr><th>对比维度</th><th>volatile</th><th>synchronized</th></tr><tr><td>可见性</td><td>保证</td><td>保证</td></tr><tr><td>原子性</td><td>不保证</td><td>保证</td></tr><tr><td>有序性</td><td>禁止重排序</td><td>保证（加锁解锁语义）</td></tr><tr><td>性能开销</td><td>很小（无锁）</td><td>较大（锁竞争/上下文切换）</td></tr><tr><td>适用场景</td><td>状态标志、单次读写</td><td>复合操作、多步原子操作</td></tr><tr><td>底层实现</td><td>内存屏障 + Lock前缀</td><td>Monitor对象（偏向锁轻量重量）</td></tr><tr><td>阻塞行为</td><td>非阻塞同步</td><td>阻塞，进入BLOCKED状态</td></tr></table>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>经典使用场景</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>1. 状态标志位（最常用）</strong></p><pre><code>volatile boolean running = true;
+
+// 线程1
+while (running) {
+    // 执行任务
+}
+
+// 线程2（控制线程）
+void stop() { running = false; }</code></pre><p><strong>2. 双重检查锁定（DCL）——单例模式</strong></p><pre><code>class Singleton {
+    private static volatile Singleton instance;
+    
+    public static Singleton getInstance() {
+        if (instance == null) {
+            synchronized (Singleton.class) {
+                if (instance == null) {
+                    instance = new Singleton();
+                }
+            }
+        }
+        return instance;
+    }
+}</code></pre><div class="highlight-box green"><strong>为什么需要volatile？</strong><br><code>instance = new Singleton()</code> 并不是一个原子操作，JVM会做3件事：分配内存、初始化对象、将引用指向内存。指令重排序可能导致初始化和赋值互换，另一个线程会拿到一个未初始化完成的对象！volatile禁止了这个重排序。</div><p><strong>3. 独立观察变量（发布/订阅模式）</strong></p><pre><code>volatile int lastValue;
+
+// 监听线程可以实时看到最新变化</code></pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>面试高频真题</h2>
+        </div>
+        <div class="section-content">
+            <div class="highlight-box"><strong>Q1：</strong>volatile 能保证原子性吗？举例说明。<br>不能。比如 count++ 不是原子操作，需要 synchronized 或 AtomicInteger。</div><div class="highlight-box blue"><strong>Q2：</strong>volatile 和 synchronized 的区别？<br>volatile 只保证可见性和有序性，不阻塞线程；synchronized 保证可见性、有序性和原子性，会阻塞线程。</div><div class="highlight-box green"><strong>Q3：</strong>volatile 是如何保证可见性的？<br>底层通过Lock前缀指令 + MESI缓存一致性协议实现——写操作强制刷回主存，读操作禁用缓存直接从主存读取。</div><div class="highlight-box yellow"><strong>Q4：</strong>单例模式的 DCL 为什么要用 volatile？<br>防止指令重排序导致拿到未初始化的对象。new操作不是原子的，重排序后可能先赋值引用再初始化对象。</div><div class="highlight-box"><strong>Q5：</strong>volatile 如何防止指令重排序？<br>通过插入内存屏障（Memory Barrier），在volatile写前后插入StoreStore/StoreLoad屏障，在volatile读前后插入LoadLoad/LoadStore屏障。</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>实际踩坑经验</h2>
+        </div>
+        <div class="section-content">
+            <div class="highlight-box red"><strong>踩坑1：</strong>用volatile修饰引用类型，认为引用的内部状态也安全。<br>volatile只保证引用本身的可见性，不保证引用对象内部字段的可见性。如果list本身是volatile的，对list.add()的操作仍然不安全。</div><div class="highlight-box red"><strong>踩坑2：</strong>认为volatile性能开销很小，大量使用在热点路径上。<br>volatile变量写操作比普通变量慢约20-100倍（要强制刷缓存、使其他核心缓存失效），虽然比锁快，但也不是免费的。</div><div class="highlight-box red"><strong>踩坑3：</strong>用volatile解决所有并发问题。<br>volatile适用范围非常有限。最常见的错误是用volatile做计数器、累加器的线程安全保证。记住：一写多读用volatile，多写多读用锁或Atomic。</div>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>AQS原理（CLH队列、state、模板方法模式）</p>
+        </div>
+    </div>
+</body>
+</html>

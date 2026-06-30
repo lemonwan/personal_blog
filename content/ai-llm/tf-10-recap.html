@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第29课 · 串讲：从 N-gram 到 Transformer | AI大模型原理教程</title>
+    <meta name="description" content="学了这么多细节，怎么把它们重新串成一条线？——每一代技术，都是来解上一代死结的">
+    <meta name="keywords" content="AI大模型教程,Transformer,串讲：从 N-gram 到 Transformer,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第29课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 29 · 卷四</div>
+            <h1>串讲：从 N-gram 到 Transformer</h1>
+            <p class="subtitle">❝ 学了这么多细节，怎么把它们重新串成一条线？——每一代技术，都是来解上一代死结的 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="一条主线" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>不学新东西，只把学过的串成一条线</h2></div><p>到上一课为止，你已经亲手「逼出」了从 N-gram 到 Transformer 的每一块零件。但零件多了，细节难免忘—— N-gram 为什么不行？词向量到底神在哪？RNN 和 LSTM 差在哪一步？这一课不引入任何新概念， 只做一件事：<strong>把这些珠子重新串成一条项链</strong>。</p><p>串这条线，只需要记住一个叙事母题：<strong>语言难在哪，每一代技术就在补哪一刀</strong>。语言的难，可以归成三句话——</p><div style="margin:20px 0;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper-card);padding:12px 18px;border-radius:4px"><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">序列</span><span style="color:var(--ink-soft)">词有先后，「我打你」和「你打我」字一样、意思反。模型得处理<strong>顺序</strong>。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">上下文</span><span style="color:var(--ink-soft)">一个词的意思取决于周围。「苹果」是水果还是公司？得看<strong>上下文</strong>。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:none;font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">稀疏</span><span style="color:var(--ink-soft)">能组成的句子近乎无限，再大的语料也只见过其中极小一撮——大量合理组合<strong>从没出现过</strong>。</span></div></div><p>接下来六站，每一站都是一次「上一代留下一个死结 → 这一代用一个新想法解开它 → 但又冒出新的死结」。 顺着这条链走一遍，整套 NLP 技术史就立起来了。</p></section><section class="station reveal" data-title="N-gram" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>N-gram：最朴素的起点——数数</h2></div><p>最早的语言模型干脆不懂语法、不懂语义，只会<strong>数数</strong>。它赌的是一条朴素假设（马尔可夫假设）： 下一个词只跟前面紧挨着的那几个词有关。只看前 1 个词叫 2-gram，看前 2 个叫 3-gram，以此类推。</p><p>怎么用？把语料里的搭配频率数出来就行。比如要接「今天天气很 ___」，就去数「很」后面都跟过些什么：</p><div class="formula" style="text-align:left;font-size:14px;line-height:2">「很」→ 好（38%）、冷（21%）、热（15%）、大（9%）……<br/>于是模型赌概率最高的那个：「好」。</div><p>这招在短搭配上意外地好用，撑起了手机输入法和早期语音识别几十年。可它有两道硬伤。头一道是<strong>稀疏</strong>： 词表动辄五万，3-gram 的组合就有 5 万³ ≈ 125 万亿种，再大的语料也只见过其中极小一撮—— 你随口说一句没人说过的话，它数出来的频率就是 0，于是整句话被判「不可能」。后人用各种「平滑」给零概率打补丁，终究治标不治本。</p><p>第二道是<strong>记性短</strong>：它只回头瞄两三个词。「他在<strong>法国</strong>长大……（中间隔了一长串）……所以他说一口流利的 ___」， 这种跨越几十个词的线索，N-gram 根本够不着。</p><div style="margin:20px 0;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper-card);padding:12px 18px;border-radius:4px"><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">诞生于</span><span style="color:var(--ink-soft)">想接出下一个词，但又最省事——能数数就别建模。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">解决了</span><span style="color:var(--ink-soft)">用<strong>统计频率</strong>给出「下一个词」的概率，简单、快、可解释。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:none;font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">但留下</span><span style="color:var(--ink-soft)">① <strong>稀疏</strong>：没数到的组合概率直接为 0；② <strong>记性短</strong>：只看前几个词；③ <strong>符号孤立</strong>：「猫」和「小猫」被当成毫不相干的两个符号。</span></div></div></section><section class="station reveal" data-title="词向量" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>词向量：先把「符号孤立」这一刀补上</h2></div><p>N-gram 把每个词当成一个孤立编号，机器永远不知道「猫」和「小猫」有关系。词向量换了个思路：<strong>把每个词变成一组数字（几百维的向量）</strong>，让意思相近的词，向量也相近——夹角小、余弦相似度高（第 2 课）。</p><p>这些数字怎么来？靠一条朴素得近乎废话的假设——<strong>近朱者赤</strong>：一个词的意思，由它常出现的上下文决定（第 15 课）。 训练时让模型反复做一道完形填空：拿一个词去预测它周围的词（或反过来）。「猫」和「小猫」总出现在相似语境里 （「___ 在睡觉」「喂 ___」），一来二去就被挤到了相邻的位置。</p><p>最惊艳的是，连词与词之间的<strong>关系</strong>都被编码成了向量空间里的<strong>方向</strong>，于是加加减减就能做类比：</p><div class="formula" style="text-align:left;font-size:14px;line-height:2">国王 − 男人 + 女人 ≈ 女王<br/>北京 − 中国 + 法国 ≈ 巴黎</div><p>这些都不是人为设计，而是从语料里自然浮现的。语义第一次有了坐标，举一反三有了立足点。</p><div style="margin:20px 0;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper-card);padding:12px 18px;border-radius:4px"><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">诞生于</span><span style="color:var(--ink-soft)">N-gram 把词当孤立符号，无法举一反三。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">解决了</span><span style="color:var(--ink-soft)">用<strong>稠密向量</strong>编码词义，相近的词靠在一起，泛化有了立足点。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:none;font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">但留下</span><span style="color:var(--ink-soft)">词向量只是「零件」，本身还不是语言模型；而且它是<strong>静态</strong>的——「苹果」在所有句子里都是同一个向量，区分不了水果和公司。</span></div></div></section><section class="station reveal" data-title="神经语言模型" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>神经网络语言模型：用词向量绕开「稀疏」</h2></div><p>光有词向量还不算语言模型——它本身还不会「预测下一个词」。把词向量喂进一个神经网络来干这件事， 就是前馈神经网络语言模型（第 16 课）：把前几个词的向量<strong>拼接</strong>起来，过几层网络， 最后用 Softmax（第 11 课）吐出「下一个词是谁」的概率分布。</p><p>关键的飞跃在<strong>泛化</strong>。N-gram 见过「我吃苹果」，碰到「我吃梨」却傻眼——因为「梨」是个它没数到的新符号。 而 NNLM 知道「苹果」和「梨」的向量很近，于是「我吃苹果」学到的本事，能<strong>自动迁移</strong>到「我吃梨」上。 稀疏的诅咒，就这样被词向量的相似性绕开了。这是 2003 年 Bengio 等人埋下的伏笔，也是日后一切神经语言模型的雏形。</p><p>但它身上还留着 N-gram 的一道旧疾：输入是<strong>固定长度</strong>的——一次只能吃前面 N 个词， 超出窗口的更早信息，照样看不见。要真正记住远处，还得换一种结构。</p><div style="margin:20px 0;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper-card);padding:12px 18px;border-radius:4px"><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">诞生于</span><span style="color:var(--ink-soft)">N-gram 的稀疏——没见过的组合概率为 0。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">解决了</span><span style="color:var(--ink-soft)">借词向量的<strong>泛化</strong>能力，对没见过的合理组合也能给出合理概率。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:none;font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">但留下</span><span style="color:var(--ink-soft)">仍是<strong>固定窗口</strong>：一次只能看前面 N 个词，看不到更早的上下文，长依赖依旧抓不住。</span></div></div></section><section class="station reveal" data-title="RNN" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>RNN：给网络装上「记忆」，砸开固定窗口</h2></div><p>固定窗口的根子，在于网络一次只吃固定数量的词。RNN（第 17 课）换了个读法——<strong>逐词阅读、边读边记</strong>： 每读一个词，就把「这个词 + 上一刻的记忆」揉成一份新的记忆（隐藏状态），再传给下一步。</p><p>这就像你读小说：脑子里有一份不断更新的「剧情梗概」，读到新一句就往里揉一点。理论上，这份记忆能携带任意长的历史， 固定窗口的枷锁被打破了；而且整条序列<strong>共用同一套权重</strong>，参数不会随句子变长而膨胀。</p><p>可惜理论很丰满。记忆每走一步就被整个重写一次，早期信息一路被冲淡——这正是第 24 课那个老对手换了个方向又来了：<strong>梯度沿时间连乘</strong>，几十步后衰减到几乎为零（梯度消失），于是 RNN 的记性其实传不远。 更要命的是，它必须算完这一步才能算下一步，<strong>天生串行</strong>，GPU 上万个核心只能干瞪眼。</p><div style="margin:20px 0;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper-card);padding:12px 18px;border-radius:4px"><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">诞生于</span><span style="color:var(--ink-soft)">前馈模型的固定窗口，看不到更早的词。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">解决了</span><span style="color:var(--ink-soft)">用循环的<strong>隐藏状态</strong>当记忆，处理变长序列，原则上不限上下文长度。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:none;font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">但留下</span><span style="color:var(--ink-soft)">① <strong>梯度消失</strong>：信息沿时间连乘，几十步后早期记忆被稀释，记不远；② 必须一个词接一个词地算，<strong>无法并行</strong>。</span></div></div></section><section class="station reveal" data-title="LSTM" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>LSTM：给记忆装阀门，让它传得更远</h2></div><p>RNN 记不远，是因为记忆每一步都被无差别地重写。LSTM（第 18 课）给记忆装上了三道<strong>阀门</strong>（取值 0~1 的开关）：<strong>遗忘门</strong>决定旧记忆丢多少、<strong>输入门</strong>决定新信息写多少、<strong>输出门</strong>决定这一刻读出多少。</p><p>阀门之外，还有一条专门的「细胞状态」像<strong>传送带</strong>一样贯穿始终——信息可以几乎原封不动地从头滑到尾， 只在阀门处被有选择地增删。于是梯度不再被无脑连乘冲垮，重要信息能被守住几十步。 这条「记忆高速路」，和第 24 课残差连接的「梯度高速路」是同一个灵魂：<strong>给信息留一条少受干扰的直通道</strong>。</p><p>举个例子：「我在<strong>法国</strong>长大，从小耳濡目染……所以我能说一口流利的 <strong>法语</strong>。」 LSTM 能把「法国」这条线索一路守到句尾、接对「法语」——这是普通 RNN 很难做到的。</p><p>但最硬的那道墙纹丝不动：LSTM 依然要<strong>一个词接一个词地按顺序处理</strong>，无法并行。模型规模的天花板，仍卡在这里。</p><div style="margin:20px 0;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper-card);padding:12px 18px;border-radius:4px"><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">诞生于</span><span style="color:var(--ink-soft)">RNN 的梯度消失——记忆传不远。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">解决了</span><span style="color:var(--ink-soft)">用<strong>门控 + 细胞状态</strong>守住长程信息，长依赖大为改善。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:none;font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">但留下</span><span style="color:var(--ink-soft)">最硬的那道墙还在：LSTM 依然要<strong>按顺序逐词处理</strong>，无法并行，模型规模因此被卡住天花板。</span></div></div></section><section class="station reveal" data-title="Transformer" data-num="7" id="s7"><div class="station-head"><span class="station-no">第 7 站</span><h2>Transformer：扔掉循环，让所有词同时开口</h2></div><p>串行这道墙，2017 年被注意力机制（第 19 课）一拳砸开。它的主张极简：扔掉循环，<strong>让每个词直接「查询」句中所有词</strong>——拿自己的 Query 去和所有词的 Key 比对，算出一组注意力权重， 再按权重把大家的 Value 汇总过来。「它太累了」里的「它」指谁？让「它」自己把注意力投到那个名词上就行。</p><p>这一下解决了两件大事。其一，任意两个词之间<strong>一步直达</strong>，再远的依赖也不衰减，LSTM 苦苦维持的长程记忆变得轻而易举。 其二，也是更致命的——这套计算<strong>可以完全并行</strong>：一句话里所有词的注意力同时算，本质就是几个大矩阵相乘， 正好喂饱 GPU 上万个核心。困住 RNN / LSTM 几十年的串行枷锁，就此解开。</p><p>并行解锁了规模，而<strong>规模本身就带来了能力</strong>——参数从亿级冲到千亿、万亿，模型涌现出推理、翻译、写代码等谁都没预设的本事。 把多头注意力、FFN、残差与层归一化（第 20~24 课）拼成一个块，叠几十上百层，配上分词器（第 22 课）和 「预训练 → 监督微调 → RLHF」三阶段训练（第 25 课），就长成了 ChatGPT。</p><p>当然，它也留下了自己的新麻烦：让每个词都看所有词，代价是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 的开销（第 26 课）——序列一长就贵得吓人。 这道账单，正是下一课要讲的前沿仍在攻打的难题之一。</p><div style="margin:20px 0;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--paper-card);padding:12px 18px;border-radius:4px"><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">诞生于</span><span style="color:var(--ink-soft)">RNN / LSTM 必须串行，规模上不去。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">解决了</span><span style="color:var(--ink-soft)">用<strong>自注意力</strong>实现一步直达的长依赖 + 大规模<strong>并行</strong>，规模与能力同时起飞。</span></div><div style="display:flex;gap:12px;padding:7px 0;border-bottom:none;font-size:14.5px;line-height:1.75"><span style="flex-shrink:0;font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--accent-deep);width:58px">但留下</span><span style="color:var(--ink-soft)">注意力是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 的（第 26 课），长序列代价高昂——这道账单，正是当下前沿仍在攻打的难题之一。</span></div></div></section><section class="station reveal" data-title="全景" data-num="8" id="s8"><div class="station-head"><span class="station-no">第 8 站</span><h2>一张图看完这条接力</h2></div><p>把六代技术摆成一条时间线，每一段连线上写着「逼出下一代的那个死结」——这就是整部 NLP 演变史的骨架：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 760 200" role="img" aria-label="从 N-gram 到 Transformer 的演变时间线"><defs><marker id="evo-arr" markerWidth="7" markerHeight="5" refX="6.5" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#C0481E"></polygon></marker></defs><g><line x1="76" y1="108" x2="180" y2="108" stroke="#C9BBA0" stroke-width="2" marker-end="url(#evo-arr)"></line><text x="128" y="96" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">症结：猫 ≠ 小猫</text></g><g><line x1="204" y1="108" x2="308" y2="108" stroke="#C9BBA0" stroke-width="2" marker-end="url(#evo-arr)"></line><text x="256" y="96" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">症结：组合没见过 = 0</text></g><g><line x1="332" y1="108" x2="436" y2="108" stroke="#C9BBA0" stroke-width="2" marker-end="url(#evo-arr)"></line><text x="384" y="96" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">症结：窗口固定</text></g><g><line x1="460" y1="108" x2="564" y2="108" stroke="#C9BBA0" stroke-width="2" marker-end="url(#evo-arr)"></line><text x="512" y="96" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">症结：记不远</text></g><g><line x1="588" y1="108" x2="688" y2="108" stroke="#C9BBA0" stroke-width="2" marker-end="url(#evo-arr)"></line><text x="638" y="96" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">症结：必须串行</text></g><g><circle cx="64" cy="108" r="8" fill="#FFFDF8" stroke="#C0481E" stroke-width="2"></circle><text x="64" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#C0481E">1</text><text x="64" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#232F3B">N-gram</text><text x="64" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">数数</text></g><g><circle cx="192" cy="108" r="8" fill="#FFFDF8" stroke="#C0481E" stroke-width="2"></circle><text x="192" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#C0481E">2</text><text x="192" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#232F3B">词向量</text><text x="192" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">稠密语义</text></g><g><circle cx="320" cy="108" r="8" fill="#FFFDF8" stroke="#C0481E" stroke-width="2"></circle><text x="320" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#C0481E">3</text><text x="320" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#232F3B">神经语言模型</text><text x="320" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">会泛化</text></g><g><circle cx="448" cy="108" r="8" fill="#FFFDF8" stroke="#C0481E" stroke-width="2"></circle><text x="448" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#C0481E">4</text><text x="448" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#232F3B">RNN</text><text x="448" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">有记忆</text></g><g><circle cx="576" cy="108" r="8" fill="#FFFDF8" stroke="#C0481E" stroke-width="2"></circle><text x="576" y="111" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#C0481E">5</text><text x="576" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#232F3B">LSTM</text><text x="576" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">记得久</text></g><g><circle cx="700" cy="108" r="11" fill="#C0481E" stroke="#C0481E" stroke-width="2"></circle><text x="700" y="112" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#FFF8F0">6</text><text x="700" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#232F3B">Transformer</text><text x="700" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">能并行</text></g></svg></div><figcaption><span class="fig-no">图 29-1</span>从 N-gram 到 Transformer 的接力：每一代都不是凭空冒出来的，而是被上一代留下的「症结」逼出来的。读懂这条线上每个箭头写的是什么，你就握住了整部 NLP 技术演变史的逻辑。</figcaption></figure><p>退一步看这张图，会发现一个反复出现的<strong>螺旋</strong>：每一代解决了一个老问题，又亲手制造出一个新问题， 而下一代正是冲着这个新问题来的。技术从来不是一串孤立的发明，而是一条<strong>「问题 → 解药 → 新问题」</strong>不断咬合的链。 这也正是这套教程从第 1 课起反复示范的那条主线——没有人一开始就「想到了」注意力，是一个个具体的死结，把它一步步逼了出来。</p><p>更要紧的是：这条链<strong>到 Transformer 并没有停</strong>。<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">n</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span> 的开销、静态的知识、纯文本的局限…… 都是它留下的新死结，正被今天的研究者用各种新想法去解。下一课，我们就顺着这条<strong>还在延伸</strong>的链，走进「正在发生」的前沿。</p><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>语言难在<span class="tk-hl">序列、上下文、稀疏</span>。N-gram 用数数起步，词向量补上<span class="tk-hl">语义</span>， 神经语言模型补上<span class="tk-hl">泛化</span>，RNN 补上<span class="tk-hl">记忆</span>，LSTM 让记忆<span class="tk-hl">传得远</span>， Transformer 用注意力换来<span class="tk-hl">并行与规模</span>。每一代，都是来解上一代死结的。</p></div><div class="recap"><h3>这条链，请你记成一句话</h3><ul><li><strong>N-gram</strong>：数数 → 但稀疏、记性短、符号孤立。</li><li><strong>词向量</strong>：给词义坐标 → 但静态、且只是零件。</li><li><strong>神经语言模型</strong>：靠泛化绕开稀疏 → 但窗口固定。</li><li><strong>RNN</strong>：循环记忆破窗口 → 但梯度消失、必须串行。</li><li><strong>LSTM</strong>：门控让记忆传远 → 但仍然串行。</li><li><strong>Transformer</strong>：注意力换来并行与规模 → 但 O(n²) 仍待优化。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="主线是：每一代技术都为解开上一代留下的“死结”而诞生。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>这一课把整条 NLP 技术演变史串成一句话。下面哪种概括最贴合这条主线？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">每一代技术都比上一代参数更多</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">每一代技术，都是为了解开上一代留下的「死结」而诞生的</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">每一代技术都换了一种编程语言</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">技术演变是随机的，没有内在逻辑</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="N-gram 把“猫/小猫”当无关符号 → 由词向量解决。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>按「问题 → 解药」对应，下面哪一组是正确的？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">RNN 必须串行无法并行 → 由 LSTM 解决</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">N-gram 把「猫」和「小猫」当成无关符号 → 由词向量解决</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">注意力的 O(n²) 开销 → 由 N-gram 解决</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">词向量的稀疏问题 → 由 Transformer 解决</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-11-frontier.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 30 课</span>
+                    <h3>前沿与未来：下一程</h3>
+                    <p>ChatGPT之后呢？——当下最活跃的研究方向，与大模型可能的演变</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第29课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

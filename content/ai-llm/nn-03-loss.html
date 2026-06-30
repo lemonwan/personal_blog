@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第10课 · 损失函数 | AI大模型原理教程</title>
+    <meta name="description" content="怎么衡量「预测错了」？——从MSE到交叉熵">
+    <meta name="keywords" content="AI大模型教程,Transformer,损失函数,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第10课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 10 · 卷二</div>
+            <h1>损失函数</h1>
+            <p class="subtitle">❝ 怎么衡量「预测错了」？——从MSE到交叉熵 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="同样是「预测错了」" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>同样是「预测错了」——错误程度一样吗？</h2></div><p>先玩个你小时候一定玩过的游戏——<strong>猜数字</strong>。我心里想一个 1~100 的整数，你来猜； 你每报一个数，我只回三个字：<strong>「大了」</strong>或<strong>「小了」</strong>。就靠这一句反馈，你几次就能逼到正确答案： 猜 50，「小了」，就往大里猜；猜 88，「大了」，就往小里收……范围一步步夹紧。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 540 150" role="img" aria-label="猜数字游戏：靠『大了 / 小了』的反馈一步步逼近正确答案"><text x="270" y="62" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">① 猜 50</text><text x="445" y="62" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">② 猜 88</text><text x="376" y="62" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">正确答案 = ?</text><line x1="40" y1="92" x2="500" y2="92" stroke="#5C6B79" stroke-width="1.5"></line><text x="40" y="108" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#93A0AC">1</text><text x="500" y="108" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#93A0AC">100</text><text x="376" y="99" text-anchor="middle" font-size="18" fill="#C0481E">★</text><circle cx="270" cy="92" r="5.5" fill="#3E6B8F"></circle><circle cx="445" cy="92" r="5.5" fill="#3E6B8F"></circle><line x1="256" y1="122" x2="300" y2="122" stroke="#3E8F5A" stroke-width="1.8"></line><polygon points="302,122 293,117 293,127" fill="#3E8F5A"></polygon><text x="270" y="142" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3E8F5A">小了，往大猜</text><line x1="459" y1="122" x2="415" y2="122" stroke="#C0481E" stroke-width="1.8"></line><polygon points="413,122 422,117 422,127" fill="#C0481E"></polygon><text x="445" y="142" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#C0481E">大了，往小猜</text></svg></div><figcaption><span class="fig-no">图 10-1</span>猜数字游戏：你看不到正确答案（★），但每次得到的「大了 / 小了」都指明了<strong>该往哪个方向改</strong>——靠这点反馈，瞎猜就变成了有方向的逼近。</figcaption></figure><p>这条反馈虽然简单，却恰好给了你最关键的东西——<strong>方向</strong>：大了就往小调，小了就往大调。 正是这一点「往哪边改」的信息，把「瞎猜」变成了「有方向地逼近」。</p><p>第 9 课说过，<strong>训练</strong>就是不断微调参数、让网络越猜越准。可神经网络的局面比猜数字难得多： 它一次要调成千上万个参数，输出的还是一组<strong>概率</strong>而不是一个数—— 它怎么知道自己这次是「大了」还是「小了」、每个参数又该往哪个方向挪？</p><p>这正是这一课要造的东西。我们给网络配一个<strong>损失</strong>（loss）：先把「这一次猜得有多差」压成<strong>一个数</strong>。 有了这个数，梯度下降就能求出它对每个参数的导数，从而<strong>同时</strong>知道「大了还是小了」（方向）和「差多少」（步子）—— 比猜数字那句「大了 / 小了」，信息还更丰富。</p><p>可要把「差」变成这样一个能算、能求导的数字，并没有随手一减那么简单。 先用一个比分类更简单的场景找找感觉——预测<strong>数值</strong>。一个预测房价的网络，真实价格是 300 万，网络给出两个不同的预测：</p><ul style="margin-top:20px;padding-left:24px;line-height:2.2"><li>预测 A：299 万（差了 1 万）</li><li>预测 B：100 万（差了 200 万）</li></ul><p>显然 B 错得更离谱。但梯度下降想要知道的不只是「哪个更离谱」， 还要知道<em>离谱多少</em>——因为它需要算出一个梯度来更新权重。<strong>「错误」必须是一个可以计算导数的数字。</strong></p><div class="think"><div class="think-q">最直接的想法是「预测值减真实值」。这有什么问题？</div></div></section><section class="station reveal" data-title="取平方：MSE 的诞生" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>取平方：均方误差 MSE</h2></div><p>取平方消除符号，再对所有样本平均——这就是<strong>均方误差（MSE）</strong>：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord"><span class="mord mathrm">MSE</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.5991em;vertical-align:-1.2777em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">n</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8723em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em;"><span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span></span></div><p><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是预测值，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是真实值。检验一下：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">299</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">300</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">1</span></span></span></span></span></span><span class="formula-tex-note">预测 299，真实 300</span><span class="kx kx-block" style="display:inline-block;margin-top:8px"><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">100</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">300</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">40000</span></span></span></span></span></span><span class="formula-tex-note">预测 100，真实 300</span></div><p>差 200 万，惩罚是差 1 万的 <strong>40000 倍</strong>——平方让大错的惩罚重得多，这一步好懂。 但真正要补一句的是：梯度下降<strong>用来调参数的，并不是损失这个值本身，而是它的「导数」</strong>。</p><p>回忆第 5 课：导数就是「自变量动一点点，函数跟着变多少」的<strong>变化率</strong>，也就是曲线的<strong>斜率</strong>。 梯度下降的法则是「朝损失下降最快的方向迈一步」，而<strong>这个方向、这一步迈多大，全由导数给出</strong>。 说白了，导数就是上一站猜数字那句反馈的升级版——<strong>它的正负告诉你「大了还是小了」，它的大小告诉你「该使多大劲」。</strong></p><p>那 MSE 的导数长什么样？把单个样本的损失看成预测值 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span> 的函数<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span>，对 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span></span></span> 求导 （套第 5 课的法则：平方求导，把指数 2 挪到前面、次数减一，再乘括号里那项的导数 1）：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.2519em;vertical-align:-0.8804em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="mord mathnormal">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mclose">)</span></span></span></span></span></span></div><p>念一遍就懂：导数 = <strong>2 ×（预测 − 真实）</strong>。预测<em>大了</em>（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">></span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span></span></span></span>）导数为正，提示「再调大只会更糟」，于是往小收； 预测<em>小了</em>导数为负，于是往大调。而且预测离真实越远，这个值的绝对值越大、推得越狠。形式简单、又处处可微，梯度下降拿来就能用。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 200" role="img" aria-label="MSE 损失的几何意义"><line x1="60" y1="170" x2="500" y2="170" class="svg-axis"></line><polygon points="500,170 490,165 490,175" fill="#5C6B79"></polygon><line x1="60" y1="170" x2="60" y2="20" class="svg-axis"></line><polygon points="60,20 55,30 65,30" fill="#5C6B79"></polygon><text x="510" y="174" class="svg-note">x</text><text x="68" y="18" class="svg-note">y</text><line x1="80" y1="155" x2="480" y2="50" stroke="#3E6B8F" stroke-width="2"></line><text x="484" y="50" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">预测线</text><g><line x1="120" y1="138" x2="120" y2="148" stroke="#C0481E" stroke-width="1.5" stroke-dasharray="3 2"></line><rect x="120" y="138" width="10" height="10" fill="#C0481E" opacity="0.1"></rect><circle cx="120" cy="138" r="6" fill="#C0481E"></circle><circle cx="120" cy="148" r="4" fill="#3E6B8F"></circle></g><g><line x1="200" y1="100" x2="200" y2="127" stroke="#C0481E" stroke-width="1.5" stroke-dasharray="3 2"></line><rect x="200" y="100" width="27" height="27" fill="#C0481E" opacity="0.1"></rect><circle cx="200" cy="100" r="6" fill="#C0481E"></circle><circle cx="200" cy="127" r="4" fill="#3E6B8F"></circle></g><g><line x1="300" y1="90" x2="300" y2="101" stroke="#C0481E" stroke-width="1.5" stroke-dasharray="3 2"></line><rect x="300" y="90" width="11" height="11" fill="#C0481E" opacity="0.1"></rect><circle cx="300" cy="90" r="6" fill="#C0481E"></circle><circle cx="300" cy="101" r="4" fill="#3E6B8F"></circle></g><g><line x1="380" y1="65" x2="380" y2="80" stroke="#C0481E" stroke-width="1.5" stroke-dasharray="3 2"></line><rect x="380" y="65" width="15" height="15" fill="#C0481E" opacity="0.1"></rect><circle cx="380" cy="65" r="6" fill="#C0481E"></circle><circle cx="380" cy="80" r="4" fill="#3E6B8F"></circle></g><g><line x1="440" y1="58" x2="440" y2="66" stroke="#C0481E" stroke-width="1.5" stroke-dasharray="3 2"></line><rect x="440" y="58" width="8" height="8" fill="#C0481E" opacity="0.1"></rect><circle cx="440" cy="58" r="6" fill="#C0481E"></circle><circle cx="440" cy="66" r="4" fill="#3E6B8F"></circle></g><text x="60" y="195" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">MSE = 每条红线（残差）的平方的平均。更大的误差，更大的红色小方块。</text></svg></div><figcaption><span class="fig-no">图 10-2</span>MSE 的几何意义：残差（预测值与真实值的差）的平方面积。大误差对应大面积，梯度下降会优先缩小面积最大的那块。</figcaption></figure><p>MSE 适合预测连续数值（回归问题）。但如果要做分类—— 比如我们那台机器判断「是不是苹果」——直接用 MSE 会出现意想不到的问题。</p></section><section class="station reveal" data-title="MSE 用在分类上的问题" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>MSE 用在分类上：信号太弱</h2></div><p>那台机器最后输出一个 0~1 的概率（通过 Sigmoid）。手上这个水果真实答案：是苹果（标签 = 1）。 比较两种预测：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord text"><span class="mord">A:</span></span><span class="mspace"> </span><span class="mspace"> </span><span class="mord"><span class="mord mathrm">MSE</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.9</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">0.01</span></span></span></span></span></span><span class="formula-tex-note">有 90% 把握是苹果</span><span class="kx kx-block" style="display:inline-block;margin-top:8px"><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord text"><span class="mord">B:</span></span><span class="mspace"> </span><span class="mspace"> </span><span class="mord"><span class="mord mathrm">MSE</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">0.01</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">0.98</span></span></span></span></span></span><span class="formula-tex-note">只有 1% 把握是苹果</span></div><p>预测 B 错得那么厉害，损失是预测 A 的 <strong>98 倍</strong>——看着够狠了吧？可别急。 上一站说过：真正推动训练的是<strong>导数</strong>，不是损失值本身。所以得盯着导数看。</p><p>这里真实标签 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>，损失就是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span>， 导数和上一站一模一样：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.3612em;vertical-align:-0.4811em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8801em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">p</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">d</span><span class="mord mathnormal mtight">L</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4811em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span>。把两个「极度猜错」的情况代进去：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.01</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">:</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mopen">(</span><span class="mord">0.01</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord" style="color:#C0481E;">−</span><span class="mord" style="color:#C0481E;">1.98</span></span></span></span></span></span><span class="formula-tex-note">只有 1% 把握是苹果</span><span class="kx kx-block" style="display:inline-block;margin-top:8px"><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.001</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">:</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">2</span><span class="mopen">(</span><span class="mord">0.001</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord" style="color:#C0481E;">−</span><span class="mord" style="color:#C0481E;">1.998</span></span></span></span></span></span><span class="formula-tex-note">把握更低，错得更离谱</span></div><p>蹊跷就在这儿：网络从「1% 把握」掉到「0.1% 把握」，明明<strong>错得更离谱了</strong>， 导数却几乎纹丝不动（−1.98 → −1.998）。换句话说——<strong>不管错得多狠，MSE 给的「推力」都差不多大。</strong></p><div class="crack reveal"><div class="crack-label">最该用力时，推力却封了顶</div><p>网络已经烂到家了（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>），本该被狠狠推一把；可 MSE 的导数最多也就到 <strong>−2 附近、再也不涨</strong>。 结果是：越离谱的错误，越得不到更强的纠正信号，训练拖拖拉拉、甚至原地打转。</p><p style="margin-top:12px">我们想要的，是一个<strong>「越错，导数越大、推得越狠」</strong>的损失——当 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span> 趋近 0，损失该<em>飙向无穷</em>，它的导数也跟着飙起来。</p></div><div class="think"><div class="think-q">需要一个函数：p=1 时为 0，p→0 时趋向无穷大，导数随 p 变小而增大。你能想到吗？</div></div></section><section class="station reveal" data-title="对数损失：交叉熵" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>对数损失：交叉熵</h2></div><p>这个 −log(p)，名字你应该会觉得眼熟。第 6 课《概率与信息》里，我们从<strong>信息论</strong>推过它： 交叉熵衡量「用模型分布 q 去解读真实答案 p，平均有多意外」，当真实答案确定时塌缩成 −log(模型给正确答案的概率)。 当时它还是个抽象的信息论量；现在我们仅仅凭「损失函数该有的脾气」（猜对趋于 0、自信猜错趋于 ∞）， 竟然又把<strong>同一个公式</strong>找了回来。两条完全不同的路——信息论、和工程直觉——殊途同归。</p><p>对正确类别的预测概率 p 取负对数，就是<strong>交叉熵损失</strong>：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord"><span class="mord mathrm">CE</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">c</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></span><span class="formula-tex-note">c = 正确类别</span></div><p>再用刚才那把尺子量量它的<strong>导数</strong>：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span></span></span></span></span> 对 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span> 求导是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.3262em;vertical-align:-0.4811em;"></span><span class="mord">−</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">p</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.4811em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span>。 代入和上面完全一样的两个点：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.01</span></span></span></span></span> 时导数 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.3669em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">100</span></span></span></span></span>，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.001</span></span></span></span></span> 时导数 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.3669em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">1000</span></span></span></span></span>—— 错得越狠，推力越大、还成倍地大。和 MSE 那「封顶在 −2」一对比，差距一目了然：这正好补上了「最该用力时却使不上劲」的短板。</p><figure class="fig"><div class="fig-frame"><div class="plotly-fig"></div></div><figcaption><span class="fig-no">图 10-3</span>同样是预测概率趋近 0，交叉熵（红线）的惩罚趋向无穷大；MSE（蓝虚线）的惩罚只是趋近 1，斜率不随错误程度增大。</figcaption></figure><p>把这条曲线接到我们那台机器上，你就能<strong>亲手感受损失在衡量「猜得有多差」</strong>。 先选定这个水果的真实答案，再转旋钮改变机器的预测，看黑点沿 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span></span></span></span></span> 曲线滑动、损失实时变化：</p><figure class="fig"><div class="fruit-lab"><div class="fruit-knobs"><div class="knob-title">🎛 四个旋钮 = 四个输入特征</div><div class="knob-row"><div class="knob-head"><span class="knob-name">尺寸大小</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">小</span><input type="range" min="0" max="1" step="0.01" aria-label="尺寸大小" value="0.5"/><span class="knob-end">大</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">颜色</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">偏绿</span><input type="range" min="0" max="1" step="0.01" aria-label="颜色" value="0.5"/><span class="knob-end">偏红</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">酸甜度</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">酸</span><input type="range" min="0" max="1" step="0.01" aria-label="酸甜度" value="0.5"/><span class="knob-end">甜</span></div></div><div class="knob-row"><div class="knob-head"><span class="knob-name">水分</span><span class="knob-val">0.50</span></div><div class="knob-slider"><span class="knob-end">干</span><input type="range" min="0" max="1" step="0.01" aria-label="水分" value="0.5"/><span class="knob-end">多汁</span></div></div></div><div class="fruit-out"><div class="act-btns"><span class="act-btns-label">真实答案：</span><button type="button" class="act-btn on">🍎 是苹果</button><button type="button" class="act-btn">🚫 不是苹果</button></div><svg class="neuron-svg" viewBox="0 0 360 204" role="img" aria-label="交叉熵损失曲线与当前工作点"><line x1="46" y1="16" x2="46" y2="178" stroke="#C5BBA6" stroke-width="1"></line><line x1="46" y1="178" x2="344" y2="178" stroke="#C5BBA6" stroke-width="1"></line><text x="44" y="192" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#93A0AC">0</text><text x="344" y="192" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#93A0AC">1</text><text x="195" y="193" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">给「正确答案」的概率 pᶜ</text><text x="44" y="24" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">损失</text><polyline points="52.0,16.0 54.9,16.0 57.9,16.0 60.9,16.2 63.9,26.1 66.9,34.4 69.8,41.6 72.8,48.0 75.8,53.7 78.8,58.8 81.8,63.5 84.7,67.8 87.7,71.8 90.7,75.6 93.7,79.0 96.7,82.3 99.6,85.4 102.6,88.3 105.6,91.1 108.6,93.7 111.6,96.2 114.5,98.6 117.5,100.9 120.5,103.1 123.5,105.3 126.5,107.3 129.4,109.3 132.4,111.2 135.4,113.0 138.4,114.8 141.4,116.5 144.3,118.1 147.3,119.7 150.3,121.3 153.3,122.8 156.3,124.3 159.2,125.8 162.2,127.2 165.2,128.5 168.2,129.9 171.2,131.2 174.1,132.4 177.1,133.7 180.1,134.9 183.1,136.1 186.1,137.2 189.0,138.4 192.0,139.5 195.0,140.6 198.0,141.6 201.0,142.7 203.9,143.7 206.9,144.7 209.9,145.7 212.9,146.7 215.9,147.6 218.8,148.6 221.8,149.5 224.8,150.4 227.8,151.3 230.8,152.2 233.7,153.1 236.7,153.9 239.7,154.7 242.7,155.6 245.7,156.4 248.6,157.2 251.6,158.0 254.6,158.7 257.6,159.5 260.6,160.3 263.5,161.0 266.5,161.7 269.5,162.5 272.5,163.2 275.5,163.9 278.4,164.6 281.4,165.3 284.4,166.0 287.4,166.6 290.4,167.3 293.3,167.9 296.3,168.6 299.3,169.2 302.3,169.9 305.3,170.5 308.2,171.1 311.2,171.7 314.2,172.3 317.2,172.9 320.2,173.5 323.1,174.1 326.1,174.7 329.1,175.2 332.1,175.8 335.1,176.4 338.0,176.9 341.0,177.5 344.0,178.0" fill="none" stroke="#C0481E" stroke-width="2.5"></polyline><line x1="209.85053119911842" y1="145.70050105339405" x2="209.85053119911842" y2="178" stroke="#1E2B38" stroke-width="1" stroke-dasharray="4 3"></line><line x1="46" y1="145.70050105339405" x2="209.85053119911842" y2="145.70050105339405" stroke="#1E2B38" stroke-width="1" stroke-dasharray="4 3"></line><circle cx="209.85053119911842" cy="145.70050105339405" r="5" fill="#1E2B38"></circle></svg><div class="calc-line">预测 P(苹果) = <b class="calc-z">55%</b>；给「正确答案」的概率 pᶜ = <b class="calc-z">55%</b></div><div class="calc-line">交叉熵损失 = −log(pᶜ) = <b class="calc-z">0.60</b></div><div class="lab-hint">把旋钮调到让机器「自信猜对」→ pᶜ 接近 1、损失趋近 0；调成「自信猜错」→ pᶜ 接近 0、损失飙升。这就是 loss 在实时量化「这次猜得有多差」。</div></div></div><figcaption><span class="fig-no">互动 10-A</span>交叉熵损失实验台：损失只看「给正确答案的概率 pᶜ」。自信猜对（pᶜ→1）损失趋近 0；自信猜错（pᶜ→0）损失飙升——梯度下降正是被这股「越错越痛」的劲儿推着走。</figcaption></figure><p>当有 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">K</span></span></span></span></span> 个类别时（比如在苹果、香蕉、西瓜、柠檬里猜），完整的交叉熵是：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord"><span class="mord mathrm">CE</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3521em;vertical-align:-1.3021em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3021em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1667em;"><span class="mord">^</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></span></div><p><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是真实标签（正确类为 1，其余为 0），所以只有正确类别那一项不为 0， 公式实际上就是 −log(正确类别的预测概率)。越有把握地猜对，损失越低；越自信地猜错，损失越高。</p><p>交叉熵几乎是所有分类任务的默认损失函数，配合下一课的 Softmax 输出效果最好。</p></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>损失函数是梯度下降的「方向标」——它把「猜得有多差」变成一个可微的数，那台猜水果的机器才知道每一步该往哪调。 回归用 <span class="tk-hl">MSE</span>（平方差），分类用<span class="tk-hl">交叉熵</span>（−log 概率）。 MSE 对误差线性敏感；交叉熵对「极度自信的错误」指数级惩罚，梯度信号更强，分类任务收敛更快。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>损失函数</strong>：把预测误差变成一个可微的数，让梯度下降有方向走。</li><li><strong>MSE</strong>：(ŷ−y)² 的平均，消除符号，惩罚大误差；适合回归任务。</li><li><strong>MSE 的弱点</strong>：分类时对「极度错误」的梯度信号随 p 的变化很小。</li><li><strong>交叉熵</strong>：−log(正确类别概率)，p→0 时损失趋向无穷，梯度信号更强。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="损失函数把“预测错得多离谱”量化成可优化的数。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>损失函数（loss function）在训练中扮演什么角色？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">决定网络有多少层</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">把「预测错得有多离谱」量化成一个可比较、可优化的数</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">负责把数据读进内存</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">决定使用哪种激活函数</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="按任务选损失：连续数值用 MSE，类别概率用交叉熵。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>回归任务常用均方误差（MSE），分类任务常用交叉熵。选择损失函数时主要看什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">看哪个名字更短</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">看任务类型与输出形式：连续数值用 MSE，类别概率用交叉熵</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">随便选一个都一样</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">看网络有多少参数</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nn-04-softmax.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 11 课</span>
+                    <h3>Softmax</h3>
+                    <p>一组任意大小的分数，怎么变成一组加起来等于1的概率？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷二 · 第10课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

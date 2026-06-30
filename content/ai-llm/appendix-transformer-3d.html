@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第附1课 · Transformer 3D 全景图 | AI大模型原理教程</title>
+    <meta name="description" content="一图看尽Transformer的每一层、每一个组件">
+    <meta name="keywords" content="AI大模型教程,Transformer,Transformer 3D 全景图,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第附1课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 附1 · 卷五</div>
+            <h1>Transformer 3D 全景图</h1>
+            <p class="subtitle">❝ 一图看尽Transformer的每一层、每一个组件 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="3D 全景图" data-num="A" id="s1"><div class="station-head"><span class="station-no">附录</span><h2>Transformer 3D 全景图</h2></div><p>前面 30 课，是把 Transformer <strong>一块一块拆开</strong>讲的。这篇附录反过来——把所有零件重新拼回原位， 摆进一个可以<strong>平移、旋转、缩放</strong>的三维空间，让你一眼看到数据从「一句话」到「下一个词」的完整旅程。</p><p>用鼠标左键<strong>拖动平移</strong>、右键<strong>旋转</strong>、滚轮<strong>缩放</strong>。看够了静态结构， 就点下方的<strong>「开始训练」</strong>按钮——一束光点会从左端的输入出发，逐层流过 Q/K/V、注意力矩阵、 FFN 节点和最终 Softmax。需要看细节时，点<strong>「全屏查看」</strong>。</p><div class="tf3d"><div class="tf3d-shell"><div class="tf3d-stage"><div class="tf3d-canvas"></div><div class="tf3d-note" aria-live="polite"></div></div><div class="tf3d-bar"><button class="tf3d-play"><span aria-hidden="true">▶</span>开始训练：逐步推演</button><button class="tf3d-full" aria-label="全屏查看 Transformer 3D 图" title="全屏查看"><span class="tf3d-full-icon" aria-hidden="true"></span>全屏查看</button><span class="tf3d-hint">左键拖动平移 · 右键拖动旋转 · 滚轮缩放</span></div></div></div><ul class="tf3d-legend"><li><span class="tf3d-swatch" style="background:#E0703A"></span><span><strong>橙色块</strong>：输入 token 与最终预测的「下一个词」（第 22 课分词）。</span></li><li><span class="tf3d-swatch" style="background:#4F8FC0"></span><span><strong>蓝色球阵</strong>：token embedding，表示词义本身（第 1 / 15 课）。</span></li><li><span class="tf3d-swatch" style="background:#D7665B"></span><span><strong>红色节点 x</strong>：token embedding 加上 position embedding 之后的当前位置表示，Q/K/V 都从这里投影出来。</span></li><li><span class="tf3d-swatch" style="background:#D8B23A"></span><span><strong>金色节点 + 矩阵</strong>：Q/K/V 投影、QKᵀ 打分、softmax 权重、A·V 加权求和（第 19 / 20 课）。</span></li><li><span class="tf3d-swatch" style="background:#4FB07A"></span><span><strong>绿色小网络</strong>：FFN 的 W1、GELU、W2 三步，每个位置各自加工（第 21 课）。</span></li><li><span class="tf3d-swatch" style="background:#4F8FC0"></span><span><strong>三组概率柱</strong>：logits → exp(z) → softmax 概率，最高的就是答案（第 11 课）。</span></li><li><span class="tf3d-swatch" style="background:#FF8A4C"></span><span><strong>流动光点</strong>：一次前向传播——信息正在逐层向右传递。</span></li></ul></section><section class="station reveal" data-title="怎么读" data-num="B" id="s2"><div class="station-head"><span class="station-no">导读</span><h2>顺着光点走一遍</h2></div><p>点「演示」后，光点经过的每一站，正好对应前面学过的一课：</p><div class="recap"><h3>图中六站 ↔ 对应课程</h3><ul><li><strong>① 分词</strong>：句子「猫坐在垫子」被切成 4 个 token，各自配一个 id（第 22 课）。</li><li><strong>② 词向量</strong>：每个 token 查表变成一列数字，也就是 token embedding（蓝色球阵，第 1 / 15 课）。</li><li><strong>③ 加位置</strong>：先把 token embedding 和 position embedding 相加，得到当前位置表示 x（红色节点）。</li><li><strong>④ 自注意力</strong>：再把 x 乘三套权重得到 Q/K/V，算 QKᵀ/√d、逐行 softmax，最后用 A·V 混合上下文（第 19 / 20 课）。</li><li><strong>⑤ FFN</strong>：每个位置单独经过 W1 → GELU → W2；图中把节点数缩小，只保留计算骨架（第 21 课）。</li><li><strong>⑥ 2 个 Block + Softmax</strong>：④⑤ 打包成一个 Block；图中画 2 层，最后取末位置做 logits、exp、归一化，得到下一个词概率（第 11 / 24 课）。</li></ul></div><p>把光点多放几遍，你会发现：所谓「大模型生成文字」，不过是<strong>这条流水线一次又一次地跑</strong>—— 每吐出一个词，就把它接到句尾，再从头跑一遍，预测再下一个词（第 23 课的自回归）。 ChatGPT 写一篇长文，就是这条流水线跑了成千上万次。</p><div class="takeaway"><div class="takeaway-label">尾声 · TAKEAWAY</div><p>这张图里没有任何新东西——<span class="tk-hl">每一块你都亲手推导过</span>。 从一根数轴上的向量，到此刻在你眼前旋转的整座 Transformer， AI 始终是<span class="tk-hl">一连串可以追溯的数学与工程决策</span>，垒起来的。旅程到此，山，你已登顶。</p></div></section></div></div></main>
+        
+        <a href="appendix-attention-paper.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 32 课</span>
+                    <h3>《Attention Is All You Need》原文</h3>
+                    <p>回到那篇改变了一切的论文——现在你能完全读懂它了</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷五 · 第附1课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

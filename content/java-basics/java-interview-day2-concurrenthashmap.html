@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 2 | ConcurrentHashMap 原理</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Source Han Sans CN", "Noto Sans CJK SC", sans-serif;
+  background: #f1f5f9;
+  color: #1e293b;
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+.header {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: #e0e0e0;
+  padding: 40px 20px 32px;
+  text-align: center;
+  border-bottom: 4px solid var(--accent-blue);
+}
+
+.header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: 1px;
+}
+
+.header .subtitle {
+  font-size: 15px;
+  opacity: 0.8;
+  margin-bottom: 12px;
+}
+
+.header .tag {
+  display: inline-block;
+  background: var(--accent-blue);
+  color: #fff;
+  padding: 3px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+.module-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+  margin-bottom: 24px;
+  overflow: hidden;
+  border-top: 4px solid var(--accent-blue);
+}
+
+.module-card .card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent);
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.module-card .card-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  background: var(--accent-blue);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.module-card .card-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.module-card .card-body {
+  padding: 20px;
+}
+
+.section {
+  margin-bottom: 20px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.section h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section h3 .icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.bullet-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.bullet-list li {
+  position: relative;
+  padding: 6px 0 6px 20px;
+  margin-bottom: 4px;
+}
+
+.bullet-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 13px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-blue);
+}
+
+.bullet-list li .highlight {
+  font-weight: 600;
+  color: #0c4a6e;
+}
+
+.code-block {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 12px 0;
+  overflow-x: auto;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+
+.note-box {
+  border-left: 4px solid var(--accent-blue);
+  background: #eff6ff;
+  padding: 14px 18px;
+  border-radius: 0 8px 8px 0;
+  margin: 14px 0;
+  font-size: 14px;
+}
+
+.note-box.warning {
+  border-left-color: var(--accent-orange);
+  background: #fff7ed;
+}
+
+.note-box.danger {
+  border-left-color: var(--accent-red);
+  background: #fef2f2;
+}
+
+.note-box .note-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 14px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.comparison-table th {
+  background: #1e293b;
+  color: #fff;
+  padding: 10px 14px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.comparison-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+
+.comparison-table tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.badge.blue { background: var(--accent-blue); }
+.badge.green { background: var(--accent-green); }
+.badge.purple { background: var(--accent-purple); }
+.badge.orange { background: var(--accent-orange); }
+
+.footer {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+  padding: 20px;
+  margin-top: 24px;
+}
+
+.footer h4 {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: #0f172a;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 12px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.progress-bar .progress-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+}
+
+.progress-text {
+  font-size: 13px;
+  color: #64748b;
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.next-preview {
+  background: linear-gradient(135deg, #eff6ff, #f0fdf4);
+  border-radius: 8px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.next-preview .next-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.next-preview .next-content h5 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.next-preview .next-content p {
+  font-size: 13px;
+  color: #475569;
+}
+
+@media print {
+  body { background: #fff; }
+  .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; }
+  .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; }
+  .footer { break-inside: avoid; }
+  .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; }
+}
+
+@media (max-width: 640px) {
+  .header h1 { font-size: 22px; }
+  .container { padding: 16px 12px 32px; }
+  .module-card .card-body { padding: 16px; }
+  .code-block { font-size: 12px; padding: 12px 14px; }
+  .comparison-table { font-size: 13px; }
+  .comparison-table th, .comparison-table td { padding: 8px 10px; }
+}
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 2 — ConcurrentHashMap 原理</h1>
+  <div class="tag">模块一：Java 基础 · 集合框架</div>
+</div>
+
+<div class="container">
+
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">1.2</span>
+    <span class="card-title">ConcurrentHashMap — 分段锁到 CAS + synchronized 的演进</span>
+  </div>
+  <div class="card-body">
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-blue)">📖</span>核心概念</h3>
+      <ul class="bullet-list">
+        <li>ConcurrentHashMap 是 Java 中最高性能的线程安全 Map 实现，在并发场景下远优于 <span class="badge blue">Hashtable</span> 和 <span class="badge green">Collections.synchronizedMap</span></li>
+        <li>Java 1.7 采用 <strong>分段锁（Segment）</strong> 机制：将数据分为多个 Segment，每个 Segment 继承自 ReentrantLock，锁粒度为 segment 级别</li>
+        <li>Java 1.8 采用 <strong>CAS + synchronized</strong> 机制：锁粒度缩小到 <strong>链表/红黑树的节点（bin）级别</strong>，并发度大幅提升</li>
+        <li>核心数据结构：数组 + 链表 + 红黑树（与 HashMap 1.8 结构一致），但增加了并发控制</li>
+      </ul>
+      <div class="note-box">
+        <div class="note-title">🎯 为什么需要 ConcurrentHashMap？</div>
+        HashMap 线程不安全（put 时可能死循环/数据覆盖），Hashtable 全表锁性能差，Collections.synchronizedMap 也是全表锁。ConcurrentHashMap 在保持线程安全的同时，将并发度提升到接近 HashMap 的性能水平。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-purple)">🔒</span>Java 1.7 分段锁机制</h3>
+      <ul class="bullet-list">
+        <li><span class="highlight">Segment：</span>继承自 ReentrantLock，是锁的粒度单位。默认 16 个 Segment，通过 hash 值定位到具体 Segment 加锁</li>
+        <li><span class="highlight">HashEntry：</span>Segment 内部存储数据的链表节点，key/value/volatile next，其中 next 使用 volatile 保证可见性</li>
+        <li><span class="highlight">put 流程：</span>先通过 hash 定位到 Segment → 对 Segment 加锁（synchronized）→ 在 segment 内部的 table 数组中定位 bin → 链表插入</li>
+        <li><span class="highlight">get 流程：</span>无需加锁，直接通过 volatile 的 next 字段遍历链表（HashEntry.value 是 volatile 的）</li>
+        <li><span class="highlight">扩容：</span>每个 Segment 独立扩容，不会锁全表；扩容时不会迁移其他 Segment 的数据</li>
+      </ul>
+      <div class="code-block"><span class="comment">// 1.7 内部结构示意</span>
+ConcurrentHashMap
+├── Segment[16]  ← 默认16个段，每个段可独立加锁
+│   ├── HashEntry[16]  ← 每个段内部的table数组
+│   │   └── HashEntry(key, value, volatile next)  ← 链表节点
+│   └── ...
+│
+Segment 继承 ReentrantLock，加锁粒度 = 1个 Segment ≈ 1/16 的数据</div>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-green)">⚡</span>Java 1.8 CAS + synchronized</h3>
+      <ul class="bullet-list">
+        <li><span class="highlight">锁粒度革命：</span>从 Segment 级别缩小到 bin（链表头节点/红黑树根节点）级别，理论上可达 N 倍并发（N = 数组长度）</li>
+        <li><span class="highlight">CAS 保证原子性：</span>put 时先用 CAS 尝试插入表头节点（Unsafe.putOrderedObject），成功则直接返回，无需加锁</li>
+        <li><span class="highlight">synchronized 保证安全：</span>当 bin 非空时，用 synchronized 锁定 bin 的第一个节点（f），只锁这一个节点，其他线程可并行操作其他 bin</li>
+        <li><span class="highlight">volatile 保证可见性：</span>Node 的 val 和 next 都是 volatile，确保多线程下的可见性</li>
+        <li><span class="highlight">treeifyBin：</span>链表长度 ≥ 8 且数组长度 ≥ 64 时，将链表转为红黑树，查找从 O(n) 降为 O(log n)</li>
+      </ul>
+      <div class="code-block"><span class="comment">// 1.8 put 核心流程</span>
+put(key, value):
+  1. hash(key) 计算 hash 值
+  2. 用 CAS 尝试初始化 table
+  3. 定位 bin 位置: (n - 1) &amp; hash
+  4. 如果 bin 为空：CAS 插入新节点（无锁操作！）
+  5. 如果 bin 不为空：
+     a. 如果 f.hash == MOVED (-1) → 说明正在扩容，协助扩容
+     b. synchronized(f) 锁定头节点
+     c. 如果是链表：遍历插入/更新
+     d. 如果是红黑树：treePut
+  6. sizeAddCheck() 检查是否需要树化/扩容
+
+<span class="comment">// 扩容流程（支持并发扩容）</span>
+transfer():
+  1. 创建 newTable (2倍大小)
+  2. 用 ForwardingNode 占位 → 指示其他线程此位置正在扩容
+  3. 多线程协作扩容：每个线程处理一部分 bin
+  4. 完成后更新 table 引用</div>
+
+      <div class="note-box warning">
+        <div class="note-title">⚠️ 扩容时的并发处理</div>
+        1.8 支持多线程并发扩容！当线程 A 正在扩容时，线程 B 来 put 数据，发现目标位置被 ForwardingNode 占位（hash == -1），会先帮忙扩容，扩容完再执行自己的 put。这种"协助扩容"机制大幅缩短了扩容时间窗口。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>对比分析：1.7 vs 1.8 vs Hashtable vs synchronizedMap</h3>
+      <table class="comparison-table">
+        <tr><th>特性</th><th>Hashtable</th><th>synchronizedMap</th><th>1.7 Segment</th><th>1.8 CAS+synchronized</th></tr>
+        <tr><td>锁粒度</td><td>全表锁</td><td>全表锁</td><td>Segment 级别（~1/16）</td><td>bin 级别（~1/N）</td></tr>
+        <tr><td>get 是否加锁</td><td>是</td><td>是</td><td>否（volatile）</td><td>否（volatile）</td></tr>
+        <tr><td>并发度</td><td>1</td><td>1</td><td>16</td><td>理论 N（数组长度）</td></tr>
+        <tr><td>扩容</td><td>全表重 hash</td><td>全表重 hash</td><td>Segment 独立扩容</td><td>多线程并发扩容</td></tr>
+        <tr><td>数据结构</td><td>数组+链表</td><td>数组+链表</td><td>数组+链表</td><td>数组+链表+红黑树</td></tr>
+        <tr><td>支持 null</td><td>不支持</td><td>不支持</td><td>不支持</td><td>不支持</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-red)">🔬</span>底层原理深度</h3>
+      <ul class="bullet-list">
+        <li><span class="highlight">size() 的精确性：</span>1.7 中 size 累加每个 Segment 的 count；1.8 中 size 通过 CAS 累加。Java 8u40 引入 sumCount() 通过 LongAdder 风格的累加器实现精确 size</li>
+        <li><span class="highlight">size() 的语义：</span>返回的是"近似"大小。在并发环境下，精确计数代价极高。size() 返回的是最近一次成功更新操作后的值，如果有其他并发修改，可能略小于实际值</li>
+        <li><span class="highlight">forwardingNode：</span>扩容时的占位节点，hash == -1，用于通知其他线程"这个位置正在扩容，请协助"。它的 nextTable 指向新数组</li>
+        <li><span class="highlight">treeifyBin 阈值：</span>链表长度 ≥ 8 且数组长度 ≥ 64 才转红黑树。如果数组长度 < 64，优先扩容而非树化，因为扩容能更有效地降低碰撞率</li>
+        <li><span class="highlight">spread(hash) 函数：</span>对 key 的 hashCode 进行扰动，高 16 位和低 16 位异或，减少高位差异不参与计算导致的碰撞</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试要点</h3>
+      <ul class="bullet-list">
+        <li><span class="highlight">核心考点：1.8 为什么放弃 Segment 改用水桶结构 + CAS + synchronized？</span>答：Segment 的锁粒度还是太大（1/16），synchronized 在 1.6+ 优化后性能大幅提升，CAS + synchronized 可以锁定更小的粒度，并发度更高</li>
+        <li><span class="highlight">put 操作全程是否需要加锁？</span>答：不一定。如果 bin 为空，CAS 成功即可，无需加锁。只有在 bin 非空需要遍历链表时，才需要 synchronized 锁定头节点</li>
+        <li><span class="highlight">get 操作为什么不需要加锁？</span>答：因为 Node.value 和 Node.next 都是 volatile 的，volatile 的 happens-before 关系保证了可见性。但注意：get 返回的是"近似"值，可能读到旧数据（因为 put 的操作分两步：先改 val，再 unlink 旧节点）</li>
+        <li><span class="highlight">为什么 ConcurrentHashMap 不支持 null 键和 null 值？</span>答：因为 get(key) 返回 null 无法区分是"key 不存在"还是"key 对应的值为 null"。这在 ConcurrentHashMap 中会产生歧义</li>
+        <li><span class="highlight">ConcurrentHashMap 的迭代器是强一致性还是弱一致性？</span>答：弱一致性（weakly consistent）。迭代器不会抛 ConcurrentModificationException，能反映创建迭代器之后的修改，但不保证反映所有修改</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>实战场景</h3>
+      <ul class="bullet-list">
+        <li><span class="highlight">缓存计数：</span>用 ConcurrentHashMap 的 compute() 或 merge() 方法做分布式环境下的本地计数，替代 AtomicInteger 做细粒度计数</li>
+        <li><span class="highlight">用户会话存储：</span>Spring Session 等框架中，用 ConcurrentHashMap 做内存级 Session 缓存（配合过期清理策略）</li>
+        <li><span class="highlight">本地缓存：</span>小型本地缓存场景，不需要引入 Guava Cache / Caffeine 时，CHM 是简单有效的选择</li>
+        <li><span class="highlight">统计汇总：</span>在并发场景下统计各类指标（UV/PV/接口耗时分布等），用 CHM 做聚合比加锁 HashMap 简单高效</li>
+      </ul>
+      <div class="code-block"><span class="comment">// 实用：merge 做计数</span>
+ConcurrentHashMap&lt;String, Integer&gt; stats = new ConcurrentHashMap&lt;&gt;();
+stats.merge("error", 1, Integer::sum);    <span class="comment">// 不存在则创建，存在则+1</span>
+stats.merge("success", 1, Integer::sum);
+
+<span class="comment">// 实用：compute 做条件更新</span>
+stats.compute("total", (k, v) -> {
+    if (v == null) return 1;
+    return v + 1;
+});</div>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-orange)">💥</span>踩坑经验</h3>
+      <ul class="bullet-list">
+        <li><strong>put 值覆盖问题：</strong>putIfAbsent() 虽然原子性地"不存在则插入"，但 put() 不保证原子性。如果需要"不存在则创建+初始化"的复合操作，用 computeIfAbsent()，它内部保证了原子性</li>
+        <li><strong>compute/merge 的陷阱：</strong>compute 的 mappingFunction 执行期间持有 bin 锁，如果 mappingFunction 内部调用外部服务或做耗时操作，会阻塞其他线程对该 bin 的访问，严重影响性能</li>
+        <li><strong>迭代时不要修改：</strong>虽然迭代器不会抛异常，但并发修改会影响迭代结果的正确性</li>
+        <li><strong>containsValue/containsKey 不是原子操作：</strong>这两个方法是逐元素遍历检查，并发环境下结果不准确。如果需要原子性检查+操作，用 computeIfAbsent/merge</li>
+      </ul>
+      <div class="note-box danger">
+        <div class="note-title">🚫 computeIfAbsent 经典坑</div>
+        在 Java 8 中，computeIfAbsent 如果 mappingFunction 返回 null，会认为操作失败而不插入，这是符合预期的。但如果 mappingFunction 内部执行耗时 IO 操作（如查数据库），会长时间持有 bin 锁，造成其他线程阻塞。解决方案：提前在外部准备好值，或使用异步方式。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3><span class="icon" style="background:var(--accent-blue)">❓</span>模拟面试题</h3>
+      <div class="note-box">
+        <div class="note-title">Q1: 请详细描述 ConcurrentHashMap 在 1.7 和 1.8 中的实现差异</div>
+        <p style="margin-top:6px"><strong>参考回答要点：</strong>①数据结构：1.7 是 Segment 数组 + HashEntry 数组 + 链表，1.8 是 Node 数组 + 链表/红黑树；②锁机制：1.7 是 Segment 继承 ReentrantLock 做分段锁，1.8 是 CAS + synchronized 锁 bin 头节点；③锁粒度：1.7 是 1/16 数据，1.8 是 1/N 数据；④并发扩容：1.7 各 Segment 独立扩容，1.8 支持多线程协助扩容；⑤扩容方式：1.7 是头插法，1.8 也是头插法但通过 ForwardingNode 支持并发扩容。</p>
+      </div>
+      <div class="note-box" style="margin-top:12px">
+        <div class="note-title">Q2: ConcurrentHashMap 的 get 操作为什么不需要加锁？</div>
+        <p style="margin-top:6px"><strong>参考回答要点：</strong>①Node 的 value 和 next 字段都是 volatile 修饰的，volatile 的写操作 happens-before 于后续读操作，保证了可见性；②put 操作分两步：先修改 value（volatile 写），再 unlink 旧节点（volatile 写），读操作总能读到最新的 value 或旧 value，不会读到脏数据；③但 get 返回的是近似值，不能保证读到所有并发修改。</p>
+      </div>
+      <div class="note-box" style="margin-top:12px">
+        <div class="note-title">Q3: ConcurrentHashMap 支持 null 键和 null 值吗？为什么？</div>
+        <p style="margin-top:6px"><strong>参考回答要点：</strong>不支持。因为 get(key) 返回 null 无法区分是 key 不存在还是 value 为 null。这与 HashMap 不同——HashMap 允许 null 键因为它的 put 是原子性的（单线程下不存在歧义），但 ConcurrentHashMap 在并发场景下，null 值会导致语义歧义。</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="footer">
+  <h4>📊 学习进度</h4>
+  <div class="progress-bar">
+    <div class="progress-fill" style="width: calc(2 / 143 * 100%);"></div>
+  </div>
+  <div class="progress-text">已完成 2 / 143 个小节（约 1.4%）</div>
+
+  <h4 style="margin-top:20px">🔜 明日预告</h4>
+  <div class="next-preview">
+    <span class="next-icon">📅</span>
+    <div class="next-content">
+      <h5>Day 3 — ArrayList vs LinkedList 使用场景</h5>
+      <p>深入理解 ArrayList 的数组扩容机制（1.5倍）、内存布局、批量操作优化；LinkedList 的双向链表结构、缓存节点优化；以及各自适用场景的量化分析。</p>
+    </div>
+  </div>
+</div>
+
+</div>
+
+</body>
+</html>

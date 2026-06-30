@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HashMap 底层实现原理</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道面试题开始</h2></div>
+
+<p>先来看一道大厂高频面试题：</p>
+
+<div class="think"><div class="think-q">"请你详细说一下 HashMap 的底层实现原理？" —— 90% 的 Java 开发者都会遇到这道题，但真正能说清楚的人不超过 30%。</div></div>
+
+<p>这个问题看似简单，却可以层层递进，从数据结构问到哈希算法，从扩容机制问到线程安全，从 JDK 1.7 问到 1.8 的优化。面试官通过这一个问题，就能判断你的 Java 功底到底有多深。</p>
+
+<p>在日常工作中，<strong>HashMap 是使用频率最高的数据结构之一</strong>。无论是缓存数据、配置映射、请求参数解析、还是作为 Spring 容器的底层存储（<code>DefaultListableBeanFactory</code> 内部就是用 <code>ConcurrentHashMap</code> 存储 BeanDefinition），HashMap 的身影无处不在。</p>
+
+<p>在正式开始之前，先抛几个你工作中可能遇到过的问题：</p>
+
+<ul>
+  <li>为什么有时候遍历 HashMap 的顺序和插入顺序不一样？</li>
+  <li>为什么阿里规约要求初始化 HashMap 时必须指定容量？</li>
+  <li>为什么说 HashMap 的 key 最好用不可变对象（如 String、Integer）？</li>
+  <li>线上服务突然 CPU 飙到 100%，排查后发现是 HashMap 死循环——这是怎么发生的？</li>
+</ul>
+
+<p>带着这些问题，我们从最底层开始，一步步拆解 HashMap 的设计。</p>
+</section>
+
+<!-- ═══════════════ 第2站：核心数据结构 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>核心数据结构：数组 + 链表 + 红黑树</h2></div>
+
+<p>HashMap 的底层结构一句话概括：<strong>数组 + 链表 + 红黑树</strong>。这个结构不是一蹴而就的，而是在 JDK 演进中逐步优化的。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 720 340" role="img" aria-label="HashMap 数据结构示意图">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+  <!-- 数组部分 -->
+  <rect x="20" y="40" width="680" height="40" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="65" text-anchor="middle" font-family="monospace" font-size="12" fill="#57544E">table[] 数组 —— 默认长度 16，每个位置称为一个"桶（bucket）"</text>
+
+  <!-- 桶0：空 -->
+  <rect x="30" y="100" width="60" height="36" rx="4" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="60" y="123" text-anchor="middle" font-family="monospace" font-size="13" fill="#1C1C1C">[0]</text>
+  <text x="60" y="148" text-anchor="middle" font-size="10" fill="#8C8676">null</text>
+
+  <!-- 桶1：链表 -->
+  <rect x="110" y="100" width="60" height="36" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="140" y="123" text-anchor="middle" font-family="monospace" font-size="13" fill="#1C1C1C">[1]</text>
+
+  <rect x="190" y="95" width="100" height="28" rx="4" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="240" y="113" text-anchor="middle" font-size="11" fill="#1C1C1C">Node(key,value)</text>
+  <line x1="290" y1="109" x2="308" y2="109" stroke="#8C8676" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <rect x="310" y="95" width="100" height="28" rx="4" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="113" text-anchor="middle" font-size="11" fill="#1C1C1C">Node(key,value)</text>
+  <line x1="410" y1="109" x2="428" y2="109" stroke="#8C8676" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <rect x="430" y="95" width="100" height="28" rx="4" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="480" y="113" text-anchor="middle" font-size="11" fill="#1C1C1C">Node(key,value)</text>
+
+  <text x="240" y="140" text-anchor="middle" font-size="10" fill="#8C8676">链表（next 指针串联）</text>
+
+  <!-- 桶n：红黑树 -->
+  <rect x="580" y="100" width="60" height="36" rx="4" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.3"/>
+  <text x="610" y="123" text-anchor="middle" font-family="monospace" font-size="13" fill="#1C1C1C">[n]</text>
+
+  <circle cx="610" cy="170" r="18" fill="none" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="610" y="174" text-anchor="middle" font-size="9" fill="#3E6B8F">红黑树</text>
+
+  <text x="140" y="230" text-anchor="middle" font-size="11" fill="#57544E">链表长度 &lt; 8</text>
+  <line x1="140" y1="136" x2="140" y2="215" stroke="#8C8676" stroke-width="0.8" stroke-dasharray="3 3"/>
+  <text x="610" y="215" text-anchor="middle" font-size="11" fill="#57544E">链表长度 ≥ 8</text>
+
+  <!-- JDK 版本对比 -->
+  <rect x="30" y="260" width="300" height="60" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="180" y="282" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C">JDK 1.7</text>
+  <text x="180" y="303" text-anchor="middle" font-size="12" fill="#1C1C1C">数组 + 链表（头插法）</text>
+
+  <rect x="380" y="260" width="300" height="60" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="530" y="282" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C">JDK 1.8</text>
+  <text x="530" y="303" text-anchor="middle" font-size="12" fill="#1C1C1C">数组 + 链表 + 红黑树（尾插法）</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>HashMap 底层结构全景：数组作为主干，每个桶通过链表或红黑树解决哈希冲突</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">为什么要引入红黑树？</div>
+<p>极端情况下，所有 key 的哈希值都落到同一个桶里，链表长度会变成 n。此时 <code>get()</code> 的时间复杂度从 <strong>O(1)</strong> 退化为 <strong>O(n)</strong>。1.8 引入红黑树后，即使所有元素碰撞到同一个桶，查找复杂度也能保证在 <strong>O(log n)</strong>。</p>
+<p>但注意，树化有两个条件<strong>同时满足</strong>才触发：① 链表长度 ≥ 8（<code>TREEIFY_THRESHOLD</code>）；② 数组长度 ≥ 64（<code>MIN_TREEIFY_CAPACITY</code>）。如果数组还很小，优先选择扩容而不是树化——因为扩容能更均匀地分散元素。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：Hash 计算 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>Hash 计算：为什么 hashCode 要"扰动"？</h2></div>
+
+<p>HashMap 的核心是<strong>哈希函数</strong>——如何把一个任意对象映射到数组的某个下标上。一个好的哈希函数应该让元素<strong>均匀分布</strong>在各个桶中，最大限度地减少碰撞。</p>
+
+<p>JDK 1.8 的哈希计算分为两步：</p>
+
+<div class="formula">
+<strong>第一步：扰动函数</strong><br/>
+hash = key.hashCode() ^ (key.hashCode() &gt;&gt;&gt; 16)<br/><br/>
+<strong>第二步：取模定位</strong><br/>
+index = hash &amp; (table.length - 1)
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 200" role="img" aria-label="HashMap 哈希计算流程">
+  <defs>
+    <marker id="arrow2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+  </defs>
+  <!-- hashCode -->
+  <rect x="20" y="15" width="160" height="40" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="100" y="32" text-anchor="middle" font-family="monospace" font-size="11" fill="#57544E">key.hashCode()</text>
+  <text x="100" y="48" text-anchor="middle" font-family="monospace" font-size="10" fill="#8C8676">例如: 12345678</text>
+
+  <line x1="180" y1="35" x2="210" y2="35" stroke="#8C8676" stroke-width="1" marker-end="url(#arrow2)"/>
+
+  <!-- 扰动 -->
+  <rect x="215" y="10" width="200" height="50" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="315" y="30" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C">扰动: h ^ (h &gt;&gt;&gt; 16)</text>
+  <text x="315" y="48" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">高16位 ⊕ 低16位</text>
+
+  <line x1="415" y1="35" x2="445" y2="35" stroke="#8C8676" stroke-width="1" marker-end="url(#arrow2)"/>
+
+  <!-- 定位 -->
+  <rect x="450" y="10" width="230" height="50" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="565" y="30" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F">hash &amp; (n - 1)</text>
+  <text x="565" y="48" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">等价于 hash % n（但更快）</text>
+
+  <!-- 解释区 -->
+  <rect x="50" y="90" width="600" height="90" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="115" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">为什么 hashCode 需要"扰动"？</text>
+  <text x="350" y="138" text-anchor="middle" font-size="12" fill="#57544E">如果直接用 hashCode() 的低位来决定桶下标 —— 而 hashCode() 的高位变化大、低位可能相似</text>
+  <text x="350" y="158" text-anchor="middle" font-size="12" fill="#57544E">扰动函数让高位也参与运算（高16位异或低16位），使最终的下标更"随机"、碰撞更少</text>
+  <text x="350" y="178" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">这就是面试时要说的"为什么不是直接 hashCode % n"</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>HashMap 的哈希计算：先扰动、再定位，让你的 key 均匀散落在数组各处</figcaption>
+</figure>
+
+<div class="think"><div class="think-q">思考：为什么 table.length 必须是 2 的幂？</div></div>
+
+<p>因为当 n = 2<sup>k</sup> 时，<strong>n - 1</strong> 的二进制形式是 k 个连续的 1（比如 16-1=15=1111₂），这样 <code>hash &amp; (n-1)</code> 的结果就只在 [0, n-1] 范围内均匀分布。如果 n 不是 2 的幂，n-1 的二进制中会有 0 位，导致某些桶永远分不到元素，浪费空间且增大碰撞。</p>
+
+<p><strong>实战 Tips：</strong>面试时你可以补充"这就是为什么阿里规约要求 <code>new HashMap(n)</code> 时，建议传 <code>(int) (n / 0.75 + 1)</code>，这样既避免了扩容，又保证了容量会被 <code>tableSizeFor()</code> 自动纠正为 2 的幂"。</p>
+</section>
+
+<!-- ═══════════════ 第4站：put() 流程 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>put() 完整流程：8 个关键步骤</h2></div>
+
+<p>面试官说："你画一下 HashMap 的 put 流程。" —— 这是一个经典的"白板编程题"。我们通过一张图把整个过程串起来：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 560" role="img" aria-label="HashMap put 操作流程图">
+  <defs>
+    <marker id="arrow3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#1C1C1C"/></marker>
+  </defs>
+  <!-- 开始 -->
+  <rect x="275" y="5" width="150" height="30" rx="15" fill="#C2410C" opacity="0.85"/>
+  <text x="350" y="25" text-anchor="middle" font-size="13" fill="#fff" font-weight="700">put(key, value)</text>
+  <line x1="350" y1="35" x2="350" y2="55" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- Step 1 -->
+  <rect x="200" y="58" width="300" height="36" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="220" y="73" font-family="monospace" font-size="11" fill="#C2410C">①</text>
+  <text x="240" y="80" font-size="12" fill="#1C1C1C">table 为空？→ resize() 初始化</text>
+  <line x1="350" y1="94" x2="350" y2="114" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- Step 2 -->
+  <rect x="200" y="117" width="300" height="36" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="220" y="132" font-family="monospace" font-size="11" fill="#C2410C">②</text>
+  <text x="240" y="139" font-size="12" fill="#1C1C1C">计算 hash，定位桶下标 i</text>
+  <line x1="350" y1="153" x2="350" y2="173" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- 判断 -->
+  <polygon points="350,178 430,210 350,242 270,210" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="350" y="214" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">table[i]</text>
+  <text x="350" y="228" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">== null?</text>
+
+  <text x="180" y="214" font-size="10" fill="#3E6B8F">是 →</text>
+  <rect x="40" y="198" width="120" height="28" rx="6" fill="#3E6B8F" opacity="0.2" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="100" y="217" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="700">③ 直接插入</text>
+
+  <text x="440" y="214" font-size="10" fill="#C2410C">否 ↓</text>
+  <line x1="350" y1="242" x2="350" y2="265" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- Step 4-6 -->
+  <rect x="200" y="268" width="300" height="50" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="220" y="288" font-family="monospace" font-size="11" fill="#C2410C">④⑤</text>
+  <text x="245" y="292" font-size="12" fill="#1C1C1C">遍历链表/红黑树</text>
+  <text x="245" y="308" font-size="11" fill="#57544E">key 相同 → 覆盖 value（onlyIfAbsent 为 false 时）</text>
+  <line x1="350" y1="318" x2="350" y2="340" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- Step 6-8 -->
+  <rect x="200" y="343" width="300" height="66" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="220" y="360" font-family="monospace" font-size="11" fill="#C2410C">⑥</text>
+  <text x="240" y="363" font-size="12" fill="#1C1C1C">尾插法：追加到链表末尾（1.7 是头插法）</text>
+  <text x="220" y="380" font-family="monospace" font-size="11" fill="#C2410C">⑦</text>
+  <text x="240" y="383" font-size="12" fill="#1C1C1C">链表长度 ≥ 8？→ treeifyBin()</text>
+  <text x="220" y="400" font-family="monospace" font-size="11" fill="#C2410C">⑧</text>
+  <text x="240" y="403" font-size="12" fill="#1C1C1C">++size &gt; threshold？→ resize()</text>
+
+  <line x1="350" y1="409" x2="350" y2="430" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- 结束 -->
+  <rect x="275" y="433" width="150" height="30" rx="15" fill="#3E6B8F" opacity="0.8"/>
+  <text x="350" y="453" text-anchor="middle" font-size="13" fill="#fff" font-weight="700">return oldValue</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>HashMap put() 的完整流程图 —— 一次记不住没关系，理解逻辑比背步骤更重要</figcaption>
+</figure>
+
+<p><strong>重点理解</strong>第 ④⑤ 步中 key 相同的判断逻辑：</p>
+<div class="formula">
+(key1.hashCode() == key2.hashCode()) &amp;&amp;<br/>
+(key1 == key2 || key1.equals(key2))
+</div>
+<p>先比较 <code>hashCode()</code>（快，整数比较），再比较 <code>==</code> 和 <code>equals()</code>（慢，按需）。这是典型的"先用低成本过滤，再用高成本确认"的优化策略。</p>
+
+<div class="crack"><div class="crack-label">不可变 key 的重要性</div>
+<p>如果你用可变对象做 key，并且修改了影响 hashCode 的字段，那么 HashMap 就再也找不到这个 entry 了——它还在原来的桶里，但 <code>containsKey()</code> 返回 false。这就是为什么推荐用 String、Integer 等<strong>不可变对象</strong>做 key。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：扩容 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>扩容机制：1.7 vs 1.8 的关键差异</h2></div>
+
+<p>扩容是 HashMap 中最"贵"的操作——需要重新计算每个元素的位置并搬移。触发条件是 <code>size &gt; capacity × loadFactor</code>，默认 <strong>16 × 0.75 = 12</strong>，即第 13 个元素插入时触发扩容。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 260" role="img" aria-label="HashMap 扩容对比">
+  <!-- 1.7 -->
+  <rect x="20" y="10" width="320" height="240" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="180" y="38" text-anchor="middle" font-family="monospace" font-size="14" fill="#C2410C" font-weight="700">JDK 1.7 扩容</text>
+  <text x="40" y="68" font-size="12" fill="#1C1C1C">1. 创建 newTable（2 倍容量）</text>
+  <text x="40" y="90" font-size="12" fill="#1C1C1C">2. 遍历 oldTable 每个桶</text>
+  <text x="40" y="112" font-size="12" fill="#1C1C1C">3. <strong>头插法</strong>转移到 newTable</text>
+  <text x="40" y="134" font-size="12" fill="#1C1C1C">4. 重新 hash 计算位置</text>
+  <text x="40" y="165" font-size="12" fill="#C2410C">⚠ 头插法导致顺序反转</text>
+  <text x="40" y="185" font-size="12" fill="#C2410C">⚠ 并发下可能形成环形链表</text>
+  <text x="40" y="205" font-size="12" fill="#C2410C">⚠ 导致 get() 死循环 CPU 100%</text>
+
+  <!-- 1.8 -->
+  <rect x="360" y="10" width="320" height="240" rx="6" fill="#3E6B8F" opacity="0.12" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="520" y="38" text-anchor="middle" font-family="monospace" font-size="14" fill="#3E6B8F" font-weight="700">JDK 1.8 扩容</text>
+  <text x="380" y="68" font-size="12" fill="#1C1C1C">1. 创建 newTable（2 倍容量）</text>
+  <text x="380" y="90" font-size="12" fill="#1C1C1C">2. 遍历 oldTable 每个桶</text>
+  <text x="380" y="112" font-size="12" fill="#1C1C1C">3. <strong>尾插法</strong>保持原有顺序</text>
+  <text x="380" y="134" font-size="12" fill="#1C1C1C">4. 无需重新 hash！</text>
+  <text x="380" y="165" font-size="12" fill="#3E6B8F">✓ hash &amp; oldCap = 0 → 原位不动</text>
+  <text x="380" y="185" font-size="12" fill="#3E6B8F">✓ hash &amp; oldCap ≠ 0 → 原位 + oldCap</text>
+  <text x="380" y="205" font-size="12" fill="#3E6B8F">✓ 尾插法避免环形链表</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>JDK 1.7 vs 1.8 扩容对比：核心差异在于插入方式 + 位置计算</figcaption>
+</figure>
+
+<h3>JDK 1.7 的扩容过程</h3>
+
+<p>1.7 的扩容方法是 <code>resize()</code> + <code>transfer()</code>。它的逻辑很直接：创建一个 2 倍大小的新数组，然后把旧数组里每一个元素<strong>逐个重新计算下标</strong>，再用<strong>头插法</strong>放进新数组：</p>
+
+<div class="formula">
+// JDK 1.7 transfer 核心逻辑（简化）<br/>
+for (Entry&lt;K,V&gt; e : oldTable) {<br/>
+&nbsp;&nbsp;while (e != null) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;Entry&lt;K,V&gt; next = e.next;&nbsp;&nbsp;// 先存下一个<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;int i = indexFor(e.hash, newCapacity); // 重新算下标<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;e.next = newTable[i];&nbsp;&nbsp;// 头插：当前节点指向桶里的旧头<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;newTable[i] = e;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// 当前节点成为新的头<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;e = next;<br/>
+&nbsp;&nbsp;}<br/>
+}
+</div>
+
+<p>这里有两个关键问题：</p>
+
+<ul>
+  <li><strong>每个元素都要重新 hash</strong>：调用 <code>indexFor(hash, newCap)</code> 重新计算桶位置，开销大。</li>
+  <li><strong>头插法导致链表逆序</strong>：新元素插在桶的头部，所以原本 <code>A→B→C</code> 的链表，扩容后会变成 <code>C→B→A</code>。正是这个"逆序 + 节点引用交错"的特性，在<strong>多线程并发扩容</strong>时会形成环形链表——也就是第 6 站要详细讲的 CPU 100% 死循环根源。</li>
+</ul>
+
+<h3>JDK 1.8 扩容位置计算的精妙优化</h3>
+
+<ul>
+  <li>如果 <code>hash &amp; oldCap == 0</code>：元素在新表中的位置<strong>不变</strong>（因为新增的高位是 0）</li>
+  <li>如果 <code>hash &amp; oldCap != 0</code>：元素的新位置 = <strong>原位 + oldCap</strong>（因为新增的高位是 1）</li>
+</ul>
+
+<p>这个优化省掉了每个元素重新调用 <code>hashCode()</code> 和取模运算的开销。<strong>面试时说到这个细节，面试官就知道你真正读过源码。</strong></p>
+
+<div class="think"><div class="think-q">实战思考：如果预知要存 1000 个元素，HashMap 初始容量应该设多少？</div></div>
+
+<p>答案：<strong>2048</strong>（不是 1024）。公式：<code>capacity = tableSizeFor((int)(expectedSize / 0.75 + 1))</code> = tableSizeFor(1334) = 2048。这样在整个插入过程中<strong>一次扩容都不会发生</strong>。如果你设 1024，容量不够大，还是会触发 1-2 次扩容。</p>
+</section>
+
+<!-- ═══════════════ 第6站：线程安全 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>线程安全问题：致命的死循环</h2></div>
+
+<div class="crack"><div class="crack-label">真实生产事故</div>
+<p>某电商系统在"双十一"促销期间，多个线程同时往一个全局 HashMap 中写入缓存数据。JDK 1.7 环境下运行一段时间后，服务器 CPU 突然飙到 100%。排查发现：<strong>HashMap 在并发扩容时形成了环形链表，后续的 get() 操作陷入死循环</strong>。最终通过重启恢复，紧急将缓存容器替换为 ConcurrentHashMap。</p>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 180" role="img" aria-label="环形链表示意图">
+  <defs>
+    <marker id="arrow4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+  </defs>
+  <text x="350" y="25" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">环形链表的形成（JDK 1.7 头插法 + 并发扩容）</text>
+
+  <text x="60" y="65" font-size="12" fill="#3E6B8F" font-weight="700">线程 A（扩容中，头插法转移）:</text>
+  <rect x="50" y="80" width="55" height="30" rx="4" fill="#fff" stroke="#C2410C" stroke-width="1.5"/><text x="77" y="100" text-anchor="middle" font-size="11" fill="#1C1C1C">A→B</text>
+  <line x1="105" y1="95" x2="123" y2="95" stroke="#8C8676" stroke-width="1" marker-end="url(#arrow4)"/>
+  <rect x="125" y="80" width="55" height="30" rx="4" fill="#fff" stroke="#C2410C" stroke-width="1.5"/><text x="152" y="100" text-anchor="middle" font-size="11" fill="#1C1C1C">B→C</text>
+  <line x1="180" y1="95" x2="198" y2="95" stroke="#8C8676" stroke-width="1" marker-end="url(#arrow4)"/>
+  <rect x="200" y="80" width="55" height="30" rx="4" fill="#fff" stroke="#C2410C" stroke-width="1.5"/><text x="227" y="100" text-anchor="middle" font-size="11" fill="#1C1C1C">C→null</text>
+
+  <text x="480" y="65" font-size="12" fill="#C2410C" font-weight="700">线程 B（同时扩容，交错操作后）:</text>
+  <rect x="420" y="80" width="55" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/><text x="447" y="100" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">B→A</text>
+  <line x1="475" y1="95" x2="498" y2="95" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arrow4)"/>
+  <rect x="500" y="80" width="55" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/><text x="527" y="100" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">A→B</text>
+  <path d="M555,95 Q590,95 590,125 Q590,155 500,155" fill="none" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arrow4)"/>
+
+  <text x="527" y="175" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="900">⚠ B → A → B → A … 死循环！</text>
+</svg>
+<figcaption><span class="fig-no">图 5</span>JDK 1.7 并发扩容时头插法导致的环形链表形成过程</figcaption>
+</figure>
+
+<div class="takeaway"><div class="takeaway-label">生产环境方案对比</div>
+<table class="nb-table">
+  <thead><tr><th>方案</th><th>线程安全</th><th>性能</th><th>推荐</th></tr></thead>
+  <tbody>
+    <tr><td><strong>ConcurrentHashMap</strong></td><td>✅ CAS + synchronized</td><td>极高，粒度到桶</td><td>✅ 首选</td></tr>
+    <tr><td><strong>Collections.synchronizedMap()</strong></td><td>✅ 锁整表</td><td>差</td><td>⚠ 低并发</td></tr>
+    <tr><td><strong>Hashtable</strong></td><td>✅ 所有方法 synchronized</td><td>差</td><td>❌ 已淘汰</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：面试 & 实践 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>面试追问 &amp; 最佳实践</h2></div>
+
+<h3>追问 1：HashMap 和 Hashtable 的区别？</h3>
+<div class="formula">
+HashMap：非线程安全 | 允许 null key/value | 初始 16 | 扩容 ×2 | 1.8 引入红黑树<br/>
+Hashtable：线程安全(synchronized) | 不允许 null | 初始 11 | 扩容 ×2+1 | 只有链表
+</div>
+
+<h3>追问 2：为什么重写 equals() 必须重写 hashCode()？</h3>
+<p>HashMap 用 <code>hashCode()</code> 定位桶、用 <code>equals()</code> 在桶内查找。如果你只重写了 <code>equals()</code> 不重写 <code>hashCode()</code>，那么两个逻辑上相同的对象可能落在不同桶里——HashMap 永远找不到它。<strong>这是 Java 开发中最常见的 bug 之一。</strong></p>
+
+<h3>追问 3：loadFactor 为什么默认是 0.75？</h3>
+<p>这是空间与时间的折中：</p>
+<ul>
+  <li>1.0：空间满，碰撞严重，查询慢</li>
+  <li>0.5：碰撞少，一半空间浪费</li>
+  <li><strong>0.75：泊松分布下，桶中元素超过 8 个的概率低于千万分之一（源码注释可查）</strong></li>
+</ul>
+
+<h3>生产环境 Checklist</h3>
+<div class="takeaway"><div class="takeaway-label">✅ 最佳实践</div>
+<ul>
+  <li><strong>指定初始容量</strong>：<code>new HashMap((int)(expectedSize / 0.75 + 1))</code></li>
+  <li><strong>用不可变对象做 key</strong>：String、Integer、LocalDate 等</li>
+  <li><strong>重写 equals() 必须重写 hashCode()</strong>：IDEA/Lombok 可自动生成</li>
+  <li><strong>并发场景用 ConcurrentHashMap</strong>：不要在并发环境用 HashMap</li>
+  <li><strong>JDK 1.8+ 可放心使用</strong>：尾插法修复了死循环问题</li>
+  <li><strong>序列化注意</strong>：确保 key 和 value 都实现了 Serializable</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
+
+<div class="recap"><h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>数据结构</strong>：JDK 1.7 数组+链表（头插法）→ JDK 1.8 数组+链表+红黑树（尾插法）</li>
+  <li><strong>哈希计算</strong>：扰动函数 (h ^ h&gt;&gt;&gt;16) + 位运算取模 (hash &amp; n-1)，n 必须是 2 的幂</li>
+  <li><strong>put 流程</strong>：8 步 —— 判空→定位→遍历→覆盖/插入→树化→扩容</li>
+  <li><strong>扩容优化</strong>：1.8 无需重新 hash，hash &amp; oldCap 直接决定新位置（0→原位，1→原位+oldCap）</li>
+  <li><strong>线程安全</strong>：1.7 头插法并发扩容可形成死循环，1.8 尾插法修复</li>
+  <li><strong>树化条件</strong>：链表 ≥ 8 <strong>且</strong> 数组 ≥ 64，缺一不可</li>
+</ul>
+</div>
+
+<p style="margin-top:28px;text-align:center;font-size:18px;font-weight:700;color:var(--ink)">
+  👉 下一篇：<a href="/java-interview/%E4%BA%8C%E9%9B%86%E5%90%88%E6%A1%86%E6%9E%B6-ConcurrentHashMap%E5%88%86%E6%AE%B5%E9%94%81%E5%88%B0CAS+synchronized%E7%9A%84%E6%BC%94%E8%BF%9B/">ConcurrentHashMap —— 从分段锁到 CAS + synchronized 的演进</a>
+</p>
+</section>
+
+</main>
+
+</body>
+</html>

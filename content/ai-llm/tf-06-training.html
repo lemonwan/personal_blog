@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第25课 · 预训练 · 监督微调 · 强化学习 | AI大模型原理教程</title>
+    <meta name="description" content="「会接话」和「会帮忙」之间有一道鸿沟——ChatGPT的三个训练阶段">
+    <meta name="keywords" content="AI大模型教程,Transformer,预训练 · 监督微调 · 强化学习,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第25课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 25 · 卷四</div>
+            <h1>预训练 · 监督微调 · 强化学习</h1>
+            <p class="subtitle">❝ 「会接话」和「会帮忙」之间有一道鸿沟——ChatGPT的三个训练阶段 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="预训练完只会接话" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>刚训完的模型，只会「接话」</h2></div><p>上一课结尾，我们手里有了一台叠了上百层、在 1TB 文字上练过「预测下一个词」的 GPT。 它知识渊博。可你兴冲冲地敲下第一条请求：「帮我写一封向房东投诉漏水的邮件。」它的回答可能是这样：</p><div class="formula" style="font-family:var(--serif);font-size:16px;line-height:2">「帮我写一封向房东投诉漏水的邮件。<br/><span style="color:var(--ink-faint)">——这是很多租客都会遇到的烦恼。在动笔之前，你需要先确认几件事……」</span></div><p>它没在<strong>帮你</strong>，它在<strong>续写你这句话</strong>——把你的请求当成一篇网文的开头往下接。 因为它在互联网上见过无数这种「提个问题、然后展开议论」的文章。 它脑子里压根没有「替用户完成一件事」的概念，只有「下一个词最可能是什么」。<strong>会预测下一个词，离会帮忙，还隔着一条鸿沟。</strong></p><div class="think"><div class="think-q">「预测下一个词」和「有帮助地回答」之间隔着一道鸿沟。怎么跨过去？</div></div></section><section class="station reveal" data-title="第一步：预训练" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>第一步：预训练——海量文本里「自学成才」</h2></div><p>从「裸模型」到 ChatGPT，要走三步。先把整条路摆出来，再逐站细看：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 150" role="img" aria-label="大模型三阶段训练路线图"><g><rect x="20" y="24" width="155" height="92" rx="8" fill="#5C6B7912" stroke="#5C6B79" stroke-width="2"></rect><text x="98" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#5C6B79">① 预训练</text><text x="98" y="68" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">海量文本</text><text x="98" y="84" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">→ 预测下一词</text><text x="98" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">（学知识/才华）</text></g><g><rect x="200" y="24" width="155" height="92" rx="8" fill="#3E6B8F12" stroke="#3E6B8F" stroke-width="2"></rect><text x="278" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#3E6B8F">② SFT</text><text x="278" y="68" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">指令-回答范例</text><text x="278" y="84" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">→ 学问答格式</text><text x="278" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">（学礼仪）</text></g><g><rect x="380" y="24" width="155" height="92" rx="8" fill="#4A8B5E12" stroke="#4A8B5E" stroke-width="2"></rect><text x="458" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#4A8B5E">③ RLHF</text><text x="458" y="68" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">人类偏好打分</text><text x="458" y="84" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">→ 对齐人类</text><text x="458" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">（学价值观）</text></g><line x1="175" y1="70" x2="198" y2="70" stroke="#DCD2BF" stroke-width="2"></line><line x1="355" y1="70" x2="378" y2="70" stroke="#DCD2BF" stroke-width="2"></line><text x="280" y="140" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">才华、礼仪、价值观——缺一步，模型就不完整</text></svg></div><figcaption><span class="fig-no">图 25-1</span>大模型的三阶段训练：预训练塑造「能力/知识」，SFT 塑造「回答格式」，RLHF 塑造「合不合人类口味」。本课就沿这三站走。</figcaption></figure><p>预训练的目标，简单到和第 14 课一模一样：给定前 k 个词，预测第 k+1 个。变的只有规模：</p><ul style="padding-left:24px;line-height:2.1"><li>GPT-3：约 3000 亿 token；Llama-3：约 15 万亿 token（相当于把整个互联网读了好多遍）。</li><li>一次训练耗费的算力，按今天的价码动辄上千万美元——这是三步里<strong>唯一</strong>烧钱到这个量级的。</li></ul><p>停下来看一眼这条贯穿全书的主线：从第 14 课 N-gram「数频率猜下一个词」，到词向量、RNN、LSTM， 再到今天上百层的 Transformer——<strong>目标从头到尾就没变过：预测下一个词</strong>。变的只是估计这个概率的工具，一个比一个强。</p><p>为什么这么个朴素目标能学出「智能」？因为<strong>想把下一个词预测准，你被迫得理解世界</strong>。 「太阳从＿＿升起」要填「东」，得懂地球自转；「快速排序的平均复杂度是 O(n＿＿n)」要填「log」，得真懂算法。 预训练就这样把语言、事实、推理、代码，<strong>悄悄压进了几千亿个参数里</strong>——但它学到的是「续写」，不是「听话」。</p></section><section class="station reveal" data-title="第二步：监督微调 SFT" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>第二步：监督微调——教它「该在哪儿开口」</h2></div><p>SFT 还是预训练那套「预测下一个词」，只换了教材：雇人写几万到几十万条<strong>「指令 → 理想回答」</strong>， 再让模型在这些范例上接着训。但有个不起眼却关键的机关——这些对话被套进一个固定<strong>模板</strong>， 而且<strong>损失只算「回答」那一段</strong>：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 168" role="img" aria-label="SFT 的对话模板，损失只在回答部分计算"><text x="20" y="20" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#5C6B79">一条 SFT 训练样本（套进对话模板）</text><rect x="20" y="32" width="300" height="40" rx="6" fill="#F2EFE8" stroke="#DCD2BF" stroke-width="1.2"></rect><text x="32" y="48" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#93A0AC"><|user|></text><text x="32" y="64" font-family="Noto Serif SC, serif" font-size="12" fill="#5C6B79">帮我写一封投诉漏水的邮件</text><text x="330" y="56" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">← 只「给定」，不算损失</text><rect x="20" y="84" width="300" height="56" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.8"></rect><text x="32" y="100" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#C0481E"><|assistant|></text><text x="32" y="116" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">尊敬的房东：我是 3 栋 502 的</text><text x="32" y="132" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">租户，近日卫生间出现漏水……</text><text x="330" y="108" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#C0481E">← 只对这一段</text><text x="330" y="124" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#C0481E">计算损失、更新参数</text></svg></div><figcaption><span class="fig-no">图 25-2</span>SFT 把对话套进 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">⟨</span><span class="mord text"><span class="mord">user</span></span><span class="mclose">⟩</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">⟨</span><span class="mord text"><span class="mord">assistant</span></span><span class="mclose">⟩</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span></span></span></span></span> 模板。用户那段当「已知条件」不计损失，只训练模型生成<strong>回答</strong>那一段——它学的不是「续写整段对话」，而是「轮到我说话时，该怎么说」。</figcaption></figure><p>就这点改动，模型从「续写机器」变成了「对话助手」：看到 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">⟨</span><span class="mord text"><span class="mord">user</span></span><span class="mclose">⟩</span></span></span></span></span> 的请求， 它知道现在该轮到自己、按回答的格式开口，而不是把你的话往下接。</p><div class="crack reveal"><div class="crack-label">「会回答」不等于「答得好」</div><p>SFT 教会了<em>格式</em>，却没教会<em>好坏</em>。标注员写的范例风格五花八门——有的啰嗦有的简练、有的保守有的大胆， 而「好回答」本就没有唯一标准答案。模型只是<strong>模仿</strong>了这些范例的样子， 并不知道两个都「格式正确」的回答里，哪个更有帮助、更诚实、更安全。 更别提：你没法给每种刁钻问题都写出范例。光靠模仿，到头了。</p></div></section><section class="station reveal" data-title="把人类偏好炼成打分器" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>第三步上半场：把「人类偏好」炼成一个打分器</h2></div><p>既然「好」说不清、写不全，那就换个问法：<strong>不让人写标准答案，只让人做选择题。</strong>给模型同一个问题、让它生成两个回答 A 和 B，然后问标注员一句谁都答得上来的话——「<strong>哪个更好？</strong>」</p><p>收集几十万条这样的「A 比 B 好」，就能训练出一个<strong>奖励模型（Reward Model）</strong>： 它本质是另一个 Transformer，但顶上换了个「打分头」，输入任意回答、输出一个分数。训练它的目标，就是让被人选中的那个分更高：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord text"><span class="mord cjk_fallback">损失</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">σ</span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord mathnormal" style="margin-right:0.0278em;">r</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">好回答</span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">r</span><span class="mopen">(</span><span class="mord text"><span class="mord cjk_fallback">差回答</span></span><span class="mclose">)</span><span class="mord"><span class="delimsizing size1">)</span></span></span></span></span></span></span></div><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 176" role="img" aria-label="奖励模型：从人类两两偏好中学会打分"><defs><marker id="rm-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5C6B79"></polygon></marker></defs><rect x="16" y="70" width="96" height="32" rx="5" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="64" y="90" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">同一个问题</text><line x1="112" y1="78" x2="146" y2="50" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#rm-arr)"></line><line x1="112" y1="94" x2="146" y2="122" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#rm-arr)"></line><rect x="148" y="32" width="120" height="32" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.6"></rect><text x="208" y="52" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2F8F76">回答 A 👍</text><rect x="148" y="108" width="120" height="32" rx="5" fill="#F4F0E7" stroke="#C9BBA2" stroke-width="1.4"></rect><text x="208" y="128" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">回答 B 👎</text><text x="208" y="86" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">人类选 A 更好</text><line x1="268" y1="48" x2="330" y2="70" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#rm-arr)"></line><line x1="268" y1="124" x2="330" y2="94" stroke="#5C6B79" stroke-width="1.3" marker-end="url(#rm-arr)"></line><rect x="332" y="60" width="120" height="52" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.8"></rect><text x="392" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">奖励模型</text><text x="392" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#C0481E">学会：r(A) > r(B)</text><text x="486" y="90" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">→ 能给</text><text x="486" y="104" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">任意回答打分</text><text x="280" y="166" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">人只需做选择题（A 还是 B），「好坏」就被蒸馏进了一个能自动打分的模型</text></svg></div><figcaption><span class="fig-no">图 25-3</span>奖励模型的炼成：人类只做「A 还是 B」的两两比较，模型从几十万次比较里学会给任意回答打一个分。「说不清的好」，被悄悄量化成了一个可计算的分数。</figcaption></figure></section><section class="station reveal" data-title="用打分器拧模型" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>第三步下半场：用打分器，反过来拧语言模型</h2></div><p>有了能打分的奖励模型，最后一步就顺理成章：<strong>让语言模型多说高分的话</strong>。这是一个不断转的循环——</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 172" role="img" aria-label="RLHF 的强化学习循环：生成、打分、更新"><defs><marker id="rl-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3E6B8F"></polygon></marker></defs><rect x="40" y="56" width="130" height="48" rx="8" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="105" y="76" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">语言模型</text><text x="105" y="92" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">（正在被训练）</text><line x1="170" y1="64" x2="230" y2="64" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#rl-arr)"></line><text x="200" y="56" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">生成回答</text><rect x="232" y="48" width="96" height="32" rx="5" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="280" y="68" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#5C6B79">一个回答</text><line x1="328" y1="64" x2="388" y2="64" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#rl-arr)"></line><rect x="390" y="48" width="130" height="48" rx="8" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="455" y="68" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#C0481E">奖励模型</text><text x="455" y="84" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E">打个分</text><path d="M 455 96 q 0 50 -175 50 q -175 0 -175 -42" fill="none" stroke="#4A8B5E" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#rl-arr)"></path><text x="280" y="162" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#4A8B5E">分高 → 提高这种回答的概率；分低 → 压低（梯度上升，第 12 课的近亲）</text></svg></div><figcaption><span class="fig-no">图 25-4</span>RLHF 下半场的循环：语言模型生成回答 → 奖励模型打分 → 拿这个分当「奖励」去更新语言模型，让高分回答更可能被说出来。转上几万圈，模型就越来越对人类的胃口。</figcaption></figure><p>但这里埋着一个大坑：如果只是<strong>一味追高分</strong>，模型会「钻空子」—— 找到一些奖励模型误判为高分、人读起来却是车轱辘废话的套路，疯狂复读。这叫<strong>奖励欺骗（reward hacking）</strong>。 所以训练时会再拴一根<strong>缰绳</strong>：在奖励里减去一项「<strong>别离原来的 SFT 模型太远</strong>」的惩罚（KL 散度）：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord text"><span class="mord cjk_fallback">真正的奖励</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3263em;vertical-align:-1.5763em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.75em;"><span style="top:-1.4237em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">打分</span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.75em;"><span class="svg-align" style="top:-2.102em;"><span class="pstrut" style="height:3em;"></span><span class="stretchy" style="height:0.548em;min-width:1.6em;"><span class="brace-left" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMinYMin slice"><path d="M0 6l6-6h17c12.688 0 19.313.3 20 1 4 4 7.313 8.3 10 13
+ 35.313 51.3 80.813 93.8 136.5 127.5 55.688 33.7 117.188 55.8 184.5 66.5.688
+ 0 2 .3 4 1 18.688 2.7 76 4.3 172 5h399450v120H429l-6-1c-124.688-8-235-61.7
+-331-161C60.687 138.7 32.312 99.3 7 54L0 41V6z"/></svg></span><span class="brace-center" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMidYMin slice"><path d="M199572 214
+c100.7 8.3 195.3 44 280 108 55.3 42 101.7 93 139 153l9 14c2.7-4 5.7-8.7 9-14
+ 53.3-86.7 123.7-153 211-199 66.7-36 137.3-56.3 212-62h199568v120H200432c-178.3
+ 11.7-311.7 78.3-403 201-6 8-9.7 12-11 12-.7.7-6.7 1-18 1s-17.3-.3-18-1c-1.3 0
+-5-4-11-12-44.7-59.3-101.3-106.3-170-141s-145.3-54.3-229-60H0V214z"/></svg></span><span class="brace-right" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMaxYMin slice"><path d="M399994 0l6 6v35l-6 11c-56 104-135.3 181.3-238 232-57.3
+ 28.7-117 45-179 50H-300V214h399897c43.3-7 81-15 113-26 100.7-33 179.7-91 237
+-174 2.7-5 6-9 10-13 .7-1 7.3-1 20-1h17z"/></svg></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0278em;">r</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.898em;"><span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.5763em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0528em;">β</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.5263em;vertical-align:-1.6763em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.85em;"><span style="top:-1.3237em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">别跑偏的罚款</span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.85em;"><span class="svg-align" style="top:-2.002em;"><span class="pstrut" style="height:3em;"></span><span class="stretchy" style="height:0.548em;min-width:1.6em;"><span class="brace-left" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMinYMin slice"><path d="M0 6l6-6h17c12.688 0 19.313.3 20 1 4 4 7.313 8.3 10 13
+ 35.313 51.3 80.813 93.8 136.5 127.5 55.688 33.7 117.188 55.8 184.5 66.5.688
+ 0 2 .3 4 1 18.688 2.7 76 4.3 172 5h399450v120H429l-6-1c-124.688-8-235-61.7
+-331-161C60.687 138.7 32.312 99.3 7 54L0 41V6z"/></svg></span><span class="brace-center" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMidYMin slice"><path d="M199572 214
+c100.7 8.3 195.3 44 280 108 55.3 42 101.7 93 139 153l9 14c2.7-4 5.7-8.7 9-14
+ 53.3-86.7 123.7-153 211-199 66.7-36 137.3-56.3 212-62h199568v120H200432c-178.3
+ 11.7-311.7 78.3-403 201-6 8-9.7 12-11 12-.7.7-6.7 1-18 1s-17.3-.3-18-1c-1.3 0
+-5-4-11-12-44.7-59.3-101.3-106.3-170-141s-145.3-54.3-229-60H0V214z"/></svg></span><span class="brace-right" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMaxYMin slice"><path d="M399994 0l6 6v35l-6 11c-56 104-135.3 181.3-238 232-57.3
+ 28.7-117 45-179 50H-300V214h399897c43.3-7 81-15 113-26 100.7-33 179.7-91 237
+-174 2.7-5 6-9 10-13 .7-1 7.3-1 20-1h17z"/></svg></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"><span class="mord mathrm">KL</span></span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord text"><span class="mord cjk_fallback">新模型</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∥</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord text"><span class="mord">SFT</span><span class="mord cjk_fallback">模型</span></span><span class="mord"><span class="delimsizing size1">)</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.998em;"><span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.6763em;"><span></span></span></span></span></span></span></span></span></span></span></div><p>一边追高分、一边被缰绳拽着别走火入魔——这就是经典的 <strong>PPO</strong> 方案。它有效，但要同时伺候语言模型、奖励模型、参考模型好几个网络，又笨重又难调。 于是 2023 年出了个聪明的简化版 <strong>DPO</strong>：<strong>跳过单独的奖励模型和这套 RL 循环</strong>， 直接在「A 比 B 好」的偏好数据上，用一个巧妙的损失把语言模型一步拧到位。又一次「能简则简」——如今很多开源模型都改用了它。</p></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>大模型分三步炼成：<span class="tk-hl">预训练</span>（海量文本预测下一词，得才华）→<span class="tk-hl">SFT</span>（指令范例 + 只算回答的损失，学礼仪）→<span class="tk-hl">RLHF</span>（把人类两两偏好炼成奖励模型，再用它+KL缰绳拧语言模型，立价值观）。 缺一步，模型要么只会续写、要么格式对而内容糟。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>鸿沟</strong>：预训练只学到「续写」，看到请求会接话而非帮忙。</li><li><strong>SFT</strong>：对话模板 + 损失只算 ⟨assistant⟩ 段，把续写机器变成对话助手。</li><li><strong>奖励模型</strong>：人只做「A/B 哪个好」的选择题，蒸馏出一个能给任意回答打分的模型。</li><li><strong>RL 优化 + KL 缰绳</strong>：拉高高分回答的概率，又不许跑离 SFT 太远（防奖励欺骗）。</li><li><strong>PPO → DPO</strong>：DPO 跳过奖励模型与 RL 循环，直接在偏好数据上优化，更简单。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="三阶段：预训练→监督微调(SFT)→基于人类反馈的强化学习(RLHF)。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>从「会接话」到「会帮忙」，ChatGPT 类模型的训练通常分为哪三个阶段？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">分词 → 编码 → 解码</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">预训练 → 监督微调（SFT）→ 基于人类反馈的强化学习（RLHF）</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">加法 → 乘法 → 归一化</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">训练 → 测试 → 部署</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="预训练在海量无标注文本上预测下一个词，习得语言规律与知识。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>「预训练」阶段，模型主要在学习什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">记住几条人工规则</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">在海量无标注文本上反复预测「下一个词」，从而习得语言规律与世界知识</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">只学会礼貌用语</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">只学会数学计算</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-07-sparse.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 26 课</span>
+                    <h3>KV 缓存、稀疏注意力与 FlashAttention</h3>
+                    <p>注意力的账单是O(n²)——处理一本书，工程师用什么手段把它变快？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第25课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

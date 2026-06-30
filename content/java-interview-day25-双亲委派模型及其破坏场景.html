@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 25 · 双亲委派模型及其破坏场景 · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 25 / 66</div>
+            <h1>JVM 原理与调优 · 类加载机制</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 双亲委派模型及其破坏场景</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:37.88%"></div>
+            </div>
+            <div class="progress-label">进度 37.88%（25/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念：什么是双亲委派模型</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>双亲委派模型（Parent Delegation Model）</strong>是 Java 类加载器的默认协作机制：当一个 ClassLoader 收到类加载请求时，它通常不会先自己加载，而是先把请求委派给父加载器；只有父加载器无法完成加载时，子加载器才尝试自己加载。</p><ul><li><strong>Bootstrap ClassLoader</strong>：启动类加载器，主要加载 JDK 核心类库，如 <code>java.lang.String</code>、<code>java.util.*</code>。</li><li><strong>Extension / Platform ClassLoader</strong>：Java 8 中常称扩展类加载器；Java 9+ 对应 Platform ClassLoader，加载平台相关类。</li><li><strong>Application ClassLoader</strong>：应用类加载器，加载 classpath/module path 下的业务类和第三方依赖。</li><li><strong>自定义 ClassLoader</strong>：框架、插件化、热部署、隔离加载等场景会使用。</li></ul><p>面试中要注意：这里的“父加载器”并不一定是继承关系，而更多是 <code>ClassLoader</code> 内部维护的 parent 引用形成的层级委派关系。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>加载流程：loadClass 的典型步骤</h2>
+        </div>
+        <div class="section-content">
+            <ol><li><strong>先检查是否已经加载</strong>：调用 <code>findLoadedClass(name)</code>，避免重复加载同一个类。</li><li><strong>委派父加载器加载</strong>：如果 parent 不为空，调用 <code>parent.loadClass(name, false)</code>；如果 parent 为空，则交给 Bootstrap ClassLoader。</li><li><strong>父加载器失败后自己加载</strong>：父加载器抛出 <code>ClassNotFoundException</code> 后，当前加载器再调用 <code>findClass(name)</code>。</li><li><strong>按需解析链接</strong>：如果 <code>resolve=true</code>，再调用 <code>resolveClass(clazz)</code> 完成符号引用解析。</li></ol><p>简化伪代码：</p><pre><code>protected Class&lt;?&gt; loadClass(String name, boolean resolve) {
+    Class&lt;?&gt; c = findLoadedClass(name);
+    if (c == null) {
+        try {
+            c = parent != null ? parent.loadClass(name, false)
+                               : findBootstrapClassOrNull(name);
+        } catch (ClassNotFoundException e) {
+            c = findClass(name);
+        }
+    }
+    if (resolve) resolveClass(c);
+    return c;
+}</code></pre><p>因此，自定义类加载器通常建议重写 <code>findClass</code>，而不是直接重写 <code>loadClass</code>，除非你明确要改变委派顺序。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>为什么需要双亲委派：安全、唯一、隔离</h2>
+        </div>
+        <div class="section-content">
+            <p>双亲委派模型的价值主要体现在三个方面：</p><ul><li><strong>核心类库安全</strong>：业务代码即使定义了一个 <code>java.lang.String</code>，也会优先由 Bootstrap ClassLoader 加载真正的 JDK String，避免核心类被恶意替换。</li><li><strong>类的唯一性</strong>：在同一个委派体系中，越基础的类越由上层加载器统一加载，减少同名类被重复定义导致的类型混乱。</li><li><strong>职责分层清晰</strong>：JDK 类、平台类、应用类分别由不同层级加载，降低类路径冲突概率。</li></ul><p>需要牢记：JVM 判断两个类是否“相同”，不仅看<strong>全限定类名</strong>，还要看<strong>定义它的类加载器</strong>。同名 class 被不同 ClassLoader 加载后，在 JVM 看来可能是两个不同类型，强转时可能出现 <code>ClassCastException</code>。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚖️</span>
+            <h2>常见破坏场景：不是坏事，而是为了满足特殊需求</h2>
+        </div>
+        <div class="section-content">
+            <p>“破坏双亲委派”不是一定错误，很多框架是有意改变委派顺序来实现隔离、插件化或服务发现。</p><table><thead><tr><th>场景</th><th>为什么要破坏</th><th>典型例子</th></tr></thead><tbody><tr><td>JDBC SPI</td><td>核心类库需要反向加载厂商实现类</td><td><code>DriverManager</code> 借助线程上下文类加载器加载 MySQL Driver</td></tr><tr><td>Tomcat Web 应用隔离</td><td>不同 WebApp 可以使用不同版本依赖</td><td>WebAppClassLoader 优先加载自身 <code>WEB-INF/lib/classes</code></td></tr><tr><td>OSGi / 插件化</td><td>模块之间需要精细化依赖和版本隔离</td><td>按 Bundle 维度加载类</td></tr><tr><td>热部署 / 动态加载</td><td>卸载旧 ClassLoader，重新加载新 class</td><td>Spring Boot DevTools、IDE 热加载、脚本引擎</td></tr></tbody></table><p>面试回答时要强调：破坏通常发生在 <code>loadClass</code> 的委派顺序上，例如改为“子加载器优先”，或借助 <strong>Thread Context ClassLoader</strong> 让父级代码访问子级实现。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>高频面试题与回答要点</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>Q1：双亲委派模型解决了什么问题？</strong><br/>答：保证核心类库安全，避免重复加载，维持类加载层次的稳定性。比如用户自定义 <code>java.lang.String</code> 不会覆盖 JDK 的 String。</p><p><strong>Q2：ClassLoader 的父子关系是继承吗？</strong><br/>答：不是。主要是组合关系，ClassLoader 内部有一个 parent 引用。</p><p><strong>Q3：为什么 JDBC 会破坏双亲委派？</strong><br/>答：<code>DriverManager</code> 属于 JDK 核心类，由上层加载器加载；但数据库驱动实现位于应用 classpath，由应用类加载器加载。父加载器默认看不到子加载器的类，所以需要线程上下文类加载器反向加载厂商驱动。</p><p><strong>Q4：两个类全限定名一样，是否一定是同一个类？</strong><br/>答：不一定。还要看是否由同一个 ClassLoader 定义。不同加载器加载的同名类在 JVM 中可视为不同类型。</p><p><strong>Q5：自定义 ClassLoader 应该重写哪个方法？</strong><br/>答：常规情况下重写 <code>findClass</code>，保留 <code>loadClass</code> 的双亲委派逻辑；只有需要子优先或特殊隔离时才重写 <code>loadClass</code>。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>实际运用：Tomcat 为什么能隔离不同 Web 应用</h2>
+        </div>
+        <div class="section-content">
+            <p>Tomcat 中每个 Web 应用通常有自己的 WebAppClassLoader。这样 App A 和 App B 即使引用不同版本的同一个 jar，也可以在各自的加载空间内独立存在。</p><ul><li><strong>共享类</strong>：Tomcat 自身类、JDK 类由公共或更上层加载器加载。</li><li><strong>应用私有类</strong>：<code>WEB-INF/classes</code> 和 <code>WEB-INF/lib</code> 由 WebAppClassLoader 加载。</li><li><strong>隔离收益</strong>：一个应用升级 Guava、Jackson、Spring 版本，不一定影响另一个应用。</li></ul><p>但这也带来风险：如果静态变量、线程、ThreadLocal、JDBC Driver 等资源持有了旧 WebAppClassLoader 引用，应用停止后 class 元数据仍不能释放，就可能出现类加载器泄漏。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>踩坑经验：类冲突、ClassCastException 与热部署泄漏</h2>
+        </div>
+        <div class="section-content">
+            <ul><li><strong>同名类冲突</strong>：排查时不要只看包名类名，还要看是哪个 jar、哪个 ClassLoader 加载的。可用 <code>-verbose:class</code> 或 Arthas <code>sc -d 类名</code> 查看。</li><li><strong>莫名 ClassCastException</strong>：常见原因是接口或 DTO 被两个不同 ClassLoader 分别加载，虽然全限定名一样，但 JVM 认为不是同一个类型。</li><li><strong>热部署内存泄漏</strong>：线程池、Timer、ThreadLocal、JDBC Driver、日志框架回调等如果不清理，会持有旧 ClassLoader，导致 Metaspace 增长。</li><li><strong>重写 loadClass 风险</strong>：子优先加载容易覆盖父级依赖，造成框架内部类型不一致；除非明确知道隔离边界，否则优先重写 <code>findClass</code>。</li></ul><p>生产建议：对插件化或热部署系统，要设计明确的生命周期：加载、启动、停止、资源释放、ClassLoader 丢弃，并配合监控 Metaspace 和线程泄漏。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>一页速记</h2>
+        </div>
+        <div class="section-content">
+            <ul><li>双亲委派：先父后子，父加载不了，子再加载。</li><li>目的：安全、避免重复、层次清晰。</li><li>类唯一性 = 全限定类名 + 定义它的 ClassLoader。</li><li>常规自定义加载器：重写 <code>findClass</code>。</li><li>破坏场景：JDBC SPI、Tomcat、OSGi、热部署、插件化。</li><li>线程上下文类加载器：解决父加载器代码需要加载子加载器实现的问题。</li><li>排查类加载问题：看 jar 来源、ClassLoader、是否重复依赖、是否热部署残留。</li></ul>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>自定义类加载器</p>
+        </div>
+    </div>
+</body>
+</html>

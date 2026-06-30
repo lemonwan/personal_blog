@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 33 · synchronized原理 · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 33 / 66</div>
+            <h1>多线程与并发编程 · 线程基础</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 synchronized原理</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:50%"></div>
+            </div>
+            <div class="progress-label">进度 50%（33/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念与作用</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>synchronized</strong> 是 Java 内置的关键字，用于实现线程同步，保证共享资源的原子性、可见性和有序性。</p><p><strong>三种使用方式：</strong></p><ul><li><strong>修饰实例方法</strong>：锁的是当前实例对象（this）</li><li><strong>修饰静态方法</strong>：锁的是当前类的 Class 对象</li><li><strong>修饰代码块</strong>：锁的是括号内配置的对象</li></ul><div class="highlight-box green"><p>synchronized 是 <strong>可重入锁</strong>：一个线程已经获得某个对象的锁后，可以再次获取同一把锁而不会产生死锁。</p></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>底层实现：Monitor 对象</h2>
+        </div>
+        <div class="section-content">
+            <p>synchronized 的底层是通过 <strong>Monitor（管程）</strong> 对象实现的。每个 Java 对象都关联一个 Monitor 对象。</p><p><strong>Monitor 的核心结构：</strong></p><ul><li><code>_owner</code>：指向持有锁的线程</li><li><code>_EntryList</code>：等待获取锁的线程阻塞队列</li><li><code>_WaitSet</code>：调用 wait() 后等待的线程集合</li><li><code>_recursions</code>：记录重入次数</li></ul><p><strong>字节码层面</strong>：同步代码块使用 <code>monitorenter</code> 和 <code>monitorexit</code> 指令，同步方法通过 ACC_SYNCHRONIZED 标志隐式实现。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>Mark Word 与锁标志位</h2>
+        </div>
+        <div class="section-content">
+            <p>Java 对象头的 <strong>Mark Word</strong> 区域（64位虚拟机占 8 字节）存储了锁状态信息：</p><table><tr><th>锁状态</th><th>标志位</th><th>存储内容</th></tr><tr><td>无锁</td><td>01</td><td>对象hashCode、分代年龄</td></tr><tr><td>偏向锁</td><td>01</td><td>偏向线程ID、epoch</td></tr><tr><td>轻量级锁</td><td>00</td><td>指向栈中锁记录的指针</td></tr><tr><td>重量级锁</td><td>10</td><td>指向 Monitor 的指针</td></tr><tr><td>GC标记</td><td>11</td><td>空（不使用）</td></tr></table><p>偏向锁的标志位也是 01，通过是否偏向（1）区分。锁只能升级，不能降级。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>锁升级完整流程</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>1. 偏向锁（Biased Locking）</strong></p><p>当第一个线程访问同步块时，通过 CAS 将 Mark Word 设置为偏向自己。后续同一线程进入无需 CAS，直接检查线程ID即可。</p><p><strong>2. 轻量级锁（Lightweight Locking）</strong></p><p>有多个线程竞争时，偏向锁撤销，升级为轻量级锁：</p><ul><li>线程在栈帧中创建 Lock Record</li><li>CAS 将 Mark Word 复制到 Lock Record</li><li>CAS 将 Mark Word 指向 Lock Record</li><li>成功则获得锁，失败则自旋重试</li></ul><p><strong>3. 重量级锁（Heavyweight Locking）</strong></p><p>自旋超过 10 次或等待线程过多时，升级为重量级锁，线程真正阻塞，依赖操作系统内核调度。</p><div class="highlight-box yellow"><p>锁升级是 JDK 6 引入的优化：<strong>无锁 → 偏向锁 → 轻量级锁 → 重量级锁</strong></p></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>面试高频考点</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>Q1: synchronized 和 Lock 的区别？</strong></p><ul><li>synchronized 是关键字，Lock 是接口</li><li>synchronized 不可中断，Lock 可中断</li><li>synchronized 非公平，Lock 可选择公平/非公平</li><li>Lock 可绑定多个 Condition 条件</li></ul><p><strong>Q2: 什么是锁消除、锁粗化？</strong></p><p><strong>锁消除</strong>：JIT 检测到不可能存在共享数据竞争时，自动消除同步</p><p><strong>锁粗化</strong>：将多个连续的加锁解锁操作合并为一个大范围的锁</p><p><strong>Q3: synchronized 可以保证有序性吗？</strong></p><p>可以，持有同一锁的线程，解锁操作 happens-before 随后的加锁操作。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>实际使用最佳实践</h2>
+        </div>
+        <div class="section-content">
+            <ul><li><strong>尽量缩小同步范围</strong>：只锁必要的临界区代码</li><li><strong>避免锁嵌套</strong>：防止死锁的发生</li><li><strong>优先使用 synchronized</strong>：除非需要 Lock 的高级特性</li><li><strong>注意锁对象的选择</strong>：避免使用 String 常量或基本类型包装类作为锁</li></ul><pre><code>// 推荐：锁代码块而非整个方法
+public void safeMethod() {
+    // 非临界区代码...
+    synchronized (this) {
+        // 临界区 - 仅包含必要操作
+        count++;
+    }
+    // 非临界区代码...
+}</code></pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>常见踩坑场景</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>⚠️ 坑1：锁 String 常量</strong></p><p><code>String a = "hello"; String b = "hello";</code> 指向同一对象，导致意外的锁竞争</p><p><strong>⚠️ 坑2：锁 Integer/Long</strong></p><p>缓存池范围内的 Integer（-128~127）是同一对象，超出范围才会 new</p><p><strong>⚠️ 坑3：锁 this 与锁 class 混淆</strong></p><p>实例锁和类锁是两把不同的锁，互不干扰</p><p><strong>⚠️ 坑4：异常时未释放锁</strong></p><p>synchronized 在异常时会自动释放锁，Lock 则需要 finally 手动释放</p>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>ReentrantLock vs synchronized、公平/非公平锁</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 29 · CPU 100% 排查流程（top -> jstack -> jmap） · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 29 / 66</div>
+            <h1>JVM 原理与调优 · JVM 调优实战</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 CPU 100% 排查流程（top -> jstack -> jmap）</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:43.94%"></div>
+            </div>
+            <div class="progress-label">进度 43.94%（29/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念：CPU 100% 本质上在找“谁在烧 CPU”</h2>
+        </div>
+        <div class="section-content">
+            <p>线上 Java 服务 CPU 飙高时，排查目标不是先重启，而是快速定位：</p>
+<ul>
+  <li><strong>哪个进程</strong>占用 CPU 最高；</li>
+  <li><strong>进程里的哪个线程</strong>占用 CPU 最高；</li>
+  <li>这个线程对应到 JVM 中的<strong>哪段 Java 调用栈</strong>；</li>
+  <li>是否需要进一步结合 <code>jmap</code>、GC 日志、业务日志判断是死循环、锁竞争、频繁 GC、正则灾难还是流量突增。</li>
+</ul>
+<p>经典链路可以记成：<strong>top 找进程 → top -Hp 找线程 → printf 转十六进制 → jstack 查线程栈 → jmap/日志辅助判断</strong>。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>标准排查流程：top → jstack → jmap</h2>
+        </div>
+        <div class="section-content">
+            <ol>
+  <li><strong>定位高 CPU 进程</strong><br><code>top</code> 查看 <code>%CPU</code> 最高的 Java 进程，记录 PID，例如 <code>12345</code>。</li>
+  <li><strong>定位进程内高 CPU 线程</strong><br><code>top -Hp 12345</code>，找到最耗 CPU 的线程 ID，记为十进制 TID，例如 <code>12372</code>。</li>
+  <li><strong>线程 ID 转十六进制</strong><br>JVM 线程栈里的 <code>nid</code> 是十六进制：<code>printf '%x\n' 12372</code>，得到如 <code>3054</code>。</li>
+  <li><strong>导出线程栈并定位 nid</strong><br><code>jstack -l 12345 &gt; /tmp/jstack_12345.log</code>，搜索 <code>nid=0x3054</code>，查看该线程当前正在执行的方法栈。</li>
+  <li><strong>必要时连续抓取多次</strong><br>间隔 5~10 秒执行 3 次 <code>jstack</code>。如果同一线程一直停在同一业务方法，常见是死循环、超大集合遍历、复杂正则、JSON 序列化、加解密压缩等 CPU 密集逻辑。</li>
+  <li><strong>结合 jmap/GC 判断内存与 GC 问题</strong><br>若 <code>jstack</code> 发现大量 GC 线程活跃，或应用线程频繁分配对象，可用 <code>jstat -gcutil PID 1000 10</code>、<code>jmap -histo:live PID</code>、Heap Dump 辅助分析。</li>
+</ol>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>线程栈怎么看：RUNNABLE 不一定就是问题根因</h2>
+        </div>
+        <div class="section-content">
+            <p>面试中常见追问：<strong>看到线程是 RUNNABLE 就一定说明它在占 CPU 吗？</strong>答案是不一定。</p>
+<ul>
+  <li><code>RUNNABLE</code> 可能真的在运行，例如死循环、Hash 冲突导致长时间遍历、复杂计算。</li>
+  <li><code>RUNNABLE</code> 也可能阻塞在 native IO 上，例如 socket read、文件 IO，此时 CPU 未必高。</li>
+  <li><code>BLOCKED</code> 通常表示等待进入 synchronized 监视器，重点看持有锁的线程。</li>
+  <li><code>WAITING/TIMED_WAITING</code> 常见于线程池取任务、sleep、park，一般不是 CPU 100% 的直接原因。</li>
+</ul>
+<p>判断关键是：<strong>高 CPU 的 TID 对应的栈顶方法是什么，以及多次采样是否持续停留在同一热点栈</strong>。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚖️</span>
+            <h2>常见根因分类</h2>
+        </div>
+        <div class="section-content">
+            <table>
+  <thead><tr><th>现象</th><th>典型原因</th><th>排查要点</th></tr></thead>
+  <tbody>
+    <tr><td>单个业务线程 CPU 高</td><td>死循环、递归、复杂正则、超大集合处理</td><td>看高 CPU 线程栈顶业务代码</td></tr>
+    <tr><td>多个业务线程都高</td><td>流量突增、热点接口、批量任务并发过高</td><td>结合接口 QPS、慢日志、线程池队列</td></tr>
+    <tr><td>GC 线程活跃</td><td>对象创建过快、内存泄漏、堆太小</td><td>看 <code>jstat</code>、GC 日志、<code>jmap -histo</code></td></tr>
+    <tr><td>大量线程 BLOCKED</td><td>锁竞争严重</td><td>看 <code>jstack -l</code> 中 <code>locked</code>/<code>waiting to lock</code></td></tr>
+    <tr><td>CPU 高但 jstack 不明显</td><td>JNI/native、系统调用、容器限额</td><td>结合 <code>perf</code>、容器 CPU limit、宿主机指标</td></tr>
+  </tbody>
+</table>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>面试真题：线上 CPU 100%，你怎么处理？</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>推荐回答：</strong></p>
+<ol>
+  <li>先保护现场，不盲目重启；如果已经影响核心链路，先限流、摘流量或扩容止血。</li>
+  <li>用 <code>top</code> 找到高 CPU Java 进程 PID。</li>
+  <li>用 <code>top -Hp PID</code> 找到进程内高 CPU 线程 TID。</li>
+  <li>将 TID 转成十六进制，用 <code>jstack -l PID</code> 搜索 <code>nid=0x...</code>，定位线程调用栈。</li>
+  <li>连续抓 3 次线程栈，确认热点栈是否稳定，避免偶然采样误判。</li>
+  <li>如果是业务代码，结合日志、入参、最近发布、流量变化定位；如果是 GC 线程高，继续看 GC 日志、<code>jstat</code>、<code>jmap</code>。</li>
+  <li>最后给出修复方案，例如修复死循环、优化算法、增加索引/缓存、控制线程池并发、调整 JVM 参数或回滚版本。</li>
+</ol>
+<p><strong>加分点：</strong>强调“先止血、再定位、保留现场、复盘根因”，这比只背命令更符合真实生产处理方式。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>踩坑经验：这些操作要谨慎</h2>
+        </div>
+        <div class="section-content">
+            <ul>
+  <li><strong>不要一上来 kill -9。</strong>重启会丢失现场，除非故障已严重影响业务且没有摘流量条件。</li>
+  <li><strong>Heap Dump 可能造成 STW 或磁盘打满。</strong>生产执行 <code>jmap -dump:live</code> 前要确认磁盘空间和业务影响。</li>
+  <li><strong>线程 ID 进制容易搞错。</strong><code>top -Hp</code> 是十进制，<code>jstack nid</code> 是十六进制。</li>
+  <li><strong>只看一次 jstack 容易误判。</strong>线程栈是瞬时快照，应该多次采样比对。</li>
+  <li><strong>容器环境要看 CPU limit。</strong>K8s 中 1 核 limit 下 Java 进程显示 100% 可能只是打满容器配额，不等于宿主机满载。</li>
+</ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>速记口诀</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>CPU 100% 排查口诀：</strong></p>
+<blockquote>先止血，保现场；top 找进程，top -Hp 找线程；十进制转十六进制；jstack 找 nid；多次采样看热点；GC 高再接 jstat/jmap；业务栈回到代码和最近变更。</blockquote>
+<p>面试表达时，可以把命令和排障思路结合起来讲：<strong>命令解决“定位”，日志和代码解决“根因”，限流/回滚/扩容解决“止血”</strong>。</p>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>GC 日志分析</p>
+        </div>
+    </div>
+</body>
+</html>

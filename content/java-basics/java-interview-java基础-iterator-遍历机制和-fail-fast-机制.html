@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 12 | Iterator 遍历机制和 fail-fast 机制</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 12 — Iterator 遍历机制和 fail-fast 机制</h1>
+  <div class="tag">模块：Java基础 · 集合框架</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">12</span>
+    <span class="card-title">Iterator 遍历机制和 fail-fast 机制</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>Iterator 基本用法与遍历机制</h3>
+      <div class="content"><p>Iterator（迭代器）是 Java 集合框架的核心接口，提供了一种统一的遍历集合元素的方式，屏蔽了底层数据结构差异。</p>
+
+<p><strong>基本用法：</strong></p>
+<div class="code-block"><span class="keyword">for</span> (String item : list) {
+    System.out.println(item);
+}
+
+<span class="comment">// 等价于底层代码：</span>
+Iterator&lt;String&gt; it = list.iterator();
+<span class="keyword">while</span> (it.hasNext()) {
+    String item = it.next();
+    System.out.println(item);
+}</div>
+
+<p><strong>核心 API：</strong></p>
+<ul class="bullet-list">
+<li><span class="highlight">hasNext()</span> — 判断是否还有下一个元素</li>
+<li><span class="highlight">next()</span> — 返回当前元素并将指针后移</li>
+<li><span class="highlight">remove()</span> — 删除 lastReturned 元素（调用 next 后才能调用）</li>
+</ul>
+
+<div class="note-box">
+<div class="note-title">💡 增强 for 循环的真相</div>
+增强 for 循环（foreach）在集合遍历时会被编译器自动转换为 Iterator 遍历；在数组遍历时会转换为索引循环。
+</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>fail-fast 机制详解</h3>
+      <div class="content"><p>fail-fast（快速失败）是 Java 集合框架的一种安全机制，用于检测集合在遍历过程中被并发修改的情况。</p>
+
+<p><strong>核心原理：</strong></p>
+<ul class="bullet-list">
+<li>每个可遍历的集合类内部维护一个 <span class="highlight">modCount</span> 字段，记录结构修改次数（add/remove/size 变化时递增）</li>
+<li>Iterator 创建时会保存当前的 <span class="highlight">expectedModCount = modCount</span></li>
+<li>每次调用 <code>next()</code> 时，检查 <code>expectedModCount == modCount</code></li>
+<li>如果不相等，立即抛出 <code>ConcurrentModificationException</code></li>
+</ul>
+
+<div class="code-block">(<span class="comment">// Iterator.java 伪代码</span>)
+<span class="keyword">public</span> E next() {
+    <span class="comment">// 检查是否被并发修改</span>
+    checkForComodification();
+    <span class="comment">// ... 返回元素</span>
+}
+
+<span class="keyword">final void</span> checkForComodification() {
+    <span class="keyword">if</span> (modCount != expectedModCount)
+        <span class="keyword">throw new</span> ConcurrentModificationException();
+}</div>
+
+<p><strong>结构修改 vs 非结构修改：</strong></p>
+<ul class="bullet-list">
+<li><span class="highlight">结构修改</span>：add、remove、clear 等改变集合大小的操作 → 触发 modCount 变更 → fail-fast</li>
+<li><span class="highlight">非结构修改</span>：set、replace 等操作不改变集合大小 → 不触发 fail-fast</li>
+</ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>fail-safe 机制</h3>
+      <div class="content"><p>与 fail-fast 相对的是 fail-safe（安全失败），其核心思想是<strong>对集合的快照（copy）进行遍历</strong>，遍历过程中修改原集合不会影响遍历结果。</p>
+
+<p><strong>主要使用场景：</strong></p>
+<ul class="bullet-list">
+<li><span class="highlight">ConcurrentHashMap</span> — 遍历整个 table 的 snapshot</li>
+<li><span class="highlight">CopyOnWriteArrayList</span> — 每次修改都创建新数组的副本（写时复制）</li>
+<li><span class="highlight">CopyOnWriteArraySet</span> — 基于 CopyOnWriteArrayList</li>
+</ul>
+
+<div class="comparison-table">
+<table>
+<tr><th>特性</th><th>fail-fast</th><th>fail-safe</th></tr>
+<tr><td>代表类</td><td>HashMap, ArrayList, HashSet</td><td>ConcurrentHashMap, CopyOnWriteArrayList</td></tr>
+<tr><td>遍历安全性</td><td>遍历中修改会抛异常</td><td>遍历中修改不影响遍历结果</td></tr>
+<tr><td>内存开销</td><td>无额外开销</td><td>需要副本，开销较大</td></tr>
+<tr><td>实时性</td><td>反映最新数据</td><td>看到的是遍历时刻的快照</td></tr>
+</table>
+</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>遍历时安全的删除操作</h3>
+      <div class="content"><p>在遍历过程中删除元素，有三种安全方式：</p>
+
+<p><strong>方法一：使用 Iterator.remove()</strong>（推荐）</p>
+<div class="code-block">Iterator&lt;String&gt; it = list.iterator();
+<span class="keyword">while</span> (it.hasNext()) {
+    String s = it.next();
+    <span class="keyword">if</span> (needRemove(s)) {
+        it.remove(); <span class="comment">// 安全！内部会同步 modCount</span>
+    }
+}</div>
+
+<p><strong>方法二：使用 Java 8+ removeIf()</strong></p>
+<div class="code-block">list.removeIf(s -> s.startsWith(<span class="string">"prefix"</span>));</div>
+
+<p><strong>方法三：正向索引遍历，倒序删除</strong></p>
+<div class="code-block"><span class="keyword">for</span> (<span class="keyword">int</span> i = list.size() - 1; i >= 0; i--) {
+    <span class="keyword">if</span> (needRemove(list.get(i))) {
+        list.remove(i);
+    }
+}</div>
+
+<div class="note-box warning">
+<div class="note-title">⚠️ 常见错误：不要在 foreach 中直接 remove</div>
+以下写法会导致 ConcurrentModificationException：
+<div class="code-block" style="margin-top:8px;">list.stream().forEach(item -> {
+    <span class="keyword">if</span> (condition) {
+        list.remove(item); <span class="comment">// ❌ 错误！直接操作原集合</span>
+    }
+});</div>
+</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试高频考点</h3>
+      <div class="content"><p><strong>Q1：Iterator 和 ListIterator 有什么区别？</strong></p>
+<ul class="bullet-list">
+<li>Iterator 只能单向遍历（next），ListIterator 可双向遍历（next/previous）</li>
+<li>ListIterator 支持 add、set、remove 操作</li>
+<li>ListIterator 只适用于 List 集合</li>
+</ul>
+
+<p><strong>Q2：为什么 foreach 不能安全删除元素？</strong></p>
+<ul class="bullet-list">
+<li>编译器会将 foreach 转换为 Iterator 遍历</li>
+<li>在循环体内直接调用集合的 remove() 会改变 modCount</li>
+<li>下次调用 next() 时发现 modCount != expectedModCount，抛出异常</li>
+</ul>
+
+<p><strong>Q3：fail-fast 和线程安全的关系？</strong></p>
+<ul class="bullet-list">
+<li>fail-fast 不是线程安全机制，它是<strong>单线程检测并发修改</strong>的手段</li>
+<li>即使多线程环境下不抛 ConcurrentModificationException，也不代表线程安全</li>
+<li>真正的线程安全需要使用 ConcurrentHashMap、CopyOnWriteArrayList 等并发类</li>
+</ul>
+
+<p><strong>Q4：Spliterator 和 Iterator 的区别？</strong></p>
+<ul class="bullet-list">
+<li>Spliterator 是 Java 8 引入的"可分割迭代器"，支持并行遍历</li>
+<li>Spliterator 可以拆分（trySplit），适合 Stream 并行处理</li>
+<li>Spliterator 是 fail-fast 的，但更强调并行能力</li>
+</ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>源码深入：ArrayList 的 Iterator 实现</h3>
+      <div class="content"><p>ArrayList 的 Iterator 实现源码（关键部分）：</p>
+
+<div class="code-block"><span class="comment">// ArrayList.java 内部类</span>
+<span class="keyword">private class</span> Itr <span class="keyword">implements</span> Iterator&lt;E&gt; {
+    <span class="keyword">int</span> cursor = 0;          <span class="comment">// 下一个元素的索引</span>
+    <span class="keyword">int</span> lastRet = -1;        <span class="comment">// 上一个返回元素的索引</span>
+    <span class="keyword">int</span> expectedModCount = modCount;  <span class="comment">// 快照</span>
+
+    <span class="keyword">public</span> E next() {
+        checkForComodification();
+        <span class="keyword">int</span> i = cursor;
+        <span class="keyword">if</span> (i >= size) <span class="keyword">throw new</span> NoSuchElementException();
+        Object[] elementData = ArrayList.<span class="method">this</span>.elementData;
+        <span class="keyword">if</span> (i >= elementData.length)
+            <span class="keyword">throw new</span> ConcurrentModificationException();
+        cursor = i + 1;
+        <span class="keyword">return</span> (E) elementData[lastRet = i];
+    }
+
+    <span class="keyword">public void</span> remove() {
+        <span class="keyword">if</span> (lastRet &lt; 0) <span class="keyword">throw new</span> IllegalStateException();
+        checkForComodification();
+        <span class="keyword">try</span> {
+            ArrayList.<span class="method">this</span>.remove(lastRet);
+            cursor = lastRet;
+            lastRet = -1;
+            expectedModCount = modCount; <span class="comment">// 关键：同步 modCount</span>
+        } <span class="keyword">catch</span> (IndexOutOfBoundsException ex) {
+            <span class="keyword">throw new</span> ConcurrentModificationException();
+        }
+    }
+
+    <span class="keyword">final void</span> checkForComodification() {
+        <span class="keyword">if</span> (modCount != expectedModCount)
+            <span class="keyword">throw new</span> ConcurrentModificationException();
+    }
+}</div>
+
+<div class="note-box danger">
+<div class="note-title">🔑 核心要点</div>
+Iterator.remove() 调用的是集合自己的 remove 方法后，手动将 <code>expectedModCount = modCount</code> 重新同步，这是唯一安全的遍历中删除方式。
+</div></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 18.2%"></div></div>
+  <div class="progress-text">12 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>泛型擦除机制及绕过方法</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 12/66</div>
+</body>
+</html>

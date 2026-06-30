@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第12课 · 梯度下降与优化器 | AI大模型原理教程</title>
+    <meta name="description" content="知道了往哪走是下坡，一步该迈多大？">
+    <meta name="keywords" content="AI大模型教程,Transformer,梯度下降与优化器,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第12课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 12 · 卷二</div>
+            <h1>梯度下降与优化器</h1>
+            <p class="subtitle">❝ 知道了往哪走是下坡，一步该迈多大？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="更新一步，损失反而涨了" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>更新一步，损失反而涨了</h2></div><p>上一课，那台猜水果的机器终于有了<strong>损失</strong>——知道自己每次猜得有多差。这一课就来干正事： 调参数把损失降下去，也就是真正地<strong>训练</strong>它。用的就是第 5 课《梯度》学过的蒙眼下山。</p><p>回忆一下：梯度 ∇L 指出最陡的<em>上坡</em>方向，朝它的反方向迈步就是下坡。写成更新公式：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">∇</span><span class="mord mathnormal">L</span></span></span></span></span></span></div><p>听上去万无一失，可真迈一步就翻车。为了把账算清楚，我们<strong>盯住其中一个权重 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span></strong>， 把「<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span> 取不同值时、损失有多大」画成一条山谷曲线。假设这台机器的损失随 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span> 变化恰好长这样：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord">4.5</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span></span></div><p>这是一条开口向上的抛物线，<strong>谷底在 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">4.5</span></span></span></span></span></strong>（那里损失为 0），离谷底越远、损失越大。 训练要做的就是把 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span> 一步步挪向谷底。现在机器的权重停在 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>，先算它<strong>此刻的损失</strong>——把 0.5 代进去：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord">0.5</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">(</span><span class="mord">0.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord">4.5</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord">4</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">16</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">24</span></span></span></span></span></span></div><p>再算<strong>梯度</strong>（也就是这条曲线在 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span> 处的斜率）。对 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1.5</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord">4.5</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span></span></span> 求导 （第 5 课的法则：平方求导、再乘内层那项的导数 1）得 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal">L</span><span class="mord">/</span><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">4.5</span><span class="mclose">)</span></span></span></span></span>，代入 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.5</span></span></span></span></span>：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.0574em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal">L</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">3</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">(</span><span class="mord">0.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">4.5</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord" style="color:#C0481E;">−</span><span class="mord" style="color:#C0481E;">12.0</span></span></span></span></span></span></div><p>负号说明「往右（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span> 变大）是下坡」。按更新公式 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">∇</span><span class="mord mathnormal">L</span></span></span></span></span> 迈一步：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">−</span><span class="mord">12.0</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">12.5</span></span></span></span></span></span></div><p>这一步把 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span> 从 0.5 直接甩到了 <strong>12.5</strong>。它到底落到山谷的哪儿？再把 12.5 代回损失：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">L</span><span class="mopen">(</span><span class="mord">12.5</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mopen">(</span><span class="mord">12.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord">4.5</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8641em;"></span><span class="mord"><span class="mord">8</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">64</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">96</span></span></span></span></span></span></div><p>损失从 <strong>24</strong> 不降反升、飙到了 <strong>96</strong>！方向其实没错（确实朝着下坡迈）， 问题出在步子：一步迈了整整 12，直接<strong>飞过</strong>谷底（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">4.5</span></span></span></span></span>），冲到对面更高的山坡上。 看来「方向对」不等于「走得到谷底」——还得管住<strong>步幅</strong>。把刚才这一步画到那条山谷曲线上，就一目了然：</p><figure class="fig"><div class="fig-frame"><div class="plotly-fig"></div></div><figcaption><span class="fig-no">图 12-1</span>梯度方向对了，但步长 = 整个梯度值，直接飞过最低点落到对面的山坡上，损失反而更大。</figcaption></figure><div class="think"><div class="think-q">很简单的修补——不用整个梯度值，用梯度的一个比例。你会怎么写这个公式？</div></div></section><section class="station reveal" data-title="学习率：步子迈多大" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>学习率 α：步子迈多大</h2></div><p>加入学习率后，更新公式变为：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4445em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord">∇</span><span class="mord mathnormal">L</span></span></span></span></span></span></div><p><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span></span> 通常是 0.001 到 0.1 之间的一个小数。但选多大，是整个训练过程中最重要也最棘手的决定：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 180" role="img" aria-label="学习率太大和太小的训练曲线对比"><text x="145" y="18" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#232F3B">α 太大：震荡</text><line x1="30" y1="160" x2="260" y2="160" stroke="#DCD2BF" stroke-width="1"></line><line x1="30" y1="30" x2="30" y2="165" stroke="#DCD2BF" stroke-width="1"></line><text x="30" y="175" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">训练步数 →</text><path d="M 30 50 L 70 140 L 110 55 L 150 130 L 190 70 L 230 120 L 260 80" fill="none" stroke="#C0481E" stroke-width="2"></path><text x="415" y="18" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#232F3B">α 太小：极慢</text><line x1="300" y1="160" x2="530" y2="160" stroke="#DCD2BF" stroke-width="1"></line><line x1="300" y1="30" x2="300" y2="165" stroke="#DCD2BF" stroke-width="1"></line><text x="300" y="175" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">训练步数 →</text><path d="M 300 50 C 350 50 370 52 400 54 C 430 56 460 59 530 65" fill="none" stroke="#3E6B8F" stroke-width="2"></path></svg></div><figcaption><span class="fig-no">图 12-2</span>α 太大，损失曲线震荡无法收敛；α 太小，损失下降极缓慢。好的学习率让曲线稳定地下降。</figcaption></figure><p>实践中用<em>学习率调度</em>（LR scheduling）：训练初期用较大的学习率快速接近最优区域， 后期逐渐降低——如余弦退火（cosine annealing）或线性预热（linear warmup）。</p><p>光说不练没感觉。下面把那台猜水果的机器<strong>缩到只看「颜色」一个特征</strong>（这样整台机器和每一步都看得清清楚楚）， 给它 8 个已知答案的水果当训练数据，让你<strong>亲手一步步训练它</strong>：</p><figure class="fig"><div class="fruit-lab fruit-lab-col"><div class="gd-controls"><button type="button" class="act-btn">训练一步</button><button type="button" class="act-btn">▶ 自动训练</button><button type="button" class="act-btn">↺ 重置</button><span class="gd-alpha">学习率 α = <b>2.0</b><input type="range" min="0.2" max="6" step="0.2" aria-label="学习率" value="2"/></span></div><svg class="neuron-svg" viewBox="0 0 530 150" role="img" aria-label="简化的猜水果机器：颜色经加权求和、Sigmoid 激活、softmax 归一化，算出苹果概率"><rect x="2" y="40" width="74" height="44" rx="7" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.6"></rect><text x="39" y="57" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">🍎 颜色 x</text><text x="39" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#3E6B8F">0.92</text><line x1="76" y1="62" x2="126" y2="62" stroke="#C0481E" stroke-width="1.8"></line><polygon points="128,62 120,58 120,66" fill="#C0481E"></polygon><text x="101" y="53" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#C0481E">× w = <!-- -->0.00</text><circle cx="156" cy="62" r="28" fill="#FDF6EC" stroke="#C0481E" stroke-width="2.4"></circle><text x="156" y="56" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="7.5" fill="#93A0AC">z = w·x + b</text><text x="156" y="75" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#C0481E">0.00</text><line x1="156" y1="90" x2="156" y2="100" stroke="#C9BBA2" stroke-width="1.4"></line><rect x="126" y="100" width="60" height="18" rx="5" fill="#F0EDE6" stroke="#C9BBA2" stroke-width="1"></rect><text x="156" y="113" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#5C6B79">b = <!-- -->0.00</text><line x1="184" y1="62" x2="204" y2="62" stroke="#5C6B79" stroke-width="1.8"></line><polygon points="206,62 198,58 198,66" fill="#5C6B79"></polygon><text x="243" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">激活 σ</text><rect x="208" y="32" width="70" height="64" rx="5" fill="#FCFAF4" stroke="#DCD2BF" stroke-width="1"></rect><line x1="214" y1="90" x2="272" y2="90" stroke="#D7CDB8" stroke-width="1"></line><line x1="243" y1="38" x2="243" y2="90" stroke="#E2D8C6" stroke-width="1" stroke-dasharray="2 2"></line><polyline points="214.0,89.9 215.9,89.8 217.9,89.7 219.8,89.6 221.7,89.4 223.7,89.1 225.6,88.6 227.5,88.0 229.5,87.0 231.4,85.7 233.3,83.8 235.3,81.3 237.2,78.0 239.1,73.9 241.1,69.1 243.0,64.0 244.9,58.9 246.9,54.1 248.8,50.0 250.7,46.7 252.7,44.2 254.6,42.3 256.5,41.0 258.5,40.0 260.4,39.4 262.3,38.9 264.3,38.6 266.2,38.4 268.1,38.3 270.1,38.2 272.0,38.1" fill="none" stroke="#3E6B8F" stroke-width="2"></polyline><circle cx="243" cy="64" r="4" fill="#C0481E"></circle><text x="243" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="7.5" fill="#93A0AC">把 z 压成 0~1</text><line x1="280" y1="62" x2="300" y2="62" stroke="#5C6B79" stroke-width="1.8"></line><polygon points="302,62 294,58 294,66" fill="#5C6B79"></polygon><text x="364" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">softmax（2 类）</text><rect x="306" y="34" width="116" height="62" rx="6" fill="#FCFAF4" stroke="#DCD2BF" stroke-width="1"></rect><text x="316" y="52" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0481E">🍎 eᶻ = <!-- -->1.00</text><text x="316" y="68" font-family="JetBrains Mono, monospace" font-size="10" fill="#5C6B79">🚫 e⁰ = 1</text><line x1="314" y1="75" x2="414" y2="75" stroke="#E2D8C6" stroke-width="1"></line><text x="316" y="89" font-family="JetBrains Mono, monospace" font-size="10" fill="#1E2B38">和 = <!-- -->2.00</text><line x1="422" y1="62" x2="446" y2="62" stroke="#1E2B38" stroke-width="2"></line><polygon points="448,62 440,58 440,66" fill="#1E2B38"></polygon><text x="490" y="54" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#1E2B38">P(苹果)</text><text x="490" y="75" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" font-weight="700" fill="#C0481E">50%</text></svg><div class="gd-prob-label">把上面两个 e 值各除以「和 = <!-- -->2.00<!-- -->」就得到两类概率——<b>这一步就是 softmax 的归一化</b>，两类相加正好 100%：</div><div class="prob-block"><div class="prob-row prob-win"><span class="prob-name">🍎 苹果</span><span class="prob-bar"><span class="prob-fill" style="width:50%;background:#C0481E"></span></span><span class="prob-pct">50%</span></div><div class="prob-row"><span class="prob-name">🚫 非苹果</span><span class="prob-bar"><span class="prob-fill" style="width:50%;background:#93A0AC"></span></span><span class="prob-pct">50%</span></div></div><div class="gd-loss"><div class="gd-loss-head">📉 这一步的损失（loss）是怎么算出来的</div><div class="gd-loss-steps"><div>① 拿一颗<b>真苹果</b>（颜色 0.92、真值 y=1）走一遍机器：上面算出 <span class="calc-z">P(苹果) = <!-- -->50%</span>。</div><div>② 它<b>本该是 1</b>、机器只猜了 p，这一个的损失 = −ln(p) = <span class="calc-z">0.693</span>（越接近 1 越小）。</div><div>③ 8 个训练水果都这样算一遍、再取平均，就是这一步的总损失 ↓</div></div><div class="gd-loss-big">当前总损失 L = <b>0.693</b><span class="gd-loss-tag">训练就是要把它一路压小</span></div></div><div class="gd-readout"><span>第 <b>0</b> 步</span><span>w = <b class="calc-z">0.00</b></span><span>b = <b class="calc-z">0.00</b></span></div><div class="gd-spark"><span class="gd-spark-label">损失随训练步数下降</span><svg viewBox="0 0 360 60" role="img" aria-label="损失下降曲线"><polyline points="2,6.5" fill="none" stroke="#3E6B8F" stroke-width="2"></polyline></svg></div><div class="gd-log"><div class="gd-log-row gd-log-head"><span>步</span><span>w</span><span>b</span><span>总损失</span></div><div class="gd-log-body"><div class="gd-log-row"><span>0</span><span>0.00</span><span>0.00</span><span>0.693</span></div></div></div><div class="lab-hint">起点 w=b=0 时机器对谁都只猜 50%，损失最高。点「训练一步」或「自动训练」：每点一次都按 <b>w ← w − α·∂L/∂w</b> 微调一次 w、b，上方机器里的数字随之变化，<b>下面的记录表也追加一行</b>——w、b 怎么挪、总损失怎么一步步降，全程都看得见。把 α 拉到 6 看震荡、拉到 0.2 看龟速，就是第 2 站说的学习率。</div></div><figcaption><span class="fig-no">互动 12-A</span>单神经元的梯度下降全过程，把完整链条都画了出来：颜色 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> →（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord">×</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span>、<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord">+</span><span class="mord mathnormal">b</span></span></span></span></span>）加权求和 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.044em;">z</span></span></span></span></span> → <strong>激活函数 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">σ</span></span></span></span></span> 曲线</strong>把 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.044em;">z</span></span></span></span></span> 压成 0~1 → 归一化成「苹果 / 非苹果」概率（<strong>二分类 softmax</strong>）→ 再算损失。每点一步「训练」，参数按 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal">L</span><span class="mord">/</span><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span> 更新一次，<strong>下方记录表就追加一行</strong>——w、b 怎么挪、总损失怎么一路降，整个过程看得清清楚楚。拖动 α 亲历「太大震荡 / 太小龟速」。</figcaption></figure><p>盯着 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span></span>、<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">b</span></span></span></span></span> 和损失这三个数字跳动，你看到的就是训练的<strong>全部秘密</strong>： 算梯度 → 朝反方向挪一小步 → 重复。几亿个参数的大模型，做的也只是同一件事，只是数字更多。</p><p>但学习率还不是最大的问题。有一个更基本的困难正在等着我们。</p></section><section class="station reveal" data-title="全量梯度：慢到无法接受" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>另一个问题：梯度算在哪些数据上？</h2></div><p>目前为止，∇L 是基于<strong>所有训练样本</strong>的平均损失算出来的。 更新一次参数，需要把整个训练集都喂给网络跑一遍。 GPT-3 的训练集有 3000 亿个 token——每次更新参数前要扫完 3000 亿条数据， 一天下来可能只更新几次，这显然行不通。</p><div class="crack reveal"><div class="crack-label">全量梯度的代价</div><p>假设你有 10 亿条训练数据，每条数据做一次前向传播需要 1ms， 那仅仅算一次梯度就需要 <strong>10 亿 ms = 277 小时</strong>。 更新一次参数就要等 11 天——这完全没有实用价值。</p></div><div class="think"><div class="think-q">不用全部数据，也不用一条数据，有没有折中方案？两个极端各有什么问题？</div></div></section><section class="station reveal" data-title="Mini-batch：噪声换速度" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>Mini-batch SGD：用噪声换速度</h2></div><p>每次从训练集随机抽取 B 条样本（一个 batch），计算这 B 条的平均梯度，更新一次参数。 B 通常是 32、64、128——随 GPU 显存大小调整。</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4445em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.6509em;vertical-align:-1.3295em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3214em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0502em;">B</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.8479em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">∈</span><span class="mord text mtight"><span class="mord mtight">batch</span></span></span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3295em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∇</span><span class="mord"><span class="mord mathnormal">L</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mclose">)</span></span></span></span></span></span></div><p>这叫 <strong>Mini-batch 随机梯度下降</strong>。「随机」指的是每次随机抽取一个 batch—— 每次算出的梯度不是真正的全量梯度，有一定噪声。</p><p>噪声有时反而有好处：它帮助模型跳出「小坑」（局部最小值）， 找到泛化能力更好的参数区域。纯全量梯度太精确，反而更容易陷入局部最优。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 200" role="img" aria-label="三种梯度下降路径对比"><ellipse cx="280" cy="120" rx="200" ry="100" fill="none" stroke="#DCD2BF" stroke-width="1"></ellipse><ellipse cx="280" cy="120" rx="155" ry="77.5" fill="none" stroke="#DCD2BF" stroke-width="1"></ellipse><ellipse cx="280" cy="120" rx="110" ry="55" fill="none" stroke="#DCD2BF" stroke-width="1"></ellipse><ellipse cx="280" cy="120" rx="68" ry="34" fill="none" stroke="#DCD2BF" stroke-width="1"></ellipse><ellipse cx="280" cy="120" rx="35" ry="17.5" fill="none" stroke="#DCD2BF" stroke-width="1"></ellipse><ellipse cx="280" cy="120" rx="12" ry="6" fill="none" stroke="#DCD2BF" stroke-width="1"></ellipse><ellipse cx="280" cy="120" rx="7" ry="4" fill="#DCD2BF"></ellipse><path d="M 80 50 L 140 72 L 190 88 L 235 102 L 265 114 L 280 120" fill="none" stroke="#3E6B8F" stroke-width="2"></path><circle cx="80" cy="50" r="6" fill="#3E6B8F"></circle><text x="64" y="44" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">全批量（稳但慢）</text><path d="M 470 60 L 440 75 L 410 72 L 375 90 L 350 100 L 320 108 L 298 116 L 280 120" fill="none" stroke="#C0481E" stroke-width="2" stroke-dasharray="none"></path><circle cx="470" cy="60" r="6" fill="#C0481E"></circle><text x="478" y="58" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#C0481E">Mini-batch（折中）</text><circle cx="280" cy="120" r="6" fill="#1E2B38"></circle><text x="288" y="138" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1E2B38">最低点</text></svg></div><figcaption><span class="fig-no">图 12-3</span>全批量路径平滑但每步代价极高；Mini-batch 路径有轻微抖动，但每步只需少量数据，整体更快。</figcaption></figure><p>一个 epoch 是扫完整个训练集一遍。完整训练通常需要几十到几百个 epoch， 每个 epoch 里有「数据集大小 / B」次参数更新。</p></section><section class="station reveal" data-title="动量与 Adam" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>还不够好：峡谷地形与 Adam</h2></div><p>Mini-batch SGD 还有一个麻烦：在「峡谷地形」（某方向坡度很陡、另一方向很平缓）里， 参数会沿陡峭方向来回震荡，沿平缓方向却走得极慢。</p><p>修补：加入<strong>动量（Momentum）</strong>——给更新加入惯性， 用历史梯度的加权平均代替单步梯度：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.9em;vertical-align:-1.2em;"></span><span class="mord"><span class="mtable"><span class="col-align-r"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.7em;"><span style="top:-3.86em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em;">v</span></span></span><span style="top:-2.16em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0269em;">w</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2em;"><span></span></span></span></span></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.7em;"><span style="top:-3.86em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord mathnormal" style="margin-right:0.0528em;">β</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">v</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal" style="margin-right:0.0528em;">β</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∇</span><span class="mord mathnormal">L</span></span></span><span style="top:-2.16em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord"></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">v</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2em;"><span></span></span></span></span></span></span></span></span></span></span></span></span><span class="formula-tex-note">β ≈ 0.9</span></div><p>90% 保留上一步的方向，10% 接受新梯度。陡峭方向的来回震荡相互抵消， 平缓方向的梯度逐步积累速度——轨迹更平滑，收敛更快。</p><p>现代训练几乎都用 <strong>Adam</strong>（Adaptive Moment Estimation）： 在动量的基础上，还为每个参数维护一个自适应的学习率—— 更新频繁的参数自动降低学习率，稀疏参数自动提高。</p><div class="formula">Adam ≈ 动量（一阶矩）+ 每参数自适应 α（二阶矩）</div><p>Adam 的默认参数（α=0.001, β₁=0.9, β₂=0.999）在绝大多数任务上开箱即用， 不需要精细调节。Transformer 几乎清一色用 Adam 或其变种 AdamW。</p></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>梯度告诉方向，<span class="tk-hl">学习率 α</span> 控制步长。 全量太慢，单样本太抖，<span class="tk-hl">Mini-batch</span> 折中。<span class="tk-hl">Adam</span> 把动量和自适应学习率合二为一， 是现代深度学习训练的事实标准。</p></div><div class="recap"><h3>这一课你亲手发现了</h3><ul><li><strong>学习率 α</strong>：控制每次更新步长；太大震荡，太小极慢。</li><li><strong>全批量 GD</strong>：梯度精确但每步代价极高，不可行。</li><li><strong>Mini-batch SGD</strong>：每次用 B 个样本估算梯度，速度和精度的折中。</li><li><strong>动量</strong>：用历史梯度加权平均，平滑轨迹，加速收敛。</li><li><strong>Adam</strong>：动量 + 自适应学习率；开箱即用，现代训练标配。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="学习率决定每一步迈多大，方向由梯度给出。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>梯度告诉我们「往哪个方向是下坡」，而「学习率」决定的是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">下坡的方向</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">每一步迈多大</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">一共要走多少步</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">山谷有多深</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="小批量每步只用少量样本估梯度，更新更快且能跳出部分局部坑。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>「随机梯度下降（SGD）/ 小批量（mini-batch）」相比每次都用全部数据算梯度，主要好处是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">结果一定更精确</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">每步只用一小批样本估算梯度，更新更快、还能跳出一些局部坑</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">完全不需要计算梯度</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">可以不用学习率</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nn-06-backprop.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 13 课</span>
+                    <h3>反向传播</h3>
+                    <p>输出层错了，第一层的某个权重该负多大责任？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷二 · 第12课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

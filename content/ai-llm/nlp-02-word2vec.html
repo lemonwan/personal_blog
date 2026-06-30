@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第15课 · 词向量 | AI大模型原理教程</title>
+    <meta name="description" content="「国王 - 男人 + 女人 ≈ 女王」是怎么做到的？">
+    <meta name="keywords" content="AI大模型教程,Transformer,词向量,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第15课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 15 · 卷三</div>
+            <h1>词向量</h1>
+            <p class="subtitle">❝ 「国王 - 男人 + 女人 ≈ 女王」是怎么做到的？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="符号的盲点" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>符号的盲点：猫和小猫是陌生人</h2></div><p>上一课的 N-gram 学到了一件事：「猫 → 出门」在历史数据里出现过 800 次。 但现在有人写了「小猫」。N-gram 怎么处理「小猫」？</p><p>它查遍整张频率表，发现「小猫 → 出门」只出现过 3 次——样本太少，完全没把握。 它<strong>不知道「猫」和「小猫」是同一种动物</strong>， 因为在它眼里，「猫」和「小猫」是两个不同的字符串，就像「苹果」和「梨子」一样没有关联。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 152" role="img" aria-label="N-gram 眼中的词：每个词是独立符号"><g><rect x="30" y="10" width="60" height="22" rx="4" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="60" y="25" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">猫</text><text x="120" y="26" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">「__出门」出现过 <!-- -->800<!-- --> 次</text><rect x="300" y="12" width="200" height="16" rx="3" fill="#3E6B8F" opacity="0.7"></rect></g><g><rect x="30" y="38" width="60" height="22" rx="4" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="60" y="53" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">小猫</text><text x="120" y="54" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">「__出门」出现过 <!-- -->3<!-- --> 次</text><rect x="300" y="40" width="0.75" height="16" rx="3" fill="#DCD2BF" opacity="0.7"></rect></g><g><rect x="30" y="66" width="60" height="22" rx="4" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="60" y="81" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">猫咪</text><text x="120" y="82" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">「__出门」出现过 <!-- -->12<!-- --> 次</text><rect x="300" y="68" width="3" height="16" rx="3" fill="#DCD2BF" opacity="0.7"></rect></g><g><rect x="30" y="94" width="60" height="22" rx="4" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="60" y="109" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">喵</text><text x="120" y="110" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">「__出门」出现过 <!-- -->5<!-- --> 次</text><rect x="300" y="96" width="1.25" height="16" rx="3" fill="#DCD2BF" opacity="0.7"></rect></g><text x="280" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#C0481E">对 N-gram 来说，「猫」「小猫」「猫咪」是三个毫不相关的词——即使意思几乎相同</text></svg></div><figcaption><span class="fig-no">图 15-1</span>N-gram 查的是字符串是否完全匹配。「猫」的统计帮不了「小猫」，尽管这两个词人人都知道是一回事。</figcaption></figure><p>这个问题的根源是：N-gram 用「符号」代表词，符号之间没有任何距离或相似度。 要解决这个问题，词必须有<strong>「意思」</strong>—— 不是用字典定义来描述，而是用<strong>数字</strong>来表示， 让「猫」和「小猫」的数字表示很接近，「猫」和「飞机」的数字表示很远。</p><p>道理说通了，可「用数字表示意思」到底怎么落地？先别急着上理论——<strong>我们自己动手试一把</strong>，说不定就能撞出办法来。</p></section><section class="station reveal" data-title="先动手：用几个维度给词打分" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>先动手：自己给词的意思「打分」</h2></div><p>要把「意思」变成数字，最朴素的念头是：<strong>挑几个语义属性当「维度」，给每个词在每个属性上打个分（0~1）。</strong>先试最简单的两个维度——<strong>维度① 动物性</strong>（像不像活物）和<strong>维度② 体型大小</strong>，把手里这几个词都摆进去：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 480 300" role="img" aria-label="用两个手工维度给词打分，把词摆成平面上的点"><line x1="56" y1="260" x2="448" y2="260" stroke="#5C6B79" stroke-width="1.2"></line><polygon points="448,260 438,255 438,265" fill="#5C6B79"></polygon><line x1="56" y1="260" x2="56" y2="24" stroke="#5C6B79" stroke-width="1.2"></line><polygon points="56,24 51,34 61,34" fill="#5C6B79"></polygon><text x="250" y="288" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">维度① 动物性（像不像活物）→</text><text x="40" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">↑ 体型</text><ellipse cx="388" cy="208" rx="44" ry="36" fill="#C0481E" opacity="0.08" stroke="#C0481E" stroke-width="1" stroke-dasharray="5 4"></ellipse><text x="388" y="256" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#C0481E">猫·小猫·狗 全挤在这一角</text><g><circle cx="67.52" cy="47.20000000000002" r="5" fill="#93A0AC"></circle><text x="79.52" y="51.20000000000002" text-anchor="start" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#93A0AC">飞机</text></g><g><circle cx="94.4" cy="219.68" r="5" fill="#93A0AC"></circle><text x="106.4" y="223.68" text-anchor="start" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#93A0AC">苹果</text></g><g><circle cx="420.79999999999995" cy="69.6" r="5" fill="#3E6B8F"></circle><text x="408.79999999999995" y="73.6" text-anchor="end" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#3E6B8F">老虎</text></g><g><circle cx="386.24" cy="199.51999999999998" r="5" fill="#C0481E"></circle><text x="397.24" y="193.51999999999998" text-anchor="start" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#C0481E">猫</text></g><g><circle cx="401.6" cy="230.88" r="5" fill="#C0481E"></circle><text x="412.6" y="234.88" text-anchor="start" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#C0481E">小猫</text></g><g><circle cx="363.20000000000005" cy="188.32" r="5" fill="#C0481E"></circle><text x="352.20000000000005" y="182.32" text-anchor="end" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#C0481E">狗</text></g></svg></div><figcaption><span class="fig-no">图 15-2</span>只用「动物性、体型」两个手工维度，每个词就变成了平面上的一个点。「猫·小猫·狗」自然聚到一起、「飞机」远在另一头——上一课 N-gram 做不到的「相似」，靠两个数字就有了。</figcaption></figure><p>一打分，问题就化开了：「猫」(0.86, 0.27)、「小猫」(0.90, 0.13)、「狗」(0.80, 0.32) 全挤在「小动物」那一角、彼此<strong>挨得很近</strong>； 而「飞机」(0.03, 0.95) 远在另一头。用第 2 课的距离 / 夹角一量，「猫」和「小猫」就天然地<strong>相似</strong>了。 每个词，现在都成了平面上的一个<strong>点（两个数）</strong>。</p><div class="crack reveal"><div class="crack-label">两个维度，很快就不够用</div><p>可你也看出来了：「猫」和「狗」几乎落在同一个点上——这两个维度<strong>分不开它们</strong>。 想区分，就得再添维度：「忠诚 vs 警觉」「会不会抓老鼠」「常见宠物程度」…… 而加到三维、五维，仍搞不定「自由 vs 民主」「悲伤 vs 忧郁」这类抽象词之间的细微差别。<strong>一个词的意思，牵涉成百上千种说不清却真实存在的属性。</strong></p></div><p>所以真实的自然语言处理里，维度取得<strong>非常多</strong>——常见 <strong>128、300、768，甚至上千维</strong>。 每一维都是一个「说不太清、但确实有用」的语义方向；维度越多，越能容下词与词之间那些细微差别。</p><div class="book-def"><div class="book-def-label">定义 · 词向量</div><p>把一个词表示成这样一串数字 <strong>(v₁, v₂, …, v_d)</strong>，就是它的<strong>词向量</strong>（word embedding，也叫词嵌入）。 其中 <strong>d 是维度（维数）</strong>，实际中常达几百上千。意思相近的词，词向量在这个 d 维空间里<strong>挨得近</strong>；意思无关的词，离得远。</p><p>说穿了，它就是第 1 课的<strong>向量</strong>——只不过现在每个向量都背着一个词的「意思」， 第 2 课的点积与夹角，就成了量「两个词有多像」的尺子。</p></div><p>定义有了，可真正的麻烦也来了：几百维的数字、每个词都要填一串，靠人手工打分<strong>根本不可能</strong>， 而且「动物性该打 0.86 还是 0.88」全凭感觉、太主观。<strong>能不能让机器自己把这些数字学出来？</strong>——下一站揭晓。</p></section><section class="station reveal" data-title="让机器自己学" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>让机器自己把这串数字学出来</h2></div><p>上一站把目标定死了：给每个词配一串几百维的数字（词向量），意思相近的挨得近。可几百维手工填不现实—— 问题于是变成：<strong>怎么让机器自己学出这些数字？</strong>难点在于，机器既不懂「动物性」也不懂「体型」， 它<strong>凭什么</strong>知道该把哪些词放近、每一维又该填多少？</p><p>线索藏在语言学家的一句老话里：<em>「一个词的意思，由它经常出现的场合决定。」</em>（You shall know a word by the company it keeps.） 机器读不懂词义，但它能<strong>数上下文</strong>——看看「猫」和「小猫」都出现在什么样的句子里：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 180" role="img" aria-label="「猫」和「小猫」出现在相似的上下文中"><g><rect x="20" y="20" width="60" height="28" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="50" y="39" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">猫</text><text x="20" y="68" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->这只___很可爱</text><text x="20" y="94" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->___喜欢吃鱼</text><text x="20" y="120" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->___爬到树上</text><text x="20" y="146" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->主人抚摸___</text></g><g><rect x="290" y="20" width="60" height="28" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="320" y="39" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#4A8B5E">小猫</text><text x="290" y="68" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->这只___很可爱</text><text x="290" y="94" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->___喜欢追球</text><text x="290" y="120" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->___爬上沙发</text><text x="290" y="146" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">· <!-- -->邻居养了只___</text></g><text x="280" y="170" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B" font-weight="600">← 上下文高度重叠 → 意思应该相近</text></svg></div><figcaption><span class="fig-no">图 15-3</span>「猫」和「小猫」出现在几乎相同的句子结构里。如果用「上下文的相似度」来判断词义相似度，这两个词应该非常接近。</figcaption></figure><p>两个词的上下文几乎重合。这就给了机器一个<strong>不依赖人工、纯靠统计</strong>的判据：<strong>上下文越像的词，就该离得越近。</strong>可「上下文相似」要怎么落成「向量相近」？Word2Vec 用了一个很巧的训练游戏——<strong>遮词猜词</strong>。</p><p>先给词表里每个词<strong>随机</strong>发一串数字（随机初始化的词向量，一开始谁都不靠谱）。然后反复玩填空： 遮住句子里的一个词，让网络拿<strong>上下文词的向量</strong>去把它猜出来。比如：</p><div class="formula" style="font-family:var(--serif);line-height:2">「今天我带着___去公园散步，它很兴奋」<br/>→ 网络猜：「猫」0.3，「狗」0.4，「孩子」0.2，「朋友」0.1</div><p>真实答案是「猫」——「狗」的分数最高但猜错了，于是<strong>微调相关词的向量</strong>，让「猫」在这种上下文下的得分更高一点。 网络里<strong>每个词都对应一行数字（通常 128~1024 个）</strong>，每错一次，被悄悄挪动的就是这行数字。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 200" role="img" aria-label="Word2Vec 训练过程：遮住词，让网络猜"><text x="20" y="20" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#232F3B">上下文词</text><g><rect x="20" y="30" width="68" height="28" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="54" y="49" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#3E6B8F">今天</text></g><g><rect x="102" y="30" width="68" height="28" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="136" y="49" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#3E6B8F">我</text></g><g><rect x="184" y="30" width="68" height="28" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="218" y="49" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#3E6B8F">带着</text></g><g><rect x="266" y="30" width="68" height="28" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="300" y="49" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#3E6B8F">去</text></g><g><rect x="348" y="30" width="68" height="28" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="382" y="49" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#3E6B8F">公园</text></g><text x="220" y="90" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="20" fill="#93A0AC">↓</text><text x="220" y="105" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">查词向量表，拿出数字，过神经网络</text><text x="20" y="130" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#232F3B">预测分数</text><g><text x="30" y="150" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">猫</text><rect x="20" y="158" width="90" height="18" rx="3" fill="#3E6B8F" opacity="0.5" style="width:27px"></rect><rect x="20" y="158" width="27" height="18" rx="3" fill="#3E6B8F" opacity="0.6"></rect><text x="51" y="171" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">30<!-- -->%</text></g><g><text x="150" y="150" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">狗</text><rect x="140" y="158" width="90" height="18" rx="3" fill="#C0481E" opacity="0.5" style="width:36px"></rect><rect x="140" y="158" width="36" height="18" rx="3" fill="#C0481E" opacity="0.6"></rect><text x="180" y="171" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E">40<!-- -->%</text></g><g><text x="270" y="150" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">孩子</text><rect x="260" y="158" width="90" height="18" rx="3" fill="#5C6B79" opacity="0.5" style="width:18px"></rect><rect x="260" y="158" width="18" height="18" rx="3" fill="#5C6B79" opacity="0.6"></rect><text x="282" y="171" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">20<!-- -->%</text></g><g><text x="390" y="150" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">朋友</text><rect x="380" y="158" width="90" height="18" rx="3" fill="#93A0AC" opacity="0.5" style="width:9px"></rect><rect x="380" y="158" width="9" height="18" rx="3" fill="#93A0AC" opacity="0.6"></rect><text x="393" y="171" font-family="JetBrains Mono, monospace" font-size="11" fill="#93A0AC">10<!-- -->%</text></g><text x="20" y="198" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">真实答案是「猫」——调整参数，让「猫」得分更高</text></svg></div><figcaption><span class="fig-no">图 15-4</span>Word2Vec 的训练核心：遮住一个词，让网络用上下文来猜。猜错了就微调词向量。几十亿次之后，每个词的数字表示就编码了它的「意思」。</figcaption></figure><p>几十亿次填空之后，奇妙的事情发生了：那些总出现在相似上下文里的词（「猫」「小猫」「猫咪」）， 为了都能在相似的句子里被猜出来，向量被一点点<strong>推到了相近的位置</strong>。这串自动学出来的数字，正是第 2 站定义的<strong>词向量</strong>—— 只不过它的每一维不再是「动物性」这种人能命名的属性，而是机器自己摸索出的、说不清却很好用的语义方向。</p><p>这套办法 2013 年由 Google 提出，就叫 <strong>Word2Vec</strong>。它第一次把「词的意思」彻底变成了可计算的数字， 也为后面所有语言模型铺好了地基。</p></section><section class="station reveal" data-title="向量运算的魔法" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>一个意外的惊喜：向量运算有意义</h2></div><p>Word2Vec 训练完之后，研究人员发现了一件让所有人兴奋的事：</p><div class="formula" style="font-family:var(--serif);font-size:20px">向量(「国王」) − 向量(「男人」) + 向量(「女人」) ≈ 向量(「女王」)</div><p>这不是人为设计进去的，而是纯粹从大量文本里<strong>自然浮现</strong>出来的。 模型在训练过程中发现：「国王」出现的地方「女王」不出现，反过来也一样； 而「国王」和「男人」的关系，与「女王」和「女人」的关系在空间上是相同的方向和距离。</p><p>注意这里的「−」和「+」不是比喻——就是第 2 课的<strong>向量加减</strong>，逐个维度地减、逐个维度地加。 只不过现在每个向量都背着一个词的意思，于是一次普通的向量运算， 竟然在「语义」上也讲得通：减掉「男人」这个方向、再加上「女人」这个方向，落点恰好在「女王」附近。 学过的运算没变，变的是它作用的对象有了含义。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 200" role="img" aria-label="词向量的加减运算：国王-男人+女人=女王"><defs><marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3E6B8F"></polygon></marker><marker id="arrowhead2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#C0481E"></polygon></marker><marker id="arrowhead3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4A8B5E"></polygon></marker></defs><line x1="60" y1="170" x2="520" y2="170" stroke="#DCD2BF" stroke-width="1"></line><line x1="60" y1="170" x2="60" y2="20" stroke="#DCD2BF" stroke-width="1"></line><text x="530" y="174" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">维度①</text><text x="62" y="16" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">维度②</text><g><circle cx="140" cy="130" r="6" fill="#5C6B79"></circle><text x="150" y="134" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#5C6B79">男人</text></g><g><circle cx="140" cy="70" r="6" fill="#5C6B79"></circle><text x="150" y="74" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#5C6B79">女人</text></g><g><circle cx="340" cy="130" r="6" fill="#3E6B8F"></circle><text x="350" y="134" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#3E6B8F">国王</text></g><g><circle cx="340" cy="70" r="6" fill="#C0481E"></circle><text x="350" y="74" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#C0481E">女王</text></g><line x1="140" y1="127" x2="140" y2="77" stroke="#5C6B79" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowhead)"></line><line x1="340" y1="127" x2="340" y2="77" stroke="#C0481E" stroke-width="1.5" marker-end="url(#arrowhead2)"></line><line x1="147" y1="130" x2="331" y2="130" stroke="#3E6B8F" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowhead)"></line><line x1="147" y1="70" x2="331" y2="70" stroke="#4A8B5E" stroke-width="1.5" marker-end="url(#arrowhead3)"></line><text x="80" y="102" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">性别方向</text><text x="220" y="148" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">皇室地位方向</text></svg></div><figcaption><span class="fig-no">图 15-5</span>词向量空间里，「国王」和「女王」的差（性别方向），与「男人」和「女人」的差相同。这个几何关系不是人为设计的，而是从文本里自动学到的。</figcaption></figure><p>类似的关系还有很多：「北京−中国+法国 ≈ 巴黎」、「跑−跑步+游泳 ≈ 游」、 「快乐−快乐（名词）+悲伤 ≈ 悲伤」…… 词向量把语言的<strong>语义关系编码成了空间方向</strong>。</p><div class="crack reveal"><div class="crack-label">词向量的局限</div><p>每个词只有一个向量。「我去银行取钱」和「我坐在河岸边」里的「银行」意思完全不同， 但词向量只能给「银行」一个固定的数字——它记住的是「银行」这个词的平均意思， 无法根据上下文动态调整。 要解决这个问题，需要每次都根据上下文重新计算词的表示——这就是注意力机制要做的事。</p></div></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>词向量把每个词变成一行数字，让<span class="tk-hl">意思相近的词，数字也相近</span>。 训练方式极其简单：遮住一个词，让网络猜，猜错了就微调。 副产品是词向量空间里出现了「国王−男人+女人≈女王」这样的语义方向。 局限：每个词只有一个固定向量，无法区分「银行（钱）」和「银行（河岸）」。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>为什么需要词向量</strong>：N-gram 把词当符号，「猫」和「小猫」无关；词向量让相似词的数字相近。</li><li><strong>核心直觉</strong>：上下文相似的词，意思相近——「你可以通过一个词交的朋友来了解这个词」。</li><li><strong>训练技巧</strong>：遮住词，猜上下文（或反过来），猜错了微调向量。</li><li><strong>意外惊喜</strong>：向量运算有语义意义，国王−男人+女人≈女王。</li><li><strong>局限</strong>：每词一个固定向量，无法处理一词多义。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="词被表示成向量后，语义关系编码为向量空间中稳定的方向/位移，故可做类比运算。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>为什么 Word2Vec 能做到「国王 − 男人 + 女人 ≈ 女王」这样的类比？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">因为它背了一本同义词词典</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">因为它把词表示成向量，语义关系被编码成了向量空间里稳定的方向/位移</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">因为它会查语法规则</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">纯属巧合，不可复现</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="核心假设是“上下文相似的词意思也相似”，靠预测邻居来学习含义。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>Word2Vec 学习词向量所依据的核心假设是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">出现频率越高的词越重要</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">「上下文相似的词，意思也相似」——靠预测一个词的邻居来学习它的含义</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">词越长含义越丰富</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">每个词的含义由它的拼写决定</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nlp-03-ffnn-lm.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 16 课</span>
+                    <h3>前馈神经网络语言模型</h3>
+                    <p>用神经网络来预测下一个词——比N-gram强在哪里？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷三 · 第15课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

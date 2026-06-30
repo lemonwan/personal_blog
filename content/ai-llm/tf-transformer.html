@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第21课 · Transformer 架构 | AI大模型原理教程</title>
+    <meta name="description" content="当注意力机制遇到残差连接和层归一化——质变发生了">
+    <meta name="keywords" content="AI大模型教程,Transformer,Transformer 架构,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第21课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 21 · 卷四</div>
+            <h1>Transformer 架构</h1>
+            <p class="subtitle">❝ 当注意力机制遇到残差连接和层归一化——质变发生了 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="主问题" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>注意力已经很强了，为什么还不够？</h2></div><p>前两课我们已经造出了一个很厉害的部件：<strong>注意力</strong>。它让句子里的每个词都能回头看别的词， 于是「它」终于知道自己指的是谁；再加上<strong>多头</strong>，模型还能同时盯住指代、语法、情绪这些不同关系。</p><p>到这里，一个很自然的问题就来了：<strong>既然注意力已经能让词彼此看见，为什么 Transformer 还要加别的零件？</strong>为什么不是“几层注意力一叠”，事情就结束了？</p><p>这一课我们不背整张结构图，也不一上来扔一堆术语。只做一件事：围着一句最简单的话，<strong>亲手把一台最简 Transformer 搭出来</strong>，并且看清它身上每个零件到底是被什么问题逼出来的。</p><p style="font-family:var(--serif);font-size:19px;font-weight:700;text-align:center;margin:30px 0">输入：「我 是 一只 小 ___」<br/>目标：预测下一个词</p></section><section class="station reveal" data-title="只用注意力" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>先搭最朴素的一版：只有注意力</h2></div><p>先别急着加零件。我们先来搭一个<strong>最朴素</strong>的版本试试看：把「我 / 是 / 一只 / 小」这几个词变成向量， 丢进一层注意力，让每个词去看别的词、把相关信息混进自己；再叠几层，最后拿最末尾那个位置的向量去预测下一个词。</p><p>这个想法很顺。因为预测「小 ___」后面该接什么，确实需要前文信息： 「我 是 一只 小」看完整体之后，模型大概率会觉得「猫」「狗」「鸟」之类的词比较像答案。</p><p>但问题也正卡在这里：<strong>注意力能把信息汇总过来，却不等于它已经会“加工”这些信息。</strong>先把这一点盯牢。</p><p>注意力算到最后，每个词拿到的新向量，本质上是别的词的 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span> 按权重做的一次<strong>加权平均</strong>。 也就是说，它更像是在已有信息之间<strong>重新分配比重</strong>，而不是凭空造出一个全新的判断。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 540 222" role="img" aria-label="注意力输出是输入向量的加权平均，永远落在它们围成的范围内"><path d="M180,38 L64,176 L296,176 Z" fill="rgba(62,107,143,0.08)" stroke="#BDD2E3" stroke-width="1.2" stroke-dasharray="4 3"></path><circle cx="180" cy="38" r="5" fill="#3E6B8F"></circle><text x="180" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">词A 的 V</text><circle cx="64" cy="176" r="5" fill="#3E6B8F"></circle><text x="56" y="194" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">词B 的 V</text><circle cx="296" cy="176" r="5" fill="#3E6B8F"></circle><text x="300" y="194" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">词C 的 V</text><g stroke="#C9BBA2" stroke-width="1"><line x1="180" y1="38" x2="168" y2="107"></line><line x1="64" y1="176" x2="168" y2="107"></line><line x1="296" y1="176" x2="168" y2="107"></line></g><g font-family="JetBrains Mono, monospace" font-size="9.5" fill="#93A0AC"><text x="186" y="74">0.5</text><text x="104" y="150">0.3</text><text x="238" y="150">0.2</text></g><circle cx="168" cy="107" r="6" fill="#C0481E"></circle><text x="158" y="104" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="700" fill="#C0481E">输出</text><text x="340" y="56" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">只是混合</text><text x="340" y="76" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">输出落在已有向量</text><text x="340" y="93" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">围成的范围之内，</text><text x="340" y="110" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">本质是重新调配。</text><text x="340" y="142" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">不是深加工</text><text x="340" y="162" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">它擅长“把该看的凑到一起”，</text><text x="340" y="179" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#5C6B79">还不等于“算出新结论”。</text></svg></div><figcaption><span class="fig-no">图 21-1</span>注意力的输出是各词 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.2222em;">V</span></span></span></span></span> 的加权平均。它非常擅长把相关信息拉到一起，但这一步本身更像“混合”而不是“深加工”。</figcaption></figure><p>用回我们的例子：注意力当然能让最后那个位置看到「我」「是」「一只」「小」这些上下文， 但它看到之后，<strong>还需要一个部件来把这些线索整理成更明确的特征</strong>，比如“这大概率在说某种小动物”。</p><p>这一步的思路，其实和第 16 课一模一样。那一课我们发现：<strong>N-gram 只会查表，查到之后不会推断</strong>， 所以才把卷二早就学过的<strong>全连接网络</strong>接上去，让它把“查来的数字”再加工一遍。这里也一样：<strong>注意力只负责把相关词找来、混到一起；可“找来之后怎么办”，它自己不负责。</strong></p><p>一旦把缺口说清楚，补件其实几乎是顺手拈来的：我们卷二已经有现成的“加工器”了。 它会做三件注意力自己不擅长的事：<strong>加权、过非线性、把结果压成新的表示</strong>。 换句话说，注意力负责<strong>收集材料</strong>，那下一个自然该接上的，就该是一个负责<strong>处理材料</strong>的网络。</p><div class="think"><div class="think-q">如果注意力只是把上下文汇总到当前位置，那么“汇总之后怎么加工”这一步该由谁来做？</div></div></section><section class="station reveal" data-title="补上 FFN" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>补上第一块零件：FFN</h2></div><p>这时候就轮到第二个部件出场了：<strong>FFN（前馈网络）</strong>。它不是拿来让词和词通信的， 而是让<strong>每个词各自</strong>在拿到上下文之后，再做一轮自己的内部加工。</p><p>所以这里不是“凭空又塞了一个模块”，而是顺着缺口往下补：<strong>谁负责收集上下文？注意力。谁负责把收集来的东西再算一遍？FFN。</strong>这和第 16 课“查向量之后，为什么自然要接一个神经网络”是同一种写法。</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">FFN</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mord mathrm">ReLU</span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></span></div><p>你可以把一层 block 想成两步，分工非常清楚：</p><ul style="padding-left:24px;line-height:2.1"><li><strong>注意力</strong>：横向，负责“去看别人”。</li><li><strong>FFN</strong>：纵向，负责“拿到信息后自己再想一遍”。</li></ul><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 340" role="img" aria-label="注意力层把各词横向连通，之后每个词各自通过一台独立的前馈网络 FFN 纵向加工"><defs><marker id="ffn-arr" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5C6B79"></path></marker></defs><text x="280" y="22" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#5C6B79">一句话的 4 个词，在一层 Block 里的流向（横向通信 → 纵向加工）</text><text x="280" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">② 前馈层 FFN · 纵向：每个词各过各的（同一套权重，互不相干）</text><text x="280" y="208" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E6B8F">① 注意力层 · 横向：每个词都去看其他所有词</text><rect x="44" y="216" width="472" height="60" rx="8" fill="rgba(62,107,143,0.07)" stroke="#BDD2E3" stroke-width="1.2"></rect><g fill="none" stroke="#3E6B8F" stroke-width="1.2" opacity="0.55"><path d="M90,252 Q150,236 210,252"></path><path d="M210,252 Q270,236 330,252"></path><path d="M330,252 Q390,236 450,252"></path><path d="M90,252 Q210,226 330,252"></path><path d="M210,252 Q330,226 450,252"></path><path d="M90,252 Q270,220 450,252"></path></g><circle cx="90" cy="252" r="3.5" fill="#3E6B8F"></circle><circle cx="210" cy="252" r="3.5" fill="#3E6B8F"></circle><circle cx="330" cy="252" r="3.5" fill="#3E6B8F"></circle><circle cx="450" cy="252" r="3.5" fill="#3E6B8F"></circle><g><rect x="60" y="298" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="90" y="319" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">猫</text><line x1="90" y1="298" x2="90" y2="279" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><line x1="90" y1="216" x2="90" y2="191" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="56" y="118" width="68" height="70" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="90" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#C0481E">FFN</text><text x="90" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C0481E">512→2048→512</text><line x1="90" y1="118" x2="90" y2="87" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="60" y="56" width="60" height="28" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="90" y="75" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">新向量</text></g><g><rect x="180" y="298" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="210" y="319" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">追</text><line x1="210" y1="298" x2="210" y2="279" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><line x1="210" y1="216" x2="210" y2="191" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="176" y="118" width="68" height="70" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="210" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#C0481E">FFN</text><text x="210" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C0481E">512→2048→512</text><line x1="210" y1="118" x2="210" y2="87" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="180" y="56" width="60" height="28" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="210" y="75" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">新向量</text></g><g><rect x="300" y="298" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="330" y="319" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">狗</text><line x1="330" y1="298" x2="330" y2="279" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><line x1="330" y1="216" x2="330" y2="191" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="296" y="118" width="68" height="70" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="330" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#C0481E">FFN</text><text x="330" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C0481E">512→2048→512</text><line x1="330" y1="118" x2="330" y2="87" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="300" y="56" width="60" height="28" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="330" y="75" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">新向量</text></g><g><rect x="420" y="298" width="60" height="30" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="450" y="319" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="15" font-weight="700" fill="#3E6B8F">了</text><line x1="450" y1="298" x2="450" y2="279" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><line x1="450" y1="216" x2="450" y2="191" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="416" y="118" width="68" height="70" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="450" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#C0481E">FFN</text><text x="450" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C0481E">512→2048→512</text><line x1="450" y1="118" x2="450" y2="87" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#ffn-arr)"></line><rect x="420" y="56" width="60" height="28" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="450" y="75" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">新向量</text></g></svg></div><figcaption><span class="fig-no">图 21-2</span>一层 Block 里的两步：先用注意力横向汇总上下文，再让每个词各自通过 FFN 做纵向加工。</figcaption></figure><p>所以 FFN 不是配角，而是必需品。没有它，你只有“把相关信息拉过来”这一步；有了它，模型才多了“把拉来的信息重新整理成更好表示”这一步。</p><p>论文里 FFN 常写成 <strong>512 → 2048 → 512</strong>：先把维度<strong>撑大</strong>到 4 倍，过一道 ReLU，再<strong>压回</strong>原样。为什么要这么折腾？看个具体例子就懂了。</p><p>先看清楚 FFN 拿到的「小」是什么。它<strong>不是</strong>词表里那个孤零零的「小」，而是刚过完注意力、<strong>已经把前文「我 是 一只」的信息揉进来</strong>的一个 512 维向量——里面其实<em>暗藏</em>着好几条线索： 前面出现过「一只」、出现过「小」、整句在讲「我」……只是这些线索<strong>挤成一团、藏在那 512 个数字里</strong>，还没被读出来。</p><p>FFN 要做的，就是把这些暗藏的线索<strong>一条条识别出来</strong>，合起来判断「<strong>下一个词会不会是某种小动物</strong>」： 有没有「一只」（在点数一个个体）？有没有「小」（体型偏小）？像不像在讲宠物？<strong>撑到 2048 维，就是一次摆开两千多个这样的「小检测器」</strong>，每个查一条线索；ReLU 把查到的留下、没查到的清零； 最后第二个矩阵把亮着的线索<strong>汇总成一句结论</strong>「大概率接小动物」，再压回 512 维交出去。</p><p>所以两次变维，各有各的用处：<strong>撑大</strong>，是因为 512 维塞不下这么多检测器、线索一多就照顾不过来；<strong>压回</strong>，是因为下一个 block 接的就是 512 维，不收拢回去就接不上。（至于偏偏是 4 倍，是试出来的经验值，记住套路就行。）</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 168" role="img" aria-label="FFN 把 512 维先放大到 2048 维再压回 512 维"><rect x="28" y="64" width="70" height="40" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.6"></rect><text x="63" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3E6B8F">输入</text><text x="63" y="96" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#3E6B8F">512</text><line x1="98" y1="84" x2="150" y2="84" stroke="#C0481E" stroke-width="1.6"></line><polygon points="152,84 144,80 144,88" fill="#C0481E"></polygon><text x="124" y="74" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#C0481E">×W₁</text><rect x="156" y="28" width="96" height="112" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="204" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#C0481E">放大 4 倍</text><text x="204" y="98" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#C0481E">2048</text><text x="204" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">隐藏层（ReLU）</text><line x1="252" y1="84" x2="300" y2="84" stroke="#5C6B79" stroke-width="1.6"></line><polygon points="302,84 294,80 294,88" fill="#5C6B79"></polygon><text x="276" y="74" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">ReLU</text><rect x="306" y="28" width="96" height="112" rx="6" fill="#FDF6EC" stroke="#C0481E" stroke-width="2" opacity="0.5"></rect><text x="354" y="88" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#C0481E">过滤后</text><line x1="402" y1="84" x2="450" y2="84" stroke="#C0481E" stroke-width="1.6"></line><polygon points="452,84 444,80 444,88" fill="#C0481E"></polygon><text x="426" y="74" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#C0481E">×W₂</text><rect x="456" y="64" width="70" height="40" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.6"></rect><text x="491" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3E6B8F">输出</text><text x="491" y="96" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#3E6B8F">512</text><text x="280" y="160" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">句子里每个词都<tspan font-weight="700" fill="#5C6B79">各自、独立</tspan>走一遍这条流水线，用的是同一套 W₁、W₂</text></svg></div><figcaption><span class="fig-no">图 21-3</span>FFN 先把维度放大，再通过非线性筛选和压缩，最后回到原维度。这一步发生在每个词内部，而不是词与词之间。</figcaption></figure><p>这一步还有个重要副作用：FFN 里塞满了参数，因此模型很多“内部知识”也会沉在这里。但对这一课来说，你先记住更关键的分工就够了：<strong>attention 管通信，FFN 管加工。</strong></p></section><section class="station reveal" data-title="拼成主干" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>把它们拼起来：最简 Transformer 主干</h2></div><p>到这里，block 的主干已经出来了：<strong>一个词进来，先和别的词交换信息，再自己做一轮加工。</strong>把这两个步骤首尾接起来，就是一个 Transformer block。</p><p>而且这个 block 有个非常妙的性质：<strong>输入和输出维度一样</strong>。这里说的“输入”，不是一句话的汉字本身， 而是<strong>这一整排词向量</strong>；“输出”则是这排词向量各自经过 attention 和 FFN 之后的新版本。 比如这句「我 / 是 / 一只 / 小」，现在正好有 4 个 token；如果每个词向量是 512 维，那么这一轮一个 block 吃进去的是<strong>4 × 512</strong>，吐出来的仍然是<strong>4 × 512</strong>： 还是 4 个位置、每个位置还是 512 个数，只不过每个位置里的内容都被更新过了。</p><p>但要注意，<strong>4 只是这句例子的长度，不是 Transformer 固定只吃 4 个词</strong>。更一般地，一个 block 处理的是<strong>n × 512</strong> 这样一整张表：<strong>n</strong> 是这次实际喂进去的 token 数，512 是每个 token 向量的维度。 句子短，n 就小；句子长，n 就大。唯一的限制是 <strong>n 不能超过模型允许的最大上下文长度</strong>，不可能无限长。</p><p>正因为形状没变，一个 block 的输出才能原封不动地送进下一个 block。于是它天然就适合一层一层往上叠。</p><p>现在把整个流程接完整：</p><ul style="padding-left:24px;line-height:2.1"><li>先把「我 / 是 / 一只 / 小」查词表，变成一排向量。</li><li>过几层 block，让这些向量反复交换信息、反复加工。</li><li>取最后一个位置的输出向量，去预测“下一个词是谁”。</li></ul><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 480 470" role="img" aria-label="最简 Transformer 的端到端流程：词向量进入，过几层注意力加 FFN，最后预测下一个词"><defs><marker id="pipe-arr" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5C6B79"></path></marker></defs><text x="240" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#5C6B79">最简 Transformer：一句话 → 下一个词</text><text x="240" y="44" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#4A8B5E">③ 线性层 + softmax → 下一个词的概率</text><g><text x="205" y="64" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#232F3B">🐱 猫</text><rect x="213" y="53" width="52.699999999999996" height="13" rx="2" fill="#C0481E" opacity="0.55"></rect><text x="271.7" y="64" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0481E">31<!-- -->%</text></g><g><text x="205" y="83" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#232F3B">🐶 狗</text><rect x="213" y="72" width="37.4" height="13" rx="2" fill="#C0481E" opacity="0.55"></rect><text x="256.4" y="83" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0481E">22<!-- -->%</text></g><g><text x="205" y="102" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#232F3B">🐦 鸟</text><rect x="213" y="91" width="20.4" height="13" rx="2" fill="#C0481E" opacity="0.55"></rect><text x="239.4" y="102" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0481E">12<!-- -->%</text></g><line x1="240" y1="128" x2="240" y2="114" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#pipe-arr)"></line><rect x="150" y="128" width="180" height="30" rx="6" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="146" y="147" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#4A8B5E">②</text><text x="240" y="147" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#4A8B5E">线性层 + softmax</text><g><rect x="110" y="190" width="260" height="46" rx="7" fill="#FFFDF8" stroke="#C9BBA2" stroke-width="1.2"></rect><rect x="120" y="199" width="116" height="28" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="178" y="217" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">注意力 · 横向</text><rect x="244" y="199" width="116" height="28" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.4"></rect><text x="302" y="217" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">FFN · 纵向</text><text x="376" y="217" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">第 3 层</text></g><g><rect x="110" y="246" width="260" height="46" rx="7" fill="#FFFDF8" stroke="#C9BBA2" stroke-width="1.2"></rect><rect x="120" y="255" width="116" height="28" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="178" y="273" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">注意力 · 横向</text><rect x="244" y="255" width="116" height="28" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.4"></rect><text x="302" y="273" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">FFN · 纵向</text><text x="376" y="273" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">第 2 层</text></g><g><rect x="110" y="302" width="260" height="46" rx="7" fill="#FFFDF8" stroke="#C9BBA2" stroke-width="1.2"></rect><rect x="120" y="311" width="116" height="28" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="178" y="329" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">注意力 · 横向</text><rect x="244" y="311" width="116" height="28" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.4"></rect><text x="302" y="329" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">FFN · 纵向</text><text x="376" y="329" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">第 1 层</text></g><line x1="240" y1="190" x2="240" y2="162" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#pipe-arr)"></line><line x1="240" y1="246" x2="240" y2="238" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#pipe-arr)"></line><line x1="240" y1="302" x2="240" y2="294" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#pipe-arr)"></line><text x="240" y="364" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="700" fill="#3E6B8F">① 查词表：每个词 → 一个词向量（再加上位置，见下一站）</text><g><rect x="101" y="376" width="58" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="130" y="392" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">向量</text><line x1="130" y1="376" x2="130" y2="350" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><line x1="130" y1="414" x2="130" y2="402" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><rect x="101" y="414" width="58" height="28" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1.2"></rect><text x="130" y="433" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#232F3B">我</text></g><g><rect x="171" y="376" width="58" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="200" y="392" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">向量</text><line x1="200" y1="376" x2="200" y2="350" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><line x1="200" y1="414" x2="200" y2="402" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><rect x="171" y="414" width="58" height="28" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1.2"></rect><text x="200" y="433" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#232F3B">是</text></g><g><rect x="241" y="376" width="58" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="270" y="392" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">向量</text><line x1="270" y1="376" x2="270" y2="350" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><line x1="270" y1="414" x2="270" y2="402" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><rect x="241" y="414" width="58" height="28" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1.2"></rect><text x="270" y="433" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#232F3B">一只</text></g><g><rect x="311" y="376" width="58" height="24" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.3"></rect><text x="340" y="392" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">向量</text><line x1="340" y1="376" x2="340" y2="350" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><line x1="340" y1="414" x2="340" y2="402" stroke="#5C6B79" stroke-width="1.2" marker-end="url(#pipe-arr)"></line><rect x="311" y="414" width="58" height="28" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1.2"></rect><text x="340" y="433" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#232F3B">小</text></g><text x="240" y="460" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">输入：「我 是 一只 小 ___」</text></svg></div><figcaption><span class="fig-no">图 21-4</span>最简 Transformer 主干：词向量输入，经过几层“注意力 + FFN”，最后由末尾位置去预测下一个词。</figcaption></figure><p>这就是 GPT 式生成的核心：先算出「猫 31%、狗 22%、鸟 12%……」，挑一个结果接到句尾， 再把整句重新送进去，继续预测下一个词。于是文本就是这样一个词一个词往外长出来的。</p><p>到这里你应该已经抓住主干了：<strong>Transformer block = attention + FFN，并且可以堆叠。</strong>但这台机器还埋着一个马上会翻车的坑。</p></section><section class="station reveal" data-title="顺序问题" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>它马上翻车了：模型不知道谁在前谁在后</h2></div><p>问题恰好出在我们刚刚夸过的优点上：<strong>并行</strong>。Transformer 能把一整排词同时送进去算， 不像 RNN 那样一个个排队，这让它特别适合 GPU，也特别适合做大。</p><p>但“同时处理”也带来副作用：<strong>如果你只给词向量，不额外告诉它位置，注意力本身并不知道顺序。</strong></p><div class="formula" style="font-family:var(--serif);font-size:18px">「猫 追 狗」　vs　「狗 追 猫」</div><p>这两句用的是同一批词，意思却完全反过来。可如果模型只看到一袋词和它们的向量， 那它根本不知道“猫”是在前面还是在后面，“狗”是在宾语位置还是主语位置。</p><p>这就逼出了第三块零件：<strong>位置编码</strong>。方法很直接：在送进第一层注意力之前， 先给每个词向量加上一份“我是第几个”的信息。</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord text"><span class="mord cjk_fallback">真正的输入</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.0097em;vertical-align:-1.3263em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span style="top:-1.6737em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">是什么词</span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span class="svg-align" style="top:-2.352em;"><span class="pstrut" style="height:3em;"></span><span class="stretchy" style="height:0.548em;min-width:1.6em;"><span class="brace-left" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMinYMin slice"><path d="M0 6l6-6h17c12.688 0 19.313.3 20 1 4 4 7.313 8.3 10 13
+ 35.313 51.3 80.813 93.8 136.5 127.5 55.688 33.7 117.188 55.8 184.5 66.5.688
+ 0 2 .3 4 1 18.688 2.7 76 4.3 172 5h399450v120H429l-6-1c-124.688-8-235-61.7
+-331-161C60.687 138.7 32.312 99.3 7 54L0 41V6z"/></svg></span><span class="brace-center" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMidYMin slice"><path d="M199572 214
+c100.7 8.3 195.3 44 280 108 55.3 42 101.7 93 139 153l9 14c2.7-4 5.7-8.7 9-14
+ 53.3-86.7 123.7-153 211-199 66.7-36 137.3-56.3 212-62h199568v120H200432c-178.3
+ 11.7-311.7 78.3-403 201-6 8-9.7 12-11 12-.7.7-6.7 1-18 1s-17.3-.3-18-1c-1.3 0
+-5-4-11-12-44.7-59.3-101.3-106.3-170-141s-145.3-54.3-229-60H0V214z"/></svg></span><span class="brace-right" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMaxYMin slice"><path d="M399994 0l6 6v35l-6 11c-56 104-135.3 181.3-238 232-57.3
+ 28.7-117 45-179 50H-300V214h399897c43.3-7 81-15 113-26 100.7-33 179.7-91 237
+-174 2.7-5 6-9 10-13 .7-1 7.3-1 20-1h17z"/></svg></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord text"><span class="mord cjk_fallback">词向量</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.648em;"><span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3263em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:2.0097em;vertical-align:-1.3263em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span style="top:-1.6737em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">排第几个</span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6833em;"><span class="svg-align" style="top:-2.352em;"><span class="pstrut" style="height:3em;"></span><span class="stretchy" style="height:0.548em;min-width:1.6em;"><span class="brace-left" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMinYMin slice"><path d="M0 6l6-6h17c12.688 0 19.313.3 20 1 4 4 7.313 8.3 10 13
+ 35.313 51.3 80.813 93.8 136.5 127.5 55.688 33.7 117.188 55.8 184.5 66.5.688
+ 0 2 .3 4 1 18.688 2.7 76 4.3 172 5h399450v120H429l-6-1c-124.688-8-235-61.7
+-331-161C60.687 138.7 32.312 99.3 7 54L0 41V6z"/></svg></span><span class="brace-center" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMidYMin slice"><path d="M199572 214
+c100.7 8.3 195.3 44 280 108 55.3 42 101.7 93 139 153l9 14c2.7-4 5.7-8.7 9-14
+ 53.3-86.7 123.7-153 211-199 66.7-36 137.3-56.3 212-62h199568v120H200432c-178.3
+ 11.7-311.7 78.3-403 201-6 8-9.7 12-11 12-.7.7-6.7 1-18 1s-17.3-.3-18-1c-1.3 0
+-5-4-11-12-44.7-59.3-101.3-106.3-170-141s-145.3-54.3-229-60H0V214z"/></svg></span><span class="brace-right" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMaxYMin slice"><path d="M399994 0l6 6v35l-6 11c-56 104-135.3 181.3-238 232-57.3
+ 28.7-117 45-179 50H-300V214h399897c43.3-7 81-15 113-26 100.7-33 179.7-91 237
+-174 2.7-5 6-9 10-13 .7-1 7.3-1 20-1h17z"/></svg></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord text"><span class="mord cjk_fallback">位置向量</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.648em;"><span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3263em;"><span></span></span></span></span></span></span></span></span></span></span></div><p>这样一来，“猫@位置0”和“猫@位置2”就不再是同一个向量，“猫追狗”和“狗追猫”也终于会被模型区分开。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 228" role="img" aria-label="位置编码：每个位置一行独特的 sin/cos 指纹"><text x="70" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#5C6B79">位置</text><text x="330" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#5C6B79">← 维度（不同频率的 sin/cos）→</text><g><text x="70" y="42" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->0</text><rect x="108" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="32" width="22" height="20" rx="2" fill="rgba(62,107,143,0.94)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><g><text x="70" y="64" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->1</text><rect x="108" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8750031037712375)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7515239454059373)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.6741950273520232)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9138069750368657)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5828064393016686)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9365851447953788)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5490236816205398)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9395584201766584)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.536838895031696)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399429588549428)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5324578707043637)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399926327040531)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5308833175395798)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399990484746571)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5303174480781818)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399998771057347)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5301140849340182)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="54" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399999841275946)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><g><text x="70" y="86" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->2</text><rect x="108" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9028119449985295)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.3593797970156716)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7999661329918935)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8385746053021915)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.6347332379004748)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9263974632598984)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5680063853192782)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9382346318907333)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5436758871443506)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9397718512914411)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5349156530776987)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399705310809786)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5317666309791645)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399961939030452)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5306348959660583)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399995084230129)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5302281698592034)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="76" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399999365103796)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><g><text x="70" y="108" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->3</text><rect x="108" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5878592033045456)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.12410307639381737)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8912434354090442)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7239153948862022)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.6849154079990796)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9096066600633854)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5869072214428207)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9360314866456267)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5505090739484078)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9394867249200866)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5373732587921509)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399336959250654)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5326499362187778)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.939991436298414)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5309523434733248)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399988939520554)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5303422547667221)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="98" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399998571483588)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><g><text x="70" y="130" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->4</text><rect x="108" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.2197109769237494)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.2620061154459191)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9363643557704022)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5844794489629428)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7325170235255788)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8864924335555245)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.605685476684453)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9329537301217684)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5573365541131381)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9390876590771462)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5398305995262147)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9398821285600961)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5335332291584813)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399847756828461)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5312697904096764)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399980336932307)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5304563396477413)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="120" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399997460415382)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><g><text x="70" y="152" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->5</text><rect x="108" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.13684104738811323)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.6463014960399227)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9295637555716524)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.43808261734863885)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7767451448481233)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8574398165982241)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.6243007017825546)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9290079919541934)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5641564278956803)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9385747648024865)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5422875869679076)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9398158308393003)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5344165056983943)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399762120872576)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5315872365848088)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399969276470542)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5305704244934277)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="142" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399996031899266)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><g><text x="70" y="174" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->6</text><rect x="108" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.4154396457384404)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.92366981752665)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8717105533043564)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.30343014816522795)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8168630274287184)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8229327627535545)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.6427127986502458)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.924202771451989)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.570966797669646)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9379481848086768)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5447441328179434)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9397348051452876)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5352997617387116)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.939965745551397)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5319046818084179)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399955758141892)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5306845092949484)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="164" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399994285935349)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><g><text x="70" y="196" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">pos <!-- -->7</text><rect x="108" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7993645054747035)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="132" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8390999242807549)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="156" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7701967019986826)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="180" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.1977267023232892)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="204" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.8522023943886876)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="228" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.7835460846674557)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="252" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.6608821067485892)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="276" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9185484192903774)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="300" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5777657684531314)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="324" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9372080934412794)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="348" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5472001487929065)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="372" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9396390543899614)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="396" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5361829931797235)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="420" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399533761238458)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="444" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.5322221258902001)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="468" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399939781954462)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="492" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.53079859404347)" stroke="#E2D8C6" stroke-width="0.5"></rect><rect x="516" y="186" width="22" height="20" rx="2" fill="rgba(62,107,143,0.9399992222523765)" stroke="#E2D8C6" stroke-width="0.5"></rect></g><text x="330" y="222" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">每一行（一个位置）都是独一无二的图案——这就是「第几个词」的身份证</text></svg></div><figcaption><span class="fig-no">图 21-5</span>位置编码的作用不是增加词义，而是把顺序重新塞回模型输入里。</figcaption></figure><p>原始论文用的是正弦/余弦位置编码；后来的模型还会用可学习位置向量、RoPE 等做法。实现细节可以变化， 但目的始终没变：<strong>告诉模型“这些词不只是同时出现，它们还有先后次序”。</strong></p></section><section class="station reveal" data-title="拼完整体" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>到这里，一台最简 Transformer 就拼出来了</h2></div><p>现在回头看，整个结构已经很清楚了：</p><ul style="padding-left:24px;line-height:2.2"><li><strong>词向量</strong>负责告诉模型“这是什么词”。</li><li><strong>位置编码</strong>负责告诉模型“它排第几个”。</li><li><strong>注意力</strong>负责让词与词交换信息。</li><li><strong>FFN</strong>负责让每个词在拿到信息后自己再加工一遍。</li><li><strong>多层堆叠</strong>负责把这件事反复做深。</li><li><strong>末尾线性层 + softmax</strong>负责把最后一个位置变成“下一个词的概率表”。</li></ul><figure class="fig"><div class="fig-frame" style="padding:0"><img src="/images/lessons-transformer-overview.png" alt="简化后的 Transformer 全结构图：从输入 token 到词向量、位置向量、多层 Attention 和 FFN，再到末位置的下一个词预测" style="width:100%;height:auto;display:block"/></div><figcaption><span class="fig-no">图 21-6</span>这节课的简化版 Transformer 总览图：token 先变成词向量，再叠加位置信息，经过多层「注意力 + FFN」的 block，最后只拿末位置的表示去预测下一个词。</figcaption></figure><p>这已经是一台能跑的 Transformer 主干了。它能并行、能堆深、能做“预测下一个词”这种任务， 这正是后来 GPT 一路做大的出发点。</p><p>当然，真实模型还没讲完。为了突出主线，我们这节课有意省掉了两个重要细节：比如 block 里真正的<strong>Add & Norm</strong> 稳定器，以及生成时的掩码等机制。这些不是不重要，而是值得拆到后面单独讲。</p><p>所以这节课的任务不是“把全部细节一次吞下”，而是先把主骨架梳理出来，有一个大体的印象。</p></section><section class="station reveal" data-title="总结" data-num="7" id="s7"><div class="station-head"><span class="station-no">第 7 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>Transformer 不是“只有注意力”。一台最简 Transformer 至少包含三样东西：<span class="tk-hl">注意力</span>负责让词与词通信，<span class="tk-hl">FFN</span>负责让每个词在拿到上下文后继续加工，<span class="tk-hl">位置编码</span>负责把顺序信息塞回输入。 把这样的 block 一层层叠起来，再接上线性层和 softmax，就能像 GPT 那样一步步预测下一个词。</p></div><div class="recap"><h3>这一课你真正应该带走的是</h3><ul><li><strong>只靠注意力还不够</strong>：它能汇总上下文，但还缺少“汇总后的逐词加工”。</li><li><strong>FFN 的职责</strong>：每个词各自做一轮非线性加工，所以 block 不是 attention-only。</li><li><strong>一个 block 的骨架</strong>：attention（横向通信）+ FFN（纵向加工）。</li><li><strong>顺序必须额外补回</strong>：没有位置编码，模型分不清“猫追狗”和“狗追猫”。</li><li><strong>最简 Transformer 主干</strong>：词向量 + 位置信息 → 多层 block → 末尾预测下一个词。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="Transformer 块=（多头）自注意力+前馈网络(FFN)+残差连接+层归一化。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>2017 年的 Transformer 把一个标准「块」拼装起来，主要由哪些部件组成？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">卷积层 + 池化层</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">（多头）自注意力 + 前馈网络（FFN），并配以残差连接和层归一化</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">只有一个巨大的全连接层</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">循环单元 + 门控</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="抛弃循环后各位置可并行计算，训练高效且更易建模长依赖。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>Transformer 抛弃了 RNN 的循环结构，带来的一个关键优势是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">不再需要任何参数</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">序列内各位置可以并行计算，训练效率大幅提升，且更易建模长距离依赖</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">彻底不需要数据</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">只能处理很短的句子</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-03-tokenizer.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 22 课</span>
+                    <h3>Tokenizer 分词器</h3>
+                    <p>大模型输入的不是字，不是词——那到底是什么？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第21课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

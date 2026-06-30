@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · CompletableFuture 异步编程 · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 16 / 66</div>
+            <h1>Java 基础 · Java 8+ 新特性</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 CompletableFuture 异步编程</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:24%"></div>
+            </div>
+            <div class="progress-label">进度 24%（16/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>CompletableFuture</strong> 是 Java 8 引入的异步编程工具类，实现了 <code>Future</code> 和 <code>CompletionStage</code> 接口，支持函数式编程和链式调用。</p><p><strong>核心优势：</strong></p><ul><li><strong>异步非阻塞</strong>：任务在后台线程执行，主线程不阻塞</li><li><strong>链式编排</strong>：支持 thenApply、thenAccept、thenCompose 等链式调用</li><li><strong>异常处理</strong>：内置 exceptionally、handle 等异常处理机制</li><li><strong>结果合并</strong>：支持 thenCombine、allOf、anyOf 等多任务组合</li></ul><p><strong>与 Future 接口的区别：</strong></p><ul><li>Future 只能通过 get() 阻塞获取结果</li><li>CompletableFuture 支持回调函数，结果就绪时自动触发</li><li>CompletableFuture 支持任务流水线编排</li></ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>创建方式</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>1. supplyAsync / runAsync</strong></p><pre><code>// 有返回值<br>CompletableFuture&lt;String&gt; future = CompletableFuture.supplyAsync(() -&gt; "result");<br><br>// 无返回值<br>CompletableFuture&lt;Void&gt; future = CompletableFuture.runAsync(() -&gt; System.out.println("task"));<br><br>// 指定线程池（推荐，避免共用ForkJoinPool）<br>ExecutorService executor = Executors.newFixedThreadPool(10);<br>CompletableFuture.supplyAsync(() -&gt; "result", executor);</code></pre><p><strong>2. 已完成的 Future</strong></p><pre><code>CompletableFuture&lt;String&gt; future = CompletableFuture.completedFuture("ok");</code></pre><p><strong>⚠️ 注意：</strong>不指定线程池时，默认使用 <code>ForkJoinPool.commonPool()</code>，整个 JVM 共享，线程数=CPU核心数，IO密集型场景务必自定义线程池！</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚖️</span>
+            <h2>链式回调 API</h2>
+        </div>
+        <div class="section-content">
+            <table border='1' cellpadding='8' style='border-collapse:collapse;width:100%'><tr><th>方法</th><th>入参</th><th>返回值</th><th>说明</th></tr><tr><td><strong>thenApply</strong></td><td>Function</td><td>U</td><td>转换结果，有返回值</td></tr><tr><td><strong>thenAccept</strong></td><td>Consumer</td><td>Void</td><td>消费结果，无返回值</td></tr><tr><td><strong>thenRun</strong></td><td>Runnable</td><td>Void</td><td>不关心结果，执行后续</td></tr><tr><td><strong>thenCompose</strong></td><td>Function</td><td>CompletionStage</td><td>扁平化，依赖上一个结果</td></tr><tr><td><strong>thenCombine</strong></td><td>BiFunction</td><td>U</td><td>合并两个独立 Future 的结果</td></tr></table><p><strong>示例：</strong></p><pre><code>CompletableFuture.supplyAsync(() -&gt; 100)<br>    .thenApply(i -&gt; i * 2)          // 转换: 200<br>    .thenAccept(i -&gt; log(i))        // 消费<br>    .thenRun(() -&gt; clean());        // 收尾</code></pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>多任务组合</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>allOf - 等待所有完成</strong></p><pre><code>CompletableFuture&lt;String&gt; f1 = CompletableFuture.supplyAsync(() -&gt; "A");<br>CompletableFuture&lt;String&gt; f2 = CompletableFuture.supplyAsync(() -&gt; "B");<br>CompletableFuture&lt;String&gt; f3 = CompletableFuture.supplyAsync(() -&gt; "C");<br><br>// 等所有完成，无返回值<br>CompletableFuture.allOf(f1, f2, f3).join();<br><br>// 获取所有结果<br>String r1 = f1.get(), r2 = f2.get(), r3 = f3.get();</code></pre><p><strong>anyOf - 任一完成即返回</strong></p><pre><code>CompletableFuture&lt;Object&gt; any = CompletableFuture.anyOf(f1, f2, f3);<br>Object firstResult = any.get();</code></pre><p><strong>applyToEither - 取最快结果并转换</strong></p><pre><code>f1.applyToEither(f2, s -&gt; s + " wins!");</code></pre><p><strong>使用场景：</strong>超时降级设计——同时调用缓存和DB，哪个先返回用哪个。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>异常处理</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>1. exceptionally - 异常恢复</strong></p><pre><code>CompletableFuture.supplyAsync(() -&gt; 10 / 0)<br>    .thenApply(i -&gt; i * 2)<br>    .exceptionally(ex -&gt; {<br>        log.error("error", ex);<br>        return 0;  // 默认值降级<br>    });</code></pre><p><strong>2. handle - 无论成功失败都处理</strong></p><pre><code>.handle((result, ex) -&gt; {<br>    if (ex != null) return "fallback";<br>    return result;<br>});</code></pre><p><strong>3. whenComplete - 副作用，不修改结果</strong></p><pre><code>.whenComplete((result, ex) -&gt; {<br>    if (ex != null) monitor.incError();<br>    else monitor.incSuccess();<br>});</code></pre><p><strong>⚠️ 面试重点：</strong>如果不处理异常，异常会被静默吞噬！建议<strong>所有</strong> CompletableFuture 链尾都加异常处理。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>生产踩坑经验</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>坑1：默认线程池被耗尽</strong></p><p>IO密集型任务用默认 ForkJoinPool（线程数=CPU核数），导致所有异步任务阻塞。<strong>解决：</strong>业务专用线程池。</p><p><strong>坑2：异常被吞导致排障困难</strong></p><p>没有 exceptionally/handle 时，异常不会打印，任务看起来卡死。<strong>解决：</strong>统一加 whenComplete 打日志。</p><p><strong>坑3：get() 无限阻塞</strong></p><p>Future.get() 不带超时，任务异常或卡住会永久阻塞主线程。<strong>解决：</strong>永远用 <code>get(timeout, unit)</code>，或用 join() 但配合超时。</p><p><strong>坑4：线程上下文丢失</strong></p><p>ThreadLocal 在异步线程中丢失（如用户登录态）。<strong>解决：</strong>调用前捕获上下文，在回调中恢复；或用自定义线程池包装 Runnable。</p><p><strong>坑5：OOM 风险</strong></p><p>循环创建大量未完成的 CompletableFuture 导致内存泄漏。<strong>解决：</strong>加限流，控制并发数。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">❓</span>
+            <h2>面试真题</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>Q1: CompletableFuture 和 Future 有什么区别？</strong></p><p>A: Future 是 Java 5 接口，只能通过阻塞 get() 获取结果，不支持回调、链式编排、异常处理。CompletableFuture 是其实现类，支持函数式编程、多任务组合、非阻塞回调。</p><p><strong>Q2: supplyAsync 和 runAsync 的区别？</strong></p><p>A: supplyAsync 是 Supplier 有返回值，runAsync 是 Runnable 无返回值。</p><p><strong>Q3: thenApply 和 thenCompose 的区别？（高频）</strong></p><p>A: <code>thenApply</code> 是 Function&lt;T,U&gt;，返回 U，结果会被包装成 CompletableFuture；<code>thenCompose</code> 是 Function&lt;T,CompletionStage&lt;U&gt;&gt;，直接返回 CompletableFuture，用于避免嵌套（CompletableFuture&lt;CompletableFuture&lt;U&gt;&gt;）。类似 map vs flatMap。</p><p><strong>Q4: allOf 有返回值吗？如何获取所有结果？</strong></p><p>A: allOf 返回 CompletableFuture&lt;Void&gt;，无返回值。需要在 allOf.join() 后分别调用每个 future 的 get()。</p><p><strong>Q5: CompletableFuture 是线程安全的吗？</strong></p><p>A: 是。内部用 CAS 操作维护状态，多线程同时 complete 也不会有并发问题。</p>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>JVM · JVM 内存区域划分</p>
+        </div>
+    </div>
+</body>
+</html>

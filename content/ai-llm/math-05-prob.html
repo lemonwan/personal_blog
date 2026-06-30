@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第06课 · 概率与信息 | AI大模型原理教程</title>
+    <meta name="description" content="神经网络的输出为什么叫「概率」？——从频率到交叉熵损失">
+    <meta name="keywords" content="AI大模型教程,Transformer,概率与信息,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第06课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 06 · 卷一</div>
+            <h1>概率与信息</h1>
+            <p class="subtitle">❝ 神经网络的输出为什么叫「概率」？——从频率到交叉熵损失 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="「70% 降雨」到底什么意思" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>「70% 降雨」到底什么意思</h2></div><p>天气预报说：「明天降雨概率 70%。」可第二天要么下雨、要么没下，哪来的「70%」？ 这个数字其实描述的是一种<strong>长期频率</strong>：在所有和明天气象条件相似的日子里， 大约七成最后下了雨。概率不是对单独某一天的承诺，而是<strong>「重复很多次，某个结果占多大比例」</strong>。</p><p>掷骰子也一样：掷 1000 次，数字 3 出现了 168 次，我们就说「3 的概率约 0.168」。 一个概率，就是一个事件的长期占比。</p><p>但很多时候，我们关心的不是<em>一个</em>结果，而是<strong>所有可能结果各占多少</strong>。 这正是 AI 里反复出现的场景。比如一个语言模型，你输入「今天天气很」， 它要猜下一个字——它不会只蹦一个答案，而是给词表里<em>每一个</em>候选词都打一个分：</p><figure class="fig"><div class="fig-frame"><div class="plotly-fig"></div></div><figcaption><span class="fig-no">图 6-1</span>模型对「今天天气很 ___」之后一个词的预测（示意）：P(下一个词 | 上文)。它不是给一个答案，而是给出一整组数——每个候选词配一个分数，每个 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7719em;vertical-align:-0.136em;"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span>，全部加起来 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.3669em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>。</figcaption></figure><p>这一整组数有两条铁律：<strong>每个都 ≥ 0</strong>（占比不可能是负的），<strong>全部加起来正好 = 1</strong>（总会出现某一个词）。满足这两条的一组数，就叫一个<strong>概率分布</strong>（probability distribution）——它是对「所有可能结果各占多少」的完整描述。</p><p>这也顺带回答了本课的标题问题：<strong>神经网络的输出为什么叫「概率」？</strong>因为它吐出来的就是这样一组非负、加和为 1 的数。 （至于怎么把任意一堆实数挤成这种形状，是第 11 课 Softmax 的活儿，这里先不展开。）</p></section><section class="station reveal" data-title="越意外的消息越「值钱」" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>信息量：越意外的消息越「值钱」</h2></div><p>有了「概率」，下一个问题是：<strong>一条消息到底带来多少「信息」？</strong> 先靠直觉感受一下。 朋友跑来告诉你两件事：</p><ul style="margin-top:16px;padding-left:24px;line-height:2.1"><li>「明天太阳会从东边升起」——你眉头都不抬，<strong>等于没说</strong>。</li><li>「楼下小卖部老板昨晚中了五百万」——你瞬间瞪大眼，<strong>信息量爆炸</strong>。</li></ul><p>区别在哪？第一件事几乎必然发生（概率≈1），第二件事极其罕见（概率极小）。<strong>一件事越「出乎意料」，它一旦成真带来的信息就越多。</strong>这就是信息论的核心直觉。 把它写成公式，就是事件 x 的<strong>信息量</strong>（用它的概率 p 来算）：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0785em;">I</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span></span></div><p>为什么偏偏是 <strong>−log</strong>，而不是别的？除了「概率越小、数值越大」这个起码要求， 它还满足一条非常关键的性质：<strong>两条互不相干的消息，信息量应该能直接相加</strong>。 而 log 恰好能把「概率相乘」变成「信息相加」，天造地设。先用三个极端值检验一下它靠不靠谱：</p><figure class="fig"><div class="fig-frame"><div class="plotly-fig"></div></div><figcaption><span class="fig-no">图 6-2</span>信息量 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0785em;">I</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span></span></span></span></span> 随概率单调下降。必然发生的事（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span>）信息量为 0；越罕见（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">p</span></span></span></span></span> 越小），信息量越往上冲。</figcaption></figure><ul style="margin-top:4px;padding-left:24px;line-height:2.1"><li><strong>p = 1</strong>（太阳东升）：I = −log 1 = <strong>0</strong>。毫不意外，零信息。</li><li><strong>p = 0.5</strong>（抛一次硬币）：I = −log 0.5 = <strong>1 比特</strong>。一个「是/否」的信息。</li><li><strong>p = 0.001</strong>（中大奖）：I ≈ <strong>10 比特</strong>。极度惊讶，信息量巨大。</li></ul><p>顺带说一句单位：用以 2 为底的对数，单位是<strong>比特（bit）</strong>，正好对应「需要几个 0/1 才能表达这条消息」； 深度学习里更常用自然对数（底数 e），单位叫<strong>奈特（nat）</strong>。两者只差一个固定常数，性质完全一样。</p><div class="think"><div class="think-q">为什么用 log，而不是「1 − p」之类更简单的式子来衡量意外程度？提示：想想两条独立消息的信息量该怎么合并。</div></div></section><section class="station reveal" data-title="熵：整个分布平均有多难猜" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>熵：整个分布平均有多难猜</h2></div><p>信息量说的是「<em>某一个</em>具体结果」有多意外。可如果想衡量「<strong>整件事整体上有多难预测</strong>」， 就得把所有可能结果的意外程度<strong>加权平均</strong>——用每个结果自己的概率当权重。 这个平均意外程度，就叫<strong>熵</strong>（entropy）：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span></span></div><p>直觉很好抓：拿两枚硬币对比就懂了。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 220" role="img" aria-label="公平硬币与灌铅硬币的熵对比"><line x1="240" y1="20" x2="240" y2="185" stroke="#DCD2BF" stroke-width="1.2" stroke-dasharray="4 4"></line><text x="130" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#C0481E">公平硬币</text><line x1="55" y1="170" x2="215" y2="170" class="svg-axis"></line><g><rect x="80" y="105" width="42" height="65" rx="3" fill="#C0481E" fill-opacity="0.55"></rect><text x="101" y="99" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0481E">0.5</text><text x="101" y="186" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1E2B38">正</text></g><g><rect x="140" y="105" width="42" height="65" rx="3" fill="#C0481E" fill-opacity="0.55"></rect><text x="161" y="99" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0481E">0.5</text><text x="161" y="186" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1E2B38">反</text></g><text x="130" y="208" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E">H = 1 比特（最难猜）</text><text x="380" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E6B8F">灌铅硬币</text><line x1="300" y1="170" x2="460" y2="170" class="svg-axis"></line><g><rect x="325" y="53" width="42" height="117" rx="3" fill="#3E6B8F" fill-opacity="0.55"></rect><text x="346" y="47" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">0.9</text><text x="346" y="186" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1E2B38">正</text></g><g><rect x="385" y="157" width="42" height="13" rx="3" fill="#3E6B8F" fill-opacity="0.55"></rect><text x="406" y="151" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">0.1</text><text x="406" y="186" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1E2B38">反</text></g><text x="380" y="208" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">H ≈ 0.47 比特（好猜）</text></svg></div><figcaption><span class="fig-no">图 6-3</span>公平硬币正反各半，结果最难猜——熵最大；灌铅硬币九成正面，几乎闭眼能猜对——熵很小。分布越「扁平均匀」，熵越高。</figcaption></figure><ul style="margin-top:4px;padding-left:24px;line-height:2.1"><li><strong>均匀分布</strong>（每种结果概率相等）：<strong>熵最大</strong>。完全没有头绪，平均最意外。</li><li><strong>确定性分布</strong>（某个结果概率为 1）：H = −1 × log 1 = <strong>0</strong>。结果板上钉钉，毫无悬念。</li></ul><p>这恰好解释了「为什么 AI 猜词是一件有意义的事」。如果中文的每个字都等概率出现，那语言就是纯噪声， 熵高到没法预测，模型再聪明也无能为力。但真实语言远没那么随机—— 「今天天气很」后面接「好」的可能远大于接「桌子」。语言的熵<strong>不高不低</strong>： 有规律可循（所以可预测、可压缩），又留有选择（所以不无聊）。正因如此，「预测下一个词」才既不是送分题、也不是无解题。</p><div class="think"><div class="think-q">分布 A：下雨 0.9、晴天 0.1；分布 B：下雨 0.5、晴天 0.5。哪个分布的熵更高？哪个更难预测？</div></div></section><section class="station reveal" data-title="交叉熵：用错的地图走路要多绕" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>交叉熵：拿一张「可能画错的地图」去赌真实世界</h2></div><p>前面的熵，衡量的是<em>真实世界本身</em>有多难猜。但在 AI 里，我们手上往往只有一张<strong>模型自己画的「地图」</strong>——模型对各种结果的概率估计 q，它未必和真实情况 p 一致。 于是出现一个新问题：<strong>如果我拿着模型这张（可能画错的）地图，去面对真实世界，平均会有多「意外」？</strong></p><p>答案就是<strong>交叉熵</strong>（cross-entropy）：用模型分布 q 给出的「意外程度 −log q」， 按真实分布 p 来加权平均——</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">q</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3em;vertical-align:-1.25em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em;"><span style="top:-1.9em;margin-left:0em;"><span class="pstrut" style="height:3.05em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">x</span></span></span><span style="top:-3.05em;"><span class="pstrut" style="height:3.05em;"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.25em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">q</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span></span></div><p>在「猜下一个词」这种任务里，真实答案是<strong>确定</strong>的：正确的词就是「猫」。 把这个事实写成概率分布 p，它是一个<strong>独热分布</strong>——p(猫)=1，其它词全是 0。 而模型的预测 q 则是一组没那么笃定的数，比如 q(猫)=0.7、q(狗)=0.2、q(鸟)=0.1：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 215" role="img" aria-label="真实独热分布与模型预测分布的交叉熵"><text x="130" y="24" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#5C6B79">真实答案 p（独热）</text><line x1="55" y1="165" x2="235" y2="165" class="svg-axis"></line><rect x="80" y="45" width="42" height="120" rx="3" fill="#C0481E" fill-opacity="0.85"></rect><text x="101" y="38" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E">1.0</text><text x="101" y="182" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1E2B38">猫</text><text x="156" y="182" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1E2B38">狗</text><text x="211" y="182" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1E2B38">鸟</text><line x1="260" y1="18" x2="260" y2="185" stroke="#DCD2BF" stroke-width="1.2" stroke-dasharray="4 4"></line><text x="385" y="24" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#5C6B79">模型预测 q</text><line x1="285" y1="165" x2="465" y2="165" class="svg-axis"></line><g><rect x="300" y="81" width="42" height="84" rx="3" fill="#3E6B8F" fill-opacity="0.7"></rect><text x="321" y="75" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">0.7</text><text x="321" y="182" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1E2B38">猫</text></g><g><rect x="355" y="141" width="42" height="24" rx="3" fill="#3E6B8F" fill-opacity="0.4"></rect><text x="376" y="135" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">0.2</text><text x="376" y="182" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1E2B38">狗</text></g><g><rect x="410" y="153" width="42" height="12" rx="3" fill="#3E6B8F" fill-opacity="0.28"></rect><text x="431" y="147" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">0.1</text><text x="431" y="182" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1E2B38">鸟</text></g><line x1="321" y1="60" x2="321" y2="80" stroke="#5C6B79" stroke-width="1" stroke-dasharray="3 2"></line><polygon points="321,81 318,73 324,73" fill="#5C6B79"></polygon><text x="385" y="56" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0481E">只看这一根：−log 0.7 ≈ 0.36</text><text x="260" y="207" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#1E2B38">H(p, q) = −log q(猫) = −log 0.7 ≈ 0.36</text></svg></div><figcaption><span class="fig-no">图 6-4</span>真实分布 p 是独热的，求和里只有「猫」那一项活下来，其余被 p=0 直接抹掉。于是交叉熵化简成一句话：−log（模型给正确答案的概率）。</figcaption></figure><p>因为 p 是独热的，求和里只有「猫」这一项的权重不为 0，整个交叉熵<strong>干脆利落地塌缩成一项</strong>：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="mopen">(</span><span class="mord mathnormal">p</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">q</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.7</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.0139em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">0.7</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">0.36</span></span></span></span></span></span><span class="formula-tex-note">0.7 = 模型给正确答案「猫」的概率 q(猫)</span></div><p>现在体会一下它的脾气：模型越<strong>自信地答对</strong>（q(猫) 越接近 1），−log q(猫) 越接近 0，交叉熵越小； 模型越把正确答案的概率<strong>压低</strong>（q(猫) 越接近 0），−log q(猫) 越往上飙，交叉熵越大。 这不正是一个理想的「错得多离谱」打分器该有的样子吗？</p><p>所以这件事一点都不巧：<strong>「模型预测下一个词」的损失，天生就该用交叉熵来衡量</strong>。 第 10 课《损失函数》会把它正式当成训练的目标——到时你会看到，那个公式不是谁拍脑袋规定的， 而是信息论在这里自然长出来的。</p><div class="crack reveal"><div class="crack-label">两个补充直觉</div><p><strong>① 交叉熵永远 ≥ 熵。</strong> 多出来的那部分，衡量的是「模型地图 q 和真实世界 p 差了多远」， 它有个名字叫 <strong>KL 散度</strong>。地图画得越准，q 越贴近 p，这段差距越小，交叉熵就越逼近真实世界本身的熵——再也省不掉了。</p><p style="margin-top:12px"><strong>② 为什么用 −log 当惩罚，而不是简单的「差多少」？</strong> 因为当模型把正确答案的概率压到接近 0 时， −log 的惩罚会冲向无穷大。回想上一课的梯度：错得越离谱、坡度越陡，纠错的信号就越猛，模型回头得越快。 换成「平方差」那种温和的惩罚，反而会在模型错得最离谱时几乎没有坡度，学习就卡住了。</p></div></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p><span class="tk-hl">概率分布</span>是对「所有可能结果各占多少」的完整描述（非负、加和为 1）—— 这就是模型输出被叫做「概率」的原因。<span class="tk-hl">信息量 −log p</span> 刻画一个结果有多意外；<span class="tk-hl">熵</span>是整个分布的平均意外程度；<span class="tk-hl">交叉熵</span>衡量「拿模型的分布 q 去面对真实分布 p」平均有多意外。 当真实答案确定（独热）时，交叉熵塌缩成 <span class="tk-hl">−log（模型给正确答案的概率）</span>—— 它天生就是一个完美的「错得多离谱」打分器，也正是后面分类任务损失函数的来历。</p></div><div class="recap"><h3>这一课你一步步理解了</h3><ul><li><strong>概率分布</strong>：非负、加和为 1，描述所有可能结果的长期占比。</li><li><strong>信息量 I = −log p</strong>：越意外信息越大；p=1 时为 0。log 来自「信息可加」。</li><li><strong>熵 H(p) = −Σ p·log p</strong>：分布的平均意外程度，均匀时最大、确定时为 0。</li><li><strong>交叉熵 H(p,q) = −Σ p·log q</strong>：p 为独热时塌缩成 −log q(正确答案)。</li><li><strong>KL 散度</strong>：交叉熵超出熵的部分，衡量模型分布与真实分布的差距。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="非负且总和为 1 正是概率的基本要求，故可解释为概率分布。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>神经网络做分类时，最后输出一组「加起来等于 1 的非负数」。我们为什么把它们解释为「概率」？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">因为数字比较小</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">因为它们满足概率的基本要求：非负、且总和为 1</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">因为它们是整数</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">因为它们一定大于 0.5</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="0" data-explain="交叉熵衡量预测分布与真实分布的差距，预测越贴近真实答案越小。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>交叉熵损失衡量的是什么？什么时候它最小？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">衡量预测分布与真实分布的差距，预测越贴近真实答案它越小</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">衡量网络的参数总量，参数越少越小</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">衡量训练用了多少数据，数据越多越小</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">衡量输出向量的长度，越短越小</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nn-01-neuron.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 07 课</span>
+                    <h3>神经元结构</h3>
+                    <p>一个「脑细胞」是怎么工作的？——输入、加权、激活</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷一 · 第06课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

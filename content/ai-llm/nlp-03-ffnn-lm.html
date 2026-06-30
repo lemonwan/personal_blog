@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第16课 · 前馈神经网络语言模型 | AI大模型原理教程</title>
+    <meta name="description" content="用神经网络来预测下一个词——比N-gram强在哪里？">
+    <meta name="keywords" content="AI大模型教程,Transformer,前馈神经网络语言模型,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第16课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 16 · 卷三</div>
+            <h1>前馈神经网络语言模型</h1>
+            <p class="subtitle">❝ 用神经网络来预测下一个词——比N-gram强在哪里？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="N-gram 的死穴" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>N-gram 的死穴：没见过就不会</h2></div><p>上两课我们有了两样东西：第 14 课的 N-gram，靠「数数」预测下一个词；第 15 课的词向量，把每个词变成一串能比较远近的数字。 这一课，我们把它们拼到一起——但先要看清，单靠 N-gram 会栽在哪。</p><p>N-gram 的做法是查历史统计：要预测下一个词，就看前面 N−1 个词，找它们后面历史上最常跟着的那个词。我们用 N=3，试试这句：</p><div class="formula" style="font-family:var(--serif);font-size:17px">「科学家发现了一颗围绕<span class="f-hl">黑洞</span>运转的 ___」</div><p>要查的是：「<strong>围绕黑洞运转</strong>」后面最常出现什么词？于是我们翻遍训练语料，去数这个短语后面跟过的词—— 结果是个尴尬的数字：<strong>0 次</strong>。「黑洞」本就是个冷僻的专业词，「围绕黑洞运转的」这个完整组合，普通文本里压根没出现过。</p><div class="crack reveal"><div class="crack-label">0 次 = 一片空白</div><p>查不到统计，N-gram 只能<strong>回退</strong>：砍掉前文，只看「运转的 ___」，甚至只看「的 ___」。 可「的」后面最常见的是「人」「树」「东西」这种万金油词——于是它一本正经地补出 「围绕黑洞运转的<strong>树</strong>」。</p><p style="margin-top:12px">病根在于：N-gram 眼里每个词都是一个<strong>孤立的符号</strong>。它不知道「黑洞」和「恒星」有任何关系—— 哪怕语料里「围绕恒星运转的<strong>行星</strong>」出现过一万次，对「围绕黑洞运转」这条空白记录也<em>一点忙都帮不上</em>。 它只会照搬见过的，对没见过的组合<strong>毫无推断能力</strong>。</p></div><div class="think"><div class="think-q">上一课我们刚学了词向量——它能帮 N-gram 补上这个死穴吗？如果「黑洞」是一串数字而不是一个符号，能帮上什么忙？</div></div></section><section class="station reveal" data-title="把词翻译成数字" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>第一步：把上下文词翻译成数字</h2></div><p>2003 年，研究员 Bengio 想到的办法朴素得惊人，就三步：</p><ol style="padding-left:24px;line-height:2.1"><li><strong>查向量</strong>：把最近的 N 个词，各自换成它的词向量（一串数字）；</li><li><strong>拼起来</strong>：把这几串数字首尾相接，拼成一长串，作为神经网络的输入；</li><li><strong>过网络</strong>：送进一个神经网络，输出词表里每个词「该是下一个词」的概率。</li></ol><p>关键的转折就在第 1 步：神经网络的输入从今往后是<strong>数字，不再是符号</strong>。 这一步看似平平无奇，却正是举一反三的全部秘密所在——下一站会把它算给你看。</p><p>先看整体长什么样。真实的模型里每个词向量上百维、上下文好几个词，画不下；下面这张是它的<strong>骨架</strong>：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 220" role="img" aria-label="FFNN 语言模型结构：词向量 → 拼接 → 神经网络 → 概率"><text x="40" y="20" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#5C6B79">最近 3 个词</text><g><rect x="20" y="30" width="72" height="32" rx="4" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="56" y="51" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">围绕</text></g><g><rect x="20" y="74" width="72" height="32" rx="4" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="56" y="95" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">黑洞</text></g><g><rect x="20" y="118" width="72" height="32" rx="4" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="56" y="139" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">运转的</text></g><line x1="92" y1="46" x2="130" y2="46" stroke="#DCD2BF" stroke-width="1.5"></line><line x1="92" y1="90" x2="130" y2="90" stroke="#DCD2BF" stroke-width="1.5"></line><line x1="92" y1="134" x2="130" y2="134" stroke="#DCD2BF" stroke-width="1.5"></line><text x="165" y="20" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#3E6B8F">词向量（查表得到）</text><g><rect x="130" y="30" width="160" height="32" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="210" y="51" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">[0.2, −0.7, 0.1, …]</text></g><g><rect x="130" y="74" width="160" height="32" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="210" y="95" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">[0.8, 0.3, −0.5, …]</text></g><g><rect x="130" y="118" width="160" height="32" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="210" y="139" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#3E6B8F">[0.1, 0.9, 0.2, …]</text></g><line x1="290" y1="100" x2="320" y2="100" stroke="#DCD2BF" stroke-width="1.5"></line><rect x="320" y="75" width="60" height="50" rx="4" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="350" y="98" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">拼接</text><text x="350" y="113" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#4A8B5E">一长串</text><line x1="380" y1="100" x2="412" y2="100" stroke="#DCD2BF" stroke-width="1.5"></line><rect x="412" y="68" width="64" height="64" rx="8" fill="#FDF6EC" stroke="#C0481E" stroke-width="1.5"></rect><text x="444" y="97" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E" font-weight="700">神经</text><text x="444" y="112" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E" font-weight="700">网络</text><line x1="476" y1="100" x2="510" y2="100" stroke="#DCD2BF" stroke-width="1.5"></line><text x="515" y="82" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#C0481E">行星 42%</text><text x="515" y="98" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">天体 18%</text><text x="515" y="114" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">卫星 11%</text><text x="515" y="130" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">…</text><text x="280" y="185" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">查向量 → 拼成一长串 → 过网络 → 每个词的概率</text></svg></div><figcaption><span class="fig-no">图 16-1</span>FFNN 语言模型的骨架：取最近 N 个词，各查出词向量，首尾拼成一长串，送进全连接网络，输出词表上每个词的概率。</figcaption></figure><div class="crack reveal"><div class="crack-label">这台「神经网络」你早就拆解过了</div><p>图里那个橙色「神经网络」方块不是新东西，而是卷二一整套积木的组合： 过 <strong>Wx + b 加激活函数</strong>（第 7、8 课），最后用 <strong>Softmax</strong> 把输出压成「每个词的概率」（第 11 课）。 训练也照搬卷二：真实的下一个词就是标准答案，用<strong>交叉熵</strong>算预测有多离谱（第 10 课）， 再靠<strong>反向传播</strong>把误差摊回每个权重、连同词向量一起微调（第 13 课）。</p></div></section><section class="station reveal" data-title="手算一遍前向" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>手算一遍：数字是怎么流过网络的</h2></div><p>骨架看懂了，可「过网络」三个字还是个黑箱。我们把它<strong>缩到能手算的尺寸</strong>，真刀真枪走一遍。 为了算得清楚，做三处简化（道理和满血版一模一样）：</p><ul style="margin-top:12px;padding-left:24px;line-height:2.1"><li>上下文只取 <strong>2 个词</strong>：「围绕」+ 一个待定的词（先用「恒星」）；</li><li>每个词向量只要 <strong>2 维</strong>。第 1 维我们叫它<strong>「天文性」</strong>（越大越像天文词），第 2 维是别的语义；</li><li>候选的下一个词只留 <strong>2 个</strong>：「行星」和「雨伞」。</li></ul><p>查表，得到两个词向量，把它们拼成一串 4 个数的输入：</p><div class="formula">围绕 = <span class="f-dim">[0.10, 0.20]</span>　恒星 = <span class="f-hl">[0.90, 0.15]</span><br/><span style="font-size:14px">拼接后的输入 = [0.10, 0.20, <span class="f-hl">0.90, 0.15</span>]</span></div><p>网络的隐藏层放<strong>一个神经元</strong>，专门当「天文语境探测器」：它只盯着待定词的「天文性」那一维， 做的还是第 7、8 课那套 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">tanh</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0269em;">w</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">b</span><span class="mclose">)</span></span></span></span></span>（权重 1.5、偏置 −0.8，激活用 tanh）：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">h</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">tanh</span><span class="mopen">(</span><span class="mord">1.5</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.9708em;vertical-align:-1.3263em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6444em;"><span style="top:-1.6737em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord cjk_fallback mtight">恒星的天文性</span></span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="minner munder"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6444em;"><span class="svg-align" style="top:-2.352em;"><span class="pstrut" style="height:3em;"></span><span class="stretchy" style="height:0.548em;min-width:1.6em;"><span class="brace-left" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMinYMin slice"><path d="M0 6l6-6h17c12.688 0 19.313.3 20 1 4 4 7.313 8.3 10 13
+ 35.313 51.3 80.813 93.8 136.5 127.5 55.688 33.7 117.188 55.8 184.5 66.5.688
+ 0 2 .3 4 1 18.688 2.7 76 4.3 172 5h399450v120H429l-6-1c-124.688-8-235-61.7
+-331-161C60.687 138.7 32.312 99.3 7 54L0 41V6z"/></svg></span><span class="brace-center" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMidYMin slice"><path d="M199572 214
+c100.7 8.3 195.3 44 280 108 55.3 42 101.7 93 139 153l9 14c2.7-4 5.7-8.7 9-14
+ 53.3-86.7 123.7-153 211-199 66.7-36 137.3-56.3 212-62h199568v120H200432c-178.3
+ 11.7-311.7 78.3-403 201-6 8-9.7 12-11 12-.7.7-6.7 1-18 1s-17.3-.3-18-1c-1.3 0
+-5-4-11-12-44.7-59.3-101.3-106.3-170-141s-145.3-54.3-229-60H0V214z"/></svg></span><span class="brace-right" style="height:0.548em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="0.548em" viewBox="0 0 400000 548" preserveAspectRatio="xMaxYMin slice"><path d="M399994 0l6 6v35l-6 11c-56 104-135.3 181.3-238 232-57.3
+ 28.7-117 45-179 50H-300V214h399897c43.3-7 81-15 113-26 100.7-33 179.7-91 237
+-174 2.7-5 6-9 10-13 .7-1 7.3-1 20-1h17z"/></svg></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">0.90</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.648em;"><span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.3263em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0.8</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">tanh</span><span class="mopen">(</span><span class="mord">0.55</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.50</span></span></span></span></span></span></div><p>再接<strong>输出层</strong>：天文味越浓（h 越大），就越该接「行星」。我们让「行星」的分数 = <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">2.5</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">h</span></span></span></span></span>， 「雨伞」的分数固定为 0，最后用第 11 课的 <strong>softmax</strong> 把两个分数挤成概率：</p><div class="formula">行星分 = 2.5 × 0.50 = <span class="f-hl">1.25</span>　｜　雨伞分 = 0<br/><span style="font-size:14px">softmax：行星 = e<sup>1.25</sup> / (e<sup>1.25</sup>+e<sup>0</sup>) = 3.49 / 4.49 ≈ <span class="f-hl">78%</span>，雨伞 ≈ 22%</span></div><p>网络吐出：下一个词<strong>有 78% 是「行星」</strong>。一串数字，经过「拼接 → 一次加权 + tanh → softmax」， 就变成了一个有理有据的预测。下面这台就是这套缩小版机器，活的——它默认在算「围绕 + 恒星」，数字和上面完全对得上：</p><figure class="fig"><div class="fruit-lab fruit-lab-col"><div class="gd-controls"><span class="act-btns-label">第二个上下文词：</span><button type="button" class="act-btn on">恒星</button><button type="button" class="act-btn">黑洞</button><button type="button" class="act-btn">火箭</button><button type="button" class="act-btn">香蕉</button></div><svg class="neuron-svg" viewBox="0 0 560 196" role="img" aria-label="FFNN 语言模型：两个词的向量拼接、过隐藏神经元、softmax 输出下一个词的概率"><text x="66" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#5C6B79">上下文（2 个词）</text><g><rect x="14" y="36" width="58" height="32" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1.3"></rect><text x="43" y="56" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">围绕</text><line x1="72" y1="52" x2="104" y2="52" stroke="#DCD2BF" stroke-width="1.4"></line><polygon points="106,52 98,48 98,56" fill="#DCD2BF"></polygon><rect x="106" y="36" width="92" height="32" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="152" y="56" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">[<!-- -->0.10<!-- -->, <!-- -->0.20<!-- -->]</text></g><g><rect x="14" y="96" width="58" height="32" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1.3"></rect><text x="43" y="116" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#C0481E">恒星</text><line x1="72" y1="112" x2="104" y2="112" stroke="#DCD2BF" stroke-width="1.4"></line><polygon points="106,112 98,108 98,116" fill="#DCD2BF"></polygon><rect x="106" y="96" width="92" height="32" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="152" y="116" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">[<!-- -->0.90<!-- -->, <!-- -->0.15<!-- -->]</text></g><text x="250" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#4A8B5E">拼接成一串</text><line x1="198" y1="52" x2="222" y2="88" stroke="#C9BBA2" stroke-width="1.3"></line><line x1="198" y1="112" x2="222" y2="96" stroke="#C9BBA2" stroke-width="1.3"></line><rect x="222" y="70" width="86" height="44" rx="6" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="265" y="88" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#4A8B5E">[<!-- -->0.10<!-- -->,<!-- -->0.20<!-- -->,</text><text x="265" y="104" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#4A8B5E">0.90<!-- -->,<!-- -->0.15<!-- -->]</text><line x1="308" y1="92" x2="336" y2="92" stroke="#5C6B79" stroke-width="1.6"></line><polygon points="338,92 330,88 330,96" fill="#5C6B79"></polygon><circle cx="372" cy="92" r="30" fill="#FDF6EC" stroke="#C0481E" stroke-width="2.2"></circle><text x="372" y="84" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="8" fill="#93A0AC">天文探测器</text><text x="372" y="99" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="8" fill="#93A0AC">tanh</text><text x="372" y="114" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#C0481E">0.50</text><text x="372" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#5C6B79">h = tanh(1.5×<!-- -->0.90<!-- -->−0.8)</text><line x1="402" y1="92" x2="430" y2="92" stroke="#5C6B79" stroke-width="1.6"></line><polygon points="432,92 424,88 424,96" fill="#5C6B79"></polygon><text x="500" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#5C6B79">下一个词</text><text x="448" y="84" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#C0481E" font-weight="700">🪐 行星 <!-- -->78%</text><text x="448" y="108" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#93A0AC" font-weight="400">☂ 雨伞 <!-- -->22%</text></svg><div class="prob-block"><div class="prob-row prob-win"><span class="prob-name">🪐 行星</span><span class="prob-bar"><span class="prob-fill" style="width:78%;background:#C0481E"></span></span><span class="prob-pct">78%</span></div><div class="prob-row"><span class="prob-name">☂ 雨伞</span><span class="prob-bar"><span class="prob-fill" style="width:22%;background:#3E6B8F"></span></span><span class="prob-pct">22%</span></div></div><div class="calc-line" style="margin-top:8px">「<!-- -->恒星<!-- -->」是<b>天文词</b>，天文性 = <!-- -->0.90<!-- --> → h = tanh(1.5×<!-- -->0.90<!-- -->−0.8) = <b class="calc-z">0.50</b> → 行星概率 = <b class="calc-z">78%</b></div><div class="lab-hint">把第二个词从「恒星」切到「<b>黑洞</b>」：它俩的向量几乎一样（[0.90,0.15] vs [0.85,0.20]），所以拼出来的输入几乎一样、隐藏层反应几乎一样、<b>行星概率也几乎一样</b>——哪怕训练里从没出现过「围绕黑洞」。这就是「举一反三」。再切到「香蕉」，向量差得远，输出立刻翻盘成「雨伞」。<b>N-gram 把这几个词都当成毫无关系的符号，永远做不到这一点。</b></div></div><figcaption><span class="fig-no">互动 16-A</span>缩小版 FFNN 语言模型的现场演算：换上方按钮里第二个上下文词，看它的词向量、隐藏层 h、和最终的「行星 / 雨伞」概率<strong>同步刷新</strong>。重点对比「恒星」和「黑洞」。</figcaption></figure></section><section class="station reveal" data-title="举一反三" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>见证「举一反三」：把恒星换成黑洞</h2></div><p>现在回到第 1 站那个把 N-gram 难住的词——<strong>黑洞</strong>。假设训练语料里「围绕黑洞」从没出现过， 但词向量那一课已经让「黑洞」的向量和「恒星」挨得极近。我们把上下文第二个词换成黑洞，<strong>同一台机器，重算一遍</strong>：</p><div class="formula">恒星 = [<span class="f-hl">0.90</span>, 0.15]　vs　黑洞 = [<span class="f-hl">0.85</span>, 0.20]<br/><span style="font-size:14px">h = tanh(1.5×0.85 − 0.8) = tanh(0.475) ≈ <span class="f-hl">0.44</span> → 行星分 = 1.10 → 行星 ≈ <span class="f-hl">75%</span></span></div><p><strong>78% vs 75%——几乎一模一样。</strong>道理很朴素：黑洞的向量和恒星只差一点点， 拼出来的输入就只差一点点，隐藏层是连续函数，<em>输入差一点点、输出也只差一点点</em>。 于是哪怕「围绕黑洞」这个组合网络从没见过，它照样稳稳预测「行星」。这正是 N-gram 怎么也做不到的<strong>举一反三</strong>。</p><p>把三个词排在一起对比，差别一目了然（在互动 16-A 里挨个点一遍，数字会和这张表对上）：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 540 200" role="img" aria-label="恒星、黑洞、香蕉三个上下文词给出的预测对比"><text x="100" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#5C6B79">第二个上下文词</text><text x="270" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">天文性 → h</text><text x="450" y="24" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#C0481E">预测「行星」</text><line x1="20" y1="32" x2="520" y2="32" stroke="#DCD2BF" stroke-width="1"></line><g><text x="30" y="60" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#232F3B">恒星（见过）</text><text x="270" y="60" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">0.90 → 0.50</text><rect x="372" y="49" width="120" height="16" rx="3" fill="#F4F0E7" stroke="#DCD2BF" stroke-width="0.8"></rect><rect x="372" y="49" width="93.60000000000001" height="16" rx="3" fill="#C0481E" opacity="0.85"></rect><text x="500" y="61" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E" font-weight="700">78%</text><line x1="20" y1="70" x2="520" y2="70" stroke="#F5F0E8" stroke-width="1"></line></g><g><text x="30" y="104" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#232F3B">黑洞（没见过）</text><text x="270" y="104" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">0.85 → 0.44</text><rect x="372" y="93" width="120" height="16" rx="3" fill="#F4F0E7" stroke="#DCD2BF" stroke-width="0.8"></rect><rect x="372" y="93" width="90" height="16" rx="3" fill="#C0481E" opacity="0.85"></rect><text x="500" y="105" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E" font-weight="700">75%</text><line x1="20" y1="114" x2="520" y2="114" stroke="#F5F0E8" stroke-width="1"></line></g><g><text x="30" y="148" font-family="Noto Serif SC, serif" font-size="13" font-weight="700" fill="#93A0AC">香蕉（无关）</text><text x="270" y="148" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">0.10 → −0.57</text><rect x="372" y="137" width="120" height="16" rx="3" fill="#F4F0E7" stroke="#DCD2BF" stroke-width="0.8"></rect><rect x="372" y="137" width="22.8" height="16" rx="3" fill="#3E6B8F" opacity="0.85"></rect><text x="500" y="149" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F" font-weight="700">19%</text><line x1="20" y1="158" x2="520" y2="158" stroke="#F5F0E8" stroke-width="1"></line></g><text x="270" y="192" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">向量相近的「恒星 / 黑洞」给出几乎一样的预测；向量很远的「香蕉」立刻翻盘</text></svg></div><figcaption><span class="fig-no">图 16-2</span>同一台网络，只换上下文里第二个词。语义相近的词（恒星↔黑洞）输出几乎一致——这就是泛化；而 N-gram 把这三个词当成三个毫无关系的符号，「恒星」的统计一丝一毫都借不给「黑洞」。</figcaption></figure></section><section class="station reveal" data-title="和 N-gram 比较" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>和 N-gram 一起放在桌上比较</h2></div><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 180" role="img" aria-label="N-gram vs FFNN-LM 对比"><text x="160" y="22" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#5C6B79">N-gram（数数）</text><text x="430" y="22" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E6B8F">FFNN 语言模型</text><line x1="20" y1="28" x2="540" y2="28" stroke="#DCD2BF" stroke-width="1"></line><g><text x="20" y="48" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="600" fill="#232F3B">词是什么</text><text x="160" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">孤立的符号</text><text x="430" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">一串数字（向量）</text><line x1="20" y1="56" x2="540" y2="56" stroke="#F5F0E8" stroke-width="1"></line></g><g><text x="20" y="76" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="600" fill="#232F3B">没见过的组合</text><text x="160" y="76" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">查不到 → 回退乱猜</text><text x="430" y="76" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">看相近的词，举一反三</text><line x1="20" y1="84" x2="540" y2="84" stroke="#F5F0E8" stroke-width="1"></line></g><g><text x="20" y="104" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="600" fill="#232F3B">存储</text><text x="160" y="104" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">庞大的统计表（GB 级）</text><text x="430" y="104" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">紧凑（向量 + 网络权重）</text><line x1="20" y1="112" x2="540" y2="112" stroke="#F5F0E8" stroke-width="1"></line></g><g><text x="20" y="132" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="600" fill="#232F3B">训练方式</text><text x="160" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">数数</text><text x="430" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">反向传播</text><line x1="20" y1="140" x2="540" y2="140" stroke="#F5F0E8" stroke-width="1"></line></g><g><text x="20" y="160" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="600" fill="#232F3B">上下文窗口</text><text x="160" y="160" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">N 个词（固定）</text><text x="430" y="160" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">N 个词（固定）</text><line x1="20" y1="168" x2="540" y2="168" stroke="#F5F0E8" stroke-width="1"></line></g></svg></div><figcaption><span class="fig-no">图 16-3</span>FFNN 语言模型样样比 N-gram 聪明，但最后一行——上下文窗口固定——是它俩共同的死结。</figcaption></figure><div class="crack reveal"><div class="crack-label">窗口还是固定的</div><p>两者共有的硬伤：<strong>上下文窗口是固定大小的</strong>。N 通常只设 3~5， 因为窗口一变大，拼出来的输入就变长、网络也跟着变大，训练成本飙升，回报却越来越小。</p><p style="margin-top:12px">可看这句：「那只从小被遗弃在废弃工厂里、因为长期挨饿而变得格外暴躁的流浪犬，今天终于被好心人收留了，它＿＿＿」。 要填最后一个词，得读懂整段的情绪和故事——但 FFNN 只看得见最后 5 个词「它终于＿＿＿」， 前面那一长串铺垫<strong>全被挡在窗口外面，完全不存在</strong>。</p></div><div class="think"><div class="think-q">如果「窗口固定」是根本病灶，有没有办法让模型读每个词时都「记住」前面所有内容，而不是只看最近几个？</div></div></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>FFNN 语言模型 = 词向量 + 神经网络。把最近 N 个词的向量<span class="tk-hl">拼成一长串</span>， 送进全连接网络预测下一个词。关键进步：<span class="tk-hl">相近的词向量 → 相近的网络输入 → 相近的预测</span>， 于是能对没见过的组合举一反三。遗留问题：上下文窗口仍是固定大小，看不到更远处。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>N-gram 的死穴</strong>：词是孤立符号，没见过的组合 → 回退乱猜，「恒星」的统计借不给「黑洞」。</li><li><strong>三步法</strong>：查向量 → 拼接 → 过网络（Wx+b、tanh、softmax，全是卷二的零件）。</li><li><strong>手算一遍前向</strong>：[0.10,0.20,0.90,0.15] → h≈0.50 → 行星 78%。</li><li><strong>举一反三</strong>：黑洞向量≈恒星 → 输入≈、输出≈（78% vs 75%），哪怕没见过这个组合。</li><li><strong>新的局限</strong>：上下文窗口固定，超出 N 个词的信息完全丢失。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="NNLM 用稠密词向量让相似词共享统计强度，从而泛化到没见过的组合。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>前馈神经网络语言模型（NNLM）相比 N-gram，主要靠什么绕开了「稀疏灾难」？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">用更大的统计表</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">把词表示成稠密的词向量，让相似的词能共享统计强度、泛化到没见过的组合</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">完全不看上下文</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">把所有概率都设成相等</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="0" data-explain="前馈语言模型只能看固定长度窗口，无法利用更长历史。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>前馈神经网络语言模型在处理上下文时有什么固有局限？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">只能看到固定长度的上下文窗口，无法利用更早、更长的历史</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">完全无法训练</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">不能使用词向量</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">只能用于翻译</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="nlp-04-rnn.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 17 课</span>
+                    <h3>RNN 循环神经网络</h3>
+                    <p>句子长短不一，神经网络怎么处理任意长度的序列？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷三 · 第16课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

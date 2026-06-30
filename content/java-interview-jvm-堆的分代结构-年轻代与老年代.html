@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 18 | 堆的分代结构：年轻代与老年代</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #a855f7; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #a855f7; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #a855f7; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #a855f7; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #a855f7, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 18 — 堆的分代结构：年轻代与老年代</h1>
+  <div class="tag">模块：JVM · 内存模型</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">18</span>
+    <span class="card-title">堆的分代结构：年轻代与老年代</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>堆的分代结构：年轻代与老年代</h3>
+      <div class="content"><p>JVM 堆内存按照对象生命周期划分为<strong>年轻代（Young Generation）</strong>和<strong>老年代（Old Generation）</strong>，这是「分代收集理论」的核心实现。</p>
+
+<h4 style="margin:10px 0 6px;color:#0c4a6e">年轻代（Young Generation）</h4>
+<p>新创建的对象首先被分配在年轻代。年轻代进一步分为：</p>
+<ul class="bullet-list">
+<li><span class="highlight">Eden 区</span>：对象首次分配的地方，大多数对象在这里「朝生夕死」。</li>
+<li><span class="highlight">Survivor 区（From）</span>：第一次Minor GC后存活下来的对象进入此区。</li>
+<li><span class="highlight">Survivor 区（To）</span>：下一次Minor GC的目标区域。</li>
+</ul>
+<p>年轻代默认占堆内存的 <strong>1/3</strong>，老年代占 <strong>2/3</strong>。可通过 <code>-XX:NewRatio</code> 调整比例。</p>
+
+<h4 style="margin:10px 0 6px;color:#0c4a6e">老年代（Old Generation）</h4>
+<ul class="bullet-list">
+<li>存放<strong>长期存活的对象</strong>，如缓存对象、单例等。</li>
+<li>对象经过多次GC仍存活（默认 <strong>15次</strong>，可由 <code>-XX:MaxTenuringThreshold</code> 设定），会被晋升到老年代。</li>
+<li>大对象（超过Survivor区一半容量）可能直接分配在老年代（<code>-XX:+PretenureSizeThreshold</code>）。</li>
+<li>老年代满了触发 <strong>Full GC</strong>。</li>
+</ul>
+
+<table class="comparison-table">
+<tr><th>特性</th><th>年轻代</th><th>老年代</th></tr>
+<tr><td>GC类型</td><td>Minor GC（Young GC）</td><td>Full GC</td></tr>
+<tr><td>GC频率</td><td>高（频繁回收）</td><td>低（较少触发）</td></tr>
+<tr><td>回收速度</td><td>快</td><td>慢</td></tr>
+<tr><td>默认占比</td><td>1/3</td><td>2/3</td></tr>
+</table>
+
+<h4 style="margin:10px 0 6px;color:#0c4a6e">对象在年轻代的流转</h4>
+<div class="code-block">对象创建 &amp; 晋升流程：
+
+┌──────────────────────────────────────────┐
+│ 1. 新对象 → Eden区分配                    │
+│ 2. Minor GC：Eden存活对象 → Survivor(From) │
+│ 3. 下次Minor GC：From → Survivor(To)       │
+│ 4. 反复交换，计数器+1                    │
+│ 5. 达到阈值 → 晋升老年代                 │
+│ 6. 大对象 / 年老对象 → 直接进老年代       │
+└──────────────────────────────────────────┘</div>
+
+<h4 style="margin:10px 0 6px;color:#0c4a6e">面试高频追问</h4>
+<ul class="bullet-list">
+<li><span class="highlight">为什么分代收集？</span> — 不同生命周期对象采用不同GC策略，提高回收效率。年轻代GC频繁但快，老年代GC少但影响大。</li>
+<li><span class="highlight">Survivor区大小为何1:1？</span> — 避免内存碎片，From/To交替使用，确保存活的对象有空间可放。</li>
+<li><span class="highlight">对象一定在Eden分配吗？</span> — 不一定。TLAB优先在Eden的线程私有区域分配；大对象和年老对象可能直接进入老年代。</li>
+</ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>TLAB与指针碰撞/空闲列表</h3>
+      <div class="content"><p>对象创建是 JVM 最频繁的操作之一，需要高效分配内存。</p>
+
+<h4 style="margin:10px 0 6px;color:#0c4a6e">指针碰撞（Bump the Pointer）</h4>
+<p>当堆内存是<strong>规整</strong>的（所有已用内存连成一块），JVM 用一个指针做分界线：</p>
+<ul class="bullet-list">
+<li>分配时把指针向空闲区域移动对象大小的距离。</li>
+<li>类似 <code>malloc</code> 的行为，速度极快。</li>
+<li>前提：使用 <strong>Serial / Parallel</strong> GC 等能确保堆规整的收集器。</li>
+</ul>
+
+<h4 style="margin:10px 0 6px;color:#0c4a6e">空闲列表（Free List）</h4>
+<p>当堆内存<strong>不规整</strong>时（如 CMS/G1 收集器，内存碎片化），使用空闲列表：</p>
+<ul class="bullet-list">
+<li>JVM 维护一个记录空闲区域的列表。</li>
+<li>分配时从列表中找到足够大的空闲块。</li>
+<li>速度稍慢于指针碰撞，但更灵活。</li>
+</ul>
+
+<h4 style="margin:10px 0 6px;color:#0c4a6e">TLAB（Thread Local Allocation Buffer）</h4>
+<div class="note-box"><p><strong>核心问题：</strong>对象分配需要线程安全，但加锁会严重影响并发性能。</p></div>
+<p>TLAB 是 Eden 区中的一块<strong>线程私有</strong>内存区域，每个线程有独立的分配缓冲区：</p>
+<ul class="bullet-list">
+<li><span class="highlight">优势</span>：线程在 TLAB 内分配对象<strong>无需加锁</strong>，只需移动指针。</li>
+<li><span class="highlight">触发方式</span>：大多数对象优先尝试在 TLAB 分配；TLAB 满了或对象太大时，才在 Eden 全局区域分配并加锁。</li>
+<li><span class="highlight">参数</span>：<code>-XX:+UseTLAB</code> 开启（默认开启），<code>-XX:TLABWasteTargetPercent</code> 控制浪费比例。</li>
+</ul>
+<div class="note-box warning"><p class="note-title">面试重点</p><p>「对象是否一定在年轻代创建？」— 不一定。在 G1 中，TLAB 也是分代的；在 ZGC 中，所有对象分配在同一个逻辑堆，使用染色指针，不再区分年轻代/老年代的内存隔离。</p></div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试模拟</h3>
+      <div class="content"><h4 style="margin:8px 0 6px">Q1：请描述 JVM 堆内存的分代结构。</h4>
+<p><strong>参考回答：</strong>JVM 堆分为年轻代和老年代。年轻代又分为 Eden 区和两个 Survivor 区（From/To），默认比例为 8:1:1。新对象先在 Eden 区分配，经过 Minor GC 存活后进入 Survivor 区，多次 GC 仍存活的对象晋升到老年代。老年代存放长期存活的大对象。年轻代占总堆 1/3，老年代占 2/3。</p>
+
+<h4 style="margin:12px 0 6px">Q2：对象创建时内存分配有哪几种方式？</h4>
+<p><strong>参考回答：</strong>（1）指针碰撞 — 堆规整时使用，速度快，适用于 Serial/Parallel GC；（2）空闲列表 — 堆不规整时使用，适用于 CMS/G1 等收集器；（3）TLAB 线程私有的分配缓冲区，无需加锁，提高并发分配性能。</p>
+
+<h4 style="margin:12px 0 6px">Q3：为什么 Survivor 区是 1:1 的两块？</h4>
+<p><strong>参考回答：</strong>采用 From/To 双缓冲区设计，可以避免内存碎片，每次 Minor GC 时对象在两个 Survivor 区间来回复制。这样既保证了存活对象有足够的空间存放，又简化了内存管理。默认只使用其中一个 Survivor 区，另一个作为空备用区。</p>
+
+<h4 style="margin:12px 0 6px">Q4：TLAB 有什么作用？为什么需要它？</h4>
+<p><strong>参考回答：</strong>TLAB 是为了解决多线程并发分配内存的性能问题。如果不使用 TLAB，每次分配对象都需要对 Eden 区加锁同步。使用 TLAB 后，每个线程在私有缓冲区中分配对象无需加锁，显著提升了并发性能。当 TLAB 不足时才会退回到全局 Eden 分配。</p></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 27%"></div></div>
+  <div class="progress-text">18 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>对象创建过程完整流程 + Full GC 与 Major GC 的区别</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 18/66</div>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 8 | 注解的定义、使用及元注解</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 8 — 注解的定义、使用及元注解</h1>
+  <div class="tag">模块：Java基础 · 泛型与反射</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">08</span>
+    <span class="card-title">注解的定义、使用及元注解</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>注解的基础概念</h3>
+      <div class="content"><ul class="bullet-list"><li>注解（Annotation）是 Java 5 引入的元数据机制，可以为代码添加额外信息，且<strong>不影响代码执行</strong></li><li>注解通过 <code>@interface</code> 关键字定义，本质上是一种特殊的接口</li><li>常见内置注解：@Override、@Deprecated、@SuppressWarnings、@FunctionalInterface</li><li>注解可以标注在：<strong>类/接口、方法、字段、参数、局部变量、包、类型使用</strong> 等位置</li></ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>自定义注解的定义方式</h3>
+      <div class="content"><ul class="bullet-list"><li>使用 <code>@interface</code> 定义自定义注解：</li></ul><div class="code-block">public @interface MyAnnotation {
+    String value();           // 必须指定的属性
+    String name() default ""; // 带默认值的属性
+    int priority() default 1; // 数值类型属性
+    Class&lt;?&gt; type() default Void.class; // 类型属性
+    Status level() default Status.NORMAL; // 枚举属性
+    String[] tags();          // 数组类型属性
+}
+
+// 使用方式
+@MyAnnotation(value = "test", name = "demo", tags = {"a", "b"})
+public void myMethod() {}</div><ul class="bullet-list"><li>注解属性类型只能是：<strong>基本数据类型、String、Class、Enum、Annotation</strong> 以及它们的数组</li><li>属性必须通过 <code>default</code> 设置默认值，或者在使用时必须指定</li><li>如果注解只有一个属性且名为 <code>value</code>，使用时可以省略 <code>value=</code></li></ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>四大元注解（Meta-Annotation）</h3>
+      <div class="content"><ul class="bullet-list"><li><strong>@Target</strong> — 限定注解可以应用的目标位置：</li></ul><div class="code-block">@Target({ElementType.TYPE, ElementType.METHOD})
+public @interface MyAnnotation {}
+// ElementType.METHOD  — 方法
+// ElementType.FIELD   — 字段
+// ElementType.TYPE    — 类/接口/枚举
+// ElementType.PARAMETER — 参数
+// ElementType.CONSTRUCTOR — 构造器</div><ul class="bullet-list"><li><strong>@Retention</strong> — 定义注解的保留策略（生命周期）：</li></ul><div class="code-block">@Retention(RetentionPolicy.SOURCE)   // 仅源码阶段，编译后丢弃
+@Retention(RetentionPolicy.CLASS)    // 编译期保留，默认值
+@Retention(RetentionPolicy.RUNTIME)  // 运行期可获取，最常用</div><div class="note-box">\U0001F4CD 面试要点：只有 <code>@Retention(RetentionPolicy.RUNTIME)</code> 的注解才能通过反射在运行时获取</div><ul class="bullet-list"><li><strong>@Documented</strong> — 标注注解是否会被 javadoc 提取到文档中</li><li><strong>@Inherited</strong> — 标注注解是否可以被子类继承（仅对类有效）</li></ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>运行时注解的反射处理</h3>
+      <div class="content"><ul class="bullet-list"><li>通过反射获取注解信息，是注解的核心使用方式：</li></ul><div class="code-block">// 1. 判断某个方法是否有指定注解
+method.isAnnotationPresent(MyAnnotation.class)
+
+// 2. 获取注解实例
+MyAnnotation annotation = method.getAnnotation(MyAnnotation.class);
+
+// 3. 读取注解属性值
+String value = annotation.value();
+String name = annotation.name();
+
+// 4. 在类级别遍历所有带注解的方法
+for (Method m : clazz.getDeclaredMethods()) {
+    if (m.isAnnotationPresent(MyAnnotation.class)) {
+        MyAnnotation ann = m.getAnnotation(MyAnnotation.class);
+        // 执行业务逻辑
+    }
+}</div><div class="note-box"><strong>常用反射 API：</strong><br><code>isAnnotationPresent()</code> — 判断是否标注<br><code>getAnnotation()</code> — 获取指定注解实例<br><code>getAnnotations()</code> — 获取所有注解<br><code>getDeclaredAnnotations()</code> — 获取直接声明的注解</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>注解的实际应用场景</h3>
+      <div class="content"><ul class="bullet-list"><li><strong>Spring 框架：</strong> @Autowired（依赖注入）、@Component（组件注册）、@RequestMapping（URL映射）等，都依赖 <code>@Retention(RUNTIME)</code> + 反射扫描</li><li><strong>Junit 测试：</strong> @Test、@Before、@After 等，基于 <code>@Retention(SOURCE)</code> 或 RUNTIME</li><li><strong>Lombok：</strong> @Data、@Builder 等，在编译期通过 <code>@Retention(SOURCE)</code> + APT（注解处理器）自动生成代码</li><li><strong>Retrofit / RxJava：</strong> @GET、@POST 等 HTTP 注解，运行时通过反射构建请求</li><li><strong>自定义注解处理器（APT）：</strong> 继承 <code>javax.annotation.processing.AbstractProcessor</code>，在编译期解析注解并生成 Java 代码</li></ul><div class="note-box warning">\u26A0\uFE0F 注解处理器（APT）与运行时注解的区别：<br>• APT：编译期执行，生成源码 → 需要继承 AbstractProcessor<br>• 运行时注解：运行期通过反射获取，需要 @Retention(RUNTIME)</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">❓</span>面试高频问题</h3>
+      <div class="content"><ul class="bullet-list"><li><strong>Q：注解和注释有什么区别？</strong><br>A：注解是代码的元数据，可以被工具/框架处理；注释是给开发者看的，编译器会忽略</li><li><strong>Q：@Target 和 @Retention 的作用是什么？</strong><br>A：@Target 控制注解能用在哪些位置；@Retention 控制注解的生命周期</li><li><strong>Q：如何自定义一个注解？</strong><br>A：使用 @interface 定义，配合元注解 @Target、@Retention 等，定义属性并通过 default 设置默认值</li><li><strong>Q：注解能继承吗？</strong><br>A：普通注解不能直接继承；但 @Inherited 元注解可以让类级别的注解被子类继承</li><li><strong>Q：Spring 如何扫描并处理注解？</strong><br>A：Spring 启动时通过反射扫描 classpath 下的类，检查是否标注了特定注解，然后进行相应的处理（如注册 Bean、建立映射关系等）</li></ul></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 12%"></div></div>
+  <div class="progress-text">8 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>受检异常 vs 非受检异常的设计哲学 — Java基础 · 异常与断言</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 8/66</div>
+</body>
+</html>

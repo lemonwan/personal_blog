@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 30 · GC 日志分析 · Java 面试辅导</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --header-bg: linear-gradient(135deg, #0f3460, #533483);
+            --text: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --border: #2a2a4a;
+            --highlight: #533483;
+            --code-bg: #0d0d1a;
+            --tag-bg: #2a2a4a;
+            --green: #4ecca3;
+            --yellow: #ffc107;
+            --orange: #ff6b35;
+            --red: #e94560;
+            --blue: #00b4d8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: var(--header-bg);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: rgba(233,69,96,0.1);
+            border-radius: 50%;
+        }
+        .header .day-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .header .meta {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .progress-bar-container {
+            margin-top: 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff8a5c);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: right;
+        }
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-bottom: 1px solid var(--border);
+        }
+        .section-icon {
+            font-size: 22px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--tag-bg);
+            border-radius: 8px;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .section-content {
+            padding: 20px 24px;
+        }
+        .section-content p {
+            margin-bottom: 12px;
+        }
+        .section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .section-content ul, .section-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        .section-content li {
+            margin-bottom: 6px;
+        }
+        .section-content li:last-child {
+            margin-bottom: 0;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            color: var(--accent);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--green);
+        }
+        .tag {
+            display: inline-block;
+            background: var(--tag-bg);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .tag-red { color: var(--red); border: 1px solid var(--red); }
+        .tag-green { color: var(--green); border: 1px solid var(--green); }
+        .tag-blue { color: var(--blue); border: 1px solid var(--blue); }
+        .tag-yellow { color: var(--yellow); border: 1px solid var(--yellow); }
+        .highlight-box {
+            background: rgba(233,69,96,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 12px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .highlight-box.green {
+            background: rgba(78,204,163,0.08);
+            border-left-color: var(--green);
+        }
+        .highlight-box.blue {
+            background: rgba(0,180,216,0.08);
+            border-left-color: var(--blue);
+        }
+        .highlight-box.yellow {
+            background: rgba(255,193,7,0.08);
+            border-left-color: var(--yellow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--tag-bg);
+            font-weight: 600;
+        }
+        .next-topic {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+        }
+        .next-topic h3 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .next-topic p {
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .section-content { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="day-badge">Day 30 / 66</div>
+            <h1>JVM 原理与调优 · JVM 调优实战</h1>
+            <h2 style="font-size:20px;color:var(--yellow);margin-top:4px;position:relative;z-index:1;">📌 GC 日志分析</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" style="width:45%"></div>
+            </div>
+            <div class="progress-label">进度 45%（30/66）</div>
+        </div>
+
+        
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📖</span>
+            <h2>核心概念：GC 日志到底看什么</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>GC 日志</strong>是 JVM 在发生垃圾回收时输出的结构化运行记录，用来回答三个关键问题：<span class='tag tag-blue'>什么时候 GC</span>、<span class='tag tag-yellow'>为什么 GC</span>、<span class='tag tag-green'>回收后效果如何</span>。</p><ul><li><strong>触发原因</strong>：如 <code>Allocation Failure</code>、<code>Metadata GC Threshold</code>、<code>System.gc()</code>、G1 的 <code>G1 Evacuation Pause</code>。</li><li><strong>GC 类型</strong>：Young GC、Mixed GC、Full GC，不同类型代表不同的内存压力和停顿风险。</li><li><strong>内存变化</strong>：重点看 GC 前后堆、年轻代、老年代/Metaspace 的使用量变化。</li><li><strong>耗时停顿</strong>：关注 <code>user/sys/real</code> 或 <code>Pause Time</code>，其中 real 更接近业务线程实际停顿感知。</li></ul><div class='highlight-box blue'>面试中不要只说“看 GC 次数和时间”，更要说明：通过日志判断对象晋升、老年代增长、Full GC 触发原因和是否存在内存泄漏趋势。</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>常用开启参数：JDK 8 与 JDK 9+ 写法</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>JDK 8 常见参数：</strong></p><pre><code>-XX:+PrintGCDetails
+-XX:+PrintGCDateStamps
+-XX:+PrintGCTimeStamps
+-Xloggc:/data/logs/gc.log
+-XX:+UseGCLogFileRotation
+-XX:NumberOfGCLogFiles=10
+-XX:GCLogFileSize=100M</code></pre><p><strong>JDK 9+ 统一日志参数：</strong></p><pre><code>-Xlog:gc*,safepoint:file=/data/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=100M</code></pre><ul><li><code>gc*</code>：输出 GC 相关详细信息。</li><li><code>safepoint</code>：辅助判断应用停顿是否只由 GC 引起。</li><li><code>filecount/filesize</code>：日志滚动，避免磁盘被打满。</li></ul><div class='highlight-box yellow'>生产建议：GC 日志默认打开并配置滚动，路径放在独立日志目录，配合应用发布时间点和监控指标一起分析。</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚙️</span>
+            <h2>日志字段解读：一条 Young GC 怎么读</h2>
+        </div>
+        <div class="section-content">
+            <p>典型 JDK 8 Parallel/CMS 风格日志：</p><pre><code>2026-06-25T08:00:01.123+0800: 12345.678: [GC (Allocation Failure)
+ [PSYoungGen: 65536K-&gt;8192K(76288K)] 120000K-&gt;70000K(251392K), 0.0356789 secs]
+ [Times: user=0.08 sys=0.01, real=0.04 secs]</code></pre><table><tr><th>字段</th><th>含义</th><th>面试解读</th></tr><tr><td><code>Allocation Failure</code></td><td>Eden 分配失败触发 Young GC</td><td>高频出现通常说明分配速率高或年轻代偏小</td></tr><tr><td><code>65536K-&gt;8192K(76288K)</code></td><td>年轻代 GC 前、后、总容量</td><td>回收后仍很高，可能存活对象多，会加速晋升</td></tr><tr><td><code>120000K-&gt;70000K</code></td><td>整个堆 GC 前后变化</td><td>如果回收效果差，要关注老年代增长</td></tr><tr><td><code>real=0.04 secs</code></td><td>真实停顿时间</td><td>业务延迟最关注 real 时间</td></tr></table><p>如果 Young GC 后堆总使用量下降不明显，同时老年代持续上涨，就要怀疑大对象、长生命周期缓存或对象晋升过快。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔍</span>
+            <h2>G1 GC 日志重点：Young、Mixed、Humongous</h2>
+        </div>
+        <div class="section-content">
+            <p>G1 的日志更强调 Region、停顿预测和阶段耗时。常见事件包括：</p><ul><li><strong>G1 Evacuation Pause</strong>：疏散暂停，复制存活对象到新的 Region，可能是 Young 或 Mixed。</li><li><strong>Concurrent Mark Cycle</strong>：并发标记周期，用于识别老年代 Region 的回收价值。</li><li><strong>Mixed GC</strong>：既回收年轻代，也选择部分收益高的老年代 Region。</li><li><strong>Humongous Allocation</strong>：大对象分配，超过 Region 一半会按巨型对象处理，容易导致空间碎片和 Full GC。</li></ul><div class='highlight-box green'>G1 分析口诀：看暂停目标是否达标、Mixed GC 是否正常出现、老年代是否持续增长、Humongous 对象是否过多、是否退化为 Full GC。</div><p>若日志中频繁出现 <code>to-space exhausted</code>、<code>Evacuation Failure</code>，说明疏散空间不足，可能需要增大堆、降低晋升压力或调整 <code>InitiatingHeapOccupancyPercent</code>。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💻</span>
+            <h2>排查思路：从 GC 日志定位问题</h2>
+        </div>
+        <div class="section-content">
+            <ol><li><strong>先看现象</strong>：接口 RT 抖动、CPU 飙高、吞吐下降、服务假死还是 OOM。</li><li><strong>看 GC 频率</strong>：Young GC 是否过于频繁；Full GC 是否频繁或停顿过长。</li><li><strong>看回收效果</strong>：每次 GC 后堆是否能明显下降；老年代是否呈阶梯式上升且不回落。</li><li><strong>结合线程与堆</strong>：GC 异常时配合 <code>jstat</code>、<code>jmap -dump</code>、MAT、<code>jstack</code> 分析对象来源和线程状态。</li><li><strong>关联业务变更</strong>：检查版本发布、流量峰值、定时任务、缓存策略、批处理任务。</li></ol><pre><code># 观察各区容量、使用率和 GC 次数
+jstat -gcutil &lt;pid&gt; 1000 20
+
+# 生成堆转储，配合 MAT 分析 Dominator Tree
+jmap -dump:format=b,file=/tmp/heap.hprof &lt;pid&gt;</code></pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🎯</span>
+            <h2>高频面试题与回答要点</h2>
+        </div>
+        <div class="section-content">
+            <p><strong>Q1：GC 日志中 Full GC 很频繁，可能有哪些原因？</strong></p><ul><li>老年代空间不足：对象存活时间长、缓存无边界、集合持续增长。</li><li>大对象或批量对象直接进入老年代。</li><li>元空间不足触发 Full GC，如动态代理/类加载过多。</li><li>代码中显式调用 <code>System.gc()</code>。</li><li>G1 疏散失败、并发标记跟不上分配速度导致退化。</li></ul><p><strong>Q2：如何判断是否存在内存泄漏？</strong></p><ul><li>观察多次 Full GC 后老年代最低水位是否持续升高。</li><li>GC 后堆无法回落，且伴随频繁 Full GC 或最终 OOM。</li><li>抓取不同时间点 Heap Dump，对比对象数量、Retained Size 和 GC Roots 引用链。</li></ul><p><strong>Q3：GC 调优的目标是什么？</strong> 不是“让 GC 次数最少”，而是在吞吐、停顿时间和内存成本之间取平衡，满足业务 SLA。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">⚠️</span>
+            <h2>踩坑经验：别被单条日志误导</h2>
+        </div>
+        <div class="section-content">
+            <ul><li><strong>只看平均值不看分位数</strong>：一次几秒 Full GC 就可能造成大量请求超时。</li><li><strong>只看 GC 不看 Safepoint</strong>：应用停顿也可能来自偏向锁撤销、类重定义、代码反优化等安全点事件。</li><li><strong>盲目调大堆</strong>：能降低 GC 频率，但可能让 Full GC 停顿更长；先确认对象生命周期和泄漏问题。</li><li><strong>忽略日志滚动</strong>：GC 日志持续写入可能打满磁盘，导致服务异常。</li><li><strong>脱离业务上下文</strong>：高分配速率可能来自正常流量峰值，也可能来自某个批量接口或定时任务。</li></ul><div class='highlight-box'>一句话总结：GC 日志分析的核心是“趋势 + 回收效果 + 触发原因 + 业务时间线”四者结合。</div>
+        </div>
+    </div>
+
+
+        <div class="next-topic">
+            <h3>📅 明日预告</h3>
+            <p>线程创建方式（Thread/Runnable/Callable/线程池）</p>
+        </div>
+    </div>
+</body>
+</html>

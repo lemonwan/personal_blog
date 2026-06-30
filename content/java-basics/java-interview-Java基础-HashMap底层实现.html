@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HashMap底层实现 - Java面试知识点</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","WenQuanYi Micro Hei",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f0f2f5;color:#333;line-height:1.8}
+.header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);color:#fff;padding:48px 24px;text-align:center;position:relative;overflow:hidden}
+.header::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(255,255,255,0.03) 0%,transparent 70%);animation:rotate 30s linear infinite}
+@keyframes rotate{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.header h1{font-size:2em;font-weight:700;position:relative;z-index:1;letter-spacing:2px}
+.header .subtitle{font-size:1em;opacity:0.85;margin-top:12px;position:relative;z-index:1}
+.header .badge{display:inline-block;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);padding:4px 16px;border-radius:20px;font-size:0.85em;margin-top:16px;position:relative;z-index:1}
+.container{max-width:900px;margin:0 auto;padding:24px 16px 48px}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden;transition:transform .2s,box-shadow .2s}
+.card:hover{transform:translateY(-2px);box-shadow:0 4px 20px rgba(0,0,0,0.12)}
+.card-header{padding:20px 24px;display:flex;align-items:center;gap:14px}
+.card-header .circle-badge{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.3em;color:#fff;flex-shrink:0}
+.card-header h2{font-size:1.3em;color:#fff;font-weight:600}
+.card-body{padding:24px}
+.section-title{font-size:1.15em;font-weight:700;margin:20px 0 12px;padding-left:14px;border-left:4px solid;display:flex;align-items:center;gap:8px}
+.section-title:first-child{margin-top:0}
+.content-text{padding-left:14px;margin-bottom:8px;text-align:justify}
+.content-text strong{color:#1a1a2e}
+ul.content-list{padding-left:28px;margin:8px 0}
+ul.content-list li{margin:6px 0;position:relative}
+.code-block{background:#f8f9fa;border:1px solid #e9ecef;border-radius:8px;padding:16px 20px;margin:12px 0;font-family:"Fira Code","Courier New",monospace;font-size:0.9em;overflow-x:auto;line-height:1.6;color:#24292e}
+.code-block .comment{color:#6a737d}
+.code-block .keyword{color:#d73a49}
+.code-block .string{color:#032f62}
+.code-block .type{color:#6f42c1}
+.info-box{background:#f0f7ff;border-left:4px solid #3b82f6;padding:14px 18px;margin:12px 0;border-radius:0 8px 8px 0}
+.warning-box{background:#fffbeb;border-left:4px solid #f59e0b;padding:14px 18px;margin:12px 0;border-radius:0 8px 8px 0}
+.success-box{background:#f0fdf4;border-left:4px solid #22c55e;padding:14px 18px;margin:12px 0;border-radius:0 8px 8px 0}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:.95em}
+th,td{padding:10px 14px;text-align:left;border:1px solid #e2e8f0}
+th{background:#f8f9fa;font-weight:600;color:#1a1a2e}
+tr:nth-child(even){background:#f8f9fa}
+.tag{display:inline-block;padding:2px 10px;border-radius:12px;font-size:0.8em;margin:2px;font-weight:500}
+.tag-blue{background:#dbeafe;color:#1d4ed8}
+.tag-green{background:#dcfce7;color:#15803d}
+.tag-orange{background:#ffedd5;color:#c2410c}
+.tag-red{background:#fee2e2;color:#dc2626}
+.tag-purple{background:#ede9fe;color:#7c3aed}
+.progress-container{background:#fff;border-radius:12px;padding:20px 24px;margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,0.08)}
+.progress-bar-bg{background:#e2e8f0;border-radius:10px;height:14px;overflow:hidden}
+.progress-bar-fill{background:linear-gradient(90deg,#0f3460,#3b82f6,#22c55e);height:100%;border-radius:10px;transition:width .5s}
+.progress-text{text-align:center;margin-top:10px;font-size:0.9em;color:#64748b}
+.footer-card{background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,0.08)}
+.footer-card h3{color:#1a1a2e;margin-bottom:12px;font-size:1.1em}
+.next-preview{background:linear-gradient(135deg,#f0f7ff,#e8f4f8);padding:16px 20px;border-radius:8px;margin-top:16px}
+.next-preview h4{color:#0f3460;margin-bottom:8px}
+.next-preview p{color:#475569;font-size:0.95em}
+.day-label{background:#1a1a2e;color:#fff;padding:3px 10px;border-radius:4px;font-size:0.8em;font-weight:600}
+@media print{body{background:#fff}.header{padding:24px}.card{break-inside:avoid;box-shadow:none;border:1px solid #ddd}.card:hover{transform:none}}
+@media(max-width:600px){.header h1{font-size:1.4em}.card-header{padding:14px 16px}.card-body{padding:16px}.section-title{font-size:1.05em}}
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+
+<div class="header">
+  <div class="badge"><span class="day-label">Day 1</span></div>
+  <h1>Java 基础 · 集合框架</h1>
+  <div class="subtitle">HashMap 底层实现（数组+链表+红黑树，1.8变化、扩容机制、线程安全）</div>
+</div>
+
+<div class="container">
+
+<!-- 核心概念 -->
+<div class="card">
+  <div class="card-header" style="background:linear-gradient(135deg,#1e40af,#3b82f6);">
+    <div class="circle-badge" style="background:rgba(255,255,255,0.25);">01</div>
+    <h2>核心概念</h2>
+  </div>
+  <div class="card-body">
+    <p class="content-text"><strong>HashMap</strong> 是 Java 中最常用的键值对集合类，基于 <span class="tag tag-blue">哈希表</span> 实现，允许 <span class="tag tag-orange">null 键和 null 值</span>（注意：Key 只能有一个 null，Value 可以有多个 null）。</p>
+    <p class="content-text"><strong>底层结构演变：</strong></p>
+    <ul class="content-list">
+      <li><strong>JDK 1.7：</strong>数组 + 链表（链表头插法）</li>
+      <li><strong>JDK 1.8+：</strong>数组 + 链表 + <span class="tag tag-purple">红黑树</span>（链表尾插法）</li>
+    </ul>
+    <p class="content-text"><strong>关键参数：</strong></p>
+    <ul class="content-list">
+      <li><strong>默认初始容量：</strong>16（必须是 2 的幂）</li>
+      <li><strong>负载因子（loadFactor）：</strong>0.75（容量与负载因子的乘积 = threshold，达到时触发扩容）</li>
+      <li><strong>树化阈值：</strong>链表长度 ≥ 8 时转换为红黑树</li>
+      <li><strong>退链阈值：</strong>红黑树节点 ≤ 6 时退化为链表</li>
+    </ul>
+    <div class="info-box">
+      <strong>💡 为什么容量必须是 2 的幂？</strong><br>
+      便于用位运算 <code>(n - 1) &amp; hash</code> 替代取模运算 <code>hash % n</code>，大幅提升性能。同时能保证 hash 值均匀分布，减少哈希冲突。
+    </div>
+  </div>
+</div>
+
+<!-- 底层原理 -->
+<div class="card">
+  <div class="card-header" style="background:linear-gradient(135deg,#7c3aed,#a855f7);">
+    <div class="circle-badge" style="background:rgba(255,255,255,0.25);">02</div>
+    <h2>底层原理深度剖析</h2>
+  </div>
+  <div class="card-body">
+    <p class="content-text"><strong>1. put 流程（JDK 1.8）：</strong></p>
+    <div class="code-block">
+<span class="comment">// put(K key, V value) 核心逻辑伪码</span>
+<span class="keyword">if</span> (key == <span class="keyword">null</span>) <span class="keyword">return</span> putVal(hash(<span class="keyword">null</span>), value);
+hash = hash(key);
+index = (table.length - 1) &amp; hash;  <span class="comment">// 计算桶索引</span>
+<span class="comment">// 遍历桶中的链表/树</span>
+<span class="keyword">if</span> (bucket 为空) {{ 直接插入新节点 }}
+<span class="keyword">else if</span> (key 命中) {{ 覆盖 value }}
+<span class="keyword">else if</span> (是 TreeNode) {{ 红黑树插入 }}
+<span class="keyword">else</span> {{ 链表尾部插入，长度≥8 尝试树化 }}
+<span class="keyword">if</span> (size &gt;= threshold) resize();  <span class="comment">// 扩容</span>
+    </div>
+
+    <p class="content-text"><strong>2. hash() 方法（扰动函数）：</strong></p>
+    <div class="code-block">
+<span class="keyword">static final int</span> hash(Object key) {{
+    <span class="keyword">int</span> h;
+    <span class="keyword">return</span> (key == <span class="keyword">null</span>) ? 0 : (h = key.hashCode()) ^ (h &gt;&gt;&gt; 16);
+}}
+<span class="comment">// 高16位与低16位异或，让高位也参与运算</span>
+<span class="comment">// 解决低位数不足时高位信息丢失的问题</span>
+    </div>
+
+    <p class="content-text"><strong>3. 扩容机制（resize）：</strong></p>
+    <ul class="content-list">
+      <li>新容量 = 旧容量 × 2（始终为 2 的幂）</li>
+      <li>JDK 1.8 优化：不需要重新计算 hash，只需判断 <code>(oldCap &amp; oldHash) == 0</code></li>
+      <li>节点要么在原位置，要么在原位置 + 旧容量</li>
+      <li>扩容是耗时操作，预估数据量可提前设置初始容量</li>
+    </ul>
+    <div class="code-block">
+<span class="comment">// 扩容后的位置计算（无需重新hash！）</span>
+<span class="keyword">if</span> ((e.hash &amp; oldCap) == 0) {{
+    <span class="comment">// 在原索引位置</span>
+    newTab[e.hash] = e;
+}} <span class="keyword">else</span> {{
+    <span class="comment">// 在新索引位置（原索引 + oldCap）</span>
+    newTab[e.hash + oldCap] = e;
+}}
+    </div>
+
+    <p class="content-text"><strong>4. 为什么 JDK 1.8 改用尾插法？</strong></p>
+    <div class="warning-box">
+      <strong>⚠️ 头插法在多线程下会导致环形链表，造成死循环！</strong><br>
+      JDK 1.7 的头插法在多线程扩容时可能反转链表顺序，产生环。JDK 1.8 改为尾插法后避免了此问题。但 HashMap 仍不是线程安全的！
+    </div>
+  </div>
+</div>
+
+<!-- 面试要点 -->
+<div class="card">
+  <div class="card-header" style="background:linear-gradient(135deg,#059669,#10b981);">
+    <div class="circle-badge" style="background:rgba(255,255,255,0.25);">03</div>
+    <h2>面试高频要点</h2>
+  </div>
+  <div class="card-body">
+    <div class="section-title" style="border-color:#059669;">📌 HashMap 核心考点清单</div>
+    <ul class="content-list">
+      <li>HashMap 与 Hashtable 的区别？（线程安全、null 支持、继承关系）</li>
+      <li>为什么 HashMap 的 key 一般用 String（不可变 + hashCode 缓存）？</li>
+      <li>HashMap 扩容过程是怎样的？扩容后元素位置如何确定？</li>
+      <li>链表什么时候转红黑树？为什么阈值是 8？</li>
+      <li>红黑树的退链阈值为什么是 6 而不是 8？</li>
+      <li>JDK 1.7 和 1.8 的 HashMap 有哪些主要区别？</li>
+      <li>HashMap 线程不安全体现在哪里？如何解决？</li>
+      <li>如何选择合适的初始容量和负载因子？</li>
+    </ul>
+    <div class="success-box">
+      <strong>✅ 记忆技巧：</strong>树化阈值 8 和退链阈值 6 的差值设计，是因为在负载因子 0.75 时，链表长度服从泊松分布，长度达到 8 的概率极低（约千万分之一），这样设计避免了频繁的树化/退链操作。
+    </div>
+  </div>
+</div>
+
+<!-- 对比分析 -->
+<div class="card">
+  <div class="card-header" style="background:linear-gradient(135deg,#d97706,#f59e0b);">
+    <div class="circle-badge" style="background:rgba(255,255,255,0.25);">04</div>
+    <h2>对比分析</h2>
+  </div>
+  <div class="card-body">
+    <table>
+      <thead>
+        <tr><th>对比维度</th><th>HashMap</th><th>Hashtable</th><th>ConcurrentHashMap</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>线程安全</td><td>❌ 不安全</td><td>✅ 全表锁（synchronized）</td><td>✅ CAS + synchronized</td></tr>
+        <tr><td>null 支持</td><td>✅ key/value 都可 null</td><td>❌ 都不允许</td><td>❌ 都不允许</td></tr>
+        <tr><td>性能</td><td>最快</td><td>最慢（锁粒度大）</td><td>高并发下最优</td></tr>
+        <tr><td>继承</td><td>AbstractMap</td><td>Dictionary</td><td>AbstractMap</td></tr>
+        <tr><td>遍历方式</td><td>Iterator</td><td>Iterator / Enumeration</td><td>Iterator</td></tr>
+      </tbody>
+    </table>
+    <p class="content-text" style="margin-top:16px;"><strong>HashMap vs LinkedHashMap vs TreeMap：</strong></p>
+    <ul class="content-list">
+      <li><span class="tag tag-blue">HashMap</span> — 无序，插入/查询 O(1)，最常用</li>
+      <li><span class="tag tag-green">LinkedHashMap</span> — 按插入顺序（或访问顺序）遍历，内部维护双向链表</li>
+      <li><span class="tag tag-purple">TreeMap</span> — 按 Key 自然顺序/自定义 Comparator 排序，基于红黑树，O(log n)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- 实战场景 -->
+<div class="card">
+  <div class="card-header" style="background:linear-gradient(135deg,#dc2626,#ef4444);">
+    <div class="circle-badge" style="background:rgba(255,255,255,0.25);">05</div>
+    <h2>实战场景与踩坑经验</h2>
+  </div>
+  <div class="card-body">
+    <div class="section-title" style="border-color:#dc2626;">🔧 常见应用场景</div>
+    <ul class="content-list">
+      <li><strong>数据缓存：</strong>本地缓存、LRU 缓存（结合 LinkedHashMap 的 accessOrder）</li>
+      <li><strong>统计计数：</strong>词频统计、用户行为计数</li>
+      <li><strong>去重：</strong>利用 key 的唯一性</li>
+      <li><strong>配置映射：</strong>将配置键值对映射为对象属性</li>
+      <li><strong>缓存中间结果：</strong>避免重复计算（Memoization）</li>
+    </ul>
+    <div class="section-title" style="border-color:#dc2626;">💥 踩坑经验</div>
+    <div class="warning-box">
+      <strong>坑1 — 自定义 Key 忘记重写 hashCode/equals：</strong><br>
+      使用自定义对象作为 Key 时，必须同时重写 hashCode() 和 equals()，否则可能导致数据找不到或重复存储。
+    </div>
+    <div class="warning-box">
+      <strong>坑2 — 并发修改导致 ConcurrentModificationException：</strong><br>
+      迭代器遍历时调用 map.remove() 而非 iterator.remove()，会触发 fail-fast 机制。
+    </div>
+    <div class="warning-box">
+      <strong>坑3 — 大 HashMap 序列化/传输开销：</strong><br>
+      超大 HashMap 做 RPC 传输时，序列化时间可能远大于业务处理时间。考虑分页或压缩。
+    </div>
+  </div>
+</div>
+
+<!-- 模拟面试题 -->
+<div class="card">
+  <div class="card-header" style="background:linear-gradient(135deg,#0891b2,#06b6d4);">
+    <div class="circle-badge" style="background:rgba(255,255,255,0.25);">06</div>
+    <h2>模拟面试题</h2>
+  </div>
+  <div class="card-body">
+    <div class="section-title" style="border-color:#0891b2;">🎯 面试实战</div>
+    <div class="info-box">
+      <strong>Q1：请手写一个 HashMap，要求支持 put/get/resize 操作。</strong><br>
+      <span style="color:#64748b;font-size:0.9em;">考察点：对底层数组+链表结构的理解、hash 计算方法、扩容逻辑。</span>
+    </div>
+    <div class="info-box" style="margin-top:12px;">
+      <strong>Q2：HashMap 的 hash 方法为什么要将高16位和低16位异或？如果只用低16位会怎样？</strong><br>
+      <span style="color:#64748b;font-size:0.9em;">考察点：扰动函数设计、数据分布均匀性。答案：如果容量为16，只用低4位会导致高16位信息丢失，分布不均匀，冲突率上升。</span>
+    </div>
+    <div class="info-box" style="margin-top:12px;">
+      <strong>Q3：为什么自定义对象作为 HashMap key 时推荐使用 immutable 对象？</strong><br>
+      <span style="color:#64748b;font-size:0.9em;">考察点：hashCode 缓存、不可变性保证一致性。一旦对象放入 Map，如果其 hashCode 改变了，将永远找不到该 entry。</span>
+    </div>
+    <div class="success-box" style="margin-top:12px;">
+      <strong>📝 面试技巧：</strong>回答 HashMap 问题时，按照「结构 → 插入流程 → hash 计算 → 扩容 → 线程安全」的框架展开，展现系统化的知识体系。
+    </div>
+  </div>
+</div>
+
+<!-- 进度 -->
+<div class="progress-container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span style="font-weight:600;color:#1a1a2e;">学习进度</span>
+    <span style="font-size:0.85em;color:#64748b;">1 / 52</span>
+  </div>
+  <div class="progress-bar-bg">
+    <div class="progress-bar-fill" style="width:1.9%;"></div>
+  </div>
+  <div class="progress-text">当前：集合框架 → HashMap 底层实现</div>
+</div>
+
+<!-- 明日预告 -->
+<div class="footer-card">
+  <h3>📖 明日预告</h3>
+  <div class="next-preview">
+    <h4>Java 基础 · 集合框架</h4>
+    <p>ConcurrentHashMap — 分段锁到CAS+synchronized的演进</p>
+  </div>
+  <div style="margin-top:16px;">
+    <span style="font-size:0.85em;color:#94a3b8;">📅 坚持每天一个小节，积少成多！</span>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

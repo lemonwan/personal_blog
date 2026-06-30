@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 20 | 判断对象存活的方法（引用计数 vs 可达性分析）</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #a855f7; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #a855f7; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #a855f7; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #a855f7; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #a855f7, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 20 — 判断对象存活的方法（引用计数 vs 可达性分析）</h1>
+  <div class="tag">模块：JVM · 2. GC 机制</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">20</span>
+    <span class="card-title">判断对象存活的方法（引用计数 vs 可达性分析）</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>核心概念：为什么需要判断对象存活？</h3>
+      <div class="content"><p>垃圾收集器在回收内存之前，必须判断<strong>哪些对象还&#8220;存活&#8221;</strong>，哪些对象已经&#8220;死亡&#8221;。这是整个GC机制的起点。</p>
+<p>Java中主要有两种判断存活的方法：</p>
+<ul class="bullet-list">
+<li><span class="highlight">引用计数法</span>（Reference Counting）— 给对象添加一个引用计数器，有地方引用就+1，引用失效就-1</li>
+<li><span class="highlight">可达性分析算法</span>（Reachability Analysis）— Java 虚拟机采用的方法，从 <code>GC Roots</code> 出发，沿引用链向下搜索</li>
+</ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>引用计数法 — 原理与缺陷</h3>
+      <div class="content"><p><strong>原理：</strong></p>
+<ul class="bullet-list">
+<li>对象每被引用一次，计数器 +1</li>
+<li>引用失效时，计数器 -1</li>
+<li>计数器为 0 的对象即可被回收</li>
+</ul>
+<p><strong>缺陷（导致 Java 弃用此方法）：</strong></p>
+<p class="note-box danger"><div class="note-title">⚠️ 循环引用问题</div>两个对象互相引用，即使它们已经不可达，计数器也不为0，无法回收。</p>
+<div class="code-block"><span class="comment">// 伪代码示意循环引用问题</span>
+<span class="keyword">class</span> A { B ref; }
+<span class="keyword">class</span> B { A ref; }
+
+A a = <span class="keyword">new</span> A();
+B b = <span class="keyword">new</span> B();
+a.ref = b;   <span class="comment">// a计数器=1, b计数器=1</span>
+b.ref = a;   <span class="comment">// a计数器=2, b计数器=2</span>
+
+<span class="comment">// a和b都指向空了，但计数器都不为0</span>
+<span class="comment">// 对象永远无法被回收 → 内存泄漏!</span></div>
+<p>Python 曾经使用引用计数（+GC周期性的循环回收），而 CPython 的 GC 就是为了解决循环引用问题。</p></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>可达性分析算法 — Java的选择</h3>
+      <div class="content"><p>从一组称为 <strong>"GC Roots"</strong> 的对象（根节点）出发，沿引用链向下搜索。</p>
+<p>如果某个对象到 GC Roots 之间<strong>没有任何引用链</strong>相连（即从 GC Roots 到这个对象不可达），则判定该对象为可回收对象。</p>
+<p class="note-box"><div class="note-title">📖 引用链示意图</div>GC Roots → ObjectA → ObjectB → ObjectC → <span style="color:#ef4444;font-weight:700;">ObjectD(不可达,可回收)</span></p>
+<p><strong>可以作为 GC Roots 的对象包括：</strong></p>
+<ul class="bullet-list">
+<li>虚拟机栈（栈帧中的本地变量表）中引用的对象</li>
+<li>方法区中类静态属性引用的对象</li>
+<li>方法区中常量引用的对象</li>
+<li>本地方法栈中 JNI 引用的对象</li>
+</ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>四种引用类型 — Java 精细化管理</h3>
+      <div class="content"><p>Java 提供四种引用强度，决定对象被 GC 回收的时机：</p>
+<table class="comparison-table">
+<tr><th>引用类型</th><th>说明</th><th>回收时机</th></tr>
+<tr><td><strong>强引用</strong></td><td>正常创建的对象引用，如 <code>Object o = new Object()</code></td><td>永远不会被回收（除非引用断开）</td></tr>
+<tr><td><strong>软引用</strong></td><td><code>SoftReference</code>，内存足够时不回收</td><td>内存不足（OOM之前）时回收</td></tr>
+<tr><td><strong>弱引用</strong></td><td><code>WeakReference</code></td><td>GC 时立即回收</td></tr>
+<tr><td><strong>虚引用</strong></td><td><code>PhantomReference</code>，必须与引用队列联合使用</td><td>无论何时，GC 时回收；主要用于对象被回收时的通知</td></tr>
+</table>
+<div class="code-block"><span class="comment">// 强引用 — 最常见的引用方式</span>
+String s = <span class="keyword">new</span> String(<span class="string">"hello"</span>);
+
+<span class="comment">// 软引用 — 适合做缓存</span>
+SoftReference&lt;byte[]&gt; cache = <span class="keyword">new</span> SoftReference&lt;&gt;(largeBytes);
+
+<span class="comment">// 弱引用 — 防止内存泄漏</span>
+WeakReference&lt;String&gt; weak = <span class="keyword">new</span> WeakReference&lt;&gt;(s);
+
+<span class="comment">// 虚引用 — 对象回收通知</span>
+ReferenceQueue&lt;Object&gt; queue = <span class="keyword">new</span> ReferenceQueue&lt;&gt;();
+PhantomReference&lt;Object&gt; pr = <span class="keyword">new</span> PhantomReference&lt;&gt;(obj, queue);</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>引用计数 vs 可达性分析 — 对比总结</h3>
+      <div class="content"><table class="comparison-table">
+<tr><th>维度</th><th>引用计数法</th><th>可达性分析法</th></tr>
+<tr><td>回收准确性</td><td>❌ 循环引用导致内存泄漏</td><td>✅ 能正确处理循环引用</td></tr>
+<tr><td>性能开销</td><td>✅ 实时性高</td><td>⚠️ 需要全局停顿</td></tr>
+<tr><td>对象存活判定</td><td>计数器为0即可判定</td><td>需要遍历所有GC Roots</td></tr>
+<tr><td>引用类型管理</td><td>不支持细粒度</td><td>支持强/软/弱/虚四种引用</td></tr>
+<tr><td>Java是否采用</td><td>❌ 未采用</td><td>✅ HotSpot 采用</td></tr>
+</table>
+<p class="note-box warning"><div class="note-title">💡 面试要点</div>面试官可能会追问效率问题。答：现代 JVM 采用<strong>增量更新</strong>和<strong>安全点</strong>等机制优化，且 GC 通常只扫描存活对象（对象分代假设）。</p></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试高频题</h3>
+      <div class="content"><p><strong>Q1: 为什么 Java 使用可达性分析而不是引用计数？</strong></p>
+<p>答：核心原因是<strong>循环引用问题</strong>。引用计数法无法处理对象互相引用的场景，会导致内存泄漏。</p>
+<p><strong>Q2: 什么是 GC Roots？</strong></p>
+<p>答：GC Roots 是可达性分析的起点对象，包括虚拟机栈引用、方法区静态属性、常量、JNI 本地方法栈引用等。</p>
+<p><strong>Q3: 四种引用类型在什么场景下使用？</strong></p>
+<p>答：<strong>软引用</strong>用于缓存（内存充足不回收，不足时回收）；<strong>弱引用</strong>用于防止内存泄漏；<strong>虚引用</strong>用于对象回收通知。</p>
+<p><strong>Q4: ThreadLocal 与弱引用有什么关系？</strong></p>
+<p>答：ThreadLocal 的 key 是弱引用，但 value 是强引用。如果线程不终止会导致 value 无法回收 — 所以<strong>必须手动 remove</strong>。</p></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 30%"></div></div>
+  <div class="progress-text">20 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>GC Roots 概念 — 什么是根对象？哪些对象可以作为 GC Roots？</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 20/66</div>
+</body>
+</html>

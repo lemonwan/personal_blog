@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第22课 · Tokenizer 分词器 | AI大模型原理教程</title>
+    <meta name="description" content="大模型输入的不是字，不是词——那到底是什么？">
+    <meta name="keywords" content="AI大模型教程,Transformer,Tokenizer 分词器,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第22课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 22 · 卷四</div>
+            <h1>Tokenizer 分词器</h1>
+            <p class="subtitle">❝ 大模型输入的不是字，不是词——那到底是什么？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="文字怎么进模型" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>模型读不了文字，只读得了向量</h2></div><p>先补一个前两课<strong>一直跳过没说</strong>的问题。注意力也好、多头也好，我们从头到尾摆弄的都是「<strong>词向量</strong>」——一串数字。 可你键盘上敲进去的「我 是 一只 小猫」是<strong>文字</strong>，不是数字。中间缺了一步：<strong>谁把文字变成向量？</strong></p><p>模型内部藏着一张<strong>事先定死的对照表</strong>（查找表）：表里列着几万个「单元」，每个单元都预先配好一个向量。 文字进来，模型并不逐字去「理解」，而是拿它到表里<strong>查</strong>——查到哪个单元，就取出对应那一行向量，再送进注意力。 关键在于：<strong>这张表必须是有限的</strong>，不可能为世界上每一种可能的文字串都留一行。 所以文字进门第一步，<strong>必须先切成「表里查得到的单元」</strong>。这一步就叫<strong>分词</strong>（tokenize），切出来的每一块就是一个 <strong>Token</strong>。</p><p>这套「先切块、再查表」的机制，有个常被拿来嘲笑的副作用。问一个顶尖大模型：「strawberry 里有几个字母 r？」 它常常一本正经地答「2 个」——可正确答案是 <strong>3 个</strong>（st<u>r</u>awbe<u>rr</u>y）。 不是它语文没学好：strawberry 常常<strong>整个就是表里的一个单元</strong>，一个不可分割的 token。 模型眼里它不是 10 个字母，而是一坨整体，就像你把「中国」当一个词，从不会去数它有几个笔画—— 那 3 个 r 藏在这坨整体<strong>内部</strong>，对模型根本不可见，自然数不准。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 120" role="img" aria-label="人类视角 vs 模型视角：strawberry 的分词方式"><text x="20" y="22" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#5C6B79">人类视角（字母）</text><g><rect x="20" y="30" width="34" height="30" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="37" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#5C6B79" font-weight="400">s</text></g><g><rect x="60" y="30" width="34" height="30" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="77" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#5C6B79" font-weight="400">t</text></g><g><rect x="100" y="30" width="34" height="30" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="117" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#3E6B8F" font-weight="700">r</text></g><g><rect x="140" y="30" width="34" height="30" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="157" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#5C6B79" font-weight="400">a</text></g><g><rect x="180" y="30" width="34" height="30" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="197" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#5C6B79" font-weight="400">w</text></g><g><rect x="220" y="30" width="34" height="30" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="237" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#5C6B79" font-weight="400">b</text></g><g><rect x="260" y="30" width="34" height="30" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="277" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#5C6B79" font-weight="400">e</text></g><g><rect x="300" y="30" width="34" height="30" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="317" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#3E6B8F" font-weight="700">r</text></g><g><rect x="340" y="30" width="34" height="30" rx="4" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="357" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#3E6B8F" font-weight="700">r</text></g><g><rect x="380" y="30" width="34" height="30" rx="4" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="397" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="15" fill="#5C6B79" font-weight="400">y</text></g><text x="420" y="50" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F" font-weight="700">3 个 r！</text><text x="20" y="85" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">模型视角（Token）</text><rect x="20" y="92" width="220" height="22" rx="4" fill="#FDF6EC" stroke="#C0481E" stroke-width="2"></rect><text x="130" y="107" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#C0481E" font-weight="700">strawberry（整体）</text><text x="260" y="107" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">→ 一个符号，内部字母看不见</text></svg></div><figcaption><span class="fig-no">图 22-1</span>人类把「strawberry」看成 10 个字母；模型可能把它看成 1 个 token——既然内部字母对它不可见，数 r 自然就数不准。</figcaption></figure><div class="think"><div class="think-q">要你来设计「把文本切成小块」的规则，最朴素的两种是什么？各会撞上什么墙？</div></div></section><section class="station reveal" data-title="两条朴素路都撞墙" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>两条朴素的路，各撞各的墙</h2></div><p>把两种朴素方案的账算清楚，就知道为什么需要第三条路：</p><p><strong>按「词」切。</strong>一个词一个 token，看着自然。可英语的词形几乎是无穷的—— 单复数、时态、人名、拼写错误、新造词……词表得开到上百万都兜不住。 更糟的是，<strong>只要遇到词表里没有的词，模型就彻底懵</strong>，只能吐一个「未知」占位符 [UNK]，信息全丢。 中文更尴尬：根本没有空格告诉你词的边界。</p><p><strong>按「字符」切。</strong>词表一下小到几千（汉字）甚至 256（字节），再也不会有「不认识的词」。 但代价是序列<strong>长得吓人</strong>：「understanding」=13 个 token，一篇文章的 token 数翻好几倍—— 而上一课说过，注意力的账单是 <strong>O(n²)</strong>，序列翻倍、成本翻四倍。模型还得费劲从头学会「c-a-t 三个字符合起来才是猫」。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 196" role="img" aria-label="按词、按字符、子词三种切分方式的对比"><g><text x="20" y="18" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#C0481E">按词切</text><text x="20" y="33" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">词表 ~ 百万＋</text><g><rect x="150" y="6" width="134" height="18" rx="3" fill="#C0481E1E" stroke="#C0481E" stroke-width="1"></rect><text x="156" y="19" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#C0481E" text-anchor="start">internationalization</text></g><text x="320" y="19" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79"></text><text x="320" y="19" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">没见过 → [UNK]，信息全丢</text></g><g><text x="20" y="80" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#B07A1E">按字符切</text><text x="20" y="95" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">词表 ~ 几千</text><g><rect x="150" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="157" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">i</text></g><g><rect x="167" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="174" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">n</text></g><g><rect x="184" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="191" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">t</text></g><g><rect x="201" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="208" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">e</text></g><g><rect x="218" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="225" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">r</text></g><g><rect x="235" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="242" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">n</text></g><g><rect x="252" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="259" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">a</text></g><g><rect x="269" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="276" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">t</text></g><g><rect x="286" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="293" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">i</text></g><g><rect x="303" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="310" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">o</text></g><g><rect x="320" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="327" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">n</text></g><g><rect x="337" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="344" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">a</text></g><g><rect x="354" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="361" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">l</text></g><g><rect x="371" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="378" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">i</text></g><g><rect x="388" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="395" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">z</text></g><g><rect x="405" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="412" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">a</text></g><g><rect x="422" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="429" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">t</text></g><g><rect x="439" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="446" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">i</text></g><g><rect x="456" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="463" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">o</text></g><g><rect x="473" y="68" width="14" height="18" rx="3" fill="#B07A1E1E" stroke="#B07A1E" stroke-width="1"></rect><text x="480" y="81" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#B07A1E" text-anchor="middle">n</text></g><text x="150" y="106" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">20 个 token，序列暴长</text></g><g><text x="20" y="142" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E8F5A">子词（BPE）</text><text x="20" y="157" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">词表 ~ 5 万</text><g><rect x="150" y="130" width="45" height="18" rx="3" fill="#3E8F5A1E" stroke="#3E8F5A" stroke-width="1"></rect><text x="156" y="143" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#3E8F5A" text-anchor="start">inter</text></g><g><rect x="206" y="130" width="52" height="18" rx="3" fill="#3E8F5A1E" stroke="#3E8F5A" stroke-width="1"></rect><text x="212" y="143" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#3E8F5A" text-anchor="start">nation</text></g><g><rect x="262" y="130" width="24" height="18" rx="3" fill="#3E8F5A1E" stroke="#3E8F5A" stroke-width="1"></rect><text x="268" y="143" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#3E8F5A" text-anchor="start">al</text></g><g><rect x="318" y="130" width="52" height="18" rx="3" fill="#3E8F5A1E" stroke="#3E8F5A" stroke-width="1"></rect><text x="324" y="143" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#3E8F5A" text-anchor="start">ization</text></g><text x="150" y="168" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#5C6B79">常见片段拼装，刚刚好</text></g></svg></div><figcaption><span class="fig-no">图 22-2</span>同一个长词「internationalization」：按词切要么独占一个 token、要么直接 [UNK]；按字符切碎成 20 个；子词切法折中——把它拆成 inter / nation / al / ization 这种常见片段。</figcaption></figure><p>两堵墙逼出一个折中：<strong>子词（subword）</strong>。常见的整词当一个 token，生僻的长词拆成几个常见片段， 实在没见过的，退到字符/字节，保证<strong>永远不会「完全不认识」</strong>。问题只剩一个：这些片段从哪来、按什么规则切？</p></section><section class="station reveal" data-title="BPE：数频率，反复合并" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>BPE：从字符出发，反复合并最常见的一对</h2></div><p>现代大模型几乎都用 <strong>BPE（字节对编码）</strong>。它造词表的办法像在玩积木——<strong>从零开始，谁老黏在一起，就把谁俩焊成一块</strong>：</p><ol style="padding-left:24px;line-height:2.1"><li>先把所有词拆到最小单位（字符/字节），每个字符就是一个 token；</li><li>扫一遍语料，<strong>数</strong>哪一对相邻 token 出现得最频繁；</li><li>把这一对<strong>合并</strong>成一个新 token，加进词表；</li><li>重复第 2、3 步，直到词表攒到目标大小（比如 5 万）。</li></ol><p>拿三句真实的话当迷你语料，手动走两轮，体会一下「数 → 合并」：</p><div class="formula" style="text-align:left;font-size:14px;line-height:2"><span class="f-dim">① 我爱吃苹果，苹果很甜。<br/>② 红苹果和绿苹果都是水果。<br/>③ 水果店卖水果。</span><br/>全拆成单字，数所有相邻字对 → <strong>「苹 果」</strong>最多：①里 2 次、②里 2 次，共 <span class="f-hl">4</span> 次<br/><strong>第 1 轮合并</strong>：苹 果 → <span class="f-hl">苹果</span><br/>重新数 → <strong>「水 果」</strong>跟上：②里 1 次、③里 2 次，共 <span class="f-hl">3</span> 次，最多<br/><strong>第 2 轮合并</strong>：水 果 → <span class="f-hl">水果</span></div><p>就这么数、合并、再数、再合并，几万轮之后：<strong>高频词整个变成一个 token</strong>（"苹果"、"水果" 都是单 token）， 中频词留成几个常见片段，生僻字才碎到单字。把刚学到的这两步合并，套回「苹果是水果」这句话上，就这样切：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 150" role="img" aria-label="把 BPE 学到的合并套用到「苹果是水果」"><text x="20" y="20" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#5C6B79">「苹果是水果」的切分过程</text><g><text x="20" y="42" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="600" fill="#3E6B8F">初始</text><g><rect x="70" y="28" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="79" y="42" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">苹</text></g><g><rect x="116" y="28" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="125" y="42" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">果</text></g><g><rect x="162" y="28" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="171" y="42" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">是</text></g><g><rect x="208" y="28" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="217" y="42" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">水</text></g><g><rect x="254" y="28" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="263" y="42" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">果</text></g><text x="530" y="42" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC" text-anchor="end">每个字是一个 token</text></g><g><text x="20" y="78" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="600" fill="#3E6B8F">第1轮</text><g><rect x="70" y="64" width="28" height="20" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="84" y="78" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">苹果</text></g><g><rect x="116" y="64" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="125" y="78" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">是</text></g><g><rect x="162" y="64" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="171" y="78" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">水</text></g><g><rect x="208" y="64" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="217" y="78" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">果</text></g><text x="530" y="78" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC" text-anchor="end">应用「苹 果」合并</text></g><g><text x="20" y="114" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="600" fill="#3E6B8F">第2轮</text><g><rect x="70" y="100" width="28" height="20" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="84" y="114" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">苹果</text></g><g><rect x="116" y="100" width="18" height="20" rx="3" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="125" y="114" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">是</text></g><g><rect x="162" y="100" width="28" height="20" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="176" y="114" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">水果</text></g><text x="530" y="114" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC" text-anchor="end">应用「水 果」合并</text></g></svg></div><figcaption><span class="fig-no">图 22-3</span>把上面数出来的两步合并（先「苹果」、再「水果」）依次套用到「苹果是水果」：5 个单字逐步并成 3 个 token「苹果 / 是 / 水果」。数万轮之后，常用词都成了单个 token，罕见字才被拆到更小的片段——既不爆词表，也不会「完全不认识」。</figcaption></figure></section><section class="station reveal" data-title="模型眼里其实是整数" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>掀开真相：模型眼里其实是一串整数</h2></div><p>切出 token 只是第一步。token 并不会以「文字」的样子走进模型——每个 token 在词表里有个<strong>固定编号（ID）</strong>， 模型真正吃进去的，是<strong>一串整数</strong>。每个 ID 再去一张巨大的<strong>嵌入表</strong>里，取出自己那一行数字—— 这就是第 15 课的<strong>词向量</strong>（大模型里叫 embedding）。所以一句话进模型的完整入口是这样的：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 232" role="img" aria-label="文本进入模型的完整流水线：分词、查ID、查嵌入、加位置"><defs><marker id="tk-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5C6B79"></polygon></marker></defs><text x="60" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#5C6B79">① 文本</text><rect x="8" y="30" width="104" height="30" rx="5" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="60" y="50" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#232F3B">I love strawberry</text><line x1="60" y1="62" x2="60" y2="84" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#tk-arr)"></line><text x="60" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#3E8F5A">② 切成 token</text><g><rect x="8" y="108" width="104" height="20" rx="3" fill="#EDF5EF" stroke="#3E8F5A" stroke-width="1"></rect><text x="14" y="122" font-family="JetBrains Mono, monospace" font-size="10" fill="#2F8F76">I</text></g><g><rect x="8" y="132" width="104" height="20" rx="3" fill="#EDF5EF" stroke="#3E8F5A" stroke-width="1"></rect><text x="14" y="146" font-family="JetBrains Mono, monospace" font-size="10" fill="#2F8F76"> love</text></g><g><rect x="8" y="156" width="104" height="20" rx="3" fill="#EDF5EF" stroke="#3E8F5A" stroke-width="1"></rect><text x="14" y="170" font-family="JetBrains Mono, monospace" font-size="10" fill="#2F8F76"> straw</text></g><g><rect x="8" y="180" width="104" height="20" rx="3" fill="#EDF5EF" stroke="#3E8F5A" stroke-width="1"></rect><text x="14" y="194" font-family="JetBrains Mono, monospace" font-size="10" fill="#2F8F76">berry</text></g><line x1="116" y1="150" x2="150" y2="150" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#tk-arr)"></line><text x="210" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#C0481E">③ 查编号 ID</text><g><rect x="166" y="108" width="88" height="20" rx="3" fill="#FDF6EC" stroke="#C0481E" stroke-width="1"></rect><text x="210" y="122" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#C0481E">40</text></g><g><rect x="166" y="132" width="88" height="20" rx="3" fill="#FDF6EC" stroke="#C0481E" stroke-width="1"></rect><text x="210" y="146" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#C0481E">3047</text></g><g><rect x="166" y="156" width="88" height="20" rx="3" fill="#FDF6EC" stroke="#C0481E" stroke-width="1"></rect><text x="210" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#C0481E">7124</text></g><g><rect x="166" y="180" width="88" height="20" rx="3" fill="#FDF6EC" stroke="#C0481E" stroke-width="1"></rect><text x="210" y="194" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#C0481E">15717</text></g><line x1="256" y1="150" x2="290" y2="150" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#tk-arr)"></line><text x="368" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#3E6B8F">④ 查嵌入表 → 向量</text><g><rect x="300" y="108" width="136" height="20" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="368" y="122" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">[0.2, −0.7, …]</text></g><g><rect x="300" y="132" width="136" height="20" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="368" y="146" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">[0.8, 0.1, …]</text></g><g><rect x="300" y="156" width="136" height="20" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="368" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">[−0.3, 0.5, …]</text></g><g><rect x="300" y="180" width="136" height="20" rx="3" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1"></rect><text x="368" y="194" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">[0.4, 0.9, …]</text></g><line x1="438" y1="150" x2="472" y2="150" stroke="#5C6B79" stroke-width="1.4" marker-end="url(#tk-arr)"></line><text x="516" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#5C6B79">⑤ +位置</text><rect x="478" y="120" width="76" height="60" rx="6" fill="#F0EDE6" stroke="#5C6B79" stroke-width="1.5"></rect><text x="516" y="146" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">进入</text><text x="516" y="162" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#5C6B79">Transformer</text><text x="280" y="222" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#93A0AC">文本 → token → 整数 ID → 向量 → 加位置 → 注意力层。分词器，是这条流水线的第一道工序。</text></svg></div><figcaption><span class="fig-no">图 22-4</span>一句话进模型的完整入口。注意第 ③ 步——「strawberry」被切成「straw」+「berry」两个 token、变成两个整数，从此模型只跟编号和向量打交道，再也回不到「s-t-r-a-w...」那一串字母。字母 r 的数量信息，就是在这一步丢掉的。</figcaption></figure><p>回头看开头那个谜题就通透了：模型看到的是 ID <code>7124</code>（straw）和 <code>15717</code>（berry）两个整数， 以及它们对应的向量。<strong>字母 r 从一开始就没进过模型的视野。</strong>它答不准 r 的个数，不是笨，是因为这道题问的东西，在它的输入里压根不存在。</p></section><section class="station reveal" data-title="中文与边界错误" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>中文更吃亏，以及一类「人类不会犯」的错</h2></div><p>GPT-4 的词表（tiktoken，约 10 万 token）以英文语料为主，中文 token 占比小。 后果是同样的意思，<strong>中文往往要花更多 token</strong>——上下文窗口能装的汉字更少，按 token 计费也更贵：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 100" role="img" aria-label="中英文同等内容的 token 消耗对比"><g><text x="20" y="22" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">The quick brown fox</text><text x="300" y="22" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">→ <!-- -->4<!-- --> tokens</text><text x="400" y="22" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">（每词基本 1 token）</text><g><rect x="20" y="30" width="35" height="14" rx="3" fill="#3E6B8F20" stroke="#3E6B8F" stroke-width="1"></rect><text x="24" y="41" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">The</text></g><g><rect x="80" y="30" width="56" height="14" rx="3" fill="#3E6B8F20" stroke="#3E6B8F" stroke-width="1"></rect><text x="84" y="41" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F"> quick</text></g><g><rect x="140" y="30" width="56" height="14" rx="3" fill="#3E6B8F20" stroke="#3E6B8F" stroke-width="1"></rect><text x="144" y="41" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F"> brown</text></g><g><rect x="200" y="30" width="44" height="14" rx="3" fill="#3E6B8F20" stroke="#3E6B8F" stroke-width="1"></rect><text x="204" y="41" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F"> fox</text></g></g><g><text x="20" y="72" font-family="Noto Serif SC, serif" font-size="12" fill="#232F3B">那只敏捷的棕色狐狸</text><text x="300" y="72" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">→ <!-- -->8<!-- --> tokens</text><text x="400" y="72" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">（多数汉字要 1 个甚至更多）</text><g><rect x="20" y="80" width="26" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="24" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">那只</text></g><g><rect x="80" y="80" width="17" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="84" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">敏</text></g><g><rect x="140" y="80" width="17" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="144" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">捷</text></g><g><rect x="200" y="80" width="17" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="204" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">的</text></g><g><rect x="260" y="80" width="17" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="264" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">棕</text></g><g><rect x="320" y="80" width="17" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="324" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">色</text></g><g><rect x="380" y="80" width="17" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="384" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">狐</text></g><g><rect x="440" y="80" width="17" height="14" rx="3" fill="#C0481E20" stroke="#C0481E" stroke-width="1"></rect><text x="444" y="91" font-family="Noto Serif SC, serif" font-size="9" fill="#C0481E">狸</text></g></g></svg></div><figcaption><span class="fig-no">图 22-5</span>英文「The quick brown fox」= 4 tokens；中文同义句可能要 8 tokens。中文用户的 token 成本更高，同样大小的上下文窗口，实际能放的汉字更少。</figcaption></figure><div class="crack reveal"><div class="crack-label">一类「人类不会犯」的低级错误</div><p>既然 token 不对应字符，模型就会栽在一些<strong>只跟字母有关</strong>的任务上——根源全是同一个：它看不见 token 内部的字母。</p><ul style="padding-left:20px;margin-top:8px;line-height:2"><li><strong>数字母</strong>：strawberry 是一个 token → 数不清里面的 r（开头那道题）。</li><li><strong>逆序拼写</strong>：把「HELLO」倒过来拼成「OLLEH」要逐字符操作，可 token 不是字符。</li><li><strong>押韵 / 藏头</strong>：要求每行首字母拼成一个词，模型常对不齐——它操作的是 token，不是字母。</li></ul><p style="margin-top:12px">这些都不是「智力」问题，而是 tokenization 的<strong>固有盲区</strong>。 缓解的思路：让模型能访问字符级信息，或干脆用字节级 tokenizer——但代价又回到「序列太长」那堵墙上，仍是权衡。</p></div></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>模型看到的不是文字，是 <span class="tk-hl">token 的整数编号</span>。按词切会爆词表、按字符切序列太长，<span class="tk-hl">BPE</span> 折中——从字符出发、反复合并最频繁的相邻对。 「strawberry 数不清 r」不是笨：它被切成 token、变成整数，字母从一开始就不在模型的视野里。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>两条朴素路</strong>：按词切（词表爆炸 + [UNK]）、按字符切（序列暴长 + O(n²) 翻倍）。</li><li><strong>子词折中</strong>：常见词整体、生僻词拆片段、永不「完全不认识」。</li><li><strong>BPE 规则</strong>：数频率 → 合并最常见的一对 → 重复几万轮（low/lower/newer 手算两轮）。</li><li><strong>真正的输入</strong>：文本 → token → 整数 ID → 查嵌入表得向量 → 加位置 → 进注意力。</li><li><strong>固有盲区</strong>：数字母、逆序、藏头，都因为 token 内部的字符不可见；中文还更费 token。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="BPE 等切出“子词”：常见词整块、罕见词拆片段。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>大模型并不是直接按「单个字符」或「完整单词」来处理文本，而是用 Tokenizer 切成 token。主流做法（如 BPE）切出的通常是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">总是完整的单词</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">介于字符和单词之间的「子词」单元，常见词整块、罕见词拆成片段</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">随机长度的片段</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">永远是单个字母</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="模型看到的是子词 token 而非单个字母，字符级信息被打包隐藏。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>为什么像 GPT 这样的模型会数不对 strawberry 里有几个「r」？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">模型故意答错</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">它看到的是若干 token（子词块），而非一个个独立字母，字符级信息被「打包」隐藏了</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">因为 r 是特殊字符</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">因为它没学过英文</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-04-arch.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 23 课</span>
+                    <h3>编码器、解码器与大语言模型</h3>
+                    <p>同样是Transformer，BERT为什么不能生成文章，GPT为什么是主流？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第22课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

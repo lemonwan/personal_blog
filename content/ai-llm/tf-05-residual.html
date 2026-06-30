@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第24课 · 残差连接与层归一化 | AI大模型原理教程</title>
+    <meta name="description" content="96层Transformer——梯度怎么从第96层传回第1层而不消失？">
+    <meta name="keywords" content="AI大模型教程,Transformer,残差连接与层归一化,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第24课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 24 · 卷四</div>
+            <h1>残差连接与层归一化</h1>
+            <p class="subtitle">❝ 96层Transformer——梯度怎么从第96层传回第1层而不消失？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="96层网络的麻烦" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>96 层网络，梯度能传回第一层吗？</h2></div><p>GPT-3 有 96 层 Transformer Block。训练时损失在最后一层算出，梯度要一路反向传播——从第 96 层传回第 1 层。</p><p>第 13 课讲过，梯度每穿一层，就要乘一次那层的导数。假设每层导数平均是 0.9：</p><div class="formula formula-tex">经过 96 层：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">0.</span><span class="mord"><span class="mord">9</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">96</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">0.00006</span></span></span></span></span></div><p>第 1 层收到的梯度只有原来的万分之零点六——几乎是零。它的参数得不到有效更新信号，等于白占内存。 反过来，要是每层导数平均 1.1，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1.</span><span class="mord"><span class="mord">1</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">96</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">12000</span></span></span></span></span>，梯度爆炸、数值溢出，训练当场崩盘。 连乘这件事，要么把梯度碾成零，要么把它吹上天，<strong>极难刚好停在 1 附近</strong>。</p><p>这个敌人你已经撞见过两回：第 13 课反向传播，梯度沿链式法则一层层连乘；第 17 课的 RNN， 把同一个矩阵沿「<strong>时间</strong>」连乘几十步，于是记忆消退。这一次只是换了方向——沿「<strong>深度</strong>」连乘 96 层。 同一道数学难题第三次找上门，所以解法的灵魂，也和当年给 LSTM 修「记忆高速公路」如出一辙。</p><div class="think"><div class="think-q">96 次连乘把梯度逼到极端。有没有办法让梯度「绕过」一些层，少连乘几次？</div></div></section><section class="station reveal" data-title="残差连接：加一条直通路" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>残差连接：加一条直通路</h2></div><p>残差连接的做法简单粗暴：<strong>把这一层的输入，原样加到它的输出上</strong>。</p><div class="formula formula-tex"><div>普通层　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:6px">残差层　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span></div></div><div class="crack reveal"><div class="crack-label">等一下：把 x 加回去，输出不就被改了？</div><p>会变——但不会变坏。关键在于 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span></span></span></span></span> 是<strong>训练出来的</strong>，不是写死的。 加上这条捷径后，这一层要学的目标也跟着变了：原来它得亲手算出完整的目标输出 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>， 现在它只需算出「目标与输入之间的<strong>差</strong>」<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>， 最后 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 又自动拼回 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0813em;">H</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span>。 训练时网络早把这条「+x」算在内，会主动调整 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span></span></span></span></span> 去配合它——<strong>最终该输出什么还是什么</strong>，只是「这一层负责算哪部分」换了个分工。这正是「残差」（residual = 余项、差值）这个名字的由来。</p><p>更妙的是，这个分工让「按需微调」变得极其廉价。设想某一层最该做的事其实是<strong>「别添乱，把输入原样传下去」</strong>： 普通层得逼一整组权重恰好凑出一个恒等映射，意外地难；残差层只要让 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 就行——<strong>「什么都不学」反而成了最容易达成的默认</strong>，需要改时再让 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span></span></span></span></span> 吐出一点小修正。 于是深层网络可以「能不动就不动，要动只动一点」，叠到上百层也不怕被中间某层搅乱。</p></div><p style="font-size:14px;color:var(--ink-soft)">（唯一的前提：相加要求 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 与 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span> 形状相同。Transformer 里每个子层的输入输出都保持同样的 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">model</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 维，所以这一加天然成立。）</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 200" role="img" aria-label="残差连接：两条路"><defs><marker id="res-arr" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#3E6B8F"></polygon></marker><marker id="res-arr2" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#4A8B5E"></polygon></marker></defs><rect x="220" y="10" width="120" height="28" rx="5" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="280" y="29" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">输入 x</text><line x1="280" y1="38" x2="280" y2="60" stroke="#3E6B8F" stroke-width="2" marker-end="url(#res-arr)"></line><rect x="190" y="60" width="180" height="46" rx="6" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="280" y="86" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E6B8F">f(x)（注意力 or FFN）</text><text x="280" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">梯度：∂f/∂x，可能很小</text><line x1="280" y1="106" x2="280" y2="140" stroke="#3E6B8F" stroke-width="2" marker-end="url(#res-arr)"></line><line x1="210" y1="24" x2="170" y2="24" stroke="#4A8B5E" stroke-width="2" stroke-dasharray="5,3"></line><line x1="170" y1="24" x2="170" y2="148" stroke="#4A8B5E" stroke-width="2" stroke-dasharray="5,3"></line><line x1="170" y1="148" x2="230" y2="148" stroke="#4A8B5E" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#res-arr2)"></line><text x="136" y="90" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">捷径 x</text><text x="136" y="104" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">梯度：1</text><rect x="240" y="138" width="80" height="28" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="280" y="157" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#4A8B5E">f(x) + x</text><line x1="280" y1="166" x2="280" y2="186" stroke="#5C6B79" stroke-width="2" marker-end="url(#res-arr)"></line><text x="280" y="198" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">输出 y</text></svg></div><figcaption><span class="fig-no">图 24-1</span>残差连接给梯度开了一条「高速公路」（绿色捷径）。反向传播时梯度沿两条路回传：一条穿过 f(x)（可能很小），一条走捷径（梯度恒为 1，不衰减）。</figcaption></figure><p>关键全在求导。对 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 求梯度：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.0574em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal">x</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.113em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal">x</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span></span></div><p>那个孤零零的 <strong>「+1」</strong>就是命根子。哪怕 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mord">/</span><span class="mord" style="margin-right:0.0556em;">∂</span><span class="mord mathnormal">x</span></span></span></span></span> 小到 0.01， 这一层的总梯度也是 1.01——<strong>稳稳压在 1 附近</strong>。于是 96 层连乘不再是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">0.</span><span class="mord"><span class="mord">9</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">96</span></span></span></span></span></span></span></span></span></span></span></span></span>， 而是接近 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1.0</span><span class="mord"><span class="mord">1</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">96</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.6</span></span></span></span></span> 这种温和的数：既没碾成零，也没吹爆。 96 层残差网络，相当于给梯度铺了一条可以一路直通回第 1 层的高速路。</p><p>回头看第 21 课——搭那台「最简 Transformer」时，我们说过真实的块里，注意力和 FFN 后面还各跟着一个「<strong>Add & Norm</strong>」稳定器，当时一笔带过。 那个「Add」，就是这里的 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span>——它一直在偷偷给梯度修高速路。并排的「Norm」，是下一站的主角。</p></section><section class="station reveal" data-title="LayerNorm：稳住数值" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>LayerNorm：把数值拉回正常量级</h2></div><p>看完上一站，你心里大概已经打鼓了：那条「只进不减」的高速路，每过一块就往上<strong>加</strong>一截 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span></span></span></span></span>， 这么一路加下去，数值会不会越滚越大？——确实会。但先别急着把账全算在残差头上： 「<strong>深层网络的激活值尺度会到处乱跑、得不时校准</strong>」本来就是个通病，早在没有残差的年代就存在； 残差只是让它以「单调膨胀」这种特别显眼的方式冒了出来。所以这一站的主角——<strong>归一化</strong>， 并不是专门给残差打的补丁，而是深层网络通用的「稳压器」。</p><p>先说清楚这一站要收拾的隐患：<strong>激活值的量级会慢慢漂</strong>——某些维度越加越大、另一些越来越小， 十几层后，同一条向量里可能一个分量是 10000、另一个是 0.001。这种悬殊会让后面层的权重彻底失准。</p><p>「漂」不是抽象的担心，拿数字走一遍就看得见。不过在走之前，得先把两个记号交代清楚，免得看着发懵：</p><ul class="check-list"><li><strong>记号 ①　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></strong>：我们给每一块编个号 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span>（念作 L，就是「第几块」），<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 表示数据<strong>流过第 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">ℓ</span></span></span></span></span> 块之后</strong>的那条向量。 于是上一站残差的「累加」写成式子就是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">ℓ</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1076em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">ℓ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>， 读作「下一块的向量 = 这一块的向量 + 这一块算出的增量 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span></span></span></span></span>」。</li><li><strong>记号 ②　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">∥</span><span class="mord mathnormal">x</span><span class="mclose">∥</span></span></span></span></span></strong>：一条向量到底「多大」，用它的长度来量，记作 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">∥</span><span class="mord mathnormal">x</span><span class="mclose">∥</span></span></span></span></span>，叫<strong>范数</strong>—— 其实就是向量的长度（各分量平方求和再开根号）。</li></ul><p>有了这两个记号就好说了：假设向量刚进网络时 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">∥</span><span class="mord mathnormal">x</span><span class="mclose">∥</span></span></span></span></span> ≈ 1，之后每过一块就被 +<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span></span></span></span></span> 顶大一点。 把几个残差块首尾叠起来、逐块标出输入输出，量级滚雪球的过程就一目了然：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 520 426" role="img" aria-label="多个残差块叠加，激活值量级逐块累积"><defs><marker id="dft-in" markerWidth="7" markerHeight="5" refX="6.5" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#3E6B8F"></polygon></marker><marker id="dft-out" markerWidth="7" markerHeight="5" refX="6.5" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#C0481E"></polygon></marker></defs><text x="110" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#5C6B79">残差高速路 x</text><text x="110" y="34" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">只进不减 ↓</text><line x1="110" y1="48" x2="110" y2="348" stroke="#C9BBA0" stroke-width="6" stroke-linecap="round"></line><line x1="110" y1="348" x2="110" y2="392" stroke="#C9BBA0" stroke-width="6" stroke-dasharray="2 7" stroke-linecap="round"></line><g><line x1="120" y1="48" x2="211" y2="77" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#dft-in)"></line><text x="162" y="73" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">读入 x</text><rect x="214" y="64" width="188" height="44" rx="7" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="308" y="84" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">第 <!-- -->1<!-- --> 块 · <!-- -->注意力 f₁</text><text x="308" y="99" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">算出一截增量 f</text><line x1="211" y1="95" x2="120" y2="124" stroke="#C0481E" stroke-width="1.6" marker-end="url(#dft-out)"></line><text x="162" y="110" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">+f</text></g><g><line x1="120" y1="124" x2="211" y2="153" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#dft-in)"></line><text x="162" y="149" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">读入 x</text><rect x="214" y="140" width="188" height="44" rx="7" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="308" y="160" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">第 <!-- -->2<!-- --> 块 · <!-- -->FFN f₂</text><text x="308" y="175" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">算出一截增量 f</text><line x1="211" y1="171" x2="120" y2="200" stroke="#C0481E" stroke-width="1.6" marker-end="url(#dft-out)"></line><text x="162" y="186" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">+f</text></g><g><line x1="120" y1="200" x2="211" y2="229" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#dft-in)"></line><text x="162" y="225" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">读入 x</text><rect x="214" y="216" width="188" height="44" rx="7" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="308" y="236" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">第 <!-- -->3<!-- --> 块 · <!-- -->注意力 f₃</text><text x="308" y="251" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">算出一截增量 f</text><line x1="211" y1="247" x2="120" y2="276" stroke="#C0481E" stroke-width="1.6" marker-end="url(#dft-out)"></line><text x="162" y="262" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">+f</text></g><g><line x1="120" y1="276" x2="211" y2="303" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#dft-in)"></line><text x="162" y="299" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E6B8F">读入 x</text><rect x="214" y="290" width="188" height="44" rx="7" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="308" y="310" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E6B8F">第 <!-- -->4<!-- --> 块 · <!-- -->FFN f₄</text><text x="308" y="325" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#5C6B79">算出一截增量 f</text><line x1="211" y1="321" x2="120" y2="348" stroke="#C0481E" stroke-width="1.6" marker-end="url(#dft-out)"></line><text x="162" y="336" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">+f</text></g><g><circle cx="110" cy="48" r="5.42" fill="#3E8F5A" opacity="0.9"></circle><text x="92.58" y="52" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#3E8F5A">‖x‖≈<!-- -->1.0</text></g><g><circle cx="110" cy="124" r="5.714" fill="#3E8F5A" opacity="0.9"></circle><text x="92.286" y="128" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#3E8F5A">‖x‖≈<!-- -->1.7</text></g><g><circle cx="110" cy="200" r="6.218" fill="#B07A1E" opacity="0.9"></circle><text x="91.782" y="204" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#B07A1E">‖x‖≈<!-- -->2.9</text></g><g><circle cx="110" cy="276" r="6.848" fill="#B07A1E" opacity="0.9"></circle><text x="91.152" y="280" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#B07A1E">‖x‖≈<!-- -->4.4</text></g><g><circle cx="110" cy="348" r="7.772" fill="#C0481E" opacity="0.9"></circle><text x="90.228" y="352" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#C0481E">‖x‖≈<!-- -->6.6</text></g><circle cx="110" cy="392" r="15" fill="#C0481E" opacity="0.92"></circle><text x="83" y="396" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#C0481E">‖x‖≈28</text><text x="134" y="396" text-anchor="start" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#93A0AC">…到第 12 块，已近 30 倍</text><text x="134" y="52" text-anchor="start" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E8F5A">← 入口输入，量级正常</text><text x="134" y="352" text-anchor="start" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#C0481E">← 上一块的输出 = 下一块的输入</text></svg></div><figcaption><span class="fig-no">图 24-2</span>把多个残差块<strong>首尾叠起来</strong>看：每块只把自己算出的增量 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span></span></span></span></span> 加到同一条「高速路」<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 上，<strong>上一块的输出就是下一块的输入</strong>（节点上的 ‖x‖）。高速路只进不减，量级一块接一块越滚越大——示意里 4 块就到 6.6 倍，到第 12 块近 30 倍（数值为示意，真实模型残差流范数确实随深度近乎线性增长）。这就是为什么必须有人在每块结束时把量级<strong>拉回 ≈1</strong>，那个人就是下面的 LayerNorm。</figcaption></figure><p>那……量级一路滚大，<strong>不拉回来会怎样？</strong>麻烦在于：后面每一层的权重，都是在「输入大约是某个量级」的前提下练出来的。 一旦输入层层暴涨，后面的层就像拿着厘米刻度的尺子去量公里——<strong>越往后越乱套</strong>。具体会撞上两堵墙：</p><p>其一，<strong>数值精度撑不住</strong>。大模型常用 16 位浮点做训练，位数有限：量级一旦失控，要么直接溢出成 inf / NaN、训练当场崩盘； 要么大数把小数「吃掉」——10000 和 0.001 相加，那个 0.001 直接被舍没了，信息凭空蒸发。</p><p>其二，<strong>该敏感的地方变迟钝</strong>。还记得第 11 课的 Softmax 吗？它对输入的<em>大小</em>极其敏感：喂进去的数一旦过大， 输出就会一边倒地挤成「非 0 即 1」，注意力只死盯一个词、梯度也几乎归零，网络再也学不动。</p><p>正是为了堵上这两堵墙——<strong>LayerNorm（层归一化）</strong>登场了。它的活，就是在每个子层后把向量<strong>拍回标准量级</strong>。它对<em>每一个词向量</em>单独做三步：</p><div class="formula formula-tex" style="text-align:left"><div>① 求这条向量的均值和标准差　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal">μ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">mean</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">σ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathrm">std</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:6px">② 归一化到均值 0、标准差 1　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.9463em;vertical-align:-0.686em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.2603em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em;">σ</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathnormal">μ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></div><div style="margin-top:6px">③ 再缩放平移（参数可学）　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8095em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathrm">output</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0556em;">γ</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">x</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.2222em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0528em;">β</span></span></span></span></span></div></div><p>拿一条 4 维向量 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord">8</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">2</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">4</span><span class="mclose">]</span></span></span></span></span> 手算一遍：</p><div class="formula" style="text-align:left;font-size:14px;line-height:2">均值 μ = (8+2+2+4)/4 = <span class="f-hl">4</span><br/>方差 = [(8−4)² + (2−4)² + (2−4)² + (4−4)²]/4 = (16+4+4+0)/4 = 6 → σ = √6 ≈ <span class="f-hl">2.45</span><br/>归一化　x̂ = [(8−4)/2.45, (2−4)/2.45, (2−4)/2.45, 0] ≈ <span class="f-hl">[1.63, −0.82, −0.82, 0]</span></div><p>一条原本 [8,2,2,4]、量级乱七八糟的向量，被拉成了一条均值 0、标准差 1 的「标准」向量。 第 ③ 步的 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0556em;">γ</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0528em;">β</span></span></span></span></span> 是<strong>可学习参数</strong>：归一化是死规矩，但网络可以靠 γ、β 把分布再「拧」回它真正想要的范围—— 既享受稳定，又不丢灵活。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 120" role="img" aria-label="LayerNorm 前后激活值分布对比"><text x="110" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#C0481E">归一化前（参差不齐）</text><g><rect x="20" y="19.269539708805198" width="28" height="70.7304602911948" rx="2" fill="#C0481E" opacity="0.6"></rect><text x="34" y="105" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#C0481E">9k</text></g><g><rect x="56" y="79.16292015609667" width="28" height="10.837079843903323" rx="2" fill="#C0481E" opacity="0.6"></rect><text x="70" y="105" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#C0481E">3</text></g><g><rect x="92" y="89.98438101243792" width="28" height="0.015618987562084439" rx="2" fill="#C0481E" opacity="0.6"></rect><text x="106" y="105" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#C0481E">0.002</text></g><g><rect x="128" y="16.574086156561805" width="28" height="73.4259138434382" rx="2" fill="#C0481E" opacity="0.6"></rect><text x="142" y="105" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#C0481E">12k</text></g><g><rect x="164" y="89.39837240123491" width="28" height="0.6016275987650952" rx="2" fill="#C0481E" opacity="0.6"></rect><text x="178" y="105" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#C0481E">0.08</text></g><g><rect x="200" y="42.224822246196716" width="28" height="47.775177753803284" rx="2" fill="#C0481E" opacity="0.6"></rect><text x="214" y="105" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" fill="#C0481E">0k</text></g><text x="390" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#4A8B5E">归一化后（整齐）</text><g><rect x="300" y="70" width="28" height="48" rx="2" fill="#4A8B5E" opacity="0.7"></rect><text x="314" y="85" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#4A8B5E">-1.2</text></g><g><rect x="336" y="70" width="28" height="20" rx="2" fill="#4A8B5E" opacity="0.7"></rect><text x="350" y="85" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#4A8B5E">-0.5</text></g><g><rect x="372" y="66" width="28" height="4" rx="2" fill="#4A8B5E" opacity="0.7"></rect><text x="386" y="85" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#4A8B5E">0.1</text></g><g><rect x="408" y="38" width="28" height="32" rx="2" fill="#4A8B5E" opacity="0.7"></rect><text x="422" y="85" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#4A8B5E">0.8</text></g><g><rect x="444" y="22" width="28" height="48" rx="2" fill="#4A8B5E" opacity="0.7"></rect><text x="458" y="85" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#4A8B5E">1.2</text></g><g><rect x="480" y="70" width="28" height="12" rx="2" fill="#4A8B5E" opacity="0.7"></rect><text x="494" y="85" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#4A8B5E">-0.3</text></g></svg></div><figcaption><span class="fig-no">图 24-3</span>LayerNorm 把一条向量从「量级乱飞」拉到「均值 0、标准差 1」。统一了量级，后面层的权重才能稳定工作，不被某个异常大的值带偏。</figcaption></figure></section><section class="station reveal" data-title="放前还是放后" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>一个不起眼却要命的细节：Norm 放前还是放后</h2></div><p>残差 + LayerNorm 都有了，但它俩<strong>谁先谁后</strong>，竟决定了深层模型训不训得起来。这是 2019 年后才被业界看清的一个坑：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 200" role="img" aria-label="Post-LN 与 Pre-LN 的区别"><text x="140" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#C0481E">Post-LN（原始 2017）</text><line x1="60" y1="36" x2="60" y2="176" stroke="#C0481E" stroke-width="2.5" stroke-dasharray="4 3" opacity="0.5"></line><text x="48" y="108" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#C0481E" transform="rotate(-90 48 108)">残差高速路</text><rect x="84" y="44" width="120" height="26" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="144" y="61" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">子层 f(x)</text><rect x="84" y="86" width="120" height="26" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.4"></rect><text x="144" y="103" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">Add（+x）</text><rect x="84" y="128" width="120" height="26" rx="5" fill="#FBEEE6" stroke="#C0481E" stroke-width="1.8"></rect><text x="144" y="145" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#C0481E">LayerNorm</text><text x="144" y="188" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">Norm 卡在高速路上 → 不稳</text><text x="420" y="20" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#3E8F5A">Pre-LN（现代 GPT）</text><line x1="340" y1="36" x2="340" y2="176" stroke="#3E8F5A" stroke-width="2.5" opacity="0.7"></line><text x="328" y="108" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#3E8F5A" transform="rotate(-90 328 108)">残差高速路（畅通）</text><rect x="364" y="44" width="120" height="26" rx="5" fill="#FBEEE6" stroke="#C0481E" stroke-width="1.8"></rect><text x="424" y="61" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" font-weight="700" fill="#C0481E">LayerNorm</text><rect x="364" y="86" width="120" height="26" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="1.4"></rect><text x="424" y="103" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#3E6B8F">子层 f(·)</text><rect x="364" y="128" width="120" height="26" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.4"></rect><text x="424" y="145" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">Add（+x）</text><text x="424" y="188" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#93A0AC">Norm 移到支路上 → 主路畅通</text></svg></div><figcaption><span class="fig-no">图 24-4</span>Post-LN 把 LayerNorm 压在残差主路<strong>之后</strong>，等于在高速路上设了收费站，深层时梯度仍不稳，得靠脆弱的「学习率预热」哄着训。Pre-LN 把 Norm 挪到子层<strong>之前</strong>的支路上，残差主路全程畅通——这才是 GPT 能稳稳堆到几十上百层的关键。</figcaption></figure><p>写成式子，差别就一目了然——<strong>Pre-LN 的那个 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord">+</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 完全没被 Norm 碰过</strong>，高速路纯净：</p><div class="formula formula-tex" style="text-align:left"><div>Post-LN　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord"><span class="mord mathrm">LN</span></span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord"><span class="delimsizing size1">)</span></span></span></span></span></span>　<span style="font-family:var(--sans);font-size:12px;color:var(--ink-faint)">← x 被 LN 二次加工，主路受扰</span></div><div style="margin-top:8px">Pre-LN　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mord"><span class="delimsizing size1">(</span></span><span class="mord"><span class="mord mathrm">LN</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mord"><span class="delimsizing size1">)</span></span></span></span></span></span>　<span style="font-family:var(--sans);font-size:12px;color:var(--ink-faint)">← x 原样直通，只在支路上 Norm</span></div></div><p>还有个更省的变体叫 <strong>RMSNorm</strong>（LLaMA 等在用）：它干脆<strong>连均值都不减</strong>， 只把向量除以它自己的「均方根」来定量级（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">x</span><span class="mord">/</span><span class="mord"><span class="mord mathrm">RMS</span></span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0556em;">γ</span></span></span></span></span>）。 少算一步、参数更少，效果却几乎一样——又一次印证了这一卷反复出现的审美：<strong>能简则简，简到不能再简为止。</strong></p></section><section class="station reveal" data-title="总结" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p><span class="tk-hl">残差连接</span> y = f(x) + x：那个「+1」给梯度留一条不衰减的高速路，96 层连乘也不消失。<span class="tk-hl">LayerNorm</span>：把每条向量拉回均值 0、标准差 1，挡住数值漂移。 再加一个讲究——<span class="tk-hl">Pre-LN</span> 让残差主路保持纯净，才有了今天能稳稳堆到上百层的深层模型。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>深度连乘的诅咒</strong>：0.9⁹⁶≈0.00006（消失）或 1.1⁹⁶≈12000（爆炸），极难停在 1。</li><li><strong>残差连接</strong>：∂y/∂x = ∂f/∂x + 1，那个「+1」把每层梯度钉在 1 附近。</li><li><strong>LayerNorm</strong>：[8,2,2,4] → 减均值 4、除 σ≈2.45 → [1.63,−0.82,−0.82,0]，再乘 γ 加 β。</li><li><strong>放前 vs 放后</strong>：Pre-LN（x + f(LN(x))）让残差主路畅通，比 Post-LN 稳得多；RMSNorm 更省。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="残差连接提供捷径，让梯度畅通传回浅层，缓解梯度消失。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>在 96 层这样的超深 Transformer 里，「残差连接（residual/skip connection）」最重要的作用是？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">减少参数数量</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">提供一条「捷径」让梯度能较畅通地传回浅层，缓解深层网络的梯度消失</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">加快分词速度</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">让模型只用一层</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="层归一化对每个样本特征做标准化，稳定各层输入分布。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>层归一化（Layer Normalization）在 Transformer 中主要起什么作用？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">把权重全部归零</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">对每个样本的特征做标准化，稳定各层输入的分布，让训练更稳更快</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">删除一半神经元</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">决定生成的下一个词</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-06-training.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 25 课</span>
+                    <h3>预训练 · 监督微调 · 强化学习</h3>
+                    <p>「会接话」和「会帮忙」之间有一道鸿沟——ChatGPT的三个训练阶段</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第24课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

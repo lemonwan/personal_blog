@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 15 | 接口默认方法/静态方法</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 15 — 接口默认方法/静态方法</h1>
+  <div class="tag">模块：Java 基础 · Java 8+ 新特性</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">15</span>
+    <span class="card-title">接口默认方法/静态方法</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>接口默认方法（default methods）</h3>
+      <div class="content"><p>Java 8 引入了 default 关键字，允许在接口中定义带有默认实现的方法。</p><p><span class='highlight'>核心目的</span>：在不破坏已有实现类的前提下，对接口进行演进升级。</p><ul class='bullet-list'><li><span class='highlight'>语法</span>：<code>default</code> 修饰方法，提供默认实现</li><li><span class='highlight'>实现类</span>：可以继承接口的默认实现，也可以覆写</li><li><span class='highlight'>优先级</span>：类的方法 &gt; 接口的默认方法 &gt; 父接口的 default 方法</li></ul><div class='note-box'><div class='note-title'>💡 经典场景</div>Java 8 的 Collection 接口大量使用了 default 方法（如 stream()、forEach()、removeIf()），在不破坏已有类（如 ArrayList、HashMap）的前提下新增了函数式能力。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>接口静态方法（static methods）</h3>
+      <div class="content"><p>Java 8 还允许在接口中定义 static 方法，直接通过接口名调用。</p><ul class='bullet-list'><li><span class='highlight'>语法</span>：<code>static</code> 修饰方法，不能有默认实现依赖 this</li><li><span class='highlight'>调用方式</span>：<code>InterfaceName.staticMethod()</code></li><li><span class='highlight'>区别</span>：默认方法可被实现类覆写，static 方法不能覆写</li></ul><div class='note-box'><div class='note-title'>💡 设计意图</div>静态方法用于提供与接口相关的工具方法，如 Comparator 中的 comparing()、comparingInt()、reversed() 等工厂方法。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>默认方法与继承的冲突解决</h3>
+      <div class="content"><p>当一个类实现多个接口，且这些接口有同名 default 方法时，编译器会报错，需要显式选择。</p><ul class='bullet-list'><li><span class='highlight'>规则 1</span>：类的方法优先级高于任何接口的 default 方法</li><li><span class='highlight'>规则 2</span>：如果继承的父类提供了实现，优先使用父类的</li><li><span class='highlight'>规则 3</span>：多个接口有同名 default 方法 → <strong>必须显式选择</strong></li></ul><div class='code-block'><span class='comment'>// 必须通过 super 显式选择</span>
+<span class='keyword'>class</span> MyClass implements InterfaceA, InterfaceB {
+    <span class='keyword'>public void</span> doSomething() {
+        InterfaceA.<span class='keyword'>super</span>.doSomething(); <span class='comment'>// 显式指定</span>
+    }
+}</div><div class='note-box warning'><div class='note-title'>⚠️ 面试考点</div>这个冲突解决规则体现了 Java 的设计哲学：类的实现优先于接口的契约，同时要求开发者显式处理歧义。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>函数式接口与 @FunctionalInterface</h3>
+      <div class="content"><p>Java 8 定义了四大核心函数式接口，是 Lambda 表达式的基础。</p><table class='comparison-table'><tr><th>接口</th><th>方法签名</th><th>用途</th></tr><tr><td>Supplier&lt;T&gt;</td><td>T get()</td><td>供给型：无入参，有出参</td></tr><tr><td>Consumer&lt;T&gt;</td><td>void accept(T t)</td><td>消费型：有入参，无出参</td></tr><tr><td>Function&lt;T,R&gt;</td><td>R apply(T t)</td><td>函数型：有入参，有出参</td></tr><tr><td>Predicate&lt;T&gt;</td><td>boolean test(T t)</td><td>断言型：有入参，返回布尔值</td></tr></table><div class='note-box'><div class='note-title'>🎤 面试要点</div>@FunctionalInterface 注解是可选的，但强烈建议加上。它会在编译期检查是否确实只有一个抽象方法，防止接口误用。如果接口中有多个抽象方法，标注了 @FunctionalInterface 会编译报错。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>默认方法 vs 抽象类 vs 工具类</h3>
+      <div class="content"><p>默认方法的出现引发了一个常见设计问题：什么时候用接口 default，什么时候用抽象类或工具类？</p><table class='comparison-table'><tr><th>维度</th><th>接口 default</th><th>抽象类</th><th>工具类（static）</th></tr><tr><td>多实现</td><td>✅ 支持</td><td>❌ 不支持</td><td>✅ 支持</td></tr><tr><td>状态维护</td><td>❌ 不能</td><td>✅ 可以</td><td>❌ 不能</td></tr><tr><td>向后兼容</td><td>✅ 完美</td><td>⚠️ 可能破坏</td><td>✅ 完美</td></tr><tr><td>覆写</td><td>✅ 可以</td><td>✅ 可以</td><td>❌ 不能</td></tr></table><div class='note-box warning'><div class='note-title'>💡 最佳实践</div>接口 default 适合<strong>不依赖状态</strong>的行为扩展；有状态的行为应使用抽象类；纯工具方法应使用 static 工具类。</div></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 22.7%"></div></div>
+  <div class="progress-text">15 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>明日将学习 CompletableFuture 异步编程——Java 8 最强大的异步编排工具，掌握链式调用、异常处理和多阶段异步编排，是理解现代响应式编程的基础。</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 15/66</div>
+</body>
+</html>

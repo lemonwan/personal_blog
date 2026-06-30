@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第01课 · 什么是向量 | AI大模型原理教程</title>
+    <meta name="description" content="计算机只认识数字，它怎么知道「猫」和「老虎」比「猫」和「金鱼」更像？">
+    <meta name="keywords" content="AI大模型教程,Transformer,什么是向量,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第01课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 01 · 卷一</div>
+            <h1>什么是向量</h1>
+            <p class="subtitle">❝ 计算机只认识数字，它怎么知道「猫」和「老虎」比「猫」和「金鱼」更像？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><section class="station reveal" data-title="一个尴尬的问题" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>一个尴尬的问题</h2></div><p>假设你在写一个程序，希望它能回答这样的问题：</p><p style="font-family:var(--serif);font-size:19px;font-weight:700;text-align:center;margin:28px 0">「猫、老虎、金鱼——这三种动物里，哪两个更像？」</p><p>你脱口而出：猫和老虎。理由也许是「都是猫科」「长得像」「都会扑猎物」。 但问题来了：<strong>计算机不懂「猫科」，不懂「长得像」，它只认识数字。</strong>你没法把一只猫塞进 CPU，你只能给它数字。</p><div class="think"><div class="think-q">如果只允许用数字向计算机描述一只动物，你打算怎么描述？先别往下翻，真的想 30 秒。</div></div></section><section class="station reveal" data-title="最小方案：一个数字" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>最小方案：用一个数字</h2></div><p>给每种动物打一个「体型分」，从 0 到 1。金鱼 <code>0.02</code>，猫 <code>0.25</code>， 狗 <code>0.45</code>，鳄鱼 <code>0.50</code>，老虎 <code>0.90</code>。它们排在一根数轴上：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 640 130" role="img" aria-label="体型数轴：金鱼、猫、狗、鳄鱼、老虎按体型从小到大排列"><line x1="40" y1="78" x2="612" y2="78" class="svg-axis"></line><polygon points="612,78 602,73 602,83" fill="#5C6B79"></polygon><text x="616" y="64" class="svg-note" text-anchor="end">体型 →</text><g font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC"><line x1="40" y1="74" x2="40" y2="82" stroke="#93A0AC"></line><text x="40" y="98" text-anchor="middle">0</text><line x1="320" y1="74" x2="320" y2="82" stroke="#93A0AC"></line><text x="320" y="98" text-anchor="middle">0.5</text><line x1="600" y1="74" x2="600" y2="82" stroke="#93A0AC"></line><text x="600" y="98" text-anchor="middle">1.0</text></g><g><circle cx="51" cy="78" r="6" fill="#3E6B8F"></circle><text x="51" y="50" class="svg-label" text-anchor="middle">金鱼</text><text x="51" y="120" class="svg-note" text-anchor="middle">0.02</text><circle cx="180" cy="78" r="6" fill="#3E6B8F"></circle><text x="180" y="50" class="svg-label" text-anchor="middle">猫</text>  <text x="180" y="120" class="svg-note" text-anchor="middle">0.25</text><circle cx="292" cy="78" r="6" fill="#C0481E"></circle><text x="292" y="50" class="svg-label" text-anchor="middle">狗</text>  <text x="292" y="120" class="svg-note" text-anchor="middle">0.45</text><circle cx="320" cy="78" r="6" fill="#C0481E"></circle><text x="320" y="36" class="svg-label" text-anchor="middle">鳄鱼</text><text x="335" y="120" class="svg-note" text-anchor="middle">0.50</text><circle cx="544" cy="78" r="6" fill="#3E6B8F"></circle><text x="544" y="50" class="svg-label" text-anchor="middle">老虎</text><text x="544" y="120" class="svg-note" text-anchor="middle">0.90</text></g></svg></div><figcaption><span class="fig-no">图 1-1</span>把每种动物压成一个「体型分」，它们就住在了同一根数轴上。注意狗和鳄鱼挨得有多近。</figcaption></figure><p>神奇的事情发生了：<strong>「像不像」突然变成了可以计算的东西</strong>。两个数的差越小，就越「像」：</p><div class="formula">距离(猫, 老虎) = |0.25 − 0.90| = <span class="f-hl">0.65</span><br/>距离(猫, 金鱼) = |0.25 − 0.02| = <span class="f-hl">0.23</span></div><p>等等——按这个算法，猫和<em>金鱼</em>反而更像？好像哪里不对，但先别急着推翻它。 这个方案至少做对了一件大事：<strong>它把「比较两个事物」变成了「比较两个数字」。</strong>这个思想我们要保留。真正的问题在别处。</p></section><section class="station reveal" data-title="局限：狗和鳄鱼成了近亲" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>局限：狗和鳄鱼成了近亲</h2></div><p>再看一眼图 1-1 里那两个红点。按我们的算法：</p><div class="formula">距离(狗, 鳄鱼) = |0.45 − 0.50| = <span class="f-hl">0.05</span><span class="f-dim">　←　全场最小</span></div><div class="crack reveal"><div class="crack-label">方案的局限</div><p>在「一个数字」的世界里，<strong>狗和鳄鱼是天造地设的一对</strong>——只因为它们体重差不多。 把一只动物压缩成一个数字时，我们丢掉了太多信息：性格、习性、危险程度……全没了。</p></div><div class="think"><div class="think-q">不推翻「用数字描述」这个思路，你能想到的最小修补是什么？</div></div></section><section class="station reveal" data-title="迭代：从数轴到平面" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>迭代：从数轴到平面</h2></div><p>给每只动物两个数字 <code>(体型, 凶猛)</code>，把第一个数当横坐标、第二个数当纵坐标：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 640 420" role="img" aria-label="二维动物地图：横轴体型，纵轴凶猛程度"><line x1="70" y1="370" x2="618" y2="370" class="svg-axis"></line><polygon points="618,370 608,365 608,375" fill="#5C6B79"></polygon><line x1="70" y1="370" x2="70" y2="22" class="svg-axis"></line><polygon points="70,22 65,32 75,32" fill="#5C6B79"></polygon><text x="600" y="392" class="svg-note" text-anchor="end">体型 →</text><text x="86" y="34" class="svg-note">凶猛 ↑</text><g stroke="#DCD2BF" stroke-width="0.8" stroke-dasharray="3 5"><line x1="70" y1="200" x2="610" y2="200"></line><line x1="340" y1="370" x2="340" y2="30"></line></g><g><circle cx="81" cy="363" r="7" fill="#3E6B8F"></circle><text x="81" y="345" class="svg-label" text-anchor="middle">金鱼 (0.02, 0.02)</text><circle cx="205" cy="268" r="7" fill="#3E6B8F"></circle><text x="205" y="250" class="svg-label" text-anchor="middle">猫 (0.25, 0.30)</text><circle cx="313" cy="302" r="7" fill="#C0481E"></circle><text x="313" y="330" class="svg-label" text-anchor="middle">狗 (0.45, 0.20)</text><circle cx="340" cy="64" r="7" fill="#C0481E"></circle><text x="340" y="46" class="svg-label" text-anchor="middle">鳄鱼 (0.50, 0.90)</text><circle cx="367" cy="115" r="7" fill="#3E6B8F"></circle><text x="412" y="110" class="svg-label" text-anchor="middle">狼 (0.55, 0.75)</text><circle cx="556" cy="81" r="7" fill="#3E6B8F"></circle><text x="556" y="63" class="svg-label" text-anchor="middle">老虎 (0.90, 0.85)</text></g><line x1="313" y1="302" x2="340" y2="64" stroke="#C0481E" stroke-width="1.4" stroke-dasharray="5 4"></line><text x="352" y="190" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E">距离 ≈ 0.70</text></svg></div><figcaption><span class="fig-no">图 1-2</span>加上第二个维度后，狗和鳄鱼被「凶猛」这一轴狠狠拉开了；而狼、老虎、鳄鱼自然聚成了右上角的「猛兽区」。</figcaption></figure><p>狗和鳄鱼在横轴上仍然贴着，但纵轴把它们拽开了。 用勾股定理一算（细节放在下一课），它们的距离从 <code>0.05</code> 变成了约 <code>0.70</code>。问题解决了。</p><p>现在，请注意你刚刚做了什么——你把一只动物写成了<strong>一组有顺序的数字</strong>：</p><div class="formula">狗 = <span class="f-hl">[ 0.45 , 0.20 ]</span><span class="f-dim">　// 第 1 个数是体型，第 2 个数是凶猛</span></div><p style="font-family:var(--serif);font-size:19px;font-weight:700;text-align:center;margin:30px 0">这组数字，数学上就叫<span style="color:var(--accent)">向量（vector）</span>。</p><p>数字的个数叫<strong>维度</strong>——我们刚造的是 2 维向量。同一个向量有三副面孔，说的是同一件事： 它是<strong>一列数字</strong>（计算机看到的）、是平面上的<strong>一个点</strong>（我们画出来的）、 也是从原点指向那个点的<strong>一支箭头</strong>（下一课讲运算时最好用的视角）。</p><div class="lab"><div class="lab-head"><span class="lab-tag">动手实验</span><span class="lab-title">动物地图 —— 拖动「？」，看谁离它最近</span></div><div class="lab-body"><svg viewBox="0 0 640 420" style="display:block;width:100%;height:auto;touch-action:none;cursor:crosshair"><line x1="70" y1="370" x2="618" y2="370" class="svg-axis"></line><line x1="70" y1="370" x2="70" y2="22" class="svg-axis"></line><text x="600" y="392" class="svg-note" text-anchor="end">体型 →</text><text x="86" y="34" class="svg-note">凶猛 ↑</text><line x1="0" y1="0" x2="0" y2="0" stroke="#C0481E" stroke-width="1.5" stroke-dasharray="5 4"></line><g><g><circle cx="80.8" cy="363.2" r="7" fill="#3E6B8F"></circle><text x="80.8" y="349.2" text-anchor="middle" class="svg-label">金鱼</text></g><g><circle cx="205" cy="268" r="7" fill="#3E6B8F"></circle><text x="205" y="254" text-anchor="middle" class="svg-label">猫</text></g><g><circle cx="313" cy="302" r="7" fill="#3E6B8F"></circle><text x="313" y="288" text-anchor="middle" class="svg-label">狗</text></g><g><circle cx="367" cy="115" r="7" fill="#3E6B8F"></circle><text x="367" y="101" text-anchor="middle" class="svg-label">狼</text></g><g><circle cx="340" cy="64" r="7" fill="#3E6B8F"></circle><text x="340" y="50" text-anchor="middle" class="svg-label">鳄鱼</text></g><g><circle cx="556" cy="81" r="7" fill="#3E6B8F"></circle><text x="556" y="67" text-anchor="middle" class="svg-label">老虎</text></g></g><g style="cursor:grab"><circle r="13" fill="#C0481E"></circle><text text-anchor="middle" dy="5" font-size="14" font-weight="700" fill="#FFF8F0" style="pointer-events:none">?</text></g></svg><p class="readout">拖动橙色的「？」试试。</p></div><p class="lab-hint">「？」是一只神秘动物。你把它放在哪里，就等于宣布了它的两个数字——而相似度，只是两点之间的距离。</p></div></section><section class="station reveal" data-title="总结：维度尽管加" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>总结：维度，尽管往上加</h2></div><p>两个维度也会有局限。体型和凶猛都接近的猫和狐狸怎么区分？——再加一维「是否家养」。 会飞的和会游的呢？——再加。每发现一种「区分不开」，就<strong>加一个维度</strong>。 3 个数字是空间中的一个点；4 个、100 个数字，我们画不出来了， 但数学完全不在乎：<strong>距离公式照样算，「谁和谁更像」照样比。</strong></p><p>这正是现代 AI 的做法。在 GPT 这类大语言模型里，每个词就是一个向量—— 不是 2 维，而是上万维（GPT-3 用了 12288 维）。没有人逐个设定「体型」「凶猛」这样的含义， 这些维度是模型自己从海量文本里<em>学</em>出来的。但思想和你今天发明的一模一样：</p><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>向量，就是给事物拍的一张<span class="tk-hl">「数字照片」</span>： 用一组有顺序的数字捕捉它的特征， 于是「像不像」这种模糊的直觉，第一次变成了<span class="tk-hl">可以计算的距离</span>。</p></div><div class="recap"><h3>这一课你亲手发明了</h3><ul><li><strong>向量</strong>：一组有顺序的数字，例如 <code>[0.45, 0.20]</code>。</li><li><strong>维度</strong>：数字的个数；每个维度是一种「看待事物的角度」。</li><li><strong>向量的三副面孔</strong>：一列数字 = 空间中的点 = 从原点出发的箭头。</li><li><strong>相似度 = 距离</strong>：两个向量离得越近，它们代表的事物越像。</li></ul></div><p style="margin-top:36px">不过，「距离」到底该怎么算？除了距离，还有没有别的「像不像」的算法？ 两个向量相加又是什么意思——「猫 + 狗」是什么动物？带着这些问题，去下一课。</p></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="0" data-explain="向量的根本意义在于把无法直接计算的事物，编码成一串可度量的数字，从而用距离/夹角来刻画“像不像”。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>计算机本身只认识数字。我们用「向量」来表示「猫」「老虎」这样的事物，最根本的目的是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">把事物变成一串数字，从而可以用数学度量它们之间的「像不像」</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">让事物占用更少的存储空间</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">把中文翻译成英文</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">让事物按拼音排序</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="向量的每个分量对应一个特征维度，维度可以远超三维；长度相等≠同一事物，数字也不必是整数。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>关于「向量是空间中的一个点（或一支箭头）」，下面哪种说法是对的？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">向量只能是二维或三维的，超过三维就没有意义</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">向量的每一个分量代表事物在某个维度（特征）上的取值</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">两个向量只要长度相等就一定表示同一个事物</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">向量里的数字必须都是整数</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></main>
+        
+        <a href="math-02-ops.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 02 课</span>
+                    <h3>向量的常见运算</h3>
+                    <p>「相似」可以被计算吗？——加法、点积、余弦相似度</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷一 · 第01课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

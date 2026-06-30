@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第18课 · LSTM 长短期记忆网络 | AI大模型原理教程</title>
+    <meta name="description" content="RNN的记忆为什么传不远？——给记忆装上「阀门」">
+    <meta name="keywords" content="AI大模型教程,Transformer,LSTM 长短期记忆网络,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第18课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 18 · 卷三</div>
+            <h1>LSTM 长短期记忆网络</h1>
+            <p class="subtitle">❝ RNN的记忆为什么传不远？——给记忆装上「阀门」 ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="记忆需要阀门" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>记忆需要阀门：主动管理，而不是被动稀释</h2></div><p>上一课我们手算出了 RNN 的病：每读一个词，旧记忆就被「×0.6 再混入新词」稀释一次， 读了 20 个词，20 步前的信息 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">0.</span><span class="mord"><span class="mord">6</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">20</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.00004</span></span></span></span></span>，几乎归零。</p><p>想象你在读一本小说：第 1 章写「主角害怕黑暗」，第 30 章主角走进地下室，这时你需要想起第 1 章那句话。 你不会把这中间 30 章的每个细节都死记，但你会<strong>主动记住对后面重要的事</strong>—— 因为你早判断出「主角害怕黑暗」值得留着。</p><p>RNN 坏就坏在不会「主动」：它每步机械地混合所有内容，重要的和无关的一起稀释。 解药是给记忆装上<strong>阀门</strong>——几个开关，分别管「忘掉多少旧的」「写入多少新的」「读出多少给当前用」。</p><div class="think"><div class="think-q">要你来设计「有选择的记忆」，关键会落在哪？什么时候该保留信息，什么时候该丢弃，由谁说了算？</div></div></section><section class="station reveal" data-title="两种记忆" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>两种记忆：高速公路 + 工作台</h2></div><p>LSTM（长短期记忆网络，1997 年提出）的第一招，是<strong>把记忆拆成两条线</strong>：</p><ul style="margin-top:16px;padding-left:24px;line-height:2.1"><li><strong>长期记忆 C</strong>（Cell State）：一条「高速公路」，信息可以几乎不受干扰地从句首一直开到句尾。 新内容想挤进来，必须先过阀门；不放行，原有信息就<strong>原样保留</strong>——这正是对治 RNN「每步稀释」的关键。</li><li><strong>短期记忆 h</strong>（Hidden State）：当前这一步的「工作台」，每步都根据长期记忆和当前词重新算一份， 用来预测下一个词。它对应的就是 RNN 里那个 h。</li></ul><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 200" role="img" aria-label="LSTM 两种记忆：长期记忆高速公路与短期记忆工作台"><defs><marker id="lstm-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3E6B8F"></polygon></marker><marker id="lstm-arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4A8B5E"></polygon></marker></defs><text x="30" y="30" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#4A8B5E">长期记忆 C（高速公路）</text><line x1="20" y1="60" x2="540" y2="60" stroke="#4A8B5E" stroke-width="4" marker-end="url(#lstm-arr2)"></line><g><rect x="116" y="44" width="48" height="32" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="2"></rect><text x="140" y="65" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">忘记阀</text></g><g><rect x="276" y="44" width="48" height="32" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="2"></rect><text x="300" y="65" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">写入阀</text></g><g><rect x="416" y="44" width="48" height="32" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="2"></rect><text x="440" y="65" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#4A8B5E">读出阀</text></g><text x="30" y="110" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#3E6B8F">短期记忆 h（每步重算）</text><line x1="20" y1="140" x2="540" y2="140" stroke="#3E6B8F" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#lstm-arr)"></line><line x1="140" y1="76" x2="140" y2="136" stroke="#93A0AC" stroke-width="1" stroke-dasharray="3,3"></line><line x1="300" y1="76" x2="300" y2="136" stroke="#93A0AC" stroke-width="1" stroke-dasharray="3,3"></line><line x1="440" y1="76" x2="440" y2="136" stroke="#93A0AC" stroke-width="1" stroke-dasharray="3,3"></line><g><text x="140" y="178" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#5C6B79">害怕黑暗</text><line x1="140" y1="172" x2="140" y2="148" stroke="#DCD2BF" stroke-width="1.5" marker-end="url(#lstm-arr)"></line></g><g><text x="300" y="178" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#5C6B79">吃早饭</text><line x1="300" y1="172" x2="300" y2="148" stroke="#DCD2BF" stroke-width="1.5" marker-end="url(#lstm-arr)"></line></g><g><text x="440" y="178" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#5C6B79">地下室</text><line x1="440" y1="172" x2="440" y2="148" stroke="#DCD2BF" stroke-width="1.5" marker-end="url(#lstm-arr)"></line></g><text x="280" y="198" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">当前词</text></svg></div><figcaption><span class="fig-no">图 18-1</span>LSTM 的两条线：长期记忆 C 是高速公路，靠三个阀门控制信息进出；短期记忆 h 是每步重新计算、用于当下预测的工作台。</figcaption></figure><p>两条线之间的三个阀门，各管一件事：</p><ol style="padding-left:24px;line-height:2.1"><li><strong>忘记阀（Forget Gate）</strong>：长期记忆里，旧内容保留多少。</li><li><strong>写入阀（Input Gate）</strong>：当前词的新信息，写进长期记忆多少。</li><li><strong>读出阀（Output Gate）</strong>：从长期记忆里读出多少，当作这一步的短期记忆 h。</li></ol></section><section class="station reveal" data-title="阀门怎么工作" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>阀门怎么工作：一个 0 到 1 之间的数</h2></div><p>每个阀门，说穿了就是一个 0 到 1 之间的数：</p><ul style="padding-left:24px;line-height:2.1"><li>阀门 = 1：完全打开，信息全部通过；</li><li>阀门 = 0：完全关死，信息全被拦下；</li><li>阀门 = 0.6：放 60% 过去，拦下 40%。</li></ul><p>这个数不是手动拧的，而是网络根据「当前词」和「当前短期记忆」算出来的—— 用什么算？还是老朋友 <strong>Sigmoid</strong>（把任意值压到 0~1，第 8 课）。然后靠训练数据反复优化，直到阀门学会在该开的时候开、该关的时候关：</p><div class="formula formula-tex" style="text-align:left"><div>忘记阀　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">σ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1076em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.1076em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:6px">写入阀　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">σ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:6px">候选写入　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">g</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mop">tanh</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em;">g</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:14px">长期记忆更新　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊙</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7429em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊙</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">g</span></span></span></span></span></div><div style="margin-top:6px">读出阀　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">o</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">σ</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">o</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">o</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></div><div style="margin-top:6px">短期记忆输出　<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">o</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⊙</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">tanh</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></div></div><p>公式列着吓人，其实只盯<strong>中间那行</strong>就够了：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">g</span></span></span></span></span>。 翻成人话——<strong>新的长期记忆 = 忘记阀 × 旧记忆 + 写入阀 × 新内容</strong>。 σ 负责生出 0~1 的阀门值，⊙（逐元素相乘）负责用阀门<em>掐住流量</em>。下一站就拿这一行去手算。</p><p>这里还有个值得回味的反转：第 8 课里，Sigmoid 把值压到 0~1 是<strong>缺点</strong>——两端一压平梯度就消失。 可搬到这儿，「0 到 1」恰恰是<strong>优点</strong>：它天生就是个「阀门开度」，0 关死、1 全开。 同一个函数，换个位置，缺点摇身变成了优点。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 160" role="img" aria-label="LSTM 对重要内容和无关内容给出不同阀门值的例子"><g><text x="20" y="38" font-family="Noto Serif SC, serif" font-size="12" font-weight="700" fill="#4A8B5E">害怕黑暗（重要）</text><rect x="20" y="46" width="220" height="26" rx="4" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1"></rect><text x="130" y="64" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">忘记阀 <!-- -->0.9 保留</text><rect x="260" y="46" width="260" height="26" rx="4" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1"></rect><text x="390" y="64" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4A8B5E">写入阀 <!-- -->0.9 大量写入</text></g><g><text x="20" y="108" font-family="Noto Serif SC, serif" font-size="12" font-weight="700" fill="#93A0AC">吃了早饭（无关）</text><rect x="20" y="116" width="220" height="26" rx="4" fill="#F5F0E8" stroke="#93A0AC" stroke-width="1"></rect><text x="130" y="134" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">忘记阀 <!-- -->0.99 几乎全保留</text><rect x="260" y="116" width="260" height="26" rx="4" fill="#F5F0E8" stroke="#93A0AC" stroke-width="1"></rect><text x="390" y="134" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">写入阀 <!-- -->0.04 几乎不写入</text></g><text x="280" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">网络自动学会：重要信息大量写入、长期保留；无关信息几乎不碰长期记忆</text></svg></div><figcaption><span class="fig-no">图 18-2</span>阀门值由网络自动算出。读到重要情节，写入阀大开；读到无关内容，写入阀几乎关死、忘记阀接近 1，长期记忆几乎原封不动。</figcaption></figure></section><section class="station reveal" data-title="手算一遍：守住记忆" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>手算一遍：长期记忆怎么被守住</h2></div><p>还是用上一课那把尺子——让长期记忆 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">C</span></span></span></span></span> 就是<strong>一个数</strong>，记「主角怕不怕黑」。 只用那行核心公式 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">←</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7667em;vertical-align:-0.0833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6595em;"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">g</span></span></span></span></span>。网络已经学会： 读到重要词，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord">0.9</span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.9</span></span></span></span></span>（候选 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6776em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">g</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.95</span></span></span></span></span>）； 读到无关词，<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em;"></span><span class="mord">0.99</span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.04</span></span></span></span></span>（几乎不动旧记忆）。从 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0</span></span></span></span></span> 开始：</p><div class="formula" style="text-align:left;font-size:14px;line-height:2.1">① 害怕黑暗（重要）：C = 0.9×0 + 0.9×0.95 = <span class="f-hl">0.855</span>　← 写入阀大开，记忆点亮<br/>② 主角（无关）　　：C = 0.99×0.855 + 0.04×0.2 ≈ <span class="f-hl">0.854</span><br/>③ 吃了（无关）　　：C = 0.99×0.854 + 0.008 ≈ <span class="f-hl">0.854</span><br/><span class="f-dim">　…中间一连串无关词，每步忘记阀都≈0.99，C 几乎一动不动…</span><br/>⑨ 地下室　　　　　：C ≈ <span class="f-hl">0.851</span>　← 9 个词后，「害怕」还稳稳记着</div><p>关键就在第②步往后：忘记阀 ≈ 0.99 意味着<strong>旧记忆几乎原样带过去</strong>，写入阀 ≈ 0.04 意味着无关词<strong>几乎挤不进来</strong>。 于是 9 个词读下来，长期记忆只从 0.855 掉到 0.851——<strong>还剩 99%</strong>。 把这台 LSTM 和一台 RNN 喂同一句话，并排看它俩的记忆：</p><figure class="fig"><div class="fruit-lab fruit-lab-col"><div class="gd-controls"><button type="button" class="act-btn" disabled="">← 上一词</button><button type="button" class="act-btn on">读下一个词 →</button><button type="button" class="act-btn">↺ 重置</button><span class="gd-alpha">读到第 <b>1</b> / <!-- -->9<!-- --> 个词</span></div><svg class="neuron-svg" viewBox="0 0 560 252" role="img" aria-label="LSTM 长期记忆与 RNN 记忆的逐词对比"><g><rect x="4" y="14" width="52" height="26" rx="5" fill="#FDF6EC" stroke="#C0481E" stroke-width="2.2"></rect><text x="30" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#232F3B">害怕黑暗</text><text x="30" y="50" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="8" fill="#4A8B5E">重要</text></g><g><rect x="62" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="88" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#A99E86">主角</text></g><g><rect x="120" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="146" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#A99E86">吃了</text></g><g><rect x="178" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="204" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#A99E86">早饭</text></g><g><rect x="236" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="262" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#A99E86">走出</text></g><g><rect x="294" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="320" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#A99E86">房间</text></g><g><rect x="352" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="378" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#A99E86">下楼</text></g><g><rect x="410" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="436" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#A99E86">走进</text></g><g><rect x="468" y="14" width="52" height="26" rx="5" fill="#F8F5EE" stroke="#DCD2BF" stroke-width="1.1"></rect><text x="494" y="31" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="11" fill="#C0481E">地下室</text></g><text x="20" y="78" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="700" fill="#4A8B5E">LSTM 长期记忆 C</text><line x1="24" y1="150" x2="536" y2="150" stroke="#C5BBA6" stroke-width="1.1"></line><g><rect x="16" y="80" width="28" height="70" rx="3" fill="rgba(74,139,94,0.95)" stroke="#4A8B5E" stroke-width="1"></rect><text x="30" y="164" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#4A8B5E">0.85</text></g><text x="20" y="186" font-family="Noto Sans SC, sans-serif" font-size="10.5" font-weight="700" fill="#3E6B8F">对照：RNN 记忆 h</text><line x1="24" y1="242" x2="536" y2="242" stroke="#C5BBA6" stroke-width="1.1"></line><g><rect x="16" y="172" width="28" height="70" rx="3" fill="rgba(62,107,143,0.95)" stroke="#3E6B8F" stroke-width="1"></rect><text x="30" y="168" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">0.90</text></g></svg><div class="calc-line">读「<!-- -->害怕黑暗<!-- -->」（<!-- -->重要<!-- -->）：忘记阀 f=<b class="calc-z">0.90</b>、写入阀 i=<b class="calc-z">0.90</b> → C ← <!-- -->0.90<!-- -->×旧 + <!-- -->0.90<!-- -->×<!-- -->0.95<!-- --> = <b class="calc-z" style="color:#4A8B5E">0.85</b>　｜　长期记忆残留 <b style="color:#4A8B5E">100%</b> · RNN 残留 <b style="color:#3E6B8F">100%</b></div><div class="lab-hint">第 1 个词「害怕黑暗」被判为<b>重要</b>，写入阀大开，长期记忆 C 冲到 <b>0.85</b>。之后每读一个无关词，忘记阀都接近 <b>0.99</b>——几乎原样保留旧记忆，写入阀几乎关死。读到最后的「地下室」时，C 还稳稳地记着「害怕」。<b>看下面那条 RNN：</b>同样的句子，它每步 ×0.6，没几步就塌到地板上。这就是阀门的威力。</div></div><figcaption><span class="fig-no">互动 18-A</span>上条绿色是 LSTM 的长期记忆 C，下条蓝色是同一句话喂给 RNN 的记忆 h。每点「读下一个词」走一步：LSTM 靠忘记阀≈0.99 把「害怕」几乎原样守到最后，RNN 每步 ×0.6，没几步就塌到地板。</figcaption></figure><p>对照得很扎心：读到「地下室」时，LSTM 的长期记忆还剩约 <strong>99%</strong>， 而 RNN 的记忆只剩不到 <strong>2%</strong>——「害怕」早被冲没了。同一句话，一个记得住、一个记不住，差别全在那几个阀门。</p></section><section class="station reveal" data-title="LSTM 能记多远" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>LSTM 能记住多远？又卡在哪？</h2></div><p>有了高速公路和阀门，LSTM 能处理的长距离依赖远超 RNN。原理就藏在那行公式里： 长期记忆走的是「<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.1076em;">f</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8917em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0715em;">C</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.0715em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>」这条道，<strong>忘记阀 f 接近 1 时，记忆几乎无损地往前传</strong>， 连带梯度也能几乎无损地传回很远的地方——梯度消失被大大缓解。</p><p>算给你看：哪怕隔 30 个词，RNN 是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">0.</span><span class="mord"><span class="mord">6</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">30</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">7</span></span></span></span></span></span></span></span></span></span></span></span></span>（彻底没了）， 而 LSTM 的忘记阀按 0.99 算是 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">0.9</span><span class="mord"><span class="mord">9</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">30</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.74</span></span></span></span></span>——<strong>还留着 74%</strong>。实验中 LSTM 能可靠记住 50~100 步前的信息。 也正因如此，2010~2017 年间，语音识别、机器翻译、文本生成的主力都是它，很多产品级系统至今仍在用。</p><div class="crack reveal"><div class="crack-label">一个词一个词地读：无法并行</div><p>但 LSTM（和 RNN 一样）有个绕不开的硬伤：必须<strong>按顺序</strong>处理词。 读完第 k 个词才能算第 k+1 个，因为 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">t</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 依赖 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9028em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>。 这意味着 100 个词的句子，必须老老实实做 100 步串行计算， 没法把这些词摊开，让 GPU 上成千上万个核心同时算。</p><p style="margin-top:12px">模型越大，这条串行链就越拖慢训练。2017 年 Google 提出 Transformer——它<strong>不按顺序读词</strong>， 而是让每个词<em>同时</em>看到句子里所有词，天生可以并行。 这一招把大模型（如 GPT）的训练时间从「几个月」压到了「几天」，正是下一册的主角。</p></div></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>LSTM 用<span class="tk-hl">两种记忆（长期 C + 短期 h）</span>和<span class="tk-hl">三个阀门（忘记 / 写入 / 读出）</span>解决了 RNN 的记忆淡出。 核心就一行：<span class="tk-hl">C ← 忘记阀×旧记忆 + 写入阀×新内容</span>。 忘记阀≈1，重要信息就能几乎无损地传几十上百步。遗留问题：必须按顺序读词，无法并行——这催生了 Transformer。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>RNN 的病根</strong>：机械混合所有信息，重要内容和无关内容被同等稀释。</li><li><strong>LSTM 的两条线</strong>：长期记忆 C（高速公路）+ 短期记忆 h（每步重算的工作台）。</li><li><strong>三个阀门</strong>：忘记阀（留多少旧的）、写入阀（写多少新的）、读出阀（读多少给当前用）。</li><li><strong>阀门怎么来</strong>：Sigmoid 算出 0~1 的开度，由当前词和当前记忆决定，靠训练优化。</li><li><strong>手算对照</strong>：9 词后 LSTM 记忆剩约 99%，RNN 不到 2%；隔 30 词，0.99³⁰≈74% vs 0.6³⁰≈0。</li><li><strong>新的局限</strong>：顺序计算，无法并行，限制了模型规模和训练速度。</li></ul></div><div class="recap" style="margin-top:24px;border-left-color:#C0481E"><h3 style="color:#C0481E">卷三：自然语言处理 · 完</h3><p style="line-height:1.8">这一卷走过了语言建模的完整演化： N-gram（数数）→ 词向量（语义数字化）→ FFNN-LM（举一反三）→ RNN（有记忆的序列处理）→ LSTM（带阀门的长期记忆）。 每一步都在补上一步留下的窟窿。</p><p style="line-height:1.8;margin-top:12px">下一册从注意力机制开始——你在第 15 课词向量那里已提前见过它的影子（「银行」取哪个意思，得看上下文）。 现在你也知道它为什么会出现：Transformer 要解决的，正是 LSTM 无法并行这道坎。</p></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="LSTM 用遗忘门/输入门/输出门控制信息保留、写入与读取。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>LSTM 为了让记忆「传得更远」，引入的核心机制是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">更高的学习率</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">「门控」机制（遗忘门/输入门/输出门）来控制信息的保留、写入与读取</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">更多的词向量</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">去掉隐藏状态</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="细胞状态像“传送带”，信息可较少改动地流过多步，梯度更易保持。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>LSTM 中的「细胞状态（cell state）」为什么有助于缓解梯度消失？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">它每一步都被彻底重写</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">它像一条「传送带」，信息可以较少改动地直接流过许多步，梯度更易保持</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">它把所有信息压缩成一个数字</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">它和普通 RNN 完全一样</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-01-attention.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 19 课</span>
+                    <h3>注意力机制</h3>
+                    <p>翻译「它」的时候，该看句子里的哪个词？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷三 · 第18课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

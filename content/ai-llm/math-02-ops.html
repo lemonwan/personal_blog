@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第02课 · 向量的常见运算 | AI大模型原理教程</title>
+    <meta name="description" content="「相似」可以被计算吗？——加法、点积、余弦相似度">
+    <meta name="keywords" content="AI大模型教程,Transformer,向量的常见运算,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第02课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 02 · 卷一</div>
+            <h1>向量的常见运算</h1>
+            <p class="subtitle">❝ 「相似」可以被计算吗？——加法、点积、余弦相似度 ❞</p>
+        </div>
+
+        <main class="lesson-body"><section class="station reveal" data-title="距离闹了个笑话" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>距离闹了个笑话</h2></div><p>假设你在做一个「找相似文章」的程序。两篇文章的内容用词频向量表示—— 「AI」出现几次、「数据」出现几次，以此类推。 现在有三篇文章：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 440 310" role="img" aria-label="三篇文章的词频向量"><line x1="60" y1="280" x2="346" y2="280" class="svg-axis"></line><polygon points="358,280 346,284 346,276" fill="#5C6B79"></polygon><line x1="60" y1="280" x2="60" y2="34" class="svg-axis"></line><polygon points="60,22 64,34 56,34" fill="#5C6B79"></polygon><text x="365" y="284" class="svg-note">AI出现次数</text><text x="66" y="20" class="svg-note">数据出现次数</text><g><line x1="60" y1="278" x2="60" y2="284" stroke="#5C6B79" stroke-width="1"></line><text x="60" y="296" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">0</text></g><g><line x1="116" y1="278" x2="116" y2="284" stroke="#5C6B79" stroke-width="1"></line><text x="116" y="296" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">2</text></g><g><line x1="172" y1="278" x2="172" y2="284" stroke="#5C6B79" stroke-width="1"></line><text x="172" y="296" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">4</text></g><g><line x1="228" y1="278" x2="228" y2="284" stroke="#5C6B79" stroke-width="1"></line><text x="228" y="296" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">6</text></g><g><line x1="284" y1="278" x2="284" y2="284" stroke="#5C6B79" stroke-width="1"></line><text x="284" y="296" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">8</text></g><g><line x1="340" y1="278" x2="340" y2="284" stroke="#5C6B79" stroke-width="1"></line><text x="340" y="296" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">10</text></g><g><line x1="58" y1="280" x2="62" y2="280" stroke="#5C6B79" stroke-width="1"></line><text x="52" y="284" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">0</text></g><g><line x1="58" y1="224" x2="62" y2="224" stroke="#5C6B79" stroke-width="1"></line><text x="52" y="228" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">2</text></g><g><line x1="58" y1="168" x2="62" y2="168" stroke="#5C6B79" stroke-width="1"></line><text x="52" y="172" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">4</text></g><g><line x1="58" y1="112" x2="62" y2="112" stroke="#5C6B79" stroke-width="1"></line><text x="52" y="116" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">6</text></g><g><line x1="58" y1="56" x2="62" y2="56" stroke="#5C6B79" stroke-width="1"></line><text x="52" y="60" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#93A0AC">8</text></g><circle cx="284" cy="112" r="8" fill="#3E6B8F"></circle><text x="296" y="116" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3E6B8F">文章A (8, 6)</text><circle cx="116" cy="252" r="8" fill="#C0481E"></circle><text x="128" y="256" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#C0481E">文章B (2, 1)</text><circle cx="88" cy="84" r="8" fill="#5C6B79"></circle><text x="100" y="88" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">文章C (1, 7)</text><line x1="284" y1="112" x2="116" y2="252" stroke="#C0481E" stroke-width="1.5" stroke-dasharray="5 3"></line><line x1="284" y1="112" x2="88" y2="84" stroke="#5C6B79" stroke-width="1.5" stroke-dasharray="5 3"></line></svg></div><figcaption><span class="fig-no">图 2-1</span>三篇文章的「AI频次」和「数据频次」构成二维向量。A是长篇AI文章，B是短篇AI文章，C是数据专题文章。</figcaption></figure><p><strong>文章A</strong>（8次AI，6次数据）：一篇详细讨论 AI 和数据的长文，约 3000 字。<br/><strong>文章B</strong>（2次AI，1次数据）：内容和 A 相近，但只是摘要版，约 800 字。<br/><strong>文章C</strong>（1次AI，7次数据）：大篇幅谈数据库，偶尔提到 AI。</p><p>直觉上，A 和 B 最相似——同一个话题，只是篇幅不同。 我们用最自然的方式来量「像不像」：<strong>两个点在图上离多远</strong>。 初中学的勾股定理就够用——横向差多少、纵向差多少，斜边就是距离：</p><div class="formula formula-tex"><div>A→B：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.24em;vertical-align:-0.305em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mopen">(</span><span class="mord">8</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">2</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7401em;"><span style="top:-2.989em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mopen">(</span><span class="mord">6</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7401em;"><span style="top:-2.989em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1744em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8656em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord">36</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">25</span></span></span><span style="top:-2.8256em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1744em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">7.8</span></span></span></span></span></div><div style="margin-top:6px">A→C：<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.24em;vertical-align:-0.305em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.935em;"><span class="svg-align" style="top:-3.2em;"><span class="pstrut" style="height:3.2em;"></span><span class="mord" style="padding-left:1em;"><span class="mopen">(</span><span class="mord">8</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7401em;"><span style="top:-2.989em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mopen">(</span><span class="mord">6</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">7</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7401em;"><span style="top:-2.989em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span></span><span style="top:-2.895em;"><span class="pstrut" style="height:3.2em;"></span><span class="hide-tail" style="min-width:1.02em;height:1.28em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.28em" viewBox="0 0 400000 1296" preserveAspectRatio="xMinYMin slice"><path d="M263,681c0.7,0,18,39.7,52,119
+c34,79.3,68.167,158.7,102.5,238c34.3,79.3,51.8,119.3,52.5,120
+c340,-704.7,510.7,-1060.3,512,-1067
+l0 -0
+c4.7,-7.3,11,-11,19,-11
+H40000v40H1012.3
+s-271.3,567,-271.3,567c-38.7,80.7,-84,175,-136,283c-52,108,-89.167,185.3,-111.5,232
+c-22.3,46.7,-33.8,70.3,-34.5,71c-4.7,4.7,-12.3,7,-23,7s-12,-1,-12,-1
+s-109,-253,-109,-253c-72.7,-168,-109.3,-252,-110,-252c-10.7,8,-22,16.7,-34,26
+c-22,17.3,-33.3,26,-34,26s-26,-26,-26,-26s76,-59,76,-59s76,-60,76,-60z
+M1001 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.305em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1744em;"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8656em;"><span class="svg-align" style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord" style="padding-left:0.833em;"><span class="mord">49</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord">1</span></span></span><span style="top:-2.8256em;"><span class="pstrut" style="height:3em;"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em;"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"/></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1744em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord" style="color:#C0481E;">7.1</span></span></span></span></span></div></div><p>按这个算法，<strong>A 和 C 更接近</strong>——一篇谈 AI 的长文，和一篇几乎不谈 AI 的数据库文章， 竟比同主题的摘要更像？这个结果明显不对。</p></section><section class="station reveal" data-title="长度为什么干扰了判断" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>长度为什么干扰了判断</h2></div><div class="crack reveal"><div class="crack-label">距离为什么失灵</div><p>把 A、B、C 从原点画成箭头，答案就一目了然了： A 和 B 的箭头<strong>方向高度一致</strong>——都指向「AI+数据」的方向，只是 B 短一截。 C 的箭头方向完全不同，偏向纯「数据」轴。</p><p style="margin-top:12px">「两点之间的直线距离」量的是<em>箭头末端有多远</em>，所以 B 的「短」拉近了它和 C 的表面距离。 但「内容是否相似」应该看<strong>箭头的方向</strong>，和长度无关。</p></div><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 320 280" role="img" aria-label="三篇文章的向量方向对比"><line x1="55" y1="255" x2="286" y2="255" class="svg-axis"></line><polygon points="298,255 286,259 286,251" fill="#5C6B79"></polygon><line x1="55" y1="255" x2="55" y2="32" class="svg-axis"></line><polygon points="55,20 59,32 51,32" fill="#5C6B79"></polygon><text x="304" y="259" class="svg-note">AI</text><text x="63" y="18" class="svg-note">数据</text><line x1="55" y1="255" x2="237" y2="118" stroke="#3E6B8F" stroke-width="2.5"></line><polygon points="247,111 240,122 234,114" fill="#3E6B8F"></polygon><text x="255" y="115" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3E6B8F">A</text><line x1="55" y1="255" x2="94" y2="235" stroke="#C0481E" stroke-width="2.5"></line><polygon points="103,231 96,239 92,232" fill="#C0481E"></polygon><text x="111" y="228" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#C0481E">B（方向相近，但短）</text><line x1="55" y1="255" x2="77" y2="99" stroke="#5C6B79" stroke-width="2.5"></line><polygon points="79,87 82,100 72,98" fill="#5C6B79"></polygon><text x="87" y="84" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">C（方向不同）</text><path d="M 100,233 A 50 50 0 0 0 95,225" fill="none" stroke="#C0481E" stroke-width="1.5"></path><text x="113" y="218" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#C0481E">夹角≈10°</text><path d="M 111,213 A 70 70 0 0 0 65,186" fill="none" stroke="#5C6B79" stroke-width="1.5"></path><text x="107" y="170" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#5C6B79">夹角≈45°</text></svg></div><figcaption><span class="fig-no">图 2-2</span>从原点看：A 和 B 指向几乎相同的方向，夹角仅约 10°；A 和 C 方向明显偏离，夹角约 45°。「相似」取决于方向，与箭头长度无关。</figcaption></figure><div class="think"><div class="think-q">不用长度，只用方向——你能想出一个只看「方向」的相似度吗？先想想，30 秒。</div></div></section><section class="station reveal" data-title="点积：数字背后的几何" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>点积：数字背后的几何</h2></div><p>要算夹角，得先认识一个工具：<strong>点积</strong>（dot product）。 计算方法很简单——对应分量相乘后加起来：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4445em;"></span><span class="mord mathbf">a</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathbf">b</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em;"></span><span class="minner">⋯</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">n</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span></span></div><p>这个公式好记，但更重要的是它的<strong>几何含义</strong>。 想象把向量 <strong>b</strong> 的末端沿垂直方向「投影」到向量 <strong>a</strong> 所在的直线上， 落脚点到原点的距离叫做「<strong>b 在 a 方向上的投影</strong>」：</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 400 200" role="img" aria-label="点积的几何含义：投影"><line x1="70" y1="165" x2="298" y2="165" stroke="#3E6B8F" stroke-width="2.5"></line><polygon points="310,165 298,170 298,160" fill="#3E6B8F"></polygon><text x="320" y="169" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#3E6B8F" font-weight="700">a</text><line x1="70" y1="165" x2="215" y2="72" stroke="#C0481E" stroke-width="2.5"></line><polygon points="225,65 218,76 212,67" fill="#C0481E"></polygon><text x="233" y="60" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#C0481E" font-weight="700">b</text><line x1="225" y1="65" x2="225" y2="165" stroke="#93A0AC" stroke-width="1.5" stroke-dasharray="5 3"></line><path d="M 225,155 L 215,155 L 215,165" fill="none" stroke="#93A0AC" stroke-width="1.5"></path><line x1="70" y1="165" x2="225" y2="165" stroke="#5C6B79" stroke-width="3" opacity="0.5"></line><text x="148" y="183" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">|b|cosθ = 投影长度</text><path d="M 120,165 A 50 50 0 0 0 112,138" fill="none" stroke="#232F3B" stroke-width="1.5"></path><text x="96" y="158" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#232F3B">θ</text><text x="240" y="128" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">a·b = |a| × |b|cosθ</text><text x="240" y="148" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">    = |a| × 投影</text></svg></div><figcaption><span class="fig-no">图 2-3</span>点积的几何意义：把 b 投影到 a 的方向上，投影越长，点积越大。a·b = |a| × (b 在 a 方向上的投影长度)。</figcaption></figure><p>这给了点积一个直觉：<strong>两个向量有多「一致」？</strong>b 有多少成分「朝着」a 的方向走，点积就有多大。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 480 130" role="img" aria-label="点积三种情况：正、零、负"><text x="70" y="18" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3E6B8F">方向相近</text><line x1="70" y1="85" x2="138" y2="85" stroke="#3E6B8F" stroke-width="2"></line><polygon points="150,85 140,89 140,81" fill="#3E6B8F"></polygon><line x1="70" y1="85" x2="125" y2="47" stroke="#C0481E" stroke-width="2"></line><polygon points="135,40 129,49 125,42" fill="#C0481E"></polygon><text x="70" y="115" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3E6B8F">a·b <!-- -->><!-- --> 0</text><text x="240" y="18" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">互相垂直</text><line x1="240" y1="85" x2="303" y2="85" stroke="#3E6B8F" stroke-width="2"></line><polygon points="315,85 305,89 305,81" fill="#3E6B8F"></polygon><line x1="240" y1="85" x2="240" y2="32" stroke="#C0481E" stroke-width="2"></line><polygon points="240,20 244,30 236,30" fill="#C0481E"></polygon><path d="M 250,85 L 250,75 L 240,75" fill="none" stroke="#93A0AC" stroke-width="1.5"></path><text x="240" y="115" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#5C6B79">a·b = 0</text><text x="410" y="18" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#C0481E">方向相反</text><line x1="410" y1="85" x2="473" y2="85" stroke="#3E6B8F" stroke-width="2"></line><polygon points="485,85 475,89 475,81" fill="#3E6B8F"></polygon><line x1="410" y1="85" x2="365" y2="52" stroke="#C0481E" stroke-width="2"></line><polygon points="355,45 365,48 361,54" fill="#C0481E"></polygon><text x="410" y="115" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#C0481E">a·b <!-- --><<!-- --> 0</text></svg></div><figcaption><span class="fig-no">图 2-4</span>点积的正负直接反映方向关系：正值表示方向「一致」，零表示「垂直无关」，负值表示方向「对立」。</figcaption></figure><div class="think"><div class="think-q">神经元的计算是 w·x，几何上这是什么意思？</div></div></section><section class="station reveal" data-title="余弦相似度" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>余弦相似度</h2></div><p>从点积公式 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4445em;"></span><span class="mord mathbf">a</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathbf">b</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">∣</span><span class="mord mathbf">a</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∣</span><span class="mord mathbf">b</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">cos</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">θ</span></span></span></span></span>，可以把 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mop">cos</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">θ</span></span></span></span></span> 单独解出来：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mop">cos</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.0278em;">θ</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.3074em;vertical-align:-0.936em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord">∣</span><span class="mord mathbf">a</span><span class="mord">∣</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">∣</span><span class="mord mathbf">b</span><span class="mord">∣</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathbf">a</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">⋅</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mord mathbf">b</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.936em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></span></div><p>这个值叫<strong>余弦相似度</strong>（cosine similarity）。 除以两个向量的模长，把长度的影响完全消掉，只剩下方向信息。 取值范围在 −1 到 1 之间： 1 表示方向完全相同（完全相似），0 表示正交（没有关系），−1 表示方向相反（完全对立）。</p><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 580 180" role="img" aria-label="余弦相似度计算示例"><rect x="20" y="20" width="250" height="140" rx="6" fill="#F0EDE6" stroke="#3E6B8F" stroke-width="1.5"></rect><text x="145" y="44" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#3E6B8F">A 和 B 的余弦相似度</text><text x="36" y="72" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">A·B = 8×2 + 6×1 = 22</text><text x="36" y="96" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">|A| = 10，|B| ≈ 2.24</text><text x="36" y="120" font-family="JetBrains Mono, monospace" font-size="12" fill="#3E6B8F">cos θ = 22/(10×2.24) ≈ 0.98</text><text x="145" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3E6B8F">✓ 方向高度一致！</text><rect x="310" y="20" width="250" height="140" rx="6" fill="#F5F0E8" stroke="#5C6B79" stroke-width="1.5"></rect><text x="435" y="44" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#5C6B79">A 和 C 的余弦相似度</text><text x="326" y="72" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">A·C = 8×1 + 6×7 = 50</text><text x="326" y="96" font-family="JetBrains Mono, monospace" font-size="12" fill="#232F3B">|A| = 10，|C| ≈ 7.07</text><text x="326" y="120" font-family="JetBrains Mono, monospace" font-size="12" fill="#5C6B79">cos θ = 50/70.7 ≈ 0.71</text><text x="435" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#5C6B79">方向有明显偏差</text></svg></div><figcaption><span class="fig-no">图 2-5</span>余弦相似度正确地识别出 A 和 B 方向高度一致（cos≈0.98），而 A 和 C 方向有明显偏差（cos≈0.71）。篇幅问题彻底消除。</figcaption></figure><p>这就是 AI 里最常用的「像不像」工具。搜索引擎、推荐系统、语义搜索—— 背后几乎都在用余弦相似度比较文本向量，而不是直线距离。</p></section><section class="station reveal" data-title="向量加法：语义的算术" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>向量加法：语义的算术</h2></div><p>向量还能相加减。规则非常简单——对应分量分别加减：</p><div class="formula formula-tex"><span class="kx kx-block"><span class="katex-display"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mclose">]</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">[</span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">+</span></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">a</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mord"><span class="mord">+</span></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace"> </span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mclose">]</span></span></span></span></span></span></div><p>几何上，两个向量相加就是把第二个箭头接在第一个箭头的末端——「平行四边形法则」。 但这在 AI 里发生了一件令人惊叹的事。</p><p>当词向量由神经网络从海量文本中学出来之后，有人发现：</p><div class="formula" style="font-family:var(--serif);font-size:18px;line-height:2">向量(国王) − 向量(男人) + 向量(女人) ≈ 向量(女王)</div><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 220" role="img" aria-label="词向量类比运算：国王-男人+女人≈女王"><line x1="60" y1="180" x2="488" y2="180" class="svg-axis"></line><polygon points="500,180 488,184 488,176" fill="#5C6B79"></polygon><line x1="60" y1="180" x2="60" y2="32" class="svg-axis"></line><polygon points="60,20 64,32 56,32" fill="#5C6B79"></polygon><text x="510" y="184" class="svg-note">「性别」维</text><text x="68" y="18" class="svg-note">「权力」维</text><g><circle cx="150" cy="155" r="8" fill="#3E6B8F"></circle><text x="150" y="141" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#3E6B8F">男人</text></g><g><circle cx="320" cy="155" r="8" fill="#C0481E"></circle><text x="320" y="141" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#C0481E">女人</text></g><g><circle cx="150" cy="60" r="8" fill="#3E6B8F"></circle><text x="150" y="46" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#3E6B8F">国王</text></g><g><circle cx="320" cy="60" r="8" fill="#C0481E"></circle><text x="320" y="46" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="14" font-weight="700" fill="#C0481E">女王</text></g><line x1="158" y1="155" x2="300" y2="155" stroke="#93A0AC" stroke-width="1.5"></line><polygon points="312,155 302,159 302,151" fill="#93A0AC"></polygon><text x="235" y="148" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">+女人−男人</text><line x1="158" y1="60" x2="300" y2="60" stroke="#93A0AC" stroke-width="1.5"></line><polygon points="312,60 302,64 302,56" fill="#93A0AC"></polygon><text x="235" y="53" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">+女人−男人</text><line x1="150" y1="147" x2="150" y2="80" stroke="#93A0AC" stroke-width="1.5"></line><polygon points="150,68 154,78 146,78" fill="#93A0AC"></polygon><text x="118" y="112" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#93A0AC">+权力</text><line x1="320" y1="147" x2="320" y2="80" stroke="#93A0AC" stroke-width="1.5"></line><polygon points="320,68 324,78 316,78" fill="#93A0AC"></polygon><text x="290" y="210" font-family="JetBrains Mono, monospace" font-size="12" fill="#C0481E">国王 − 男人 + 女人 ≈ 女王　✓</text></svg></div><figcaption><span class="fig-no">图 2-6</span>「性别」和「权力」是隐含在向量空间里的两个独立维度。减去男性概念、加上女性概念，在「权力」维度上平移，终点就是女王。</figcaption></figure><p>这个结果意味着什么？<strong>词的「含义」被编码成了向量空间里的方向</strong>。 「男 → 女」是空间里的某个固定偏移向量，「平民 → 王室」是另一个。 这两个偏移可以独立叠加，结果自然就对了。</p><p>第 15 课（词向量）会完整讲这是怎么学出来的。现在只需要记住： 向量加减，可以对「意义」做算术。</p></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>直线距离量「末端有多远」，余弦相似度量「方向有多一致」。 当向量的<span class="tk-hl">长度无意义</span>（如词频受文章长度影响）时，<span class="tk-hl">余弦相似度</span>才是正确的「像不像」工具。 点积不只是公式，它有鲜明的几何含义：衡量一个向量在另一个向量方向上的<span class="tk-hl">投影</span>有多长。 向量还能相减做类比：「国王−男人+女人≈女王」，语义变成了可以计算的方向偏移。</p></div><div class="recap"><h3>这一课你亲手发现了</h3><ul><li><strong>直线距离的盲点</strong>：同方向但长度不同的向量，两点距离可能比不同方向的向量还大。</li><li><strong>点积</strong>：a · b = Σ aᵢbᵢ = |a||b|cosθ；几何上等于 a 的模长 × b 在 a 方向上的投影。</li><li><strong>余弦相似度</strong>：cos θ = (a·b)/(|a||b|)，排除长度干扰，只看方向。</li><li><strong>向量加法</strong>：「含义」可以做算术——国王−男人+女人≈女王。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="余弦相似度只看方向夹角、对长度不敏感，最适合衡量“语义方向是否一致”。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>要衡量两个向量「方向上有多一致」（即语义上多相似），而又不希望被向量的长度干扰，应该用哪种运算？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">向量加法</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">余弦相似度</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">逐元素相减</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">求向量的长度</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="点积是一个标量，约等于“两向量同向程度 × 各自长度”，反映对齐程度。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>两个向量的「点积」结果是一个什么？它的大小说明了什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">一个新的向量，方向是两者之和</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">一个数（标量），大致反映两向量「同向程度 × 各自长度」</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">一个矩阵，表示一次旋转</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">一个永远为正的概率值</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></main>
+        
+        <a href="math-03-matrix.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 03 课</span>
+                    <h3>什么是矩阵</h3>
+                    <p>神经网络每一层把一组数字变成另一组数字——这个变换用什么来表示？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷一 · 第02课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

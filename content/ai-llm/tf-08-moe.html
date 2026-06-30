@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第27课 · MoE 混合专家架构 | AI大模型原理教程</title>
+    <meta name="description" content="GPT-4据说有1.8万亿参数——推理每次却只用其中一小部分，怎么做到的？">
+    <meta name="keywords" content="AI大模型教程,Transformer,MoE 混合专家架构,深度学习">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --card-bg: #12122a;
+            --text: #e0e0ff;
+            --text-secondary: #a0a0c8;
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --border: #2a2a5a;
+            --code-bg: #0d0d1a;
+            --tag-bg: #1e1e3e;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a3e, #4a1a6b);
+            border-radius: 16px;
+            padding: 32px 40px;
+            margin-bottom: 28px;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.2);
+        }
+        .header .lesson-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            font-style: italic;
+            margin-top: 12px;
+        }
+        .breadcrumb {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .breadcrumb a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 课程内容样式 */
+        .lesson-body {
+            font-size: 16px;
+            line-height: 1.9;
+        }
+        .station {
+            background: var(--card-bg);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid var(--border);
+        }
+        .station-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .station-no {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--accent2), var(--accent));
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+        }
+        .station h2 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .station p {
+            margin-bottom: 16px;
+        }
+        .station strong {
+            color: var(--accent2);
+        }
+        .formula {
+            background: rgba(124, 58, 237, 0.1);
+            padding: 16px 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            overflow-x: auto;
+        }
+        .think {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px dashed #10b981;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin: 24px 0;
+            position: relative;
+        }
+        .think::before {
+            content: '💡';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 0 8px;
+            font-size: 20px;
+        }
+        .think-q {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .takeaway {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .takeaway-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #10b981;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .recap {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .recap h3 {
+            color: #f59e0b;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        .recap ul {
+            padding-left: 20px;
+        }
+        .recap li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: var(--code-bg);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            color: var(--accent2);
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            color: #10b981;
+        }
+        .fig {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .fig svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .figcaption {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .fig-no {
+            color: var(--accent2);
+            font-weight: 600;
+        }
+        .quiz {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+        .quiz-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #8b5cf6;
+            margin-bottom: 16px;
+        }
+        .quiz-question {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .quiz-question:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .quiz-options {
+            padding-left: 20px;
+        }
+        .quiz-option {
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        .next-card {
+            display: block;
+            background: linear-gradient(135deg, var(--card-bg), rgba(124, 58, 237, 0.1));
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 28px;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+        .next-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+            border-color: var(--accent2);
+        }
+        .next-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .next-card h3 {
+            font-size: 20px;
+            color: var(--accent2);
+            margin: 8px 0;
+        }
+        .next-card p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .next-arrow {
+            font-size: 24px;
+            margin-left: 8px;
+        }
+        .lesson-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .lesson-footer a {
+            color: var(--accent2);
+            text-decoration: none;
+        }
+        .lesson-footer a:hover {
+            text-decoration: underline;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        a {
+            color: var(--accent2);
+        }
+        
+        /* 清理原站不需要的元素 */
+        .like-btn, .like-btn-wrapper { display: none !important; }
+        
+        @media (max-width: 600px) {
+            .container { padding: 12px; }
+            .header { padding: 24px; }
+            .header h1 { font-size: 22px; }
+            .station { padding: 16px; }
+        }
+    </style>
+    <link rel="stylesheet" href="assets/katex/katex.min.css">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">🏠 首页</a> / <a href="/ai-llm/">AI大模型教程</a> / 第27课
+        </div>
+
+        <div class="header">
+            <div class="lesson-badge">LESSON 27 · 卷四</div>
+            <h1>MoE 混合专家架构</h1>
+            <p class="subtitle">❝ GPT-4据说有1.8万亿参数——推理每次却只用其中一小部分，怎么做到的？ ❞</p>
+        </div>
+
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="又聪明又慢的两难" data-num="1" id="s1"><div class="station-head"><span class="station-no">第 1 站</span><h2>参数越多越聪明，可惜也越慢</h2></div><p>这一卷有条贯穿始终的经验律——<strong>缩放定律</strong>：参数越多、数据越多，模型越强。 GPT-2（1.5B）→ GPT-3（175B）→ GPT-4，能力的台阶，基本是用参数量堆出来的。可堆参数有个躲不开的账：</p><ul style="padding-left:24px;line-height:2.1"><li>标准 Transformer 里，每生成一个 token，<strong>全部参数都得参与一次计算</strong>；</li><li>参数翻 10 倍，每个 token 的推理成本也<strong>老老实实翻 10 倍</strong>；</li><li>175B 的 GPT-3 一张显卡装不下，得好几张卡接力——再大，成本就失控了。</li></ul><p>于是卡在一个两难：<strong>想更聪明就得更多参数，更多参数就更慢更贵。</strong>能不能两头都要——参数多到撑起能力，算力却不跟着涨？</p><div class="think"><div class="think-q">如果不必让所有参数都参与每一次计算，能不能既拥有海量参数，又保持低成本？</div></div></section><section class="station reveal" data-title="FFN 是最大的参数块" data-num="2" id="s2"><div class="station-head"><span class="station-no">第 2 站</span><h2>切入点：FFN 占了一个 Block 三分之二的参数</h2></div><p>要「只唤醒一部分」，得先找到那块最肥、最值得拆的肉。回到第 21 课的 Block，数一下参数：</p><div class="formula" style="text-align:left;font-size:14px;line-height:2">注意力层：Q、K、V、O 四个 <span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span> 矩阵 → 约 <span class="f-hl">4d²</span><br/>FFN 层：先放大 4 倍再缩回（<span class="kx"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord">4</span><span class="mord mathnormal">d</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">→</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal">d</span></span></span></span></span>），两个大矩阵 → 约 <span class="f-hl">8d²</span><br/><span class="f-dim">→ FFN 占了一个 Block 约 <strong>2/3</strong> 的参数，是最肥的那块</span></div><p>再想想第 21 课说的：FFN 是模型的「<strong>知识仓库</strong>」，大半事实都编码在它的权重里。 可标准做法是<strong>所有 token 都挤过同一个 FFN</strong>——不管你是一段代码、一句诗，还是一个数学公式， 都去同一个仓库里翻。这既浪费、也别扭：处理代码和处理诗歌需要的知识天差地别，凭什么塞在一个 FFN 里？<strong>要拆，就拆它。</strong></p></section><section class="station reveal" data-title="MoE：换成一群专家" data-num="3" id="s3"><div class="station-head"><span class="station-no">第 3 站</span><h2>MoE：把一个 FFN，换成一群专家 + 一个分诊台</h2></div><p>混合专家（Mixture of Experts，MoE）的做法，正是上一站那个「分科」的念头落地：</p><ol style="padding-left:24px;line-height:2.1"><li>把每层那<strong>一个</strong> FFN，复制成 <strong>N 个</strong>平行的「专家 FFN」（比如 N=8）；</li><li>前面加一个轻量的<strong>路由器</strong>（分诊台），给每个 token 打分、挑出最合适的 <strong>Top-K 个</strong>专家（通常 K=2）；</li><li>token <strong>只穿过这 K 个</strong>专家，其余 N−K 个本次不参与；</li><li>K 个专家的输出，按路由器给的权重加权求和。</li></ol><p>路由器本身就是个小小的线性层。拿一个 token 走一遍，看它怎么「分诊」（4 个专家、选 Top-2）：</p><div class="formula" style="text-align:left;font-size:13.5px;line-height:2">路由器给 4 个专家打分（logits）：<span class="f-hl">[3.1, 0.5, 2.4, −1.0]</span><br/>softmax 成概率：[<span class="f-hl">0.63</span>, 0.05, <span class="f-hl">0.31</span>, 0.01]<br/>选最高的两个 → <strong>专家1（0.63）</strong>和<strong>专家3（0.31）</strong>，其余两个空转<br/>两者权重重新归一：0.63→<span class="f-hl">0.67</span>，0.31→<span class="f-hl">0.33</span><br/>输出 = 0.67 × 专家1(x) + 0.33 × 专家3(x)</div><figure class="fig"><div class="fig-frame"><svg viewBox="0 0 560 206" role="img" aria-label="MoE 架构：路由器选择 Top-2 专家"><defs><marker id="moe-arr" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#5C6B79"></polygon></marker><marker id="moe-arr-red" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0, 7 2.5, 0 5" fill="#3E6B8F"></polygon></marker></defs><rect x="220" y="10" width="120" height="28" rx="5" fill="#F5F0E8" stroke="#DCD2BF"></rect><text x="280" y="29" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#232F3B">某个 token</text><line x1="280" y1="38" x2="280" y2="58" stroke="#5C6B79" stroke-width="1.5" marker-end="url(#moe-arr)"></line><rect x="220" y="58" width="120" height="28" rx="5" fill="#EDF5EF" stroke="#4A8B5E" stroke-width="1.5"></rect><text x="280" y="77" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#4A8B5E">路由器（分诊台）</text><g><line x1="280" y1="86" x2="42" y2="118" stroke="#3E6B8F" stroke-width="2" stroke-dasharray="none" marker-end="url(#moe-arr-red)"></line><text x="167" y="104" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">0.67</text><rect x="20" y="118" width="44" height="44" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="42" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">专家1</text></g><g><line x1="280" y1="86" x2="122" y2="118" stroke="#DCD2BF" stroke-width="1" stroke-dasharray="4,3" marker-end="none"></line><rect x="100" y="118" width="44" height="44" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="122" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">专家2</text></g><g><line x1="280" y1="86" x2="202" y2="118" stroke="#3E6B8F" stroke-width="2" stroke-dasharray="none" marker-end="url(#moe-arr-red)"></line><text x="247" y="104" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#3E6B8F">0.33</text><rect x="180" y="118" width="44" height="44" rx="5" fill="#EBF2F8" stroke="#3E6B8F" stroke-width="2"></rect><text x="202" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#3E6B8F">专家3</text></g><g><line x1="280" y1="86" x2="282" y2="118" stroke="#DCD2BF" stroke-width="1" stroke-dasharray="4,3" marker-end="none"></line><rect x="260" y="118" width="44" height="44" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="282" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">专家4</text></g><g><line x1="280" y1="86" x2="362" y2="118" stroke="#DCD2BF" stroke-width="1" stroke-dasharray="4,3" marker-end="none"></line><rect x="340" y="118" width="44" height="44" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="362" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">专家5</text></g><g><line x1="280" y1="86" x2="442" y2="118" stroke="#DCD2BF" stroke-width="1" stroke-dasharray="4,3" marker-end="none"></line><rect x="420" y="118" width="44" height="44" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="442" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">专家6</text></g><g><line x1="280" y1="86" x2="522" y2="118" stroke="#DCD2BF" stroke-width="1" stroke-dasharray="4,3" marker-end="none"></line><rect x="500" y="118" width="44" height="44" rx="5" fill="#F5F0E8" stroke="#DCD2BF" stroke-width="1"></rect><text x="522" y="144" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#93A0AC">专家7</text></g><text x="280" y="184" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3E6B8F">只激活 Top-2（专家1 + 专家3）</text><text x="280" y="198" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#5C6B79">其余 5 个专家本次完全不计算</text></svg></div><figcaption><span class="fig-no">图 27-1</span>路由器给这个 token 选了专家1、专家3（权重 0.67、0.33），其余 5 个空转。<strong>总参数是 7 个专家的，实际计算只花 2 个</strong>——这就是「分诊」省下的算力。</figcaption></figure><p>这套「<strong>分工 + 只激活相关的那部分</strong>」，和第 20 课的多头注意力是同一种智慧的两个方向： 多头把<strong>注意力</strong>拆成几个头各看一种关系，MoE 把<strong>FFN</strong>拆成一群专家各管一类输入。 一个切「注意」、一个切「记忆」，骨子里都是那句老话——<em>与其让一个大块什么都干，不如拆成小块各管一摊。</em></p></section><section class="station reveal" data-title="算一笔账：又大又快" data-num="4" id="s4"><div class="station-head"><span class="station-no">第 4 站</span><h2>算一笔账：8 倍的参数，1 倍的算力</h2></div><p>口说无凭，把账算给你看。拿开源的 <strong>Mixtral 8×7B</strong>（Mistral AI）做例子—— 注意「8×7B」这个名字很容易让人误会成 56B，其实<strong>不是</strong>：</p><div class="formula" style="text-align:left;font-size:13.5px;line-height:2">8 个专家，但注意力层、嵌入表是<strong>所有专家共享</strong>的，只数一次<br/>总参数 ≈ <span class="f-hl">47B</span>（不是 8×7=56B，共享部分不重复算）<br/>每个 token 只走 <strong>2 个</strong>专家 → 实际激活 ≈ <span class="f-hl">13B</span><br/><span class="f-dim">→ 装着 47B 的知识容量，每个 token 却只花 13B 的算力</span></div><p>这就是 MoE 的魔法账本：<strong>知识容量按「总参数」走，推理成本按「激活参数」走</strong>，两者被路由器拆开了。 想更聪明？多加专家、把总参数堆上去；想更快？把每次激活的 K 压低。 DeepSeek-V3 更激进——256 个专家、每次只激活 8 个，总参数 671B，单 token 激活仅约 37B。</p><p>这也解释了开篇那个传闻：GPT-4 据说有约 1.8 万亿总参数（16 个专家、每次激活 2 个），可你每次提问， 真正参与计算的只是其中一小块。<strong>「又大又快」不是矛盾修辞，是路由器换来的。</strong></p></section><section class="station reveal" data-title="现实里的坑" data-num="5" id="s5"><div class="station-head"><span class="station-no">第 5 站</span><h2>现实里的两个坑（和一个误会）</h2></div><p>MoE 听着完美，但真要训起来，有几处反直觉的地方值得先泼盆冷水。</p><div class="book-def"><div class="book-def-label">先澄清一个常见误会</div><p>为了好懂，很多图（包括上一站那张的原始版本）会把专家标成「法律专家」「代码专家」「数学专家」。 但真实情况是：<strong>专家并不按人类能读懂的主题分工</strong>。路由器是训练中自己学出来的， 它的分派往往跟着<em>词法、句法这类表层特征</em>走（比如标点、词形、某类 token），而不是「这段在讲法律」。 专家确实会分化，但那种分化<strong>大多没有一个我们能命名的标签</strong>。把它想成「8 条各有侧重、但说不清侧重啥的流水线」，更贴近真相。</p></div><div class="crack reveal"><div class="crack-label">坑一：专家会「旱涝不均」</div><p>路由器要是图省事，老往那么两三个专家身上派活，剩下的专家就<strong>学不到东西、白占参数</strong>—— 旱的旱死、涝的涝死。所以训练时要额外加一项<strong>「负载均衡损失」</strong>， 逼着路由器把 token 尽量摊匀。还有个硬限制叫<strong>容量</strong>：每个专家每批最多收这么多 token， 挤爆了的<strong>多余 token 会被「丢弃」</strong>（这一层干脆跳过 FFN、只靠残差直通），用一点精度换稳定。</p></div><div class="crack reveal"><div class="crack-label">坑二：省了算力，没省显存</div><p>别忘了——<strong>不参与计算 ≠ 不占地方</strong>。全部 N 个专家的参数都得<strong>常驻显存</strong>随时待命， 所以 MoE 省的是<em>计算</em>，不是<em>显存</em>。更麻烦的是，专家常分散在不同 GPU 上， 路由时 token 要<strong>跨卡跑来跑去</strong>，通信能成为新瓶颈。DeepSeek 等就靠「节点内优先路由」等工程技巧来摁住它。</p></div></section><section class="station reveal" data-title="总结" data-num="6" id="s6"><div class="station-head"><span class="station-no">第 6 站</span><h2>总结</h2></div><div class="takeaway"><div class="takeaway-label">本课核心 · TAKEAWAY</div><p>MoE = 把那个占 2/3 参数的 FFN 换成 N 个专家 + 一个路由器，每个 token 只激活 Top-K 个。<span class="tk-hl">知识容量按总参数走，算力按激活参数走</span>——8 倍参数，约 1 倍推理成本。 代价：要负载均衡防旱涝，全部专家还得常驻显存、跨卡通信。GPT-4、Mixtral、DeepSeek 都在用。</p></div><div class="recap"><h3>这一课你亲手推导了</h3><ul><li><strong>动机</strong>：缩放定律要更多参数，但标准模型推理成本随参数线性涨。</li><li><strong>切 FFN</strong>：FFN 占 Block 约 8d²、2/3 参数，是最值得拆的「知识仓库」。</li><li><strong>路由器</strong>：打分 [3.1,0.5,2.4,−1.0] → softmax → 选 Top-2 → 归一加权（0.67/0.33）。</li><li><strong>魔法账本</strong>：Mixtral 总 47B、激活仅 13B；容量按总参数、成本按激活参数。</li><li><strong>现实</strong>：专家不按主题分工；要防负载不均与 token 丢弃；省算力不省显存。</li></ul></div></section><section class="station quiz reveal" data-title="学习小测验" data-num="?" id="quiz"><div class="station-head"><span class="station-no">小测验</span><h2>学习小测验</h2></div><p class="quiz-intro">做完这一课，来检测一下核心知识点。选出你的答案后点击「提交」，即可看到正确选项与讲解。</p><div class="quiz-item" data-correct="1" data-explain="路由器为每个 token 只选少数专家参与计算（稀疏激活）。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->1</span><span>MoE（混合专家）架构能做到「总参数上万亿，但每次推理只用其中一小部分」，靠的是什么？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">把模型压缩成更小的文件</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">一个「路由器」为每个 token 只选择少数几个「专家」子网络参与计算（稀疏激活）</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">每次随机删掉一半参数</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">让所有专家同时全开</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div><div class="quiz-item" data-correct="1" data-explain="路由器(gating)为每个输入 token 决定送给哪几个专家。"><div class="quiz-q"><span class="quiz-q-no">Q<!-- -->2</span><span>MoE 中的「路由器（gating network）」起什么作用？</span></div><div class="quiz-options" role="radiogroup"><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">A</span><span class="quiz-option-text">决定网络有几层</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">B</span><span class="quiz-option-text">为每个输入 token 决定该把它送给哪几个专家处理</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">C</span><span class="quiz-option-text">负责把文本切成 token</span></button><button type="button" role="radio" aria-checked="false" class="quiz-option"><span class="quiz-option-key">D</span><span class="quiz-option-text">计算最终的损失值</span></button></div><button type="button" class="quiz-submit" disabled="">提交答案</button></div></section></div></div></main>
+        
+        <a href="tf-09-distill.html" class="next-card">
+                    <span class="next-arrow">→</span>
+                    <span class="next-label">NEXT · 第 28 课</span>
+                    <h3>模型蒸馏</h3>
+                    <p>大模型的能力能「传授」给小模型吗？——软标签里藏着什么「暗知识」？</p>
+                </a>
+
+        <div class="lesson-footer">
+            <span>卷四 · 第27课</span>
+            <a href="/ai-llm/">返回学习地图</a>
+        </div>
+    </div>
+</body>
+</html>

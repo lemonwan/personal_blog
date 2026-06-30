@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 中高级面试 - Day 11 | 异常处理最佳实践</title>
+<style>
+:root {
+  --header-bg: #1a1a2e;
+  --accent-blue: #0ea5e9;
+  --accent-green: #22c55e;
+  --accent-purple: #a855f7;
+  --accent-orange: #f97316;
+  --accent-pink: #ec4899;
+  --accent-red: #ef4444;
+  --accent-cyan: #06b6d4;
+  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  --dot-blue: #3b82f6;
+  --dot-green: #10b981;
+  --dot-purple: #8b5cf6;
+  --dot-orange: #f59e0b;
+  --dot-pink: #ec4899;
+  --dot-red: #ef4444;
+  --dot-cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
+.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
+.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
+.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
+.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+.module-card .card-body { padding: 20px; }
+.section { margin-bottom: 20px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
+.section .content { padding-left: 32px; }
+.section .content p { margin-bottom: 6px; }
+.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
+.section .content li { margin-bottom: 4px; }
+.section .content strong { color: #0f172a; }
+.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
+.bullet-list { list-style: none; padding-left: 0; }
+.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
+.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
+.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
+.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.code-block .comment { color: #64748b; }
+.code-block .keyword { color: #c084fc; }
+.code-block .string { color: #86efac; }
+.code-block .method { color: #67e8f9; }
+.code-block .number { color: #fbbf24; }
+.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
+.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
+.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
+.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
+.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
+.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.comparison-table tr:nth-child(even) td { background: #f8fafc; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
+.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
+.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
+.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
+.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.next-preview .next-content p { font-size: 13px; color: #475569; }
+@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
+@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="header">
+  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
+  <h1>Day 11 — 异常处理最佳实践</h1>
+  <div class="tag">模块：Java基础 · 异常与断言</div>
+</div>
+<div class="container">
+<div class="module-card">
+  <div class="card-header">
+    <span class="card-number">11</span>
+    <span class="card-title">异常处理最佳实践</span>
+  </div>
+  <div class="card-body">
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>异常处理的核心原则</h3>
+      <div class="content"><ul class="bullet-list">
+<li><strong>不要忽略异常</strong> — 空 catch 块是严重的代码气味，至少应该记录日志</li>
+<li><strong>尽早失败</strong> — 在方法入口处校验参数，尽早抛出异常，避免进入无效状态</li>
+<li><strong>异常处理 != 错误处理</strong> — 异常应该只用于异常情况（不常见、不可预期），不能用于控制正常流程</li>
+<li><strong>捕获具体异常</strong> — 优先捕获最具体的异常类型，避免直接捕获 Exception 或 Throwable</li>
+<li><strong>异常信息要完整</strong> — 提供有意义的错误信息，包含上下文，便于排查问题</li>
+</ul></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>正确的捕获与转换</h3>
+      <div class="content"><ul class="bullet-list">
+<li><strong>不要吞掉异常</strong> — 错误地捕获异常却不采取任何措施是最常见的反模式</li>
+<li><strong>不要记录后不处理</strong> — 如果记录完日志后什么都不做，调用方无法感知错误</li>
+</ul>
+<div class="code-block">// ❌ 反模式：捕获后什么都不做
+try {
+    process(data);
+} catch (IOException e) {
+    // 什么也不做
+}
+
+// ✅ 正确：记录日志后重新抛出或返回错误码
+try {
+    process(data);
+} catch (IOException e) {
+    log.error("处理数据失败: {}", data.getId(), e);
+    throw new BusinessException("数据处理失败", e);
+}
+
+// ✅ 或者转换为受检异常抛出
+try {
+    process(data);
+} catch (IOException e) {
+    throw new DataAccessException("数据访问失败", e);
+}</div>
+<div class="note-box">📋 <strong>异常链（Exception Chaining）</strong><br>始终使用 <code>new SpecificException("message", originalException)</code> 构造函数保留原始异常，这样堆栈跟踪信息才不会丢失。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>try-with-resources vs finally</h3>
+      <div class="content"><ul class="bullet-list">
+<li><strong>try-with-resources（推荐）</strong> — JDK 7+ 引入，自动关闭实现 AutoCloseable 的资源</li>
+<li><strong>finally</strong> — 传统方式，需要手动关闭资源，代码冗长且容易出错</li>
+</ul>
+<div class="code-block">// ✅ JDK 7+ try-with-resources（推荐）
+try (FileInputStream fis = new FileInputStream("data.txt");
+     BufferedReader br = new BufferedReader(new InputStreamReader(fis))) {
+    return br.readLine();
+} catch (IOException e) {
+    log.error("读取文件失败", e);
+    throw new BusinessException("文件读取失败", e);
+}
+// 自动关闭，无需 finally 块</div>
+<div class="code-block">// ❌ 传统方式（不推荐）
+BufferedReader br = null;
+try {
+    br = new BufferedReader(new FileReader("data.txt"));
+    return br.readLine();
+} catch (IOException e) {
+    throw new RuntimeException(e);
+} finally {
+    if (br != null) {
+        try {
+            br.close();
+        } catch (IOException e) {
+            // 这个异常会掩盖前面的异常！
+        }
+    }
+}</div>
+<div class="note-box warning">⚠️ finally 中的异常会掩盖 try 中的异常！try-with-resources 在 JDK 9+ 中支持使用 effectively final 的局部变量，无需重新声明。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>自定义异常的设计</h3>
+      <div class="content"><ul class="bullet-list">
+<li><strong>何时创建自定义异常</strong> — 当框架/业务层面的错误无法用标准异常充分表达时</li>
+<li><strong>继承体系</strong> — 运行时异常继承 RuntimeException，受检异常继承 Exception</li>
+<li><strong>命名规范</strong> — 以 Exception 结尾，清晰表达异常场景（如 UserNotFoundException）</li>
+<li><strong>携带上下文</strong> — 构造异常时传入有意义的参数（如用户 ID、订单号）</li>
+</ul>
+<div class="code-block">public class BusinessException extends RuntimeException {
+    private final String errorCode;
+    private final Object context;
+
+    public BusinessException(String message, Throwable cause) {
+        super(message, cause);
+        this.errorCode = determineErrorCode(message);
+        this.context = extractContext();
+    }
+
+    public BusinessException(String message, String errorCode) {
+        super(message);
+        this.errorCode = errorCode;
+    }
+}
+
+// 业务层使用
+throw new BusinessException("用户不存在", "USER_NOT_FOUND", userId);</div>
+<div class="note-box">📋 <strong>分层异常策略</strong><br>•  DAO 层：受检异常，向 Service 层报告数据库错误<br>•  Service 层：运行时异常，向 Controller 层报告业务错误<br>•  Controller 层：统一异常处理器，转换为 HTTP 响应</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>Spring 统一异常处理</h3>
+      <div class="content"><ul class="bullet-list">
+<li><strong>@RestControllerAdvice + @ExceptionHandler</strong> — Spring 推荐的统一异常处理方式</li>
+<li><strong>@ControllerAdvice</strong> — 全局拦截所有控制器的异常</li>
+<li><strong>异常映射</strong> — 不同类型的异常映射到不同的 HTTP 状态码</li>
+</ul>
+<div class="code-block">@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(UserNotFoundException.class)
+    public ResponseEntity&lt;ApiResponse&lt;?&gt;&gt; handleUserNotFound(
+            UserNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ApiResponse.error(404, "用户不存在"));
+    }
+
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity&lt;ApiResponse&lt;?&gt;&gt; handleBusinessException(
+            BusinessException e) {
+        return ResponseEntity.badRequest()
+            .body(ApiResponse.error(400, e.getMessage()));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity&lt;ApiResponse&lt;?&gt;&gt; handleGeneralException(
+            Exception e) {
+        log.error("未预期的异常", e);
+        return ResponseEntity.status(500)
+            .body(ApiResponse.error(500, "服务器内部错误"));
+    }
+}</div>
+<div class="note-box danger">💥 <strong>注意：</strong>@ExceptionHandler 方法必须是非私有（非-private）的，否则不会生效。</div></div></div>
+    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">❓</span>面试高频问题</h3>
+      <div class="content"><ul class="bullet-list">
+<li><strong>Q：受检异常和非受检异常的区别？何时用哪种？</strong><br>A：受检异常（Exception）编译时检查，用于可恢复的错误（如 IOException）；非受检异常（RuntimeException）编译时不检查，用于程序错误（如 NullPointerException）。现代实践倾向于减少使用受检异常，优先用非受检异常+日志。</li>
+<li><strong>Q：finally 一定执行吗？</strong><br>A：finally 在 return、break、continue 时都会执行。但在以下情况不会执行：<code>System.exit()</code>、JVM 崩溃、进程被 kill、finally 前进入死循环。</li>
+<li><strong>Q：try-with-resources 的原理？</strong><br>A：编译期展开为 try-finally 块，在 finally 中按声明顺序逆序调用 close()，先声明的后关闭，后声明的先关闭。</li>
+<li><strong>Q：如何选择合适的异常类型？</strong><br>A：参数校验错误用 IllegalArgumentException；业务规则违反用自定义运行时异常；资源问题用受检异常（如 IOException）。</li>
+<li><strong>Q：throw 和 throws 有什么区别？</strong><br>A：throw 用于方法体内抛出一个异常实例；throws 用于方法签名声明可能抛出的异常类型。</li>
+</ul></div></div>
+  </div>
+</div>
+<div class="footer">
+  <h4>📊 今日总结</h4>
+  <div class="progress-bar"><div class="progress-fill" style="width: 17%"></div></div>
+  <div class="progress-text">11 / 66 知识点</div>
+  <div class="next-preview">
+    <div class="next-icon">👉</div>
+    <div class="next-content">
+      <h5>明日预告</h5>
+      <p>Lambda 表达式与函数式接口</p>
+    </div>
+  </div>
+</div>
+</div>
+<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 11/66</div>
+</body>
+</html>

@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n-title="notes.title">Java 面试笔记 — wan</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════
+   CSS VARIABLES
+   ═══════════════════════════════════════════ */
+:root {
+  --bg-primary: #06080f;
+  --bg-secondary: #0c1020;
+  --bg-card: rgba(12, 16, 32, 0.6);
+  --neon-cyan: #00f5d4;
+  --neon-blue: #4361ee;
+  --neon-magenta: #f72585;
+  --neon-purple: #7209b7;
+  --text-primary: #e8e8f0;
+  --text-secondary: #7a8099;
+  --text-dim: #3d4258;
+  --grid-color: rgba(67, 97, 238, 0.06);
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --glow-cyan: 0 0 20px rgba(0, 245, 212, 0.4), 0 0 60px rgba(0, 245, 212, 0.15);
+  --glow-magenta: 0 0 20px rgba(247, 37, 133, 0.4), 0 0 60px rgba(247, 37, 133, 0.15);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: var(--neon-cyan) var(--bg-primary);
+}
+
+body {
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  line-height: 1.6;
+}
+
+::selection { background: var(--neon-cyan); color: var(--bg-primary); }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--neon-cyan); border-radius: 2px; }
+
+.grid-bg {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: radial-gradient(ellipse at 50% 50%, black 20%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, black 20%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ═══════════════════════════════════════════
+   NAVIGATION
+   ═══════════════════════════════════════════ */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 24px 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(180deg, var(--bg-primary) 0%, transparent 100%);
+}
+
+.nav-logo {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  text-decoration: none;
+  position: relative;
+}
+
+.nav-logo::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--neon-cyan), transparent);
+}
+
+.nav-links {
+  display: flex; gap: 36px; list-style: none;
+}
+
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  transition: color 0.3s, text-shadow 0.3s;
+  position: relative;
+}
+
+.nav-links a::before {
+  content: '//';
+  margin-right: 4px;
+  opacity: 0;
+  color: var(--neon-cyan);
+  transition: opacity 0.3s;
+}
+
+.nav-links a:hover {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 12px rgba(0, 245, 212, 0.4);
+}
+
+.nav-links a:hover::before { opacity: 1; }
+
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 8px;
+}
+
+.lang-btn {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: color 0.3s, text-shadow 0.3s;
+}
+
+.lang-btn:hover {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 12px rgba(0, 245, 212, 0.4);
+}
+
+.lang-btn.active {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 12px rgba(0, 245, 212, 0.4);
+}
+
+.lang-divider {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  user-select: none;
+  pointer-events: none;
+}
+
+main { position: relative; z-index: 2; }
+
+/* ═══════════════════════════════════════════
+   HERO
+   ═══════════════════════════════════════════ */
+.hero {
+  min-height: 70vh;
+  display: flex;
+  align-items: center;
+  padding: 120px 48px 80px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-content { max-width: 900px; position: relative; }
+
+.hero-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--neon-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  margin-bottom: 32px;
+}
+
+.hero-tag .status-dot {
+  width: 6px; height: 6px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+  box-shadow: var(--glow-cyan);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 28px;
+}
+
+.hero-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  max-width: 600px;
+  line-height: 1.8;
+  margin-bottom: 48px;
+}
+
+.hero-subtitle .accent { color: var(--neon-cyan); }
+
+.hero-cta { display: flex; gap: 20px; flex-wrap: wrap; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 32px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-primary {
+  background: var(--neon-cyan);
+  color: var(--bg-primary);
+  font-weight: 700;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.btn-primary:hover {
+  background: #fff;
+  box-shadow: var(--glow-cyan);
+  transform: translateY(-2px);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--text-dim);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.btn-outline:hover {
+  border-color: var(--neon-magenta);
+  color: var(--neon-magenta);
+  box-shadow: var(--glow-magenta);
+  transform: translateY(-2px);
+}
+
+/* ═══════════════════════════════════════════
+   SECTION
+   ═══════════════════════════════════════════ */
+.section {
+  padding: 80px 48px 120px;
+  position: relative;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 48px;
+}
+
+.section-number {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--neon-cyan);
+  letter-spacing: 0.1em;
+}
+
+.section-line {
+  flex: 0 0 60px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--neon-cyan), transparent);
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════
+   ARTICLE LIST
+   ═══════════════════════════════════════════ */
+.articles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.article-item {
+  display: grid;
+  grid-template-columns: 80px 1fr auto 40px;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 28px;
+  background: var(--bg-card);
+  border: 1px solid rgba(67, 97, 238, 0.08);
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.article-item::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--neon-cyan), transparent);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.article-item:hover {
+  border-color: rgba(0, 245, 212, 0.25);
+  transform: translateX(8px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 24px rgba(0, 245, 212, 0.05);
+}
+
+.article-item:hover::before { opacity: 1; }
+
+.article-item:hover .article-title { color: var(--neon-cyan); }
+.article-item:hover .article-arrow { transform: translateX(4px); color: var(--neon-cyan); }
+
+.article-index {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.article-body { min-width: 0; }
+
+.article-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  transition: color 0.3s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.article-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.article-tags {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.article-tag {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  padding: 3px 10px;
+  background: rgba(0, 245, 212, 0.08);
+  color: var(--neon-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.article-arrow {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  text-align: right;
+  transition: transform 0.3s, color 0.3s;
+}
+
+/* ═══════════════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════════════ */
+.footer {
+  border-top: 1px solid rgba(67, 97, 238, 0.08);
+  padding: 32px 48px;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+
+.footer-text {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .nav { padding: 20px 24px; }
+  .nav-links { gap: 20px; }
+  .hero { padding: 100px 24px 60px; }
+  .section { padding: 60px 24px 80px; }
+  .article-item {
+    grid-template-columns: 60px 1fr 40px;
+    grid-template-areas:
+      "index body arrow"
+      "tags tags tags";
+    gap: 12px;
+    padding: 20px;
+  }
+  .article-index { grid-area: index; }
+  .article-body { grid-area: body; }
+  .article-arrow { grid-area: arrow; }
+  .article-tags { grid-area: tags; }
+  .article-title { white-space: normal; font-size: 0.95rem; }
+}
+
+@media (max-width: 600px) {
+  .nav-links { display: none; }
+  .hero-cta { flex-direction: column; }
+  .btn { justify-content: center; }
+  .article-item { transform: none !important; }
+}
+</style>
+    <link rel="stylesheet" href="/assets/reading-theme.css">
+    <script defer src="/assets/theme.js"></script>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<nav class="nav">
+  <a href="../" class="nav-logo">WAN</a>
+  <ul class="nav-links">
+    <li><a href="#articles" data-i18n="nav.articles">文章目录</a></li>
+    <li><a href="../" data-i18n="nav.back">返回主页</a></li>
+  </ul>
+  <div class="lang-switch" role="group" aria-label="Language">
+    <button class="lang-btn active" data-lang="zh" type="button" aria-pressed="true">中</button>
+    <span class="lang-divider" aria-hidden="true">|</span>
+    <button class="lang-btn" data-lang="en" type="button" aria-pressed="false">EN</button>
+  </div>
+</nav>
+
+<main>
+
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-tag">
+        <span class="status-dot"></span>
+        <span data-i18n="hero.tag">15 篇文章 · 7 个主题</span>
+      </div>
+
+      <h1 class="hero-title" data-i18n="hero.title">Java 面试笔记</h1>
+
+      <p class="hero-subtitle" data-i18n-html="hero.subtitle">系统整理 <span class="accent">Java 核心知识</span>，覆盖集合框架、并发编程、JVM、设计模式等高频面试主题。每篇配套源码解读与典型例题。</p>
+
+      <div class="hero-cta">
+        <a href="#articles" class="btn btn-primary" data-i18n="hero.cta1">浏览文章 →</a>
+        <a href="../" class="btn btn-outline" data-i18n="hero.cta2">返回主页</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="articles">
+    <div class="section-header">
+      <span class="section-number">01</span>
+      <span class="section-line"></span>
+      <span class="section-title" data-i18n="sec.articles">文章目录</span>
+    </div>
+
+    <div class="articles-list">
+
+      <a class="article-item" href="java-interview-java-基础-接口默认方法-静态方法.html">
+        <span class="article-index">N-001</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n1.title">接口默认方法与静态方法</h3>
+          <p class="article-desc" data-i18n="n1.desc">Java 8 接口的默认方法与静态方法，如何演进接口与实现类的关系。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.iface">接口</span>
+          <span class="article-tag">Day 15</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-hashset-treeset-底层原理.html">
+        <span class="article-index">N-002</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n2.title">HashSet / TreeSet 底层原理</h3>
+          <p class="article-desc" data-i18n="n2.desc">Set 集合如何基于 Map 实现，以及 TreeSet 的红黑树结构。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.coll">集合</span>
+          <span class="article-tag">Day 14</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-stream-api-常用操作-map-filter-collect-reduce-.html">
+        <span class="article-index">N-003</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n3.title">Stream API 常用操作</h3>
+          <p class="article-desc" data-i18n="n3.desc">map / filter / collect / reduce 等核心操作与实战范式。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.stream">Stream</span>
+          <span class="article-tag">Day 13</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-iterator-遍历机制和-fail-fast-机制.html">
+        <span class="article-index">N-004</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n4.title">Iterator 与 fail-fast 机制</h3>
+          <p class="article-desc" data-i18n="n4.desc">遍历机制原理与 ConcurrentModificationException 的成因。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.coll">集合</span>
+          <span class="article-tag">Day 12</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-异常处理最佳实践.html">
+        <span class="article-index">N-005</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n5.title">异常处理最佳实践</h3>
+          <p class="article-desc" data-i18n="n5.desc">try-catch-finally、try-with-resources 与异常传播模式。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.exc">异常</span>
+          <span class="article-tag">Day 11</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-受检异常-vs-非受检异常的设计哲学.html">
+        <span class="article-index">N-006</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n6.title">受检 vs 非受检异常</h3>
+          <p class="article-desc" data-i18n="n6.desc">Java 异常体系的设计哲学与取舍。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.exc">异常</span>
+          <span class="article-tag">Day 9</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-注解的定义-使用及元注解-html.html">
+        <span class="article-index">N-007</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n7.title">注解的定义与元注解</h3>
+          <p class="article-desc" data-i18n="n7.desc">自定义注解、@Retention、@Target 与运行时解析。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.ann">注解</span>
+          <span class="article-tag">Day 8</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-反射的性能开销-在实际框架中的应用-spring-ioc-di-html.html">
+        <span class="article-index">N-008</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n8.title">反射与 Spring IOC</h3>
+          <p class="article-desc" data-i18n="n8.desc">反射的性能开销、缓存策略与在 Spring 框架中的应用。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.refl">反射</span>
+          <span class="article-tag">Day 7</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-java基础-arraylist-vs-linkedlist-使用场景.html">
+        <span class="article-index">N-009</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n9.title">ArrayList vs LinkedList</h3>
+          <p class="article-desc" data-i18n="n9.desc">随机访问 vs 顺序插入的性能对比与典型场景。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.coll">集合</span>
+          <span class="article-tag">Day 3</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-Java基础-HashMap底层实现.html">
+        <span class="article-index">N-010</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n10.title">HashMap 底层实现（精读版）</h3>
+          <p class="article-desc" data-i18n="n10.desc">源码角度系统梳理 HashMap 的设计与关键路径。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.coll">集合</span>
+          <span class="article-tag" data-i18n="tag.basic">Java 基础</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-一-集合框架-ArrayList-vs-LinkedList-使用场景.html">
+        <span class="article-index">N-011</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n11.title">ArrayList vs LinkedList（卡片版）</h3>
+          <p class="article-desc" data-i18n="n11.desc">集合框架卡片系列：两种 List 实现的对比与场景。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.coll">集合</span>
+          <span class="article-tag" data-i18n="tag.cards">集合框架</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-一-集合框架-ConcurrentHashMap分段锁到CAS+synchronized的演进.html">
+        <span class="article-index">N-012</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n12.title">ConcurrentHashMap 演进（卡片版）</h3>
+          <p class="article-desc" data-i18n="n12.desc">从分段锁到 CAS + synchronized 的演进过程。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.conc">并发</span>
+          <span class="article-tag" data-i18n="tag.cards">集合框架</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-一-集合框架-HashMap底层实现.html">
+        <span class="article-index">N-013</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n13.title">HashMap 底层（卡片版）</h3>
+          <p class="article-desc" data-i18n="n13.desc">集合框架卡片系列：HashMap 的底层结构与关键路径。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.coll">集合</span>
+          <span class="article-tag" data-i18n="tag.cards">集合框架</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-day2-concurrenthashmap.html">
+        <span class="article-index">N-014</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n14.title">ConcurrentHashMap 原理</h3>
+          <p class="article-desc" data-i18n="n14.desc">解析 ConcurrentHashMap 线程安全的实现机制。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.conc">并发</span>
+          <span class="article-tag">Day 2</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+      <a class="article-item" href="java-interview-day1-hashmap.html">
+        <span class="article-index">N-015</span>
+        <div class="article-body">
+          <h3 class="article-title" data-i18n="n15.title">HashMap 底层原理</h3>
+          <p class="article-desc" data-i18n="n15.desc">HashMap 数据结构与哈希冲突解决基础。</p>
+        </div>
+        <div class="article-tags">
+          <span class="article-tag" data-i18n="tag.coll">集合</span>
+          <span class="article-tag">Day 1</span>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span class="footer-text" data-i18n="footer.text">© 2026 wan. 匠心打造。</span>
+</footer>
+
+<script>
+const i18n = {
+  zh: {
+    'notes.title':  'Java 面试笔记 — wan',
+    'nav.articles': '文章目录',
+    'nav.back':     '返回主页',
+    'hero.tag':     '15 篇文章 · 7 个主题',
+    'hero.title':   'Java 面试笔记',
+    'hero.subtitle':'系统整理 <span class="accent">Java 核心知识</span>，覆盖集合框架、并发编程、JVM、设计模式等高频面试主题。每篇配套源码解读与典型例题。',
+    'hero.cta1':    '浏览文章 →',
+    'hero.cta2':    '返回主页',
+    'sec.articles': '文章目录',
+    'tag.coll':     '集合',
+    'tag.conc':     '并发',
+    'tag.stream':   'Stream',
+    'tag.exc':      '异常',
+    'tag.refl':     '反射',
+    'tag.ann':      '注解',
+    'tag.iface':    '接口',
+    'tag.basic':    'Java 基础',
+    'tag.cards':    '集合框架',
+    'n1.title':     '接口默认方法与静态方法',
+    'n1.desc':      'Java 8 接口的默认方法与静态方法，如何演进接口与实现类的关系。',
+    'n2.title':     'HashSet / TreeSet 底层原理',
+    'n2.desc':      'Set 集合如何基于 Map 实现，以及 TreeSet 的红黑树结构。',
+    'n3.title':     'Stream API 常用操作',
+    'n3.desc':      'map / filter / collect / reduce 等核心操作与实战范式。',
+    'n4.title':     'Iterator 与 fail-fast 机制',
+    'n4.desc':      '遍历机制原理与 ConcurrentModificationException 的成因。',
+    'n5.title':     '异常处理最佳实践',
+    'n5.desc':      'try-catch-finally、try-with-resources 与异常传播模式。',
+    'n6.title':     '受检 vs 非受检异常',
+    'n6.desc':      'Java 异常体系的设计哲学与取舍。',
+    'n7.title':     '注解的定义与元注解',
+    'n7.desc':      '自定义注解、@Retention、@Target 与运行时解析。',
+    'n8.title':     '反射与 Spring IOC',
+    'n8.desc':      '反射的性能开销、缓存策略与在 Spring 框架中的应用。',
+    'n9.title':     'ArrayList vs LinkedList',
+    'n9.desc':      '随机访问 vs 顺序插入的性能对比与典型场景。',
+    'n10.title':    'HashMap 底层实现（精读版）',
+    'n10.desc':     '源码角度系统梳理 HashMap 的设计与关键路径。',
+    'n11.title':    'ArrayList vs LinkedList（卡片版）',
+    'n11.desc':     '集合框架卡片系列：两种 List 实现的对比与场景。',
+    'n12.title':    'ConcurrentHashMap 演进（卡片版）',
+    'n12.desc':     '从分段锁到 CAS + synchronized 的演进过程。',
+    'n13.title':    'HashMap 底层（卡片版）',
+    'n13.desc':     '集合框架卡片系列：HashMap 的底层结构与关键路径。',
+    'n14.title':    'ConcurrentHashMap 原理',
+    'n14.desc':     '解析 ConcurrentHashMap 线程安全的实现机制。',
+    'n15.title':    'HashMap 底层原理',
+    'n15.desc':     'HashMap 数据结构与哈希冲突解决基础。',
+    'footer.text':  '© 2026 wan. 匠心打造。'
+  },
+  en: {
+    'notes.title':  'Java Interview Notes — wan',
+    'nav.articles': 'Articles',
+    'nav.back':     'Back to Home',
+    'hero.tag':     '15 articles · 7 topics',
+    'hero.title':   'Java Interview Notes',
+    'hero.subtitle':'A systematic collection of <span class="accent">core Java knowledge</span>, covering collections, concurrency, the JVM, and design patterns. Each article pairs source-code analysis with typical interview questions.',
+    'hero.cta1':    'Browse Articles →',
+    'hero.cta2':    'Back to Home',
+    'sec.articles': 'Articles',
+    'tag.coll':     'Collections',
+    'tag.conc':     'Concurrency',
+    'tag.stream':   'Stream',
+    'tag.exc':      'Exception',
+    'tag.refl':     'Reflection',
+    'tag.ann':      'Annotation',
+    'tag.iface':    'Interface',
+    'tag.basic':    'Java Basics',
+    'tag.cards':    'Card Series',
+    'n1.title':     'Default and Static Methods in Interfaces',
+    'n1.desc':      'How Java 8 default and static methods evolved the relationship between interfaces and implementations.',
+    'n2.title':     'HashSet / TreeSet Internals',
+    'n2.desc':      'How Set is built on top of Map, and TreeSet\'s red-black tree.',
+    'n3.title':     'Stream API Essentials',
+    'n3.desc':      'Core operations: map, filter, collect, reduce.',
+    'n4.title':     'Iterator and fail-fast',
+    'n4.desc':      'Iterator mechanics and the cause of ConcurrentModificationException.',
+    'n5.title':     'Exception Handling Best Practices',
+    'n5.desc':      'try-catch-finally, try-with-resources, and propagation patterns.',
+    'n6.title':     'Checked vs Unchecked Exceptions',
+    'n6.desc':      'Design philosophy behind Java\'s exception hierarchy.',
+    'n7.title':     'Annotations and Meta-annotations',
+    'n7.desc':      'Custom annotations, @Retention, @Target, and runtime parsing.',
+    'n8.title':     'Reflection in Spring IOC',
+    'n8.desc':      'Reflection overhead, caching strategies, and usage in Spring.',
+    'n9.title':     'ArrayList vs LinkedList',
+    'n9.desc':      'Random access vs sequential insertion performance and use cases.',
+    'n10.title':    'HashMap Internals (Deep Read)',
+    'n10.desc':     'A systematic walkthrough of HashMap from source code.',
+    'n11.title':    'ArrayList vs LinkedList (Card)',
+    'n11.desc':     'Collection framework card series: comparing two List implementations.',
+    'n12.title':    'ConcurrentHashMap Evolution (Card)',
+    'n12.desc':     'From segment locks to CAS + synchronized.',
+    'n13.title':    'HashMap Internals (Card)',
+    'n13.desc':     'Collection framework card series: HashMap structure and key paths.',
+    'n14.title':    'ConcurrentHashMap Principles',
+    'n14.desc':     'How ConcurrentHashMap achieves thread safety.',
+    'n15.title':    'HashMap Fundamentals',
+    'n15.desc':     'HashMap data structure and hash collision basics.',
+    'footer.text':  '© 2026 wan. Crafted with intent.'
+  }
+};
+
+function applyLang(lang) {
+  const dict = i18n[lang];
+  if (!dict) return;
+  document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+  const titleEl = document.querySelector('title[data-i18n-title]');
+  if (titleEl) {
+    const key = titleEl.getAttribute('data-i18n-title');
+    if (dict[key]) document.title = dict[key];
+  }
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (dict[key] !== undefined) el.textContent = dict[key];
+  });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    const key = el.getAttribute('data-i18n-html');
+    if (dict[key] !== undefined) el.innerHTML = dict[key];
+  });
+  document.querySelectorAll('.lang-btn').forEach(btn => {
+    const isActive = btn.getAttribute('data-lang') === lang;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
+  try { localStorage.setItem('lang', lang); } catch (e) {}
+}
+
+document.querySelectorAll('.lang-btn').forEach(btn => {
+  btn.addEventListener('click', () => applyLang(btn.getAttribute('data-lang')));
+});
+
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+});
+
+(function initLang() {
+  let saved = 'zh';
+  try { saved = localStorage.getItem('lang') || 'zh'; } catch (e) {}
+  if (saved !== 'zh') applyLang(saved);
+})();
+</script>
+
+</body>
+</html>
