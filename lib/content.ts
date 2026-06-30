@@ -121,3 +121,75 @@ export function getArticleSlugs(dir: string): string[] {
       .map(f => f.replace(/\.html$/, ''));
   } catch { return []; }
 }
+
+/* ── Java 面试笔记 元数据 ── */
+export interface JavaArticleMeta {
+  slug: string;
+  title: string;
+  volume: number;
+  lessonNum: number;
+  tags: string[];
+}
+
+export const JAVA_VOLUMES = [
+  { num: 1, title: "集合框架", subtitle: "数据结构与容器", emoji: "📦", desc: "HashMap、ConcurrentHashMap、ArrayList——Java 世界里最常用的数据结构，从底层实现到线程安全。" },
+  { num: 2, title: "并发编程", subtitle: "多线程与锁机制", emoji: "⚡", desc: "synchronized、volatile、CompletableFuture——理解 Java 并发模型，写出正确的多线程代码。" },
+  { num: 3, title: "JVM 原理与调优", subtitle: "虚拟机内核与性能", emoji: "🔧", desc: "类加载、内存模型、GC 算法、性能调优——深入 JVM 内部，掌握排查与优化能力。" },
+  { num: 4, title: "Java 基础与高级特性", subtitle: "语言核心与设计哲学", emoji: "📖", desc: "Lambda、Stream、泛型、反射、异常处理——回归语言本源，理解设计者的意图。" },
+];
+
+export const JAVA_ARTICLES: JavaArticleMeta[] = [
+  // 卷一：集合框架
+  { slug: "java-interview-day1-hashmap", title: "HashMap 底层实现", volume: 1, lessonNum: 1, tags: ["集合", "核心"] },
+  { slug: "java-interview-day2-concurrenthashmap", title: "ConcurrentHashMap 演进", volume: 1, lessonNum: 2, tags: ["集合", "并发"] },
+  { slug: "java-interview-Java基础-HashMap底层实现", title: "HashMap 源码深度解析", volume: 1, lessonNum: 3, tags: ["集合", "源码"] },
+  { slug: "java-interview-java基础-arraylist-vs-linkedlist-使用场景", title: "ArrayList vs LinkedList", volume: 1, lessonNum: 4, tags: ["集合", "对比"] },
+  { slug: "java-interview-一-集合框架-ArrayList-vs-LinkedList-使用场景", title: "ArrayList vs LinkedList 深入对比", volume: 1, lessonNum: 5, tags: ["集合", "对比"] },
+  { slug: "java-interview-一-集合框架-HashMap底层实现", title: "HashMap 底层原理详解", volume: 1, lessonNum: 6, tags: ["集合", "核心"] },
+  { slug: "java-interview-一-集合框架-ConcurrentHashMap分段锁到CAS+synchronized的演进", title: "ConcurrentHashMap 锁演进", volume: 1, lessonNum: 7, tags: ["集合", "并发"] },
+  { slug: "java-interview-java基础-hashset-treeset-底层原理", title: "HashSet 与 TreeSet 底层原理", volume: 1, lessonNum: 8, tags: ["集合", "源码"] },
+  { slug: "java-interview-java基础-iterator-遍历机制和-fail-fast-机制", title: "Iterator 与 fail-fast 机制", volume: 1, lessonNum: 9, tags: ["集合", "机制"] },
+
+  // 卷二：并发编程
+  { slug: "java-interview-day31-线程创建方式", title: "线程创建方式", volume: 2, lessonNum: 10, tags: ["并发", "基础"] },
+  { slug: "java-interview-day32-线程状态与转换", title: "线程状态与转换", volume: 2, lessonNum: 11, tags: ["并发", "基础"] },
+  { slug: "java-interview-day33-synchronized原理", title: "synchronized 原理", volume: 2, lessonNum: 12, tags: ["并发", "核心"] },
+  { slug: "java-interview-day35-volatile关键字可见性有序性不保证原子性happens-before", title: "volatile 关键字", volume: 2, lessonNum: 13, tags: ["并发", "JMM"] },
+  { slug: "java-interview-day16-completablefuture-异步编程", title: "CompletableFuture 异步编程", volume: 2, lessonNum: 14, tags: ["并发", "异步"] },
+
+  // 卷三：JVM
+  { slug: "java-interview-jvm-堆的分代结构-年轻代与老年代", title: "堆的分代结构", volume: 3, lessonNum: 15, tags: ["JVM", "内存"] },
+  { slug: "java-interview-jvm-原理与调优-对象创建过程-tlab-指针碰撞-空闲列表-", title: "对象创建过程", volume: 3, lessonNum: 16, tags: ["JVM", "内存"] },
+  { slug: "java-interview-jvm-判断对象存活的方法-引用计数-vs-可达性分析-", title: "判断对象存活的方法", volume: 3, lessonNum: 17, tags: ["JVM", "GC"] },
+  { slug: "java-interview-jvm原理与调优-gc-roots-概念", title: "GC Roots 概念", volume: 3, lessonNum: 18, tags: ["JVM", "GC"] },
+  { slug: "java-interview-day30-gc-日志分析", title: "GC 日志分析", volume: 3, lessonNum: 19, tags: ["JVM", "调优"] },
+  { slug: "java-interview-day27-常用参数-xms-xmx-xmn-xxmetaspacesize-等", title: "JVM 常用参数", volume: 3, lessonNum: 20, tags: ["JVM", "调优"] },
+  { slug: "java-interview-day28-内存泄漏排查heap-dumpmatvisualvm-使用", title: "内存泄漏排查", volume: 3, lessonNum: 21, tags: ["JVM", "调优"] },
+  { slug: "java-interview-day29-cpu-100-排查流程top-jstack-jmap", title: "CPU 100% 排查流程", volume: 3, lessonNum: 22, tags: ["JVM", "调优"] },
+  { slug: "java-interview-day25-双亲委派模型及其破坏场景", title: "双亲委派模型", volume: 3, lessonNum: 23, tags: ["JVM", "类加载"] },
+  { slug: "java-interview-day26-自定义类加载器", title: "自定义类加载器", volume: 3, lessonNum: 24, tags: ["JVM", "类加载"] },
+
+  // 卷四：Java 基础
+  { slug: "java-interview-java基础-lambda-表达式与函数式接口", title: "Lambda 表达式与函数式接口", volume: 4, lessonNum: 25, tags: ["基础", "函数式"] },
+  { slug: "java-interview-java基础-stream-api-常用操作-map-filter-collect-reduce-", title: "Stream API 常用操作", volume: 4, lessonNum: 26, tags: ["基础", "函数式"] },
+  { slug: "java-interview-java基础-泛型擦除机制及绕过方法", title: "泛型擦除机制及绕过", volume: 4, lessonNum: 29, tags: ["基础", "泛型"] },
+  { slug: "java-interview-java-基础-try-with-resources-原理", title: "try-with-resources 原理", volume: 4, lessonNum: 30, tags: ["基础", "IO"] },
+  { slug: "java-interview-java基础-异常处理最佳实践", title: "异常处理最佳实践", volume: 4, lessonNum: 31, tags: ["基础", "异常"] },
+  { slug: "java-interview-java基础-受检异常-vs-非受检异常的设计哲学", title: "受检 vs 非受检异常", volume: 4, lessonNum: 32, tags: ["基础", "异常"] },
+  { slug: "java-interview-java-基础-接口默认方法-静态方法", title: "接口默认方法与静态方法", volume: 4, lessonNum: 33, tags: ["基础", "接口"] },
+  { slug: "java-interview-java基础-注解的定义-使用及元注解-html", title: "注解的定义与使用", volume: 4, lessonNum: 34, tags: ["基础", "注解"] },
+  { slug: "java-interview-java基础-反射的性能开销-在实际框架中的应用-spring-ioc-di-html", title: "反射的性能开销与 Spring 应用", volume: 4, lessonNum: 35, tags: ["基础", "反射"] },
+];
+
+export function getJavaArticlesByVolume(volume: number): JavaArticleMeta[] {
+  return JAVA_ARTICLES.filter((a) => a.volume === volume);
+}
+
+export function getJavaArticle(slug: string): JavaArticleMeta | undefined {
+  return JAVA_ARTICLES.find((a) => a.slug === slug);
+}
+
+// Get content from either root or java-basics backup
+export function getJavaContent(slug: string): string | null {
+  return getGenericContent(slug) || getGenericContent(`java-basics/${slug}`);
+}
