@@ -245,7 +245,7 @@ index = hash &amp; (table.length - 1)
   <text x="180" y="38" text-anchor="middle" font-family="monospace" font-size="14" fill="#C2410C" font-weight="700">JDK 1.7 扩容</text>
   <text x="40" y="68" font-size="12" fill="#1C1C1C">1. 创建 newTable（2 倍容量）</text>
   <text x="40" y="90" font-size="12" fill="#1C1C1C">2. 遍历 oldTable 每个桶</text>
-  <text x="40" y="112" font-size="12" fill="#1C1C1C">3. <strong>头插法</strong>转移到 newTable</text>
+  <text x="40" y="112" font-size="12" fill="#1C1C1C">3. <tspan font-weight="700">头插法</tspan>转移到 newTable</text>
   <text x="40" y="134" font-size="12" fill="#1C1C1C">4. 重新 hash 计算位置</text>
   <text x="40" y="165" font-size="12" fill="#C2410C">⚠ 头插法导致顺序反转</text>
   <text x="40" y="185" font-size="12" fill="#C2410C">⚠ 并发下可能形成环形链表</text>
@@ -256,7 +256,7 @@ index = hash &amp; (table.length - 1)
   <text x="520" y="38" text-anchor="middle" font-family="monospace" font-size="14" fill="#3E6B8F" font-weight="700">JDK 1.8 扩容</text>
   <text x="380" y="68" font-size="12" fill="#1C1C1C">1. 创建 newTable（2 倍容量）</text>
   <text x="380" y="90" font-size="12" fill="#1C1C1C">2. 遍历 oldTable 每个桶</text>
-  <text x="380" y="112" font-size="12" fill="#1C1C1C">3. <strong>尾插法</strong>保持原有顺序</text>
+  <text x="380" y="112" font-size="12" fill="#1C1C1C">3. <tspan font-weight="700">尾插法</tspan>保持原有顺序</text>
   <text x="380" y="134" font-size="12" fill="#1C1C1C">4. 无需重新 hash！</text>
   <text x="380" y="165" font-size="12" fill="#3E6B8F">✓ hash &amp; oldCap = 0 → 原位不动</text>
   <text x="380" y="185" font-size="12" fill="#3E6B8F">✓ hash &amp; oldCap ≠ 0 → 原位 + oldCap</text>
