@@ -291,12 +291,14 @@ for (Entry&lt;K,V&gt; e : oldTable) {<br/>
 
 <h3>JDK 1.8 扩容位置计算的精妙优化</h3>
 
+<p>1.8 最大的改进是：扩容时<strong>不需要重新计算每个元素的 hash</strong>。因为 HashMap 的容量始终是 2 的幂，扩容后新容量 = 旧容量 × 2（比如 16 → 32），相当于在二进制下让掩码多出最高一位。利用这个特性，只需用元素的 hash 值和<strong>旧容量 oldCap</strong> 做一次按位与，就能判断它在新数组里的位置：</p>
+
 <ul>
   <li>如果 <code>hash &amp; oldCap == 0</code>：元素在新表中的位置<strong>不变</strong>（因为新增的高位是 0）</li>
   <li>如果 <code>hash &amp; oldCap != 0</code>：元素的新位置 = <strong>原位 + oldCap</strong>（因为新增的高位是 1）</li>
 </ul>
 
-<p>这个优化省掉了每个元素重新调用 <code>hashCode()</code> 和取模运算的开销。<strong>面试时说到这个细节，面试官就知道你真正读过源码。</strong></p>
+<p>所以 1.8 在扩容时，会把每个桶的链表拆成两条："低位链表"（位置不变）和"高位链表"（位置 + oldCap），然后分别挂到新数组的两个位置上。这个优化省掉了每个元素重新调用 <code>hashCode()</code> 和取模运算的开销。<strong>面试时说到这个细节，面试官就知道你真正读过源码。</strong></p>
 
 <div class="think"><div class="think-q">实战思考：如果预知要存 1000 个元素，HashMap 初始容量应该设多少？</div></div>
 
