@@ -215,6 +215,22 @@ body {
 /* 公式块：更宽松的内距 */
 .ai-llm-scope .lesson-body .formula { background: var(--accent-wash); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 12px; padding: 22px 28px; margin: 1.8em 0; text-align: center; font-family: var(--mono); font-size: 15px; line-height: 2; color: var(--ink); overflow-x: auto; }
 
+/* ── 源码块 srcbox：深色代码框 + 文件来源标注 ── */
+.ai-llm-scope .lesson-body .srcbox { margin: 2em 0; border-radius: 12px; overflow: hidden; border: 1px solid #2d2d3a; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+.ai-llm-scope .lesson-body .srcbox-head { display: flex; align-items: center; gap: 8px; background: #1e1e2e; padding: 10px 18px; border-bottom: 1px solid #2d2d3a; }
+.ai-llm-scope .lesson-body .srcbox-head::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: #ff5f56; box-shadow: 20px 0 #ffbd2e, 40px 0 #27c93f; flex-shrink: 0; margin-right: 44px; }
+.ai-llm-scope .lesson-body .srcbox-file { font-family: var(--mono); font-size: 12.5px; color: #8b8ba0; font-weight: 600; }
+.ai-llm-scope .lesson-body .srcbox-file b { color: var(--brand); font-weight: 700; }
+.ai-llm-scope .lesson-body .srcbox pre { margin: 0; padding: 18px 22px; background: #282838; overflow-x: auto; }
+.ai-llm-scope .lesson-body .srcbox code { display: block; font-family: var(--mono); font-size: 13.5px; line-height: 1.85; color: #e4e4ef; background: none; padding: 0; white-space: pre; border-radius: 0; }
+/* 源码内的语法着色（轻量） */
+.ai-llm-scope .lesson-body .srcbox .c { color: #6a7a8c; font-style: italic; }   /* 注释 */
+.ai-llm-scope .lesson-body .srcbox .k { color: #c792ea; }                        /* 关键字 */
+.ai-llm-scope .lesson-body .srcbox .s { color: #c3e88d; }                        /* 字符串 */
+.ai-llm-scope .lesson-body .srcbox .t { color: #82aaff; }                        /* 类型 */
+.ai-llm-scope .lesson-body .srcbox .n { color: #f78c6c; }                        /* 数字 */
+.ai-llm-scope .lesson-body .srcbox .hl { background: rgba(250,201,74,0.14); display: inline-block; width: 100%; }  /* 高亮行 */
+
 /* 思考块 think */
 .ai-llm-scope .lesson-body .think { background: #fff; border: 2px dashed var(--accent); border-radius: 12px; padding: 22px 26px; margin: 1.8em 0; display: block; }
 .ai-llm-scope .lesson-body .think-q { color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.8; margin: 0; }

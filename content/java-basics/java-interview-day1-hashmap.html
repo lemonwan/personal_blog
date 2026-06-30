@@ -93,6 +93,50 @@
 <figcaption><span class="fig-no">图 1</span>HashMap 底层结构全景：数组作为主干，每个桶通过链表或红黑树解决哈希冲突</figcaption>
 </figure>
 
+<p>我们先看几个写死在源码里的<strong>关键常量</strong>——面试里被反复追问的"16""0.75""8""64"都在这里：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.java</b> · JDK 1.8 关键常量</span></div>
+<pre><code><span class="c">// 默认初始容量 = 16（1 &lt;&lt; 4），必须是 2 的幂</span>
+<span class="k">static final</span> <span class="t">int</span> DEFAULT_INITIAL_CAPACITY = <span class="n">1</span> &lt;&lt; <span class="n">4</span>;
+
+<span class="c">// 最大容量 2^30</span>
+<span class="k">static final</span> <span class="t">int</span> MAXIMUM_CAPACITY = <span class="n">1</span> &lt;&lt; <span class="n">30</span>;
+
+<span class="c">// 默认负载因子 0.75（时间与空间的折中）</span>
+<span class="k">static final</span> <span class="t">float</span> DEFAULT_LOAD_FACTOR = <span class="n">0.75f</span>;
+
+<span class="c">// 链表转红黑树的阈值：链表长度 ≥ 8</span>
+<span class="k">static final</span> <span class="t">int</span> TREEIFY_THRESHOLD = <span class="n">8</span>;
+
+<span class="c">// 红黑树退化回链表的阈值：节点数 ≤ 6</span>
+<span class="k">static final</span> <span class="t">int</span> UNTREEIFY_THRESHOLD = <span class="n">6</span>;
+
+<span class="c">// 树化的另一前提：数组长度必须 ≥ 64，否则优先扩容</span>
+<span class="k">static final</span> <span class="t">int</span> MIN_TREEIFY_CAPACITY = <span class="n">64</span>;</code></pre>
+</div>
+
+<p>再看桶里存的<strong>节点结构</strong>。普通链表节点是 <code>Node</code>，它就是一个最朴素的单向链表节点——保存 hash、key、value 和指向下一个节点的 next 指针：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.Node</b> · 链表节点（实现 Map.Entry）</span></div>
+<pre><code><span class="k">static class</span> <span class="t">Node</span>&lt;K,V&gt; <span class="k">implements</span> <span class="t">Map.Entry</span>&lt;K,V&gt; {
+    <span class="k">final</span> <span class="t">int</span> hash;   <span class="c">// 缓存的 hash 值，避免重复计算</span>
+    <span class="k">final</span> K key;     <span class="c">// key 用 final 修饰 —— 这也是不能改 key 的原因</span>
+    V value;
+    <span class="t">Node</span>&lt;K,V&gt; next;   <span class="c">// 指向同一个桶里的下一个节点</span>
+
+    <span class="t">Node</span>(<span class="t">int</span> hash, K key, V value, <span class="t">Node</span>&lt;K,V&gt; next) {
+        <span class="k">this</span>.hash = hash;
+        <span class="k">this</span>.key = key;
+        <span class="k">this</span>.value = value;
+        <span class="k">this</span>.next = next;
+    }
+}</code></pre>
+</div>
+
+<p>当链表树化后，节点会升级为 <code>TreeNode</code>（继承自 <code>LinkedHashMap.Entry</code>），额外保存红黑树需要的 parent、left、right、red 等字段。从 16 字节的 Node 膨胀到约 48 字节的 TreeNode，<strong>这也是为什么树化要有数组 ≥ 64 的前提——避免小表里频繁树化反而浪费内存</strong>。</p>
+
 <div class="crack"><div class="crack-label">为什么要引入红黑树？</div>
 <p>极端情况下，所有 key 的哈希值都落到同一个桶里，链表长度会变成 n。此时 <code>get()</code> 的时间复杂度从 <strong>O(1)</strong> 退化为 <strong>O(n)</strong>。1.8 引入红黑树后，即使所有元素碰撞到同一个桶，查找复杂度也能保证在 <strong>O(log n)</strong>。</p>
 <p>但注意，树化有两个条件<strong>同时满足</strong>才触发：① 链表长度 ≥ 8（<code>TREEIFY_THRESHOLD</code>）；② 数组长度 ≥ 64（<code>MIN_TREEIFY_CAPACITY</code>）。如果数组还很小，优先选择扩容而不是树化——因为扩容能更均匀地分散元素。</p>
@@ -147,6 +191,32 @@ index = hash &amp; (table.length - 1)
 </svg>
 <figcaption><span class="fig-no">图 2</span>HashMap 的哈希计算：先扰动、再定位，让你的 key 均匀散落在数组各处</figcaption>
 </figure>
+
+<p>来看 <code>hash()</code> 方法的真实源码，整个扰动只有一行：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.hash()</b> · 扰动函数</span></div>
+<pre><code><span class="k">static final</span> <span class="t">int</span> hash(<span class="t">Object</span> key) {
+    <span class="t">int</span> h;
+    <span class="c">// key 为 null 时 hash = 0 —— 这就是 HashMap 允许 null key 的原因，</span>
+    <span class="c">// 且 null key 永远落在 0 号桶</span>
+    <span class="k">return</span> (key == <span class="k">null</span>) ? <span class="n">0</span>
+         : (h = key.hashCode()) ^ (h &gt;&gt;&gt; <span class="n">16</span>);
+    <span class="c">//       ↑ 取原始 hashCode      ↑ 高 16 位无符号右移后异或</span>
+}</code></pre>
+</div>
+
+<p><code>h ^ (h &gt;&gt;&gt; 16)</code> 的含义：把 32 位 hashCode 的<strong>高 16 位</strong>右移下来，和<strong>低 16 位</strong>做异或。这样高位的信息被"混入"了低位。因为后面定位桶用的是 <code>hash &amp; (n-1)</code>，当 n 较小时（比如 16），只有最低 4 位参与运算——如果不扰动，高位再不一样的两个 key 也容易碰撞。</p>
+
+<p>定位桶下标的代码藏在 <code>putVal()</code> 里，就是那个经典的 <code>(n - 1) &amp; hash</code>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.putVal()</b> · 桶定位片段</span></div>
+<pre><code><span class="c">// n 是数组长度，tab 是 table 数组</span>
+<span class="k">if</span> ((p = tab[i = (n - <span class="n">1</span>) &amp; hash]) == <span class="k">null</span>)
+    tab[i] = newNode(hash, key, value, <span class="k">null</span>);
+<span class="c">// (n-1) &amp; hash 等价于 hash % n，但位运算比取模快得多</span></code></pre>
+</div>
 
 <div class="think"><div class="think-q">思考：为什么 table.length 必须是 2 的幂？</div></div>
 
@@ -220,12 +290,65 @@ index = hash &amp; (table.length - 1)
 <figcaption><span class="fig-no">图 3</span>HashMap put() 的完整流程图 —— 一次记不住没关系，理解逻辑比背步骤更重要</figcaption>
 </figure>
 
-<p><strong>重点理解</strong>第 ④⑤ 步中 key 相同的判断逻辑：</p>
-<div class="formula">
-(key1.hashCode() == key2.hashCode()) &amp;&amp;<br/>
-(key1 == key2 || key1.equals(key2))
+<p>下面是 <code>putVal()</code> 的核心源码（去掉了红黑树分支，保留主干），图 3 的 8 个步骤都能在这里一一对应上：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.putVal()</b> · 插入主流程（精简）</span></div>
+<pre><code><span class="k">final</span> V putVal(<span class="t">int</span> hash, K key, V value, <span class="t">boolean</span> onlyIfAbsent, <span class="t">boolean</span> evict) {
+    <span class="t">Node</span>&lt;K,V&gt;[] tab; <span class="t">Node</span>&lt;K,V&gt; p; <span class="t">int</span> n, i;
+
+    <span class="c">// ① table 为空 → 触发 resize() 初始化</span>
+    <span class="k">if</span> ((tab = table) == <span class="k">null</span> || (n = tab.length) == <span class="n">0</span>)
+        n = (tab = resize()).length;
+
+    <span class="c">// ②③ 计算桶下标，桶为空 → 直接放入新节点</span>
+    <span class="k">if</span> ((p = tab[i = (n - <span class="n">1</span>) &amp; hash]) == <span class="k">null</span>)
+        tab[i] = newNode(hash, key, value, <span class="k">null</span>);
+    <span class="k">else</span> {
+        <span class="t">Node</span>&lt;K,V&gt; e; K k;
+        <span class="c">// ④ 桶第一个节点 key 就相同 → 记下，待会儿覆盖</span>
+        <span class="k">if</span> (p.hash == hash &amp;&amp;
+            ((k = p.key) == key || (key != <span class="k">null</span> &amp;&amp; key.equals(k))))
+            e = p;
+        <span class="k">else if</span> (p <span class="k">instanceof</span> <span class="t">TreeNode</span>)   <span class="c">// ⑤ 红黑树分支</span>
+            e = ((<span class="t">TreeNode</span>&lt;K,V&gt;)p).putTreeVal(<span class="k">this</span>, tab, hash, key, value);
+        <span class="k">else</span> {
+            <span class="c">// ⑥ 遍历链表，尾插法追加</span>
+            <span class="k">for</span> (<span class="t">int</span> binCount = <span class="n">0</span>; ; ++binCount) {
+                <span class="k">if</span> ((e = p.next) == <span class="k">null</span>) {
+                    p.next = newNode(hash, key, value, <span class="k">null</span>);
+                    <span class="c">// ⑦ 链表长度 ≥ 8 → 尝试树化</span>
+                    <span class="k">if</span> (binCount &gt;= TREEIFY_THRESHOLD - <span class="n">1</span>)
+                        treeifyBin(tab, hash);
+                    <span class="k">break</span>;
+                }
+                <span class="k">if</span> (e.hash == hash &amp;&amp;
+                    ((k = e.key) == key || (key != <span class="k">null</span> &amp;&amp; key.equals(k))))
+                    <span class="k">break</span>;  <span class="c">// 链表中找到相同 key</span>
+                p = e;
+            }
+        }
+        <span class="c">// 找到了相同 key 的节点 → 覆盖 value</span>
+        <span class="k">if</span> (e != <span class="k">null</span>) {
+            V oldValue = e.value;
+            <span class="k">if</span> (!onlyIfAbsent || oldValue == <span class="k">null</span>)
+                e.value = value;
+            <span class="k">return</span> oldValue;   <span class="c">// 返回旧值</span>
+        }
+    }
+    ++modCount;
+    <span class="c">// ⑧ size 超过阈值 → 扩容</span>
+    <span class="k">if</span> (++size &gt; threshold)
+        resize();
+    <span class="k">return</span> <span class="k">null</span>;   <span class="c">// 新增 key，返回 null</span>
+}</code></pre>
 </div>
-<p>先比较 <code>hashCode()</code>（快，整数比较），再比较 <code>==</code> 和 <code>equals()</code>（慢，按需）。这是典型的"先用低成本过滤，再用高成本确认"的优化策略。</p>
+
+<p><strong>重点理解</strong>第 ④⑤ 步中 key 相同的判断逻辑（注意源码里的短路顺序）：</p>
+<div class="formula">
+p.hash == hash &amp;&amp; (p.key == key || key.equals(p.key))
+</div>
+<p>先比较 <code>hash</code>（快，int 比较）→ 再比较 <code>==</code>（引用相同，最快）→ 最后才 <code>equals()</code>（可能较慢）。这是典型的"先用低成本过滤，再用高成本确认"。也正因为这个顺序，<strong>hashCode 不同的两个对象，HashMap 直接认为它们不相等，根本不会调 equals()</strong> ——这就是必须同时正确实现 hashCode 和 equals 的根本原因。</p>
 
 <div class="crack"><div class="crack-label">不可变 key 的重要性</div>
 <p>如果你用可变对象做 key，并且修改了影响 hashCode 的字段，那么 HashMap 就再也找不到这个 entry 了——它还在原来的桶里，但 <code>containsKey()</code> 返回 false。这就是为什么推荐用 String、Integer 等<strong>不可变对象</strong>做 key。</p>
@@ -299,6 +422,37 @@ for (Entry&lt;K,V&gt; e : oldTable) {<br/>
 </ul>
 
 <p>所以 1.8 在扩容时，会把每个桶的链表拆成两条："低位链表"（位置不变）和"高位链表"（位置 + oldCap），然后分别挂到新数组的两个位置上。这个优化省掉了每个元素重新调用 <code>hashCode()</code> 和取模运算的开销。<strong>面试时说到这个细节，面试官就知道你真正读过源码。</strong></p>
+
+<p>这段"低位 / 高位链表拆分"的逻辑，对应 <code>resize()</code> 里这段经典源码：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.resize()</b> · 链表 rehash 片段（JDK 1.8）</span></div>
+<pre><code><span class="c">// loHead/loTail：低位链表（留在原索引 j）</span>
+<span class="c">// hiHead/hiTail：高位链表（移到索引 j + oldCap）</span>
+<span class="t">Node</span>&lt;K,V&gt; loHead = <span class="k">null</span>, loTail = <span class="k">null</span>;
+<span class="t">Node</span>&lt;K,V&gt; hiHead = <span class="k">null</span>, hiTail = <span class="k">null</span>;
+<span class="t">Node</span>&lt;K,V&gt; next;
+<span class="k">do</span> {
+    next = e.next;
+    <span class="c">// 关键：用 hash &amp; oldCap 判断新增的那一位是 0 还是 1</span>
+    <span class="k">if</span> ((e.hash &amp; oldCap) == <span class="n">0</span>) {
+        <span class="k">if</span> (loTail == <span class="k">null</span>) loHead = e;
+        <span class="k">else</span> loTail.next = e;
+        loTail = e;        <span class="c">// 尾插，保持原有顺序</span>
+    } <span class="k">else</span> {
+        <span class="k">if</span> (hiTail == <span class="k">null</span>) hiHead = e;
+        <span class="k">else</span> hiTail.next = e;
+        hiTail = e;
+    }
+} <span class="k">while</span> ((e = next) != <span class="k">null</span>);
+
+<span class="c">// 低位链表：原位 j</span>
+<span class="k">if</span> (loTail != <span class="k">null</span>) { loTail.next = <span class="k">null</span>; newTab[j] = loHead; }
+<span class="c">// 高位链表：新位 j + oldCap</span>
+<span class="k">if</span> (hiTail != <span class="k">null</span>) { hiTail.next = <span class="k">null</span>; newTab[j + oldCap] = hiHead; }</code></pre>
+</div>
+
+<p>对比第 5 站开头给出的 1.7 <code>transfer()</code> 源码：1.7 是<strong>头插</strong>（<code>e.next = newTable[i]</code>）所以会逆序；1.8 这里是<strong>尾插</strong>（<code>loTail.next = e</code>）所以顺序不变——这正是 1.8 不会形成环形链表的根本原因。</p>
 
 <div class="think"><div class="think-q">实战思考：如果预知要存 1000 个元素，HashMap 初始容量应该设多少？</div></div>
 
