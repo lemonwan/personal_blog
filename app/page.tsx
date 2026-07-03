@@ -25,7 +25,7 @@ export default function Home() {
             </span>
           </h1>
           <p className="mt-5 max-w-xl text-base font-semibold text-[#1C1C1C]/60 leading-relaxed">
-            8 年 PHP + Java 后端开发经验，正在系统性地转型 AI Agent 应用工程师。
+            正在系统性地转型 AI Agent 应用工程师。
             学习方向：LangChain / LangGraph / RAG / MCP。
             这里公开我的每日学习笔记、面试知识沉淀与项目进度——用输出倒逼输入。
           </p>
