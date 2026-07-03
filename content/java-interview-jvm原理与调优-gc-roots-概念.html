@@ -3,6 +3,423 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GC Roots 概念与可达性分析</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从一个根本问题开始</h2></div>
+
+<p>在 Java 中，你从来不需要手动释放内存——JVM 的垃圾回收器（GC）会自动帮你清理不再使用的对象。但你有没有想过：</p>
+
+<div class="think"><div class="think-q">JVM 怎么知道哪些对象"还在用"，哪些对象"可以删"？<br/><br/>如果判断错了，要么把还在用的对象删了（程序崩溃），要么把不再用的对象留着（内存泄漏）。GC 必须做到精确无误。</div></div>
+
+<p>这个问题的答案就是 <strong>GC Roots 可达性分析算法</strong>——现代 JVM（以及 Go、C# 等语言）判定对象存活的基石。面试官经常从这道题切入，一层层深入：</p>
+
+<ul>
+  <li>GC Roots 具体包括哪些对象？为什么选它们？</li>
+  <li>可达性分析的完整流程是怎样的？</li>
+  <li>为什么 Java 不用更简单的"引用计数法"？循环引用问题怎么理解？</li>
+  <li>CMS 和 G1 收集器的"三色标记"是怎么回事？</li>
+  <li>对象的 <code>finalize()</code> 方法真的能"复活"自己吗？</li>
+</ul>
+
+<p>带着这些问题，我们从 GC Roots 的定义开始。</p>
+</section>
+
+<!-- ═══════════════ 第2站：GC Roots 定义 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>GC Roots：垃圾回收的"起点集合"</h2></div>
+
+<p>可达性分析的核心思想很朴素：<strong>从一组"确定还在用"的对象出发，沿着引用链一路找下去。能找到的都是活的，找不到的就是垃圾。</strong>这组"起点对象"就叫 GC Roots。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 720 420" role="img" aria-label="GC Roots 可达性分析全景图">
+  <text x="360" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">GC Roots 可达性分析全景图</text>
+
+  <!-- GC Roots 区域 -->
+  <rect x="20" y="42" width="680" height="100" rx="10" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="360" y="62" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">GC Roots 起点集合</text>
+
+  <!-- Root boxes -->
+  <rect x="36" y="72" width="96" height="56" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="84" y="96" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">栈帧局部变量</text>
+  <text x="84" y="112" text-anchor="middle" font-size="9" fill="#57544E">方法中的引用</text>
+
+  <rect x="146" y="72" width="96" height="56" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="194" y="96" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">静态变量</text>
+  <text x="194" y="112" text-anchor="middle" font-size="9" fill="#57544E">static 字段</text>
+
+  <rect x="256" y="72" width="96" height="56" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="304" y="96" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">常量引用</text>
+  <text x="304" y="112" text-anchor="middle" font-size="9" fill="#57544E">String 常量池</text>
+
+  <rect x="366" y="72" width="96" height="56" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="414" y="96" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">JNI 引用</text>
+  <text x="414" y="112" text-anchor="middle" font-size="9" fill="#57544E">Native 方法</text>
+
+  <rect x="476" y="72" width="96" height="56" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="524" y="96" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">活跃线程</text>
+  <text x="524" y="112" text-anchor="middle" font-size="9" fill="#57544E">Thread 对象</text>
+
+  <rect x="586" y="72" width="96" height="56" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="634" y="96" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">synchronized</text>
+  <text x="634" y="112" text-anchor="middle" font-size="9" fill="#57544E">持锁对象</text>
+
+  <!-- 引用线 -->
+  <line x1="84" y1="128" x2="160" y2="180" stroke="#3E6B8F" stroke-width="1.5"/>
+  <line x1="194" y1="128" x2="350" y2="180" stroke="#3E6B8F" stroke-width="1.5"/>
+  <line x1="304" y1="128" x2="350" y2="180" stroke="#3E6B8F" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="524" y1="128" x2="490" y2="180" stroke="#3E6B8F" stroke-width="1.5"/>
+
+  <!-- 可达对象（存活）-->
+  <circle cx="160" cy="198" r="20" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.8"/>
+  <text x="160" y="203" text-anchor="middle" font-size="10" fill="#fff" font-weight="700">A</text>
+
+  <circle cx="350" cy="198" r="20" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.8"/>
+  <text x="350" y="203" text-anchor="middle" font-size="10" fill="#fff" font-weight="700">B</text>
+
+  <circle cx="490" cy="198" r="20" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.8"/>
+  <text x="490" y="203" text-anchor="middle" font-size="10" fill="#fff" font-weight="700">C</text>
+
+  <!-- 引用线 level 2 -->
+  <line x1="160" y1="218" x2="220" y2="260" stroke="#3E6B8F" stroke-width="1.2"/>
+  <line x1="350" y1="218" x2="300" y2="260" stroke="#3E6B8F" stroke-width="1.2"/>
+  <line x1="350" y1="218" x2="420" y2="260" stroke="#3E6B8F" stroke-width="1.2"/>
+  <line x1="490" y1="218" x2="420" y2="260" stroke="#3E6B8F" stroke-width="1.2"/>
+
+  <circle cx="220" cy="278" r="18" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.6"/>
+  <text x="220" y="283" text-anchor="middle" font-size="10" fill="#fff" font-weight="700">D</text>
+
+  <circle cx="300" cy="278" r="18" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.6"/>
+  <text x="300" y="283" text-anchor="middle" font-size="10" fill="#fff" font-weight="700">E</text>
+
+  <circle cx="420" cy="278" r="18" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.6"/>
+  <text x="420" y="283" text-anchor="middle" font-size="10" fill="#fff" font-weight="700">F</text>
+
+  <!-- 不可达对象（垃圾）-->
+  <circle cx="590" cy="268" r="20" fill="none" stroke="#C2410C" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="590" y="273" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">X</text>
+
+  <circle cx="650" cy="308" r="16" fill="none" stroke="#C2410C" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="650" y="313" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">Y</text>
+
+  <line x1="605" y1="282" x2="638" y2="298" stroke="#C2410C" stroke-width="1.2" stroke-dasharray="4 3"/>
+
+  <!-- Legend -->
+  <rect x="40" y="340" width="640" height="68" rx="8" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <circle cx="80" cy="364" r="10" fill="#3E6B8F" opacity="0.8"/>
+  <text x="100" y="368" font-size="11" fill="#1C1C1C">= 可达对象（存活，GC 不回收）</text>
+  <circle cx="330" cy="364" r="10" fill="none" stroke="#C2410C" stroke-width="2" stroke-dasharray="4 2"/>
+  <text x="350" y="368" font-size="11" fill="#1C1C1C">= 不可达对象（垃圾，等待回收）</text>
+  <text x="360" y="394" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">X 和 Y 互相引用，但从任何 GC Root 都到不了 → 被判定为垃圾</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>GC Roots 可达性分析全景图：从根集合出发，沿引用链遍历，不可达的对象即为垃圾</figcaption>
+</figure>
+
+<p>具体来说，以下 <strong>7 类对象</strong>可以作为 GC Roots：</p>
+
+<table>
+  <thead>
+    <tr><th>类型</th><th>说明</th><th>典型例子</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>栈帧局部变量</strong></td><td>当前正在执行的方法中，局部变量引用的对象</td><td><code>User u = new User()</code> 中的 u 引用的 User 实例</td></tr>
+    <tr><td><strong>静态变量</strong></td><td>方法区中类的静态属性引用的对象</td><td><code>static Map cache = new HashMap()</code> 中的 cache</td></tr>
+    <tr><td><strong>常量引用</strong></td><td>方法区常量池中的引用</td><td>String 常量池中的字符串对象</td></tr>
+    <tr><td><strong>JNI 引用</strong></td><td>Native 方法栈中 JNI 引用的对象</td><td>C/C++ 代码通过 JNI 回调 Java 时持有的引用</td></tr>
+    <tr><td><strong>活跃线程</strong></td><td>当前所有正在运行的 Thread 对象</td><td>Thread.currentThread() 返回的线程对象</td></tr>
+    <tr><td><strong>synchronized 持锁对象</strong></td><td>作为 monitor 锁被持有的对象</td><td><code>synchronized(obj)</code> 中的 obj</td></tr>
+    <tr><td><strong>JVM 内部引用</strong></td><td>系统类加载器、基本类型的 Class 对象等</td><td>Integer.class、系统 ClassLoader 实例</td></tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">为什么选这些对象作为 GC Roots？</div>
+<p>这些对象有一个共同特征：<strong>它们是程序执行时"天然可达"的入口</strong>。</p>
+<p>栈帧局部变量代表正在执行的代码直接使用的对象；静态变量是全局可见的；活跃线程是正在运行的执行流；synchronized 持有的对象正在被并发控制使用。如果从这些入口都找不到某个对象，那程序无论如何也不可能再访问到它了——可以安全回收。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：可达性分析算法 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>可达性分析算法：从根出发的图遍历</h2></div>
+
+<p>可达性分析的算法本质上是<strong>对象引用图的遍历</strong>。JVM 把所有对象看作图的节点，对象之间的引用关系看作边，然后从 GC Roots 出发做 DFS（深度优先搜索）或 BFS（广度优先搜索）：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="可达性分析算法流程">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">可达性分析算法执行步骤</text>
+
+  <!-- Step 1 -->
+  <rect x="20" y="48" width="190" height="76" rx="10" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="115" y="72" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Step 1: 收集 GC Roots</text>
+  <text x="115" y="92" text-anchor="middle" font-size="10" fill="#57544E">遍历所有线程栈帧、</text>
+  <text x="115" y="106" text-anchor="middle" font-size="10" fill="#57544E">静态变量表、常量池等</text>
+
+  <!-- Arrow -->
+  <line x1="210" y1="86" x2="250" y2="86" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr1)"/>
+
+  <!-- Step 2 -->
+  <rect x="255" y="48" width="190" height="76" rx="10" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="350" y="72" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">Step 2: DFS/BFS 遍历</text>
+  <text x="350" y="92" text-anchor="middle" font-size="10" fill="#57544E">从每个 Root 出发，</text>
+  <text x="350" y="106" text-anchor="middle" font-size="10" fill="#57544E">递归标记所有可达对象</text>
+
+  <line x1="445" y1="86" x2="485" y2="86" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr1)"/>
+
+  <!-- Step 3 -->
+  <rect x="490" y="48" width="190" height="76" rx="10" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="585" y="72" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">Step 3: 标记 + 回收</text>
+  <text x="585" y="92" text-anchor="middle" font-size="10" fill="#57544E">未标记的 = 不可达</text>
+  <text x="585" y="106" text-anchor="middle" font-size="10" fill="#57544E">→ 加入回收队列</text>
+
+  <!-- OopMap detail -->
+  <rect x="40" y="150" width="620" height="64" rx="10" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="350" y="174" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">关键数据结构：OopMap</text>
+  <text x="350" y="196" text-anchor="middle" font-size="11" fill="#57544E">JVM 在 JIT 编译时生成 OopMap，记录栈帧中哪些位置存放的是对象引用（而非 int/long 等原始值），</text>
+  <text x="350" y="210" text-anchor="middle" font-size="11" fill="#57544E">避免逐位扫描整个栈，大幅提升 GC Roots 枚举速度</text>
+
+  <!-- STW note -->
+  <rect x="120" y="236" width="460" height="50" rx="10" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="350" y="258" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Stop-The-World (STW)</text>
+  <text x="350" y="276" text-anchor="middle" font-size="11" fill="#57544E">可达性分析必须在安全点（SafePoint）暂停所有用户线程，保证引用关系不变</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>可达性分析算法流程：收集根 → 图遍历 → 标记回收，全程需要 STW 保证一致性</figcaption>
+</figure>
+
+<div class="think"><div class="think-q">为什么必须暂停所有线程（STW）才能做可达性分析？<br/><br/>
+想象一下：如果分析过程中某个线程把对象 A 的引用从变量 x 转移到了变量 y，而 GC 已经扫过 x 但还没扫 y——它可能误判 A 是不可达的，然后把它回收掉。程序下次访问 A 就会 NPE 或者访问到野指针。<br/><br/>
+所以传统 GC 必须在<strong>安全点</strong>暂停所有用户线程（STW），冻结引用关系后再做分析。这也解释了为什么 GC 会造成程序"卡顿"——后续 CMS 和 G1 用<strong>三色标记 + 读写屏障</strong>来减少 STW 时间。</div></div>
+</section>
+
+<!-- ═══════════════ 第4站：引用计数 vs 可达性 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>引用计数 vs 可达性分析：为什么 Java 选了后者？</h2></div>
+
+<p>判断对象是否存活，最直觉的方法是<strong>引用计数法</strong>——每个对象维护一个计数器，被引用时 +1，引用失效时 -1，归零就回收。Python 和 Swift 就用了这种方式。</p>
+
+<p>但 Java 选择了更复杂的可达性分析，核心原因是<strong>引用计数无法解决循环引用</strong>：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 260" role="img" aria-label="循环引用问题图解">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">引用计数的致命缺陷：循环引用</text>
+
+  <!-- 左：正常回收 -->
+  <text x="175" y="54" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">正常场景</text>
+
+  <rect x="80" y="66" width="80" height="56" rx="8" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="120" y="88" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">变量 x</text>
+  <text x="120" y="106" text-anchor="middle" font-size="10" fill="#57544E">栈帧</text>
+
+  <line x1="160" y1="94" x2="200" y2="94" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="180" y="86" text-anchor="middle" font-size="9" fill="#3E6B8F">引用</text>
+
+  <circle cx="240" cy="94" r="28" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5" opacity="0.8"/>
+  <text x="240" y="90" text-anchor="middle" font-size="11" fill="#fff" font-weight="700">obj</text>
+  <text x="240" y="104" text-anchor="middle" font-size="9" fill="#fff">count=1</text>
+
+  <text x="175" y="145" text-anchor="middle" font-size="11" fill="#57544E">x = null → count=0 → 回收 ✓</text>
+
+  <!-- 右：循环引用 -->
+  <text x="525" y="54" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">循环引用（泄漏！）</text>
+
+  <circle cx="470" cy="104" r="28" fill="none" stroke="#C2410C" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="470" y="100" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">objA</text>
+  <text x="470" y="114" text-anchor="middle" font-size="9" fill="#C2410C">count=1</text>
+
+  <circle cx="580" cy="104" r="28" fill="none" stroke="#C2410C" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="580" y="100" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">objB</text>
+  <text x="580" y="114" text-anchor="middle" font-size="9" fill="#C2410C">count=1</text>
+
+  <!-- Circular arrows -->
+  <path d="M 498 94 C 520 70, 555 70, 552 94" fill="none" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <path d="M 552 114 C 535 138, 500 138, 498 114" fill="none" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+  <text x="525" y="170" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">A 引用 B，B 引用 A</text>
+  <text x="525" y="188" text-anchor="middle" font-size="11" fill="#C2410C">外部引用都断了，但 count 都不为 0</text>
+  <text x="525" y="206" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">→ 永远无法回收！内存泄漏！</text>
+
+  <!-- Bottom comparison -->
+  <rect x="80" y="220" width="540" height="32" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="241" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">可达性分析天然解决循环引用：从 GC Roots 出发找不到 → 就是垃圾，不管内部怎么互引</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>引用计数 vs 可达性分析：循环引用是引用计数法的致命缺陷</figcaption>
+</figure>
+
+<table>
+  <thead>
+    <tr><th>对比维度</th><th>引用计数法</th><th>可达性分析</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>原理</strong></td><td>每个对象维护引用计数器，归零即回收</td><td>从 GC Roots 遍历对象图，不可达即回收</td></tr>
+    <tr><td><strong>循环引用</strong></td><td>无法解决，造成内存泄漏</td><td>天然解决</td></tr>
+    <tr><td><strong>是否需要 STW</strong></td><td>不需要（增量式）</td><td>需要（至少标记阶段需要）</td></tr>
+    <tr><td><strong>实时性</strong></td><td>高，引用断开立即回收</td><td>低，等 GC 触发才回收</td></tr>
+    <tr><td><strong>实现复杂度</strong></td><td>低</td><td>高（需要 OopMap、安全点、写屏障等）</td></tr>
+    <tr><td><strong>代表语言</strong></td><td>Python、Swift（配合循环回收器）</td><td>Java、Go、C#</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第5站：三色标记 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>三色标记：并发 GC 的基石</h2></div>
+
+<p>传统的可达性分析需要 STW（暂停所有线程），停顿时间随堆大小线性增长。CMS 和 G1 收集器为了实现<strong>低延迟</strong>，引入了<strong>三色标记算法</strong>，让标记阶段可以与用户线程并发执行。</p>
+
+<div class="formula">
+<strong>三色标记的三种状态：</strong><br/><br/>
+<span style="color:#1C1C1C;font-weight:700">⬜ 白色</span> — 尚未被 GC 访问过。标记结束后仍为白色 → 垃圾对象<br/>
+<span style="color:#8C8676;font-weight:700">🔲 灰色</span> — 已被 GC 访问过，但其引用的对象还没全部扫描完<br/>
+<span style="color:#1C1C1C;font-weight:700">⬛ 黑色</span> — 已被 GC 访问过，且其所有引用对象都已扫描完毕
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="三色标记算法过程">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">三色标记过程（从 GC Roots 并发标记）</text>
+
+  <!-- Phase 1: 初始 -->
+  <text x="120" y="56" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Phase 1: 初始</text>
+  <circle cx="60" cy="90" r="16" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="60" y="94" text-anchor="middle" font-size="9" fill="#FAC94A" font-weight="700">Root</text>
+  <circle cx="120" cy="90" r="14" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="120" y="94" text-anchor="middle" font-size="9" fill="#8C8676">A</text>
+  <circle cx="170" cy="90" r="14" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="170" y="94" text-anchor="middle" font-size="9" fill="#8C8676">B</text>
+
+  <!-- Phase 2: 标记中 -->
+  <text x="360" y="56" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Phase 2: 标记进行中</text>
+  <circle cx="280" cy="90" r="16" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="280" y="94" text-anchor="middle" font-size="9" fill="#FAC94A" font-weight="700">Root</text>
+
+  <circle cx="330" cy="90" r="14" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="330" y="94" text-anchor="middle" font-size="9" fill="#FAC94A" font-weight="700">A</text>
+
+  <circle cx="380" cy="90" r="14" fill="#8C8676" stroke="#8C8676" stroke-width="1.5"/>
+  <text x="380" y="94" text-anchor="middle" font-size="9" fill="#fff" font-weight="700">B</text>
+
+  <circle cx="430" cy="90" r="14" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="430" y="94" text-anchor="middle" font-size="9" fill="#8C8676">C</text>
+
+  <line x1="296" y1="90" x2="316" y2="90" stroke="#57544E" stroke-width="1"/>
+  <line x1="344" y1="90" x2="366" y2="90" stroke="#57544E" stroke-width="1"/>
+  <line x1="394" y1="90" x2="416" y2="90" stroke="#57544E" stroke-width="1"/>
+
+  <!-- Phase 3: 完成 -->
+  <text x="580" y="56" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Phase 3: 标记完成</text>
+  <circle cx="510" cy="90" r="16" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="510" y="94" text-anchor="middle" font-size="9" fill="#FAC94A" font-weight="700">Root</text>
+
+  <circle cx="560" cy="90" r="14" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="560" y="94" text-anchor="middle" font-size="9" fill="#FAC94A" font-weight="700">A</text>
+
+  <circle cx="610" cy="90" r="14" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="610" y="94" text-anchor="middle" font-size="9" fill="#FAC94A" font-weight="700">B</text>
+
+  <circle cx="660" cy="90" r="14" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="660" y="94" text-anchor="middle" font-size="9" fill="#FAC94A" font-weight="700">C</text>
+
+  <line x1="526" y1="90" x2="546" y2="90" stroke="#57544E" stroke-width="1"/>
+  <line x1="574" y1="90" x2="596" y2="90" stroke="#57544E" stroke-width="1"/>
+  <line x1="624" y1="90" x2="646" y2="90" stroke="#57544E" stroke-width="1"/>
+
+  <!-- Garbage -->
+  <circle cx="580" cy="140" r="14" fill="#fff" stroke="#C2410C" stroke-width="2" stroke-dasharray="4 2"/>
+  <text x="580" y="144" text-anchor="middle" font-size="9" fill="#C2410C" font-weight="700">X</text>
+  <text x="580" y="168" text-anchor="middle" font-size="10" fill="#C2410C">白色 = 垃圾</text>
+
+  <!-- Legend -->
+  <rect x="40" y="188" width="620" height="100" rx="10" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="212" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">三色标记的颜色转换规则</text>
+  <text x="350" y="234" text-anchor="middle" font-size="11" fill="#57544E">1. 初始时，GC Roots 为灰色，其余所有对象为白色</text>
+  <text x="350" y="254" text-anchor="middle" font-size="11" fill="#57544E">2. 从灰色对象出发，扫描其引用 → 被引用的白色对象变灰色，该灰色对象变黑色</text>
+  <text x="350" y="274" text-anchor="middle" font-size="11" fill="#57544E">3. 重复直到没有灰色对象 → 所有白色对象即为垃圾</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>三色标记算法：白→灰→黑的状态转换，让 GC 可以与用户线程并发执行标记</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">并发标记的难题：漏标问题</div>
+<p>三色标记允许标记阶段和用户线程并发执行，但这就带来了一个风险：<strong>用户线程可能在标记过程中修改引用关系，导致某些存活对象被漏标为白色（误判为垃圾）</strong>。</p>
+<p>漏标需要同时满足两个条件（Wilson 条件）：</p>
+<p>1. 一个黑色对象新增了对白色对象的引用（黑→白）<br/>
+2. 所有灰色对象到这个白色对象的路径都被断开</p>
+<p><strong>CMS</strong> 用<strong>增量更新</strong>（Incremental Update）解决：记录黑色对象新增的引用，在 Remark 阶段重新扫描。<br/>
+<strong>G1</strong> 用 <strong>SATB</strong>（Snapshot-At-The-Beginning）解决：记录被删除的引用，在 Remark 阶段保证这些对象不会被误删。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：finalize 与面试总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>finalize 复活机制与面试高频题</h2></div>
+
+<p>在可达性分析被判定为"不可达"之后，对象并不是立即被回收。JVM 会给对象一次<strong>"自我救赎"</strong>的机会——<code>finalize()</code> 方法。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>FinalizerDemo.java</b> · finalize 复活示例</span></div>
+<pre><code><span class="k">public class</span> <span class="t">FinalizerDemo</span> {
+    <span class="k">public static</span> <span class="t">FinalizerDemo</span> SAVE_HOOK = <span class="k">null</span>;
+
+    <span class="k">public void</span> isAlive() {
+        System.out.println(<span class="s">"我还活着!"</span>);
+    }
+
+    <span class="k">@Override</span>
+    <span class="k">protected void</span> finalize() <span class="k">throws</span> <span class="t">Throwable</span> {
+        <span class="k">super</span>.finalize();
+        System.out.println(<span class="s">"finalize() 被调用，尝试自救..."</span>);
+        <span class="c">// 把自己重新关联到一个 GC Root（静态变量）</span>
+        SAVE_HOOK = <span class="k">this</span>;  <span class="c">// ← 复活！</span>
+    }
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        SAVE_HOOK = <span class="k">new</span> <span class="t">FinalizerDemo</span>();
+        SAVE_HOOK = <span class="k">null</span>;  <span class="c">// 断开引用</span>
+        System.gc();          <span class="c">// 触发 GC</span>
+        Thread.sleep(<span class="n">1000</span>);  <span class="c">// 等 finalize 执行</span>
+
+        <span class="k">if</span> (SAVE_HOOK != <span class="k">null</span>) {
+            SAVE_HOOK.isAlive(); <span class="c">// 输出："我还活着!" ← 复活成功</span>
+        }
+
+        <span class="c">// 第二次尝试——finalize 只会被调用一次！</span>
+        SAVE_HOOK = <span class="k">null</span>;
+        System.gc();
+        Thread.sleep(<span class="n">1000</span>);
+        <span class="c">// 这次 finalize 不会再被调用 → 真正被回收</span>
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">finalize 的复活流程</div>
+<p>对象第一次被标记为不可达时，JVM 会检查它是否覆盖了 <code>finalize()</code> 方法且尚未执行过：</p>
+<p>1. 如果是 → 放入 <strong>F-Queue</strong> 队列，由 Finalizer 线程（低优先级）异步执行<br/>
+2. 在 <code>finalize()</code> 中，对象可以把自己赋值给某个静态变量或栈变量 → 重新关联到 GC Root → 复活<br/>
+3. <strong>finalize() 只会被调用一次</strong>。第二次被标记不可达时，直接回收</p>
+<p>实际开发中<strong>强烈不建议</strong>依赖 finalize()：执行时间不确定、可能导致对象复活延迟、性能差。Java 9+ 已将其标记为 @Deprecated，推荐使用 <code>Cleaner</code> 或 try-with-resources。</p>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">本篇核心要点</div>
+<ul>
+  <li><strong>GC Roots</strong> 是可达性分析的起点：栈帧局部变量、静态变量、常量引用、JNI 引用、活跃线程、synchronized 持锁对象、JVM 内部引用（记忆口诀：栈静常，JNI 线）</li>
+  <li><strong>可达性分析</strong>：从 GC Roots 出发做图遍历，不可达的对象即为垃圾。需要 STW 保证一致性</li>
+  <li><strong>引用计数法</strong>的致命缺陷：循环引用。可达性分析天然解决</li>
+  <li><strong>三色标记</strong>（白/灰/黑）是 CMS/G1 并发标记的基础，通过读写屏障解决漏标问题</li>
+  <li><strong>finalize()</strong> 提供一次复活机会，但不推荐使用（@Deprecated since Java 9）</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html><!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Java 中高级面试 - Day 8 | GC Roots 概念</title>
 <style>
 :root {

@@ -3,6 +3,383 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lambda 表达式与函数式接口</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从 200 行到 1 行：Lambda 的革命</h2></div>
+
+<p>在 Java 8 之前，如果你想传递一段行为（比如一个比较逻辑、一个过滤条件），唯一的办法是写一个<strong>匿名内部类</strong>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BeforeJava8.java</b> · 匿名内部类的啰嗦写法</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; names = Arrays.asList(<span class="s">"Alice"</span>, <span class="s">"Bob"</span>, <span class="s">"Charlie"</span>);
+
+<span class="c">// 需求：按字符串长度排序</span>
+Collections.sort(names, <span class="k">new</span> <span class="t">Comparator</span>&lt;<span class="t">String</span>&gt;() {
+    <span class="k">@Override</span>
+    <span class="k">public int</span> compare(<span class="t">String</span> a, <span class="t">String</span> b) {
+        <span class="k">return</span> Integer.compare(a.length(), b.length());
+    }
+});
+
+<span class="c">// 需求：过滤出长度 &gt; 3 的名字，然后转大写</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; result = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+<span class="k">for</span> (<span class="t">String</span> name : names) {
+    <span class="k">if</span> (name.length() &gt; <span class="n">3</span>) {
+        result.add(name.toUpperCase());
+    }
+}</code></pre>
+</div>
+
+<p>Java 8 引入了 <strong>Lambda 表达式</strong>，同样的逻辑变成这样：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AfterJava8.java</b> · Lambda + Stream 的简洁写法</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; names = Arrays.asList(<span class="s">"Alice"</span>, <span class="s">"Bob"</span>, <span class="s">"Charlie"</span>);
+
+<span class="c">// 按长度排序 —— 一行搞定</span>
+names.sort((a, b) -&gt; Integer.compare(a.length(), b.length()));
+
+<span class="c">// 过滤 + 转大写 —— Stream 链式操作</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; result = names.stream()
+    .filter(name -&gt; name.length() &gt; <span class="n">3</span>)
+    .map(<span class="t">String</span>::toUpperCase)
+    .collect(Collectors.toList());</code></pre>
+</div>
+
+<p>从啰嗦的 6 行变成 1 行，从 for 循环变成声明式管道。但面试官想知道的不只是语法糖：</p>
+
+<ul>
+  <li>Lambda 编译后到底生成了什么？它和匿名内部类在字节码层面有什么区别？</li>
+  <li>什么是函数式接口？为什么 Lambda 只能对应一个方法？</li>
+  <li>方法引用（<code>::</code>）的四种形式分别对应什么场景？</li>
+  <li>Lambda 的性能真的比匿名内部类好吗？</li>
+</ul>
+</section>
+
+<!-- ═══════════════ 第2站：Lambda 语法与编译原理 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>Lambda 语法全景与编译原理</h2></div>
+
+<p>Lambda 表达式的语法非常灵活——编译器会根据上下文自动推断参数类型和返回值，允许你省略大量冗余代码：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LambdaSyntax.java</b> · Lambda 各种写法对照</span></div>
+<pre><code><span class="c">// ① 完整形式：参数类型 + 大括号 + return</span>
+<span class="t">Comparator</span>&lt;<span class="t">String</span>&gt; c1 = (<span class="t">String</span> a, <span class="t">String</span> b) -&gt; { <span class="k">return</span> a.length() - b.length(); };
+
+<span class="c">// ② 省略参数类型（编译器从上下文推断）</span>
+<span class="t">Comparator</span>&lt;<span class="t">String</span>&gt; c2 = (a, b) -&gt; { <span class="k">return</span> a.length() - b.length(); };
+
+<span class="c">// ③ 省略大括号和 return（单行表达式自动 return）</span>
+<span class="t">Comparator</span>&lt;<span class="t">String</span>&gt; c3 = (a, b) -&gt; a.length() - b.length();
+
+<span class="c">// ④ 单参数可省略括号</span>
+<span class="t">Consumer</span>&lt;<span class="t">String</span>&gt; printer = s -&gt; System.out.println(s);
+
+<span class="c">// ⑤ 无参数</span>
+<span class="t">Runnable</span> task = () -&gt; System.out.println(<span class="s">"Hello!"</span>);
+
+<span class="c">// ⑥ 多行逻辑必须加大括号</span>
+<span class="t">Consumer</span>&lt;<span class="t">String</span>&gt; logger = msg -&gt; {
+    <span class="t">String</span> upper = msg.toUpperCase();
+    System.out.println(<span class="s">"[LOG] "</span> + upper);
+};</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 280" role="img" aria-label="Lambda 编译原理对比">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">Lambda vs 匿名内部类：字节码层面的本质区别</text>
+
+  <!-- 左：匿名内部类 -->
+  <rect x="30" y="44" width="310" height="220" rx="10" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="185" y="68" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">匿名内部类</text>
+
+  <rect x="50" y="82" width="270" height="36" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="185" y="105" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">编译生成独立 .class 文件</text>
+
+  <text x="185" y="136" text-anchor="middle" font-size="11" fill="#57544E">Main$1.class ← 匿名类</text>
+  <text x="185" y="156" text-anchor="middle" font-size="11" fill="#57544E">每次 new 创建新对象</text>
+  <text x="185" y="176" text-anchor="middle" font-size="11" fill="#57544E">通过 NEW + INVOKESPECIAL 调用</text>
+  <text x="185" y="196" text-anchor="middle" font-size="11" fill="#57544E">持有外部类 this 引用（可能导致泄漏）</text>
+
+  <rect x="50" y="214" width="270" height="36" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="185" y="237" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">等价于：写了一个新类</text>
+
+  <!-- 右：Lambda -->
+  <rect x="360" y="44" width="310" height="220" rx="10" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="515" y="68" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Lambda 表达式</text>
+
+  <rect x="380" y="82" width="270" height="36" rx="6" fill="#EDE3C4" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="515" y="105" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="700">不生成 .class，用 invokedynamic</text>
+
+  <text x="515" y="136" text-anchor="middle" font-size="11" fill="#57544E">运行时由 LambdaMetafactory 生成实现类</text>
+  <text x="515" y="156" text-anchor="middle" font-size="11" fill="#57544E">无状态 Lambda 复用单例对象</text>
+  <text x="515" y="176" text-anchor="middle" font-size="11" fill="#57544E">通过 INVOKEDYNAMIC 调用</text>
+  <text x="515" y="196" text-anchor="middle" font-size="11" fill="#57544E">不自动持有外部类 this（更安全）</text>
+
+  <rect x="380" y="214" width="270" height="36" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="515" y="237" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">等价于：延迟到运行时生成</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>Lambda 编译原理：不生成独立 class 文件，通过 invokedynamic 在运行时由 LambdaMetafactory 动态生成实现</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">invokedynamic 是什么？为什么 Lambda 选择它？</div>
+<p><code>invokedynamic</code> 是 Java 7 引入的字节码指令，最初是为了支持动态语言（如 JRuby、Groovy）。它允许在运行时动态决定方法调用的目标。</p>
+<p>Lambda 使用 invokedynamic 的好处是：<strong>把实现策略的决策推迟到运行时</strong>。JVM 的 LambdaMetafactory 在首次调用时生成实现类（基于 ASM 字节码生成），后续调用直接复用。相比匿名内部类在编译时就生成固定 class 文件，这种方式更灵活，且未来 JVM 可以切换为更高效的实现策略（如 MethodHandle），而不需要重新编译用户代码。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：函数式接口 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>函数式接口：Lambda 的"类型"</h2></div>
+
+<p>Lambda 表达式本身<strong>没有类型</strong>——它必须赋值给一个特定的接口，编译器才能推断参数类型和返回值。这个接口就是<strong>函数式接口</strong>（Functional Interface）：</p>
+
+<div class="formula">
+<strong>函数式接口的定义：</strong> 有且仅有一个抽象方法的接口<br/><br/>
+可以有 default 方法、static 方法、从 Object 继承的方法<br/>
+但<strong>抽象方法只能有一个</strong>（SAM: Single Abstract Method）
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>FunctionalInterface.java</b> · 自定义函数式接口</span></div>
+<pre><code><span class="c">// @FunctionalInterface 注解：编译期检查，确保只有一个抽象方法</span>
+<span class="c">// 不加也能用，但加上是好习惯（防止后人误加第二个抽象方法）</span>
+<span class="k">@FunctionalInterface</span>
+<span class="k">public interface</span> <span class="t">Calculator</span> {
+    <span class="t">int</span> calculate(<span class="t">int</span> a, <span class="t">int</span> b);  <span class="c">// 唯一的抽象方法</span>
+
+    <span class="c">// default 方法不影响函数式接口的判定</span>
+    <span class="k">default void</span> print(<span class="t">int</span> result) {
+        System.out.println(<span class="s">"结果: "</span> + result);
+    }
+}
+
+<span class="c">// 使用：Lambda 自动匹配 calculate 方法的签名</span>
+<span class="t">Calculator</span> add = (a, b) -&gt; a + b;
+<span class="t">Calculator</span> mul = (a, b) -&gt; a * b;
+add.print(add.calculate(<span class="n">3</span>, <span class="n">5</span>));  <span class="c">// 输出：结果: 8</span></code></pre>
+</div>
+
+<p>Java 8 在 <code>java.util.function</code> 包中预定义了大量函数式接口，其中最核心的四个：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 320" role="img" aria-label="四大核心函数式接口">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">java.util.function 四大核心接口</text>
+
+  <!-- Function -->
+  <rect x="20" y="44" width="320" height="120" rx="10" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="180" y="68" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Function&lt;T, R&gt;</text>
+  <text x="180" y="88" text-anchor="middle" font-size="11" fill="#57544E">接收 T，返回 R（转换/映射）</text>
+  <rect x="40" y="98" width="280" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="180" y="117" text-anchor="middle" font-size="11" fill="#1C1C1C" font-family="monospace">R apply(T t)</text>
+  <text x="180" y="148" text-anchor="middle" font-size="10" fill="#8C8676">例：String → length()  →  Integer</text>
+
+  <!-- Consumer -->
+  <rect x="360" y="44" width="320" height="120" rx="10" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="520" y="68" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">Consumer&lt;T&gt;</text>
+  <text x="520" y="88" text-anchor="middle" font-size="11" fill="#57544E">接收 T，不返回（消费/副作用）</text>
+  <rect x="380" y="98" width="280" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="520" y="117" text-anchor="middle" font-size="11" fill="#1C1C1C" font-family="monospace">void accept(T t)</text>
+  <text x="520" y="148" text-anchor="middle" font-size="10" fill="#8C8676">例：String → println()  →  无输出</text>
+
+  <!-- Predicate -->
+  <rect x="20" y="180" width="320" height="120" rx="10" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="180" y="204" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Predicate&lt;T&gt;</text>
+  <text x="180" y="224" text-anchor="middle" font-size="11" fill="#57544E">接收 T，返回 boolean（判断/过滤）</text>
+  <rect x="40" y="234" width="280" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="180" y="253" text-anchor="middle" font-size="11" fill="#1C1C1C" font-family="monospace">boolean test(T t)</text>
+  <text x="180" y="284" text-anchor="middle" font-size="10" fill="#8C8676">例：Integer → n &gt; 0  →  true/false</text>
+
+  <!-- Supplier -->
+  <rect x="360" y="180" width="320" height="120" rx="10" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="520" y="204" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">Supplier&lt;T&gt;</text>
+  <text x="520" y="224" text-anchor="middle" font-size="11" fill="#57544E">不接收参数，返回 T（生产/工厂）</text>
+  <rect x="380" y="234" width="280" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="520" y="253" text-anchor="middle" font-size="11" fill="#1C1C1C" font-family="monospace">T get()</text>
+  <text x="520" y="284" text-anchor="middle" font-size="10" fill="#8C8676">例：() → new Random().nextInt()</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>四大核心函数式接口：Function（转换）、Consumer（消费）、Predicate（判断）、Supplier（生产）</figcaption>
+</figure>
+
+<p>除了这四个基础接口，Java 8 还提供了大量特化版本（避免装箱拆箱的性能开销）：</p>
+
+<table>
+  <thead><tr><th>特化接口</th><th>作用</th><th>典型场景</th></tr></thead>
+  <tbody>
+    <tr><td><code>ToIntFunction&lt;T&gt;</code></td><td>T → int，避免 Integer 装箱</td><td><code>list.stream().mapToInt(String::length)</code></td></tr>
+    <tr><td><code>BiFunction&lt;T,U,R&gt;</code></td><td>两个输入 T, U → 输出 R</td><td><code>map.merge(key, val, (a, b) -> a + b)</code></td></tr>
+    <tr><td><code>UnaryOperator&lt;T&gt;</code></td><td>T → T（特殊 Function，输入输出同类型）</td><td><code>list.replaceAll(String::toUpperCase)</code></td></tr>
+    <tr><td><code>BinaryOperator&lt;T&gt;</code></td><td>(T, T) → T（特殊 BiFunction）</td><td><code>stream.reduce(0, Integer::sum)</code></td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第4站：方法引用 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>方法引用：Lambda 的终极简化</h2></div>
+
+<p>当 Lambda 体只是简单地调用一个已有方法时，可以用<strong>方法引用</strong>（<code>::</code>）进一步简化。方法引用有 <strong>4 种形式</strong>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MethodReference.java</b> · 四种方法引用形式</span></div>
+<pre><code><span class="c">/* ─── 形式 1：静态方法引用 ─── */</span>
+<span class="c">// ClassName::staticMethod</span>
+<span class="t">Function</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; f1 = s -&gt; Integer.parseInt(s);
+<span class="t">Function</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; f1r = <span class="t">Integer</span>::parseInt;   <span class="c">// ← 方法引用</span>
+
+<span class="c">/* ─── 形式 2：实例方法引用（特定对象）─── */</span>
+<span class="c">// instance::method</span>
+<span class="t">String</span> str = <span class="s">"hello world"</span>;
+<span class="t">Supplier</span>&lt;<span class="t">String</span>&gt; f2 = () -&gt; str.toUpperCase();
+<span class="t">Supplier</span>&lt;<span class="t">String</span>&gt; f2r = str::toUpperCase;           <span class="c">// ← 方法引用</span>
+
+<span class="c">/* ─── 形式 3：实例方法引用（任意对象）─── */</span>
+<span class="c">// ClassName::instanceMethod（第一个参数作为调用者）</span>
+<span class="t">Function</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; f3 = s -&gt; s.toUpperCase();
+<span class="t">Function</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; f3r = <span class="t">String</span>::toUpperCase;  <span class="c">// ← 方法引用</span>
+
+<span class="c">/* ─── 形式 4：构造方法引用 ─── */</span>
+<span class="c">// ClassName::new</span>
+<span class="t">Supplier</span>&lt;<span class="t">ArrayList</span>&lt;<span class="t">String</span>&gt;&gt; f4 = () -&gt; <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+<span class="t">Supplier</span>&lt;<span class="t">ArrayList</span>&lt;<span class="t">String</span>&gt;&gt; f4r = <span class="t">ArrayList</span>::<span class="k">new</span>;     <span class="c">// ← 构造引用</span>
+
+<span class="c">// 带参构造引用</span>
+<span class="t">Function</span>&lt;<span class="t">Integer</span>, <span class="t">ArrayList</span>&lt;<span class="t">String</span>&gt;&gt; f5 = n -&gt; <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(n);
+<span class="t">Function</span>&lt;<span class="t">Integer</span>, <span class="t">ArrayList</span>&lt;<span class="t">String</span>&gt;&gt; f5r = <span class="t">ArrayList</span>::<span class="k">new</span>;  <span class="c">// 参数自动匹配</span></code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 220" role="img" aria-label="方法引用四种形式速查">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">方法引用四种形式速查表</text>
+
+  <!-- Table -->
+  <rect x="40" y="42" width="620" height="36" rx="0" fill="#1C1C1C"/>
+  <text x="140" y="64" text-anchor="middle" font-size="12" fill="#FAC94A" font-weight="700">形式</text>
+  <text x="340" y="64" text-anchor="middle" font-size="12" fill="#FAC94A" font-weight="700">语法</text>
+  <text x="560" y="64" text-anchor="middle" font-size="12" fill="#FAC94A" font-weight="700">等价 Lambda</text>
+
+  <rect x="40" y="78" width="620" height="32" fill="#fff" stroke="#D8CEB6" stroke-width="0.5"/>
+  <text x="140" y="99" text-anchor="middle" font-size="11" fill="#1C1C1C">静态方法</text>
+  <text x="340" y="99" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700" font-family="monospace">Class::staticMethod</text>
+  <text x="560" y="99" text-anchor="middle" font-size="10" fill="#57544E" font-family="monospace">(args) -> Class.staticMethod(args)</text>
+
+  <rect x="40" y="110" width="620" height="32" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="0.5"/>
+  <text x="140" y="131" text-anchor="middle" font-size="11" fill="#1C1C1C">实例方法(特定)</text>
+  <text x="340" y="131" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700" font-family="monospace">instance::method</text>
+  <text x="560" y="131" text-anchor="middle" font-size="10" fill="#57544E" font-family="monospace">() -> instance.method()</text>
+
+  <rect x="40" y="142" width="620" height="32" fill="#fff" stroke="#D8CEB6" stroke-width="0.5"/>
+  <text x="140" y="163" text-anchor="middle" font-size="11" fill="#1C1C1C">实例方法(任意)</text>
+  <text x="340" y="163" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700" font-family="monospace">Class::instanceMethod</text>
+  <text x="560" y="163" text-anchor="middle" font-size="10" fill="#57544E" font-family="monospace">(obj, args) -> obj.method(args)</text>
+
+  <rect x="40" y="174" width="620" height="32" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="0.5"/>
+  <text x="140" y="195" text-anchor="middle" font-size="11" fill="#1C1C1C">构造方法</text>
+  <text x="340" y="195" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700" font-family="monospace">Class::new</text>
+  <text x="560" y="195" text-anchor="middle" font-size="10" fill="#57544E" font-family="monospace">(args) -> new Class(args)</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>方法引用四种形式：静态方法、特定实例方法、任意实例方法、构造方法</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第5站：Lambda vs 匿名内部类 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Lambda vs 匿名内部类：不只是语法糖</h2></div>
+
+<p>很多初学者认为 Lambda 只是匿名内部类的语法简化。事实上，两者在<strong>编译产物、性能、语义</strong>上都有本质区别：</p>
+
+<table>
+  <thead><tr><th>对比维度</th><th>匿名内部类</th><th>Lambda 表达式</th></tr></thead>
+  <tbody>
+    <tr><td><strong>编译产物</strong></td><td>生成独立 .class 文件（如 Main$1.class）</td><td>不生成 .class，用 invokedynamic 指令</td></tr>
+    <tr><td><strong>实例化方式</strong></td><td>每次 new 创建新对象</td><td>无状态 Lambda 复用单例（通过 LambdaMetafactory）</td></tr>
+    <tr><td><strong>this 语义</strong></td><td>this 指向匿名类自身</td><td>this 指向外部类（词法作用域）</td></tr>
+    <tr><td><strong>变量遮蔽</strong></td><td>可以定义同名变量遮蔽外部变量</td><td>不能定义与外部同名的变量</td></tr>
+    <tr><td><strong>可继承的接口</strong></td><td>可以实现任意接口（甚至抽象类）</td><td>只能实现函数式接口</td></tr>
+    <tr><td><strong>性能</strong></td><td>类加载 + 对象分配开销</td><td>首次调用有 Metafactory 开销，后续无状态复用更快</td></tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">this 语义的区别——面试高频陷阱</div>
+<p>在匿名内部类中，<code>this</code> 指向<strong>匿名类自身的实例</strong>。在 Lambda 中，<code>this</code> 指向<strong>定义 Lambda 的外部类实例</strong>。</p>
+<p>这意味着：如果你在匿名内部类中写 <code>this.toString()</code>，调用的是匿名类的 toString；在 Lambda 中写同样的代码，调用的是外部类的 toString。这个区别在单元测试中经常造成混淆。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：实战应用与总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>实战：Stream + Lambda 常见模式</h2></div>
+
+<p>Lambda 最大的价值在于和 <strong>Stream API</strong> 的配合，实现声明式的数据处理。以下是几个生产中最常见的模式：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StreamPatterns.java</b> · 常见 Stream + Lambda 模式</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">User</span>&gt; users = getUsers();
+
+<span class="c">// 模式 1：过滤 + 转换 + 收集</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; names = users.stream()
+    .filter(u -&gt; u.getAge() &gt; <span class="n">18</span>)            <span class="c">// Predicate</span>
+    .map(<span class="t">User</span>::getName)                       <span class="c">// Function</span>
+    .sorted()                                  <span class="c">// 自然排序</span>
+    .collect(Collectors.toList());
+
+<span class="c">// 模式 2：分组统计</span>
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Long</span>&gt; countByCity = users.stream()
+    .collect(Collectors.groupingBy(
+        <span class="t">User</span>::getCity,                         <span class="c">// Function: 分组键</span>
+        Collectors.counting()                  <span class="c">// 下游: 计数</span>
+    ));
+
+<span class="c">// 模式 3：归约求和</span>
+<span class="t">int</span> totalAge = users.stream()
+    .mapToInt(<span class="t">User</span>::getAge)                    <span class="c">// 避免 Integer 装箱</span>
+    .sum();
+
+<span class="c">// 模式 4：Optional 安全链</span>
+<span class="t">String</span> firstAdult = users.stream()
+    .filter(u -&gt; u.getAge() &gt;= <span class="n">18</span>)
+    .findFirst()
+    .map(<span class="t">User</span>::getName)
+    .orElse(<span class="s">"无"</span>);
+
+<span class="c">// 模式 5：并行流（CPU 密集场景慎用）</span>
+<span class="t">long</span> count = users.parallelStream()
+    .filter(u -&gt; u.isActive())
+    .count();</code></pre>
+</div>
+
+<div class="think"><div class="think-q">parallelStream() 什么时候用？什么时候不用？<br/><br/>
+<b>适合：</b>CPU 密集型计算 + 数据量大（&gt;10000）+ 无共享状态 + 底层是 ArrayList（可高效 split）<br/>
+<b>不适合：</b>IO 密集型操作、数据量小、LinkedList（split 慢）、有副作用的操作<br/><br/>
+大多数业务场景下，串行 Stream 已经足够快。过早使用并行流反而可能因为线程切换、ForkJoin 框架开销导致性能下降。</div></div>
+
+<div class="takeaway">
+<div class="takeaway-label">本篇核心要点</div>
+<ul>
+  <li><strong>Lambda 表达式</strong>是匿名函数，编译后通过 <code>invokedynamic</code> 指令 + LambdaMetafactory 在运行时生成实现类</li>
+  <li><strong>函数式接口</strong>（SAM 接口）是 Lambda 的类型约束：有且仅有一个抽象方法</li>
+  <li>四大核心接口：<code>Function</code>（转换）、<code>Consumer</code>（消费）、<code>Predicate</code>（判断）、<code>Supplier</code>（生产）</li>
+  <li><strong>方法引用</strong>是 Lambda 的进一步简化，4 种形式：静态方法、特定实例、任意实例、构造方法</li>
+  <li>Lambda vs 匿名内部类：不生成 .class、invokedynamic、this 指向外部类、无状态可复用</li>
+  <li>实际开发中 Lambda + Stream API 是处理集合数据的首选方式</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html><!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Java 中高级面试 - Day 21 | Lambda 表达式与函数式接口</title>
 <style>
 :root {

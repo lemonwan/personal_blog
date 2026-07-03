@@ -4,6 +4,15 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "WAN — Java 开发工程师",
   description: "Java 技术笔记与 AI 大模型原理教程",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon-32.png", type: "image/png", sizes: "32x32" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+    shortcut: ["/favicon.ico"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,7 +25,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="relative mx-auto max-w-7xl px-6">
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center gap-10">
-                <a href="/" className="flex-shrink-0 font-black text-xl text-[#FAC94A] hover:opacity-80 transition-opacity">WAN</a>
+                <a href="/" aria-label="首页" className="flex-shrink-0 hover:opacity-80 transition-opacity">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/avatar.png"
+                    alt="WAN"
+                    width={40}
+                    height={40}
+                    className="h-10 w-10 rounded-full ring-2 ring-[#FAC94A]/60 shadow-sm"
+                  />
+                </a>
                 <nav className="hidden items-center gap-6 md:flex">
                   <a href="/" className="text-sm font-semibold text-white/60 hover:text-white transition-colors">首页</a>
                   <a href="/ai-llm/" className="text-sm font-semibold text-[#FAC94A] transition-colors">LLM 基础概念学习笔记</a>

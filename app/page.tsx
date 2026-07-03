@@ -43,19 +43,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ═══ 关于我 ═══ */}
-      <section className="px-6 py-16" style={{ background: "#FFF8F0", borderBottom: "1px solid var(--line, #D8CEB6)" }}>
-        <div className="mx-auto max-w-3xl text-center">
-          <p className="text-sm font-black uppercase tracking-widest text-[#1C1C1C]/40 mb-4">About · 关于</p>
-          <p className="text-lg text-[#1C1C1C]/70 leading-relaxed">
-            我是 <strong className="text-[#1C1C1C]">wan</strong>，一名常驻北京的 Java 开发工程师。
-            目前专注于<strong className="text-[#1C1C1C]">后端架构设计</strong>与<strong className="text-[#1C1C1C]">性能优化</strong>，
-            同时对 AI 大模型原理保持浓厚兴趣。
-            这个网站是我整理知识、沉淀思考的地方——希望这些笔记也能帮到你。
-          </p>
-        </div>
-      </section>
-
       {/* ═══ 精选内容 ═══ */}
       <section className="px-6 py-20" style={{ background: "#FFF8F0" }}>
         <div className="mx-auto max-w-7xl">

@@ -3,6 +3,477 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HashSet 与 TreeSet 底层原理</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道面试题开始</h2></div>
+
+<p>大厂面试中，集合框架是必考模块，而 HashSet 和 TreeSet 经常被拿来做对比考察：</p>
+
+<div class="think"><div class="think-q">"HashSet 是如何保证元素不重复的？TreeSet 又是如何实现自动排序的？两者底层分别是什么数据结构？" —— 面试官通过这一个问题，就能判断你对 Java 集合框架的理解深度。</div></div>
+
+<p>很多同学的回答停留在"HashSet 基于 HashMap，TreeSet 基于 TreeMap"就说不下去了。但面试官想听到的是：</p>
+
+<ul>
+  <li>HashSet 的 <code>add()</code> 方法内部到底做了什么？为什么 value 是一个固定的 <code>PRESENT</code> 对象？</li>
+  <li>TreeSet 的红黑树是怎么维持有序的？插入后旋转的过程是怎样的？</li>
+  <li>为什么重写 <code>equals()</code> 就必须重写 <code>hashCode()</code>？不遵守会出什么 bug？</li>
+  <li>TreeSet 不允许插入 null，而 HashSet 允许一个 null——底层原因是什么？</li>
+</ul>
+
+<p>带着这些问题，我们从 HashSet 的源码开始，逐层拆解。</p>
+</section>
+
+<!-- ═══════════════ 第2站：HashSet ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>HashSet 底层：披着 Set 外衣的 HashMap</h2></div>
+
+<p>HashSet 的源码非常简短——整个类只有不到 300 行。因为它<strong>本质上就是一个 HashMap 的包装器</strong>。所有元素都作为 HashMap 的 <code>key</code> 存储，而 <code>value</code> 则统一指向一个静态常量对象：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashSet.java</b> · JDK 1.8 核心字段</span></div>
+<pre><code><span class="k">public class</span> <span class="t">HashSet</span>&lt;E&gt; <span class="k">extends</span> <span class="t">AbstractSet</span>&lt;E&gt;
+    <span class="k">implements</span> <span class="t">Set</span>&lt;E&gt;, <span class="t">Cloneable</span>, <span class="t">Serializable</span> {
+
+    <span class="c">// 底层存储：一个 HashMap，key 是元素，value 统一用 PRESENT</span>
+    <span class="k">private transient</span> <span class="t">HashMap</span>&lt;E, <span class="t">Object</span>&gt; map;
+
+    <span class="c">// 所有元素共享的"假 value"——只为了占位</span>
+    <span class="k">private static final</span> <span class="t">Object</span> PRESENT = <span class="k">new</span> <span class="t">Object</span>();
+
+    <span class="c">// 构造方法：初始化 HashMap</span>
+    <span class="k">public</span> <span class="t">HashSet</span>() {
+        map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+    }
+
+    <span class="c">// 带初始容量的构造方法——推荐！避免扩容开销</span>
+    <span class="k">public</span> <span class="t">HashSet</span>(<span class="t">int</span> initialCapacity) {
+        map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;(initialCapacity);
+    }
+}</code></pre>
+</div>
+
+<p>理解了底层结构之后，再来看 HashSet 最核心的三个方法，就非常清晰了：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashSet.java</b> · 核心方法实现</span></div>
+<pre><code><span class="c">// add：如果 key 已存在，put 返回旧 value（非 null），则 add 返回 false</span>
+<span class="k">public boolean</span> add(E e) {
+    <span class="k">return</span> map.put(e, PRESENT) == <span class="k">null</span>;
+}
+
+<span class="c">// remove：直接调用 HashMap 的 remove</span>
+<span class="k">public boolean</span> remove(<span class="t">Object</span> o) {
+    <span class="k">return</span> map.remove(o) == PRESENT;
+}
+
+<span class="c">// contains：直接调用 HashMap 的 containsKey</span>
+<span class="k">public boolean</span> contains(<span class="t">Object</span> o) {
+    <span class="k">return</span> map.containsKey(o);
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 320" role="img" aria-label="HashSet add 方法流程图">
+  <defs>
+    <marker id="arr1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+    <marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">HashSet.add("apple") 执行流程</text>
+
+  <!-- Step 1: 调用 add -->
+  <rect x="20" y="48" width="140" height="48" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="90" y="68" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">add("apple")</text>
+  <text x="90" y="86" text-anchor="middle" font-size="10" fill="#57544E">HashSet 入口</text>
+
+  <line x1="160" y1="72" x2="195" y2="72" stroke="#8C8676" stroke-width="1" marker-end="url(#arr1)"/>
+
+  <!-- Step 2: 计算 hash -->
+  <rect x="200" y="48" width="140" height="48" rx="8" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="270" y="68" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">计算 hash</text>
+  <text x="270" y="86" text-anchor="middle" font-size="10" fill="#57544E">"apple".hashCode()</text>
+
+  <line x1="340" y1="72" x2="375" y2="72" stroke="#8C8676" stroke-width="1" marker-end="url(#arr1)"/>
+
+  <!-- Step 3: 定位桶 -->
+  <rect x="380" y="48" width="140" height="48" rx="8" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="450" y="68" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">定位桶下标</text>
+  <text x="450" y="86" text-anchor="middle" font-size="10" fill="#57544E">hash &amp; (n-1)</text>
+
+  <line x1="450" y1="96" x2="450" y2="128" stroke="#8C8676" stroke-width="1" marker-end="url(#arr1)"/>
+
+  <!-- Step 4: 判断是否存在 -->
+  <rect x="350" y="132" width="200" height="52" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="450" y="153" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">桶中是否已存在相同 key？</text>
+  <text x="450" y="172" text-anchor="middle" font-size="10" fill="#57544E">先比 hash，再比 equals()</text>
+
+  <!-- 左分支：不存在 -->
+  <line x1="390" y1="184" x2="250" y2="215" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="290" y="204" font-size="11" fill="#3E6B8F" font-weight="700">不存在</text>
+
+  <rect x="150" y="218" width="200" height="48" rx="8" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="250" y="238" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">map.put("apple", PRESENT)</text>
+  <text x="250" y="256" text-anchor="middle" font-size="10" fill="#57544E">返回 null → add 返回 true</text>
+
+  <!-- 右分支：已存在 -->
+  <line x1="510" y1="184" x2="550" y2="215" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="545" y="204" font-size="11" fill="#C2410C" font-weight="700">已存在</text>
+
+  <rect x="460" y="218" width="200" height="48" rx="8" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="560" y="238" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">put 返回旧值 PRESENT</text>
+  <text x="560" y="256" text-anchor="middle" font-size="10" fill="#57544E">!= null → add 返回 false</text>
+
+  <!-- 底部说明 -->
+  <rect x="80" y="286" width="540" height="28" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="350" y="305" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">HashSet 的"去重"本质上就是 HashMap 的 key 不可重复</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>HashSet.add() 执行流程：元素作为 key 存入底层 HashMap，PRESENT 作为统一占位 value</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">为什么 value 要用一个固定的 PRESENT 对象？</div>
+<p>因为 HashSet 只关心"元素是否存在"，不需要存 value。但如果 value 设为 null，<code>add()</code> 方法中 <code>map.put(e, PRESENT) == null</code> 的判断就会失效——无法区分"key 不存在"和"value 本身就是 null"。</p>
+<p>所以 JDK 设计者用了一个<strong>静态 final 的 Object 实例</strong>作为所有 entry 的 value，既节省内存（所有 entry 共享同一个对象引用），又能让 <code>add()</code> 的返回值逻辑正确。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：TreeSet ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>TreeSet 底层：红黑树维持的有序集合</h2></div>
+
+<p>如果说 HashSet 是"无序去重"，那 TreeSet 就是<strong>"有序去重"</strong>。它的底层同样是一个包装器——基于 <code>TreeMap</code>（NavigableMap 的实现类）。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TreeSet.java</b> · JDK 1.8 核心字段</span></div>
+<pre><code><span class="k">public class</span> <span class="t">TreeSet</span>&lt;E&gt; <span class="k">extends</span> <span class="t">AbstractSet</span>&lt;E&gt;
+    <span class="k">implements</span> <span class="t">NavigableSet</span>&lt;E&gt;, <span class="t">Cloneable</span>, <span class="t">Serializable</span> {
+
+    <span class="c">// 底层存储：一个 TreeMap</span>
+    <span class="k">private transient</span> <span class="t">NavigableMap</span>&lt;E, <span class="t">Object</span>&gt; m;
+
+    <span class="c">// 同样是占位 value（和 HashSet 的 PRESENT 类似）</span>
+    <span class="k">private static final</span> <span class="t">Object</span> PRESENT = <span class="k">new</span> <span class="t">Object</span>();
+
+    <span class="c">// 默认构造：使用自然排序（元素必须实现 Comparable）</span>
+    <span class="k">public</span> <span class="t">TreeSet</span>() {
+        <span class="k">this</span>(<span class="k">new</span> <span class="t">TreeMap</span>&lt;&gt;());
+    }
+
+    <span class="c">// 自定义比较器构造</span>
+    <span class="k">public</span> <span class="t">TreeSet</span>(<span class="t">Comparator</span>&lt;? <span class="k">super</span> E&gt; comparator) {
+        <span class="k">this</span>(<span class="k">new</span> <span class="t">TreeMap</span>&lt;&gt;(comparator));
+    }
+}</code></pre>
+</div>
+
+<p>TreeMap 的底层是一棵<strong>红黑树</strong>（Red-Black Tree），这是一种自平衡的二叉查找树。它保证每次插入、删除、查找的时间复杂度都是 <strong>O(log n)</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 380" role="img" aria-label="TreeSet 红黑树结构示意">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">TreeSet 底层红黑树：存入 [30, 10, 50, 5, 20, 40, 60]</text>
+
+  <!-- Root: 30 (black) -->
+  <circle cx="350" cy="72" r="24" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="350" y="78" text-anchor="middle" font-size="14" fill="#FAC94A" font-weight="700">30</text>
+
+  <!-- Level 2 -->
+  <line x1="330" y1="92" x2="210" y2="140" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="370" y1="92" x2="490" y2="140" stroke="#8C8676" stroke-width="1.5"/>
+
+  <!-- 10 (red) -->
+  <circle cx="210" cy="160" r="24" fill="#C2410C" stroke="#C2410C" stroke-width="2"/>
+  <text x="210" y="166" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">10</text>
+
+  <!-- 50 (red) -->
+  <circle cx="490" cy="160" r="24" fill="#C2410C" stroke="#C2410C" stroke-width="2"/>
+  <text x="490" y="166" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">50</text>
+
+  <!-- Level 3 -->
+  <line x1="194" y1="180" x2="130" y2="228" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="226" y1="180" x2="290" y2="228" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="474" y1="180" x2="410" y2="228" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="506" y1="180" x2="570" y2="228" stroke="#8C8676" stroke-width="1.5"/>
+
+  <!-- 5 (black) -->
+  <circle cx="130" cy="248" r="22" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="130" y="254" text-anchor="middle" font-size="13" fill="#FAC94A" font-weight="700">5</text>
+
+  <!-- 20 (black) -->
+  <circle cx="290" cy="248" r="22" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="290" y="254" text-anchor="middle" font-size="13" fill="#FAC94A" font-weight="700">20</text>
+
+  <!-- 40 (black) -->
+  <circle cx="410" cy="248" r="22" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="410" y="254" text-anchor="middle" font-size="13" fill="#FAC94A" font-weight="700">40</text>
+
+  <!-- 60 (black) -->
+  <circle cx="570" cy="248" r="22" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="570" y="254" text-anchor="middle" font-size="13" fill="#FAC94A" font-weight="700">60</text>
+
+  <!-- Legend -->
+  <rect x="80" y="300" width="540" height="64" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <circle cx="120" cy="324" r="10" fill="#1C1C1C"/><text x="140" y="328" font-size="11" fill="#1C1C1C">= 黑色节点</text>
+  <circle cx="250" cy="324" r="10" fill="#C2410C"/><text x="270" y="328" font-size="11" fill="#1C1C1C">= 红色节点</text>
+  <text x="350" y="352" text-anchor="middle" font-size="12" fill="#57544E">红黑树性质：根黑、叶黑、红不连红、黑高相等 → 保证 O(log n)</text>
+  <text x="350" y="336" text-anchor="middle" font-size="11" fill="#8C8676">中序遍历: 5 → 10 → 20 → 30 → 40 → 50 → 60（自动升序！）</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>TreeSet 底层红黑树结构：元素自动按大小排列，中序遍历即为升序序列</figcaption>
+</figure>
+
+<p>TreeSet 的核心操作都委托给了 TreeMap：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TreeSet.java</b> · 核心方法实现</span></div>
+<pre><code><span class="c">// add：委托给 TreeMap.put()</span>
+<span class="k">public boolean</span> add(E e) {
+    <span class="k">return</span> m.put(e, PRESENT) == <span class="k">null</span>;
+}
+
+<span class="c">// TreeSet 独有的有序操作方法（TreeSet 有而 HashSet 没有）</span>
+<span class="k">public</span> E first()              { <span class="k">return</span> m.firstKey(); }
+<span class="k">public</span> E last()               { <span class="k">return</span> m.lastKey(); }
+<span class="k">public</span> E lower(E e)           { <span class="k">return</span> m.lowerKey(e); }    <span class="c">// 小于 e 的最大元素</span>
+<span class="k">public</span> E higher(E e)          { <span class="k">return</span> m.higherKey(e); }   <span class="c">// 大于 e 的最小元素</span>
+<span class="k">public</span> E ceiling(E e)         { <span class="k">return</span> m.ceilingKey(e); }  <span class="c">// 大于等于 e 的最小元素</span>
+<span class="k">public</span> E floor(E e)           { <span class="k">return</span> m.floorKey(e); }    <span class="c">// 小于等于 e 的最大元素</span>
+<span class="k">public</span> <span class="t">SortedSet</span>&lt;E&gt; subSet(E from, E to)  { <span class="c">/* 范围查询 */</span> }</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么 TreeSet 不允许插入 null？</div>
+<p>TreeSet 需要对元素进行<strong>比较排序</strong>。当插入 null 时，TreeMap 在比较阶段会调用 <code>null.compareTo(...)</code> 或 <code>comparator.compare(null, ...)</code>，直接抛出 <code>NullPointerException</code>。</p>
+<p>而 HashSet 只依赖 <code>hashCode()</code> 和 <code>equals()</code>，null 的 hashCode 被特殊处理为 0，所以 HashSet 允许一个 null 元素。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：equals 与 hashCode ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>equals 与 hashCode 的契约：最容易踩的坑</h2></div>
+
+<p>HashSet（以及 HashMap）的去重机制依赖两个方法的协作：<code>equals()</code> 和 <code>hashCode()</code>。Java 规范要求：<strong>如果两个对象 equals 相等，它们的 hashCode 必须相同</strong>。反过来不要求。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 280" role="img" aria-label="equals 与 hashCode 协作流程">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">HashSet.add(obj) 判重流程</text>
+
+  <!-- Step 1 -->
+  <rect x="220" y="44" width="260" height="40" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="350" y="68" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">1. 计算 obj.hashCode()</text>
+
+  <line x1="350" y1="84" x2="350" y2="104" stroke="#8C8676" stroke-width="1.2" marker-end="url(#arr1)"/>
+
+  <!-- Step 2 -->
+  <rect x="200" y="108" width="300" height="40" rx="8" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="350" y="132" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">2. 定位到桶：hash &amp; (n-1)</text>
+
+  <line x1="350" y1="148" x2="350" y2="168" stroke="#8C8676" stroke-width="1.2" marker-end="url(#arr1)"/>
+
+  <!-- Step 3 -->
+  <rect x="180" y="172" width="340" height="44" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="350" y="192" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">3. 遍历桶中每个元素 node：</text>
+  <text x="350" y="208" text-anchor="middle" font-size="11" fill="#57544E">node.hash == hash &amp;&amp; node.key.equals(obj) ?</text>
+
+  <!-- Branches -->
+  <rect x="50" y="236" width="200" height="36" rx="6" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="150" y="259" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">true → 视为重复，不插入</text>
+
+  <rect x="450" y="236" width="200" height="36" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="550" y="259" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">false → 插入桶中</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>HashSet 判重两步走：先用 hashCode 定位桶，再用 equals 精确比较</figcaption>
+</figure>
+
+<p>来看一个经典的反面教材——<strong>只重写 equals 不重写 hashCode</strong>会发生什么：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BugDemo.java</b> · 只重写 equals 的后果</span></div>
+<pre><code><span class="k">class</span> <span class="t">User</span> {
+    <span class="t">String</span> name;
+    <span class="t">int</span> age;
+
+    <span class="t">User</span>(<span class="t">String</span> name, <span class="t">int</span> age) {
+        <span class="k">this</span>.name = name;
+        <span class="k">this</span>.age = age;
+    }
+
+    <span class="c">// 只重写了 equals，没有重写 hashCode</span>
+    <span class="k">public boolean</span> equals(<span class="t">Object</span> o) {
+        <span class="k">if</span> (<span class="k">this</span> == o) <span class="k">return true</span>;
+        <span class="k">if</span> (!(o <span class="k">instanceof</span> <span class="t">User</span>)) <span class="k">return false</span>;
+        <span class="t">User</span> u = (<span class="t">User</span>) o;
+        <span class="k">return</span> name.equals(u.name) &amp;&amp; age == u.age;
+    }
+    <span class="c">// ⚠️ 没有 hashCode()！使用 Object 默认实现（基于内存地址）</span>
+}
+
+<span class="c">// 测试：</span>
+<span class="t">HashSet</span>&lt;<span class="t">User</span>&gt; set = <span class="k">new</span> <span class="t">HashSet</span>&lt;&gt;();
+set.add(<span class="k">new</span> <span class="t">User</span>(<span class="s">"Alice"</span>, <span class="n">25</span>));
+set.add(<span class="k">new</span> <span class="t">User</span>(<span class="s">"Alice"</span>, <span class="n">25</span>));  <span class="c">// 期望被去重</span>
+
+System.out.println(set.size());
+<span class="c">// 实际输出：2 ← BUG！两个逻辑相同的对象都被放进去了</span>
+<span class="c">// 原因：两个对象的 hashCode() 不同 → 落到不同桶 → equals 根本没机会被调用</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么"重写 equals 就必须重写 hashCode"？</div>
+<p>核心原因是 HashSet/HashMap 的判重是<strong>两步走</strong>的：</p>
+<p><strong>第一步</strong>：用 hashCode 定位到数组的某个桶（<code>hash &amp; (n-1)</code>）<br/>
+<strong>第二步</strong>：在桶内用 equals 逐个比较</p>
+<p>如果两个逻辑相等的对象 hashCode 不同，它们会被分配到<strong>不同的桶</strong>。第一步就把它们分开了，第二步的 equals 比较根本不会发生——于是 HashSet 认为它们是两个不同的元素。</p>
+<p>这就是为什么 Java 规范（<code>Object</code> 类注释里明确写了）要求：<code>equals()</code> 返回 true 的两个对象，<code>hashCode()</code> 必须返回相同的值。</p>
+</div>
+
+<div class="think"><div class="think-q">反过来：hashCode 相同但 equals 不同的两个对象，HashSet 能正确区分吗？<br/><br/>
+答案：可以。hashCode 相同只是说明它们<strong>落在同一个桶</strong>（哈希冲突），进入桶后还会用 equals 逐个比较。只有 equals 也返回 true，才视为重复。所以 hashCode 相同但 equals 不同是允许的——只是会增加桶内链表/树的长度，降低性能。</div></div>
+</section>
+
+<!-- ═══════════════ 第5站：对比与选型 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>HashSet vs TreeSet vs LinkedHashSet 选型指南</h2></div>
+
+<p>在实际开发中，除了 HashSet 和 TreeSet，还有一个常用的实现类 <code>LinkedHashSet</code>。下面做一个全面对比：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>特性</th>
+      <th>HashSet</th>
+      <th>LinkedHashSet</th>
+      <th>TreeSet</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>底层数据结构</strong></td>
+      <td>HashMap（哈希表）</td>
+      <td>LinkedHashMap（哈希表 + 双向链表）</td>
+      <td>TreeMap（红黑树）</td>
+    </tr>
+    <tr>
+      <td><strong>是否有序</strong></td>
+      <td>无序</td>
+      <td>插入顺序</td>
+      <td>自然排序 / 自定义排序</td>
+    </tr>
+    <tr>
+      <td><strong>add / remove / contains</strong></td>
+      <td>O(1) 平均</td>
+      <td>O(1) 平均</td>
+      <td>O(log n)</td>
+    </tr>
+    <tr>
+      <td><strong>是否允许 null</strong></td>
+      <td>允许 1 个 null</td>
+      <td>允许 1 个 null</td>
+      <td>不允许 null（会 NPE）</td>
+    </tr>
+    <tr>
+      <td><strong>内存开销</strong></td>
+      <td>较小</td>
+      <td>中等（多维护链表）</td>
+      <td>较大（每个节点约 48 字节）</td>
+    </tr>
+    <tr>
+      <td><strong>典型使用场景</strong></td>
+      <td>去重、快速查找</td>
+      <td>去重且保持插入顺序</td>
+      <td>需要排序、范围查询、取 TopK</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">LinkedHashSet 的底层实现</div>
+<p>LinkedHashSet 继承自 HashSet，但构造时创建的是 <code>LinkedHashMap</code> 而非 <code>HashMap</code>。LinkedHashMap 在 HashMap 的基础上，通过双向链表把所有 entry 串起来，从而保持插入顺序。</p>
+<p>所以 LinkedHashSet 的性能和 HashSet 基本一致，只是多了维护链表的少量开销。它的典型场景是：<strong>需要去重，但又想保持元素添加的先后顺序</strong>（比如 LRU 缓存就是基于 LinkedHashMap 实现的）。</p>
+</div>
+
+<h3>生产环境选型决策</h3>
+
+<figure class="fig">
+<svg viewBox="0 0 700 260" role="img" aria-label="Set 选型决策树">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">Set 接口选型决策树</text>
+
+  <!-- Root -->
+  <rect x="250" y="42" width="200" height="40" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="350" y="67" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">需要去重集合？</text>
+
+  <!-- Left branch: 不需要排序 -->
+  <line x1="280" y1="82" x2="170" y2="115" stroke="#8C8676" stroke-width="1.2" marker-end="url(#arr1)"/>
+  <text x="200" y="102" font-size="11" fill="#3E6B8F" font-weight="700">不需要排序</text>
+
+  <rect x="80" y="118" width="180" height="36" rx="8" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="170" y="141" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">需要保持插入顺序？</text>
+
+  <line x1="130" y1="154" x2="80" y2="185" stroke="#8C8676" stroke-width="1" marker-end="url(#arr1)"/>
+  <text x="85" y="174" font-size="10" fill="#57544E">不需要</text>
+  <rect x="10" y="188" width="140" height="34" rx="6" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="80" y="210" text-anchor="middle" font-size="12" fill="#fff" font-weight="700">HashSet</text>
+
+  <line x1="210" y1="154" x2="260" y2="185" stroke="#8C8676" stroke-width="1" marker-end="url(#arr1)"/>
+  <text x="250" y="174" font-size="10" fill="#57544E">需要</text>
+  <rect x="190" y="188" width="140" height="34" rx="6" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="260" y="210" text-anchor="middle" font-size="12" fill="#fff" font-weight="700">LinkedHashSet</text>
+
+  <!-- Right branch: 需要排序 -->
+  <line x1="420" y1="82" x2="530" y2="115" stroke="#8C8676" stroke-width="1.2" marker-end="url(#arr1)"/>
+  <text x="500" y="102" font-size="11" fill="#C2410C" font-weight="700">需要排序/范围查询</text>
+
+  <rect x="460" y="118" width="200" height="36" rx="8" fill="#C2410C" stroke="#C2410C" stroke-width="1"/>
+  <text x="560" y="141" text-anchor="middle" font-size="13" fill="#fff" font-weight="700">TreeSet</text>
+
+  <!-- Bottom tips -->
+  <rect x="440" y="170" width="240" height="72" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="560" y="192" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">TreeSet 适用场景：</text>
+  <text x="560" y="210" text-anchor="middle" font-size="10" fill="#57544E">· 需要自动排序（如排行榜）</text>
+  <text x="560" y="226" text-anchor="middle" font-size="10" fill="#57544E">· 需要 first()/last()/ceiling() 等导航方法</text>
+  <text x="560" y="242" text-anchor="middle" font-size="10" fill="#57544E">· 需要 subSet() 范围查询</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>Set 接口选型决策树：根据是否需要排序和是否保持插入顺序来选择</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第6站：面试高频 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>面试高频题汇总</h2></div>
+
+<h3>Q1: HashSet 如何保证元素不重复？</h3>
+<p>HashSet 底层是 HashMap。调用 <code>add(e)</code> 时，实际执行 <code>map.put(e, PRESENT)</code>。HashMap 在 put 时先计算 key 的 hashCode 定位桶位置，再用 equals 与桶中已有元素比较。如果找到相同的 key，put 返回旧 value（非 null），add 返回 false（表示未添加）。</p>
+
+<h3>Q2: 为什么重写 equals 必须重写 hashCode？</h3>
+<p>HashSet/HashMap 判重分两步：第一步用 hashCode 定位桶，第二步用 equals 比较。如果两个逻辑相等的对象 hashCode 不同，它们会落入不同桶，equals 不会被调用，导致去重失败。</p>
+
+<h3>Q3: TreeSet 如何实现排序？</h3>
+<p>TreeSet 底层是 TreeMap，基于红黑树实现。插入元素时通过 <code>Comparable.compareTo()</code> 或 <code>Comparator.compare()</code> 在树中定位，维持二叉搜索树的有序性。中序遍历即为升序序列。</p>
+
+<h3>Q4: HashSet 是线程安全的吗？</h3>
+<p>不是。HashSet 底层是 HashMap，而 HashMap 不是线程安全的。多线程环境下需要使用 <code>Collections.synchronizedSet()</code> 包装，或者使用 <code>ConcurrentHashMap.newKeySet()</code>。</p>
+
+<div class="takeaway">
+<div class="takeaway-label">本篇核心要点</div>
+<ul>
+  <li><strong>HashSet</strong> = HashMap 的 key 集合 + 固定 value（PRESENT），去重靠 hashCode + equals</li>
+  <li><strong>TreeSet</strong> = TreeMap 的 key 集合 + 固定 value（PRESENT），排序靠红黑树 + Comparable/Comparator</li>
+  <li><strong>LinkedHashSet</strong> = LinkedHashMap 的 key 集合，保持插入顺序</li>
+  <li><strong>equals 与 hashCode 契约</strong>：equals 为 true 的两个对象 hashCode 必须相同</li>
+  <li>HashSet 允许 null，TreeSet 不允许 null（因为无法比较排序）</li>
+  <li>性能：HashSet O(1) &gt; TreeSet O(log n)，但 TreeSet 提供有序操作</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html><!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Java 中高级面试 - Day 14 | HashSet/TreeSet 底层原理</title>
 <style>
 :root {
