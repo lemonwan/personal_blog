@@ -34,10 +34,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/ai-llm/" className="btn-dark" style={{ padding: "12px 28px" }}>LLM 基础概念学习笔记 →</Link>
-            <Link href="/java-basics/" className="btn-white" style={{ padding: "12px 28px" }}>Java 面试笔记</Link>
-          </div>
+          {/* 顶部 CTA 按钮已移除——精选卡片承担入口 */}
         </div>
       </section>
 

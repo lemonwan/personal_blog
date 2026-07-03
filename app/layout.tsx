@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import HeaderNav from "./HeaderNav";
 
 export const metadata: Metadata = {
   title: "WAN — Java 开发工程师",
@@ -40,12 +41,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   className="h-10 w-10 rounded-full ring-2 ring-[#FAC94A]/60 shadow-sm"
                 />
               </a>
-              {/* 导航：手机上也可见（右对齐、字号缩小），桌面拉开间距 */}
-              <nav className="flex items-center gap-3 sm:gap-6 overflow-x-auto no-scrollbar">
-                <a href="/" className="whitespace-nowrap text-xs sm:text-sm font-semibold text-white/60 hover:text-white transition-colors">首页</a>
-                <a href="/ai-llm/" className="whitespace-nowrap text-xs sm:text-sm font-semibold text-[#FAC94A] transition-colors">LLM 笔记</a>
-                <a href="/java-basics/" className="whitespace-nowrap text-xs sm:text-sm font-semibold text-white/60 hover:text-white transition-colors">Java 笔记</a>
-              </nav>
+              {/* 导航：手机上也可见（右对齐、字号缩小），桌面拉开间距；当前页高亮 */}
+              <HeaderNav />
             </div>
           </div>
         </header>

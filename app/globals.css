@@ -286,6 +286,61 @@ body {
 /* ── 深色 header/footer 通用 ── */
 .section-dark { background: #1C1C1C; color: #fff; }
 
+/* ── 首页 Hero CTA 丛书按钮 ── */
+.hero-cta {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 14px;
+  padding: 14px 22px 14px 18px;
+  border: 3px solid #1C1C1C;
+  box-shadow: 6px 6px 0 #1C1C1C;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  min-width: 240px;
+}
+.hero-cta:hover {
+  transform: translate(3px, 3px);
+  box-shadow: 3px 3px 0 #1C1C1C;
+}
+.hero-cta-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border: 2.5px solid currentColor;
+  border-radius: 6px;
+}
+.hero-cta-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.2;
+}
+.hero-cta-title {
+  font-family: 'AlimamaShuHeiTi', sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+.hero-cta-sub {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.6;
+  margin-top: 3px;
+  letter-spacing: 0.05em;
+}
+.hero-cta-primary { background: #1C1C1C; color: #FAC94A; }
+.hero-cta-secondary { background: #fff; color: #1C1C1C; }
+.hero-cta-secondary:hover { background: #FAC94A; }
+
+@media (max-width: 640px) {
+  .hero-cta { min-width: 0; width: 100%; }
+  .hero-cta-title { font-size: 14px; }
+}
+
 /* ── 首页 FeatureCard 丛书封面风 hover ── */
 .feature-card:hover {
   transform: translate(3px, 3px);
