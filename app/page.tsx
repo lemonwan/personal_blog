@@ -53,19 +53,23 @@ export default function Home() {
           <div className="mt-10 grid gap-6 sm:grid-cols-2">
             <FeatureCard
               href="/ai-llm/"
-              accent="#3E6B8F"
-              label="LLM 基础概念学习笔记"
-              subtitle="从向量到 Transformer，零基础入门"
-              desc="30 节沉浸式讲解，每课从一个你一眼就懂的问题出发，亲手把向量、神经网络、注意力机制推导出来。"
-              stats={["30 节课", "5 卷内容"]}
+              vol="Vol. I"
+              cover="#F4D35E"
+              status="进行中"
+              title="LLM 基础"
+              subtitle="概念学习笔记"
+              desc="从向量到 Transformer，零基础入门。每课从一个你一眼就懂的问题出发，亲手把注意力机制推导出来。"
+              meta={["30 节课", "5 卷内容", "沉浸式讲解"]}
             />
             <FeatureCard
               href="/java-basics/"
-              accent="#C2410C"
-              label="Java 面试笔记"
-              subtitle="从集合框架到 JVM 调优"
-              desc="系统整理 Java 核心知识，每篇从高频面试题出发，配套 JDK 源码解读、图解与生产最佳实践。"
-              stats={[`${JAVA_ARTICLES.length} 篇文章`, "4 大主题"]}
+              vol="Vol. II"
+              cover="#EDE3C4"
+              status="持续更新"
+              title="Java 面试"
+              subtitle="知识沉淀与源码解读"
+              desc="从集合框架到 JVM 调优，每篇从高频面试题出发，配套 JDK 源码解读、图解与生产最佳实践。"
+              meta={[`${JAVA_ARTICLES.length} 篇文章`, "4 大主题", "更新中"]}
             />
           </div>
         </div>
@@ -117,75 +121,115 @@ export default function Home() {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   可复用精美卡片组件 · FeatureCard
-   新增卡片只需传 href / accent / label / subtitle / desc / stats
+   FeatureCard · 丛书封面风
+   3px 黑边 + 硬阴影 + 大卷号 + Alimama 粗黑体
    ═══════════════════════════════════════════════════════════ */
 function FeatureCard({
   href,
-  accent,
-  label,
+  vol,
+  cover,
+  status,
+  title,
   subtitle,
   desc,
-  stats,
+  meta,
 }: {
   href: string;
-  accent: string;
-  label: string;
+  vol: string;
+  cover: string;
+  status: string;
+  title: string;
   subtitle: string;
   desc: string;
-  stats: string[];
+  meta: string[];
 }) {
   return (
     <a
       href={href}
-      className="group relative flex flex-col rounded-2xl border border-[#E8E3D5] bg-white p-7
-                 transition-all duration-300
-                 hover:-translate-y-1 hover:border-transparent hover:shadow-lg hover:shadow-black/[0.06]"
+      className="feature-card group relative block"
+      style={{
+        background: cover,
+        border: "3px solid #1C1C1C",
+        boxShadow: "6px 6px 0 #1C1C1C",
+        padding: "28px 28px 24px",
+        transition: "transform 0.15s ease, box-shadow 0.15s ease",
+        color: "#1C1C1C",
+        textDecoration: "none",
+      }}
     >
-      {/* 顶部彩色装饰条 */}
-      <div
-        className="absolute top-0 left-7 right-7 h-[3px] rounded-b-full opacity-60 transition-all duration-300 group-hover:opacity-100 group-hover:h-[4px]"
-        style={{ background: accent }}
-      />
-
-      {/* 标题区 */}
-      <div className="mt-2 flex items-start gap-3">
-        {/* 彩色圆点图标 */}
-        <div
-          className="mt-0.5 h-9 w-9 flex-shrink-0 rounded-xl flex items-center justify-center transition-colors duration-300"
-          style={{ background: `${accent}12` }}
+      {/* 顶部一行：卷号 · 状态徽章 */}
+      <div className="flex items-center justify-between mb-8">
+        <span
+          className="font-mono text-xs font-black tracking-widest"
+          style={{ color: "#1C1C1C", opacity: 0.7 }}
         >
-          <div className="h-3 w-3 rounded-full" style={{ background: accent }} />
-        </div>
-        <div className="min-w-0">
-          <h3 className="text-lg font-bold text-[#1C1C1C] leading-snug transition-colors duration-300 group-hover:text-[#1C1C1C]">
-            {label}
-          </h3>
-          <p className="text-[13px] text-[#1C1C1C]/40 mt-0.5">{subtitle}</p>
-        </div>
+          {vol}
+        </span>
+        <span
+          className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1"
+          style={{
+            background: "#1C1C1C",
+            color: "#FAC94A",
+            borderRadius: "999px",
+            letterSpacing: "0.05em",
+          }}
+        >
+          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "#FAC94A" }} />
+          {status}
+        </span>
       </div>
 
+      {/* 主标题 + 副标题 */}
+      <h3
+        className="text-3xl sm:text-4xl leading-tight"
+        style={{ fontFamily: "'AlimamaShuHeiTi', sans-serif", fontWeight: 900, color: "#1C1C1C" }}
+      >
+        {title}
+      </h3>
+      <p
+        className="mt-2 text-sm font-mono font-bold"
+        style={{ color: "#1C1C1C", opacity: 0.55, letterSpacing: "0.02em" }}
+      >
+        {subtitle}
+      </p>
+
+      {/* 分隔线 */}
+      <div className="my-5 h-px" style={{ background: "#1C1C1C", opacity: 0.15 }} />
+
       {/* 描述 */}
-      <p className="mt-4 text-[14px] text-[#1C1C1C]/50 leading-relaxed flex-1">
+      <p className="text-[14px] leading-relaxed" style={{ color: "#1C1C1C", opacity: 0.72 }}>
         {desc}
       </p>
 
-      {/* 底部：统计 + 箭头 */}
-      <div className="mt-5 flex items-center justify-between pt-4 border-t border-[#F0EDE4]">
-        <div className="flex gap-3">
-          {stats.map((s) => (
-            <span key={s} className="text-[11px] font-bold tracking-wide text-[#1C1C1C]/30 uppercase">
-              {s}
+      {/* 底部：元数据 · 翻开 → */}
+      <div className="mt-6 flex items-end justify-between gap-3 flex-wrap">
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {meta.map((m, i) => (
+            <span
+              key={m}
+              className="font-mono text-[11px] font-bold uppercase tracking-wider"
+              style={{ color: "#1C1C1C", opacity: 0.5 }}
+            >
+              {i > 0 && <span className="mr-3 opacity-40">·</span>}
+              {m}
             </span>
           ))}
         </div>
         <span
-          className="inline-flex items-center gap-1 text-[13px] font-bold transition-all duration-300"
-          style={{ color: accent }}
+          className="inline-flex items-center gap-1.5 text-sm font-black"
+          style={{ color: "#1C1C1C" }}
         >
-          探索
-          <svg className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 12h14M12 5l7 7-7 7" />
+          翻开
+          <svg
+            className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 12h14M13 6l6 6-6 6" />
           </svg>
         </span>
       </div>

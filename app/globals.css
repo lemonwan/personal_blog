@@ -286,6 +286,12 @@ body {
 /* ── 深色 header/footer 通用 ── */
 .section-dark { background: #1C1C1C; color: #fff; }
 
+/* ── 首页 FeatureCard 丛书封面风 hover ── */
+.feature-card:hover {
+  transform: translate(3px, 3px);
+  box-shadow: 3px 3px 0 #1C1C1C !important;
+}
+
 /* ══════════════════════════════════════════════
    Mobile responsiveness (< 900px / < 640px)
    ══════════════════════════════════════════════ */
