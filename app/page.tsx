@@ -1,9 +1,6 @@
 import Link from "next/link";
 import { JAVA_ARTICLES } from "@/lib/content";
 
-// 最近更新的 4 篇 Java 文章
-const recentJava = JAVA_ARTICLES.slice(0, 4);
-
 export default function Home() {
   return (
     <>
@@ -75,47 +72,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ═══ 最近更新 ═══ */}
-      <section className="px-6 py-20" style={{ background: "#EDE3C4", borderTop: "2px solid #1C1C1C" }}>
-        <div className="mx-auto max-w-7xl">
-          <div className="flex items-end justify-between mb-10">
-            <div>
-              <p className="mb-2 text-sm font-black uppercase tracking-widest text-[#1C1C1C]/40">Latest · 最近更新</p>
-              <h2 className="text-3xl font-black text-[#1C1C1C]">Java 面试笔记 · 最新文章</h2>
-            </div>
-            <Link href="/java-basics/" className="hidden sm:inline-flex items-center gap-2 text-sm font-bold text-[#1C1C1C]/60 hover:text-[#C2410C] transition-colors">
-              查看全部 {JAVA_ARTICLES.length} 篇 →
-            </Link>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {recentJava.map((a, i) => (
-              <Link key={a.slug} href={`/java-interview/${encodeURIComponent(a.slug)}/`}
-                className="nb-card group block" style={{ padding: "22px 24px" }}>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-mono font-bold text-[#C2410C]">
-                    {String(a.lessonNum).padStart(2, "0")}
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#D8CEB6] text-[#1C1C1C]/40">
-                    {a.tags?.[0] || ""}
-                  </span>
-                </div>
-                <h3 className="font-bold text-[#1C1C1C] group-hover:text-[#C2410C] transition-colors text-sm leading-snug">
-                  {a.title}
-                </h3>
-              </Link>
-            ))}
-          </div>
-
-          <div className="mt-8 text-center sm:hidden">
-            <Link href="/java-basics/" className="btn-white" style={{ padding: "10px 24px" }}>
-              查看全部 {JAVA_ARTICLES.length} 篇 →
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══ CTA 已移除 ═══ */}
+      {/* ═══ 第三部分暂时去掉 ═══ */}
     </>
   );
 }
