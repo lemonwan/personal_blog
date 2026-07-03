@@ -17,16 +17,17 @@ export default function Home() {
         </div>
 
         <div className="mx-auto max-w-7xl pt-12 pb-16 reveal">
-          <p className="mb-4 text-sm font-black uppercase tracking-widest text-[#1C1C1C]/60">技术笔记 · 持续更新 — 2026</p>
+          <p className="mb-4 text-sm font-black uppercase tracking-widest text-[#1C1C1C]/60">AI Agent 学习者 · 后端工程师 · 2026 转型中</p>
           <h1 className="text-4xl font-black text-[#1C1C1C] sm:text-5xl" style={{ fontFamily: "'AlimamaShuHeiTi', sans-serif" }}>
-            Java 开发工程师
+            正在从 Java 转向 AI Agent 应用工程师
             <span className="inline-block rounded-xl border-2 border-[#1C1C1C] bg-[#1C1C1C] text-[#FAC94A] ml-2 px-3 py-1 align-middle" style={{ fontSize: "0.45em", verticalAlign: "middle" }}>
-              与知识记录者
+              Learning in Public
             </span>
           </h1>
           <p className="mt-5 max-w-xl text-base font-semibold text-[#1C1C1C]/60 leading-relaxed">
-            专注 Java 后端开发，深耕 JVM、并发编程与系统设计。
-            相信"理解源码才能写出好代码"——在这里记录学习笔记、面试复盘与技术思考。
+            8 年 PHP + Java 后端开发经验，正在系统性地转型 AI Agent 应用工程师。
+            学习方向：LangChain / LangGraph / RAG / MCP。
+            这里公开我的每日学习笔记、面试知识沉淀与项目进度——用输出倒逼输入。
           </p>
 
           {/* 技能标签 */}
@@ -110,13 +111,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ═══ CTA ═══ */}
-      <section className="section-dark text-center" style={{ padding: "56px 24px", borderTop: "3px solid #FAC94A" }}>
-        <p className="text-[#FAC94A] font-black text-lg mb-3">有想交流的技术话题？</p>
-        <p className="text-white/50 text-sm max-w-md mx-auto">
-          对笔记内容有想法，或想探讨 Java、JVM、AI 大模型？欢迎随时联系交流。
-        </p>
-      </section>
+      {/* ═══ CTA 已移除 ═══ */}
     </>
   );
 }

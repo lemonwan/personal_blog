@@ -10,7 +10,7 @@ export default function JavaBasicsPage() {
   return (
     <div className="ai-llm-scope">
       {/* ═══ Hero（对标 AI 教程金底风格）═══ */}
-      <section className="allm-hero relative overflow-hidden" style={{ background: "#F4D35E", borderBottom: "3px solid #1C1C1C", padding: "40px 24px 48px" }}>
+      <section className="allm-hero relative overflow-hidden hero-pad" style={{ background: "#F4D35E", borderBottom: "3px solid #1C1C1C" }}>
         <div className="pointer-events-none absolute -right-8 -top-8 opacity-10">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-64 w-64 text-[#1C1C1C]" aria-hidden="true">
             <path d="M4 20h16M4 20v-4a2 2 0 012-2h12a2 2 0 012 2v4M12 4v12m-4-4l4 4 4-4" />
@@ -111,7 +111,7 @@ export default function JavaBasicsPage() {
       </section>
 
       {/* ═══ Volume sections ═══ */}
-      <div style={{ maxWidth: "1280px", margin: "0 auto", padding: "0 48px 48px" }}>
+      <div className="volumes-wrap">
         <p className="section-kicker reveal" style={{ marginTop: "72px" }}>EXPAND · 逐篇展开</p>
         <p className="section-lede reveal" style={{ marginTop: "10px" }}>
           想知道每篇文章在讲什么？下面按四大主题展开，每篇标题下是该文的核心主题。

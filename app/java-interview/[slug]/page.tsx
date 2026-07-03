@@ -35,13 +35,9 @@ export default async function JavaArticlePage({ params }: Props) {
 
   return (
     <div className="ai-llm-scope">
-      <div className="reading-bar" style={{ position: "fixed", top: "64px", left: 0, right: 0, height: "3px", background: "var(--line)", zIndex: 40 }}>
-        <div id="reading-progress" style={{ height: "100%", width: "0%", background: "var(--accent)", transition: "width 0.1s linear" }} />
-      </div>
-
-      <div style={{ maxWidth: "1280px", margin: "0 auto", padding: "0 48px" }}>
-        <div style={{ display: "flex", gap: "48px" }}>
-          <aside style={{ width: "220px", flexShrink: 0, paddingTop: "56px" }}>
+      <div className="article-shell">
+        <div className="article-grid">
+          <aside className="article-side">
             <div style={{ position: "sticky", top: "80px" }}>
               {vol && (
                 <div style={{ marginBottom: "24px" }}>
@@ -73,21 +69,21 @@ export default async function JavaArticlePage({ params }: Props) {
             </div>
           </aside>
 
-          <article style={{ flex: 1, minWidth: 0, maxWidth: "788px", paddingTop: "48px", paddingBottom: "80px" }}>
-            <div style={{ fontSize: "14px", color: "var(--ink-faint)", marginBottom: "32px" }}>
+          <article className="article-main">
+            <div style={{ fontSize: "13px", color: "var(--ink-faint)", marginBottom: "24px", wordBreak: "break-word" }}>
               <Link href="/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>首页</Link>
               {" / "}<Link href="/java-basics/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>Java 面试笔记</Link>
               {" / "}{meta.title}
             </div>
 
-            <header style={{ marginBottom: "40px" }}>
+            <header style={{ marginBottom: "32px" }}>
               <p style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "6px", fontFamily: "var(--mono)", fontSize: "12px", fontWeight: 700, letterSpacing: "0.15em", color: "var(--accent)", marginBottom: "12px" }}>
                 JAVA · 卷{getZH(meta.volume)} · {vol?.title || ""}
               </p>
-              <h1 style={{ fontFamily: "'AlimamaShuHeiTi', var(--sans)", fontSize: "clamp(28px, 3.5vw, 40px)", fontWeight: 900, color: "var(--ink)", lineHeight: 1.2 }}>
+              <h1 style={{ fontFamily: "'AlimamaShuHeiTi', var(--sans)", fontSize: "clamp(24px, 6vw, 40px)", fontWeight: 900, color: "var(--ink)", lineHeight: 1.2, wordBreak: "break-word" }}>
                 {meta.title}
               </h1>
-              <div style={{ display: "flex", gap: "6px", marginTop: "12px" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "12px" }}>
                 {meta.tags.map((t) => (
                   <span key={t} className="chip chip-ready" style={{ fontSize: "11px", padding: "2px 10px" }}>{t}</span>
                 ))}
@@ -96,14 +92,14 @@ export default async function JavaArticlePage({ params }: Props) {
 
             <div className="lesson-body" dangerouslySetInnerHTML={{ __html: content }} />
 
-            <nav style={{ display: "flex", justifyContent: "space-between", marginTop: "48px", paddingTop: "24px", borderTop: "1px solid var(--line)" }}>
+            <nav className="article-pager">
               {prev ? (
-                <Link href={`/java-interview/${encodeURIComponent(prev.slug)}/`} style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", borderRadius: "999px", border: "2px solid var(--line)", color: "var(--ink-soft)", fontWeight: 700, fontSize: "13px", textDecoration: "none" }}>
+                <Link href={`/java-interview/${encodeURIComponent(prev.slug)}/`} className="pager-btn pager-prev">
                   ← {prev.title.length > 15 ? prev.title.slice(0, 15) + "…" : prev.title}
                 </Link>
               ) : <span />}
               {next ? (
-                <Link href={`/java-interview/${encodeURIComponent(next.slug)}/`} className="btn btn-dark" style={{ padding: "10px 24px", color: "#fff", textDecoration: "none" }}>
+                <Link href={`/java-interview/${encodeURIComponent(next.slug)}/`} className="btn btn-dark pager-btn pager-next" style={{ color: "#fff", textDecoration: "none" }}>
                   {next.title.length > 15 ? next.title.slice(0, 15) + "…" : next.title} →
                 </Link>
               ) : <span />}
@@ -112,7 +108,42 @@ export default async function JavaArticlePage({ params }: Props) {
         </div>
       </div>
 
-      <script dangerouslySetInnerHTML={{ __html: `(function(){var b=document.getElementById('reading-progress');if(!b)return;window.addEventListener('scroll',function(){var h=document.documentElement.scrollHeight-window.innerHeight;b.style.width=h>0?(window.scrollY/h*100)+'%':'0%';});})();` }} />
+      {/* 浮动"回到顶部"按钮 + 环形阅读进度 */}
+      <button
+        id="back-to-top"
+        type="button"
+        aria-label="回到顶部"
+        title="回到顶部"
+        style={{
+          position: "fixed",
+          right: "20px",
+          bottom: "max(24px, env(safe-area-inset-bottom))",
+          width: "52px",
+          height: "52px",
+          borderRadius: "50%",
+          background: "#1C1C1C",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          zIndex: 60,
+          display: "none",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.28)",
+          opacity: 0,
+          transition: "opacity 0.2s ease",
+        }}
+      >
+        <svg width="52" height="52" viewBox="0 0 52 52" style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)", pointerEvents: "none" }} aria-hidden="true">
+          <circle cx="26" cy="26" r="22" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
+          <circle id="progress-ring" cx="26" cy="26" r="22" fill="none" stroke="#FAC94A" strokeWidth="3" strokeDasharray="138.23" strokeDashoffset="138.23" strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.1s linear" }} />
+        </svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FAC94A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: "relative", zIndex: 1 }} aria-hidden="true">
+          <path d="M12 19V5M5 12l7-7 7 7" />
+        </svg>
+      </button>
+
+      <script dangerouslySetInnerHTML={{ __html: `(function(){var btn=document.getElementById('back-to-top');var ring=document.getElementById('progress-ring');var C=138.23;function onScroll(){var h=document.documentElement.scrollHeight-window.innerHeight;var p=h>0?Math.min(1,Math.max(0,window.scrollY/h)):0;if(ring)ring.style.strokeDashoffset=(C*(1-p)).toString();if(btn){var show=window.scrollY>400;btn.style.display=show?'inline-flex':'none';btn.style.opacity=show?'1':'0';}}window.addEventListener('scroll',onScroll,{passive:true});onScroll();if(btn)btn.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});})();` }} />
     </div>
   );
 }

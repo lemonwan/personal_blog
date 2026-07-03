@@ -23,6 +23,15 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* 消除移动端橡皮筋回弹时露出的白色背景 */
+html {
+  background: #1C1C1C;               /* 底色与 footer 一致，滑到最底不露白 */
+  overscroll-behavior-y: none;
+}
+body {
+  overscroll-behavior-y: none;
+}
+
 /* ────── ai-llm-scope 精确对标源站 ────── */
 .ai-llm-scope {
   --paper: #F5EDDB;
@@ -276,3 +285,96 @@ body {
 
 /* ── 深色 header/footer 通用 ── */
 .section-dark { background: #1C1C1C; color: #fff; }
+
+/* ══════════════════════════════════════════════
+   Mobile responsiveness (< 900px / < 640px)
+   ══════════════════════════════════════════════ */
+
+/* 页面级兜底：禁止全局左右滑动（消除内嵌 SVG/长代码行造成的整页晃动）
+   注意：只放在 body，不放 html——放到 html 上会让 iOS Safari 的 position:fixed 元素失灵 */
+body { overflow-x: hidden; max-width: 100%; }
+
+/* 正文内嵌媒体：强制贴屏宽，长代码块内部横滚 */
+.lesson-body img,
+.lesson-body svg,
+.lesson-body video,
+.lesson-body iframe { max-width: 100%; height: auto; }
+.lesson-body pre { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.lesson-body table { max-width: 100%; }
+.lesson-body { word-wrap: break-word; overflow-wrap: break-word; }
+
+/* header nav 横滚不显示滚动条 */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── 详情页外壳与栅格 ── */
+.article-shell { max-width: 1280px; margin: 0 auto; padding: 0 48px; }
+.article-grid { display: flex; gap: 48px; }
+.article-side { width: 220px; flex-shrink: 0; padding-top: 56px; }
+.article-main { flex: 1; min-width: 0; max-width: 788px; padding-top: 48px; padding-bottom: 80px; }
+.article-pager { display: flex; justify-content: space-between; gap: 12px; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.pager-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 999px; border: 2px solid var(--line); color: var(--ink-soft); font-weight: 700; font-size: 13px; text-decoration: none; max-width: 100%; }
+
+/* 介绍页 volume 外壳 */
+.volumes-wrap { max-width: 1280px; margin: 0 auto; padding: 0 48px 48px; }
+/* Hero 内边距 */
+.hero-pad { padding: 40px 24px 48px; }
+
+/* ── 900px 以下：隐藏详情页侧栏，容器 padding 收窄 ── */
+@media (max-width: 900px) {
+  .article-shell { padding: 0 16px; }
+  .article-grid { gap: 0; display: block; }
+  .article-side { display: none; }
+  .article-main { padding-top: 24px; padding-bottom: 48px; max-width: 100%; }
+
+  .ai-llm-scope .lesson-body { font-size: 16px; line-height: 1.85; }
+  .ai-llm-scope .lesson-body .station { padding: 20px 4px; margin-bottom: 24px; }
+  .ai-llm-scope .lesson-body .station-head { gap: 12px; margin-bottom: 20px; padding-bottom: 14px; }
+  .ai-llm-scope .lesson-body .station h2 { font-size: 1.15rem; }
+  .ai-llm-scope .lesson-body .station-head::before { font-size: 2rem; }
+  .ai-llm-scope .lesson-body h3 { font-size: 1.05rem; margin: 1.8em 0 0.8em; }
+  .ai-llm-scope .lesson-body p { margin: 0 0 1.1em; }
+  .ai-llm-scope .lesson-body ul, .ai-llm-scope .lesson-body ol { padding-left: 1.3em; }
+
+  .ai-llm-scope .lesson-body .srcbox pre { padding: 14px 14px; }
+  .ai-llm-scope .lesson-body .srcbox code { font-size: 12px; line-height: 1.7; }
+  .ai-llm-scope .lesson-body .fig { padding: 20px 12px 16px; }
+  .ai-llm-scope .lesson-body .formula { padding: 16px 12px; font-size: 14px; }
+  .ai-llm-scope .lesson-body .think,
+  .ai-llm-scope .lesson-body .crack,
+  .ai-llm-scope .lesson-body .takeaway,
+  .ai-llm-scope .lesson-body .recap { padding: 16px 16px; }
+  .ai-llm-scope .lesson-body table { font-size: 13.5px; display: block; overflow-x: auto; }
+
+  /* 介绍页 method/map/volume padding 收窄 */
+  .ai-llm-scope .method-inner { padding: 40px 20px; }
+  .ai-llm-scope .map-section { padding: 48px 20px 28px; }
+  .volumes-wrap { padding: 0 20px 32px; }
+  .hero-pad { padding: 28px 20px 32px; }
+
+  /* Route Map 每一行改单列 */
+  .ai-llm-scope .rm-line { grid-template-columns: 1fr; gap: 12px; padding: 18px 16px; }
+  .ai-llm-scope .rm-track { gap: 8px; }
+  .ai-llm-scope .rm-stop { font-size: 12px; padding: 4px 10px; }
+  .ai-llm-scope .rm-cap { padding: 0; }
+  .ai-llm-scope .rm-cap-name { font-size: 15px; }
+
+  /* Volume 列表：更紧凑 */
+  .ai-llm-scope .volume-head { flex-wrap: wrap; gap: 6px; }
+  .ai-llm-scope .volume-head h3 { font-size: 18px; }
+  .ai-llm-scope .volume-q { font-size: 13px; width: 100%; }
+  .ai-llm-scope .lesson-row { grid-template-columns: 32px 1fr; gap: 10px; padding: 14px 4px; }
+  .ai-llm-scope .lesson-row > span:last-child { grid-column: 1 / -1; justify-self: start !important; margin-top: 4px; }
+  .ai-llm-scope .lesson-title { font-size: 15.5px; }
+  .ai-llm-scope .lesson-q { font-size: 12.5px; }
+
+  /* 详情页 pager：可换行、单条占满 */
+  .article-pager { flex-direction: column; align-items: stretch; }
+  .pager-btn { justify-content: center; padding: 12px 16px; font-size: 12.5px; }
+}
+
+/* ── 640px 以下：Hero 大标题降级 ── */
+@media (max-width: 640px) {
+  .ai-llm-scope .allm-hero h1 { font-size: 28px !important; line-height: 1.25 !important; }
+}
+
