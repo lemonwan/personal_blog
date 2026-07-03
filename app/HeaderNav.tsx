@@ -4,8 +4,8 @@ import { usePathname } from "next/navigation";
 
 const LINKS = [
   { href: "/", label: "首页", match: (p: string) => p === "/" },
-  { href: "/ai-llm/", label: "LLM 笔记", match: (p: string) => p.startsWith("/ai-llm") },
-  { href: "/java-basics/", label: "Java 笔记", match: (p: string) => p.startsWith("/java-basics") || p.startsWith("/java-interview") },
+  { href: "/ai-llm/", label: "LLM笔记", match: (p: string) => p.startsWith("/ai-llm") },
+  { href: "/java-basics/", label: "Java笔记", match: (p: string) => p.startsWith("/java-basics") || p.startsWith("/java-interview") },
 ];
 
 export default function HeaderNav() {
@@ -22,10 +22,10 @@ export default function HeaderNav() {
             key={l.href}
             href={l.href}
             className={
-              "whitespace-nowrap text-xs sm:text-sm font-semibold transition-colors " +
+              "whitespace-nowrap text-xs sm:text-sm font-black transition-colors " +
               (active
                 ? "text-[#FAC94A]"
-                : "text-white/60 hover:text-white")
+                : "text-white/70 hover:text-white")
             }
             aria-current={active ? "page" : undefined}
           >

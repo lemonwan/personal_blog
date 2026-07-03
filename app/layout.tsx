@@ -47,10 +47,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
         <main className="pt-16 flex-1">{children}</main>
-        <footer className="section-dark py-8 text-center text-sm text-white/40">
+        <footer className="section-dark py-8 text-center text-sm text-[#F5EDDB]/45">
           <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row justify-between gap-4">
             <span>© 2026 wan. Crafted with intent.</span>
-            <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">浙ICP备2022022811号-1</a>
+            <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer" className="hover:text-[#FAC94A] transition-colors">浙ICP备2022022811号-1</a>
             <span />
           </div>
         </footer>
