@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import HeaderNav from "./HeaderNav";
+import BackToTop from "./BackToTop";
 
 export const metadata: Metadata = {
   title: "WAN — Java 开发工程师",
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span />
           </div>
         </footer>
+        <BackToTop />
       </body>
     </html>
   );
