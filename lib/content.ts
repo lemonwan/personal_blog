@@ -628,5 +628,5 @@ export function hasJavaContent(slug: string): boolean {
 
 // Get content from either root or java-basics backup
 export function getJavaContent(slug: string): string | null {
-  return getGenericContent(slug) || getGenericContent(`java-basics/${slug}`);
+  return getGenericContent(`java-basics/${slug}`) || getGenericContent(slug);
 }
