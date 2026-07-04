@@ -28,6 +28,15 @@ html {
   background: #1C1C1C;               /* 底色与 footer 一致，滑到最底不露白 */
   overscroll-behavior-y: none;
 }
+
+/* 隐藏全局滚动条 — 回顶组件的环形进度条已替代其功能 */
+html {
+  scrollbar-width: none;             /* Firefox */
+  -ms-overflow-style: none;          /* IE / Edge legacy */
+}
+html::-webkit-scrollbar {
+  display: none;                     /* Chrome / Safari / Edge */
+}
 body {
   overscroll-behavior-y: none;
 }
@@ -345,6 +354,93 @@ body {
 .feature-card:hover {
   transform: translate(3px, 3px);
   box-shadow: 3px 3px 0 #1C1C1C !important;
+}
+
+/* ── Java 笔记 — 排版优先 · 重点突出 ── */
+
+/* Volume Index Item */
+.ai-llm-scope a.jb-vol-item {
+  text-decoration: none;
+  display: block;
+  border-radius: 12px;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.ai-llm-scope a.jb-vol-item:hover {
+  background: rgba(244, 211, 94, 0.08);
+  transform: translateX(4px);
+}
+.ai-llm-scope a.jb-vol-item:hover .jb-vol-title {
+  color: #C2410C;
+}
+.ai-llm-scope .jb-vol-line {
+  transition: width 0.3s ease, opacity 0.3s ease;
+}
+.ai-llm-scope a.jb-vol-item:hover .jb-vol-line {
+  width: 100% !important;
+  opacity: 0.6 !important;
+}
+
+/* Article Row — 频率为主导视觉元素 */
+.ai-llm-scope a.jb-row-link {
+  text-decoration: none;
+  display: block;
+  position: relative;
+  border-radius: 10px;
+  transition: background 0.15s ease;
+}
+/* 底部分割线 */
+.ai-llm-scope a.jb-row-link::after {
+  content: '';
+  position: absolute;
+  left: 76px;
+  right: 16px;
+  bottom: 0;
+  height: 1px;
+  background: #F0EBE3;
+  transition: left 0.2s ease;
+}
+/* 左指示条（hover 时生长） */
+.ai-llm-scope a.jb-row-link::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  border-radius: 0 3px 3px 0;
+  background: #FAC94A;
+  transition: height 0.2s ease, opacity 0.2s ease;
+  opacity: 0;
+}
+.ai-llm-scope a.jb-row-link:hover {
+  background: rgba(244, 211, 94, 0.07);
+}
+.ai-llm-scope a.jb-row-link:hover::before {
+  height: 60%;
+  opacity: 1;
+}
+.ai-llm-scope a.jb-row-link:hover::after {
+  left: 16px;
+}
+.ai-llm-scope a.jb-row-link:hover .jb-row-title {
+  color: #C2410C;
+}
+.ai-llm-scope a.jb-row-link:hover .jb-freq-badge {
+  transform: scale(1.06);
+}
+
+/* Frequency Badge */
+.ai-llm-scope .jb-freq-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 8px;
+  font-weight: 900;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 /* ══════════════════════════════════════════════

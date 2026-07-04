@@ -158,42 +158,7 @@ export default async function JavaArticlePage({ params }: Props) {
         </div>
       </div>
 
-      {/* 浮动"回到顶部"按钮 + 环形阅读进度 */}
-      <button
-        id="back-to-top"
-        type="button"
-        aria-label="回到顶部"
-        title="回到顶部"
-        style={{
-          position: "fixed",
-          right: "20px",
-          bottom: "max(24px, env(safe-area-inset-bottom))",
-          width: "52px",
-          height: "52px",
-          borderRadius: "50%",
-          background: "#1C1C1C",
-          border: "none",
-          padding: 0,
-          cursor: "pointer",
-          zIndex: 60,
-          display: "none",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.28)",
-          opacity: 0,
-          transition: "opacity 0.2s ease",
-        }}
-      >
-        <svg width="52" height="52" viewBox="0 0 52 52" style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)", pointerEvents: "none" }} aria-hidden="true">
-          <circle cx="26" cy="26" r="22" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
-          <circle id="progress-ring" cx="26" cy="26" r="22" fill="none" stroke="#FAC94A" strokeWidth="3" strokeDasharray="138.23" strokeDashoffset="138.23" strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.1s linear" }} />
-        </svg>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FAC94A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: "relative", zIndex: 1 }} aria-hidden="true">
-          <path d="M12 19V5M5 12l7-7 7 7" />
-        </svg>
-      </button>
-
-      <script dangerouslySetInnerHTML={{ __html: `(function(){var btn=document.getElementById('back-to-top');var ring=document.getElementById('progress-ring');var C=138.23;function onScroll(){var h=document.documentElement.scrollHeight-window.innerHeight;var p=h>0?Math.min(1,Math.max(0,window.scrollY/h)):0;if(ring)ring.style.strokeDashoffset=(C*(1-p)).toString();if(btn){var show=window.scrollY>400;btn.style.display=show?'inline-flex':'none';btn.style.opacity=show?'1':'0';}}window.addEventListener('scroll',onScroll,{passive:true});onScroll();if(btn)btn.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});})();` }} />
+      {/* 回顶按钮由全局 layout 中的 BackToTop 组件统一渲染 */}
     </div>
   );
 }
