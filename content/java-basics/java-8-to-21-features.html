@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 8 → 21 核心特性</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!--
+  title: "Java 8 → 21 核心特性速览：var、record、sealed、虚拟线程"
+  difficulty: 中级
+  interviewFreq: 中高
+  desc: "Java 8 Lambda → 10 var → 14 record → 17 sealed class → 21 虚拟线程。每个版本最值得用的特性一览。"
+-->
+
+<!-- ═══════════════ 第 1 站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>Java 半年一版本，哪些特性真正值得学？</h2></div>
+
+<div class="think"><div class="think-q">面试官问："说说你了解的 Java 8 之后的新特性。" 如果你只能答出 Lambda 和 Stream，说明你的知识还停在 2014 年。从 Java 9 开始，Oracle 把发布节奏改为每 6 个月一个版本——面对这么多版本，哪些特性值得放进生产环境？</div></div>
+
+<p>2017 年 9 月，Oracle 宣布 Java 采用<strong>每 6 个月</strong>一个版本的新发布节奏，同时引入 LTS（长期支持）概念：只有 LTS 版本能获得长达数年的商业支持。到目前为止，关键的 LTS 版本有三个：</p>
+
+<table class="nb-table">
+<thead><tr><th>版本</th><th>发布时间</th><th>定位</th><th>支持周期</th></tr></thead>
+<tbody>
+  <tr><td><strong>Java 8</strong></td><td>2014.03</td><td>函数式编程元年</td><td>Oracle 商业支持至 2030+</td></tr>
+  <tr><td><strong>Java 11</strong></td><td>2018.09</td><td>首个新节奏 LTS</td><td>支持至 2026+</td></tr>
+  <tr><td><strong>Java 17</strong></td><td>2021.09</td><td>Spring Boot 3 最低要求</td><td>支持至 2029+</td></tr>
+  <tr><td><strong>Java 21</strong></td><td>2023.09</td><td>虚拟线程改变并发模型</td><td>支持至 2031+</td></tr>
+</tbody>
+</table>
+
+<p>非 LTS 版本（如 9、10、12~16、18~20）中的特性会被"顺延"到下一个 LTS 中正式落地。因此我们按<strong>实际影响力和生产可用性</strong>来筛选，只讲面试和实战中真正高频的特性。</p>
+
+<div class="crack"><span class="crack-label">面试考法</span>
+<p>面试官不期望你背出每个版本的所有 JEP 编号，而是想看你能否说出<strong>每个特性的动机、用法和取舍</strong>。能对比 record vs Lombok、虚拟线程 vs 协程的候选人，分数会明显更高。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第 2 站：Java 8 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>Java 8（LTS）：函数式编程的起点</h2></div>
+
+<p>Java 8 是整个 Java 生态的分水岭。它引入的函数式特性让 Java 从纯面向对象语言变成<strong>面向对象 + 函数式</strong>的混合范式。即使过了十年，这五个特性仍然是面试必考项。</p>
+
+<div class="srcbox">
+<div class="srcbox-head">Lambda + Stream + Optional 组合拳</div>
+<pre class="srcbox-file"><span class="c">// 1. Lambda：告别匿名内部类</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; names = <span class="t">Arrays</span>.asList(<span class="n">"Alice"</span>, <span class="n">"Bob"</span>, <span class="n">"Charlie"</span>);
+names.sort((a, b) -&gt; a.length() - b.length());
+
+<span class="c">// 2. Stream：声明式数据处理管线</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; result = names.stream()
+    .filter(n -&gt; n.length() &gt; <span class="n">3</span>)
+    .map(<span class="t">String</span>::toUpperCase)
+    .collect(<span class="t">Collectors</span>.toList());
+
+<span class="c">// 3. Optional：告别 NullPointerException</span>
+<span class="t">Optional</span>&lt;<span class="t">User</span>&gt; user = findById(<span class="n">42</span>);
+<span class="t">String</span> name = user.map(<span class="t">User</span>::getName).orElse(<span class="n">"unknown"</span>);</pre>
+</div>
+
+<p>Java 8 另外两个高频考点：</p>
+
+<table class="nb-table">
+<thead><tr><th>特性</th><th>要点</th><th>面试陷阱</th></tr></thead>
+<tbody>
+  <tr><td><strong>Date/Time API</strong><br>(java.time)</td><td>LocalDate、LocalTime、LocalDateTime 等不可变对象，线程安全，替代 Date/Calendar</td><td>Date 是可变且非线程安全的，SimpleDateFormat 也是——这是经典坑</td></tr>
+  <tr><td><strong>default 方法</strong></td><td>接口可以有默认实现，解决了接口演化问题</td><td>菱形继承问题：两个接口都定义了同名 default 方法时，实现类必须显式覆写</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">要点</span>
+<p>Java 8 的五大特性（Lambda、Stream、Optional、Date/Time、default 方法）是所有后续特性的基石。如果你对这些还不够熟练，应该先巩固它们再往后学。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第 3 站：Java 10-11 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>Java 10-11：var 推断与 HTTP Client</h2></div>
+
+<p>Java 10 是非 LTS 版本，但它引入的 <code>var</code> 类型推断被保留到了所有后续版本中，成为开发者使用频率最高的语法糖之一。Java 11 作为 LTS 版本则带来了标准化的 HTTP Client。</p>
+
+<div class="srcbox">
+<div class="srcbox-head">var 局部变量类型推断</div>
+<pre class="srcbox-file"><span class="c">// Java 10+: 编译器自动推断类型</span>
+<span class="k">var</span> list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;<span class="t">String</span>&gt;();      <span class="c">// 推断为 ArrayList&lt;String&gt;</span>
+<span class="k">var</span> map  = <span class="k">new</span> <span class="t">HashMap</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt;(); <span class="c">// 推断为 HashMap&lt;String, Integer&gt;</span>
+<span class="k">var</span> path = <span class="t">Paths</span>.get(<span class="n">"/tmp/data.csv"</span>);     <span class="c">// 推断为 Path</span>
+
+<span class="c">// ⚠️ var 只能用于局部变量，不能用于：</span>
+<span class="c">// - 方法参数、返回值</span>
+<span class="c">// - 类字段</span>
+<span class="c">// - 没有初始化器的变量</span></pre>
+</div>
+
+<div class="think"><div class="think-q">var 会不会降低代码可读性？答案是看场景。当右侧构造函数已经明确表达了类型（如 <code>new ArrayList&lt;User&gt;()</code>），用 var 反而减少噪音。但如果右侧是一个方法调用，如 <code>var result = process()</code>，你就丢失了类型信息——此时应该写明确类型。</div></div>
+
+<p>Java 10 还引入了 <code>List.of()</code>、<code>Set.of()</code>、<code>Map.of()</code> 等<strong>不可变集合工厂方法</strong>，配合 var 使用尤其简洁：</p>
+
+<div class="srcbox">
+<div class="srcbox-head">不可变集合工厂 + var</div>
+<pre class="srcbox-file"><span class="c">// Java 9+ 不可变集合工厂方法</span>
+<span class="k">var</span> colors = <span class="t">List</span>.of(<span class="n">"red"</span>, <span class="n">"green"</span>, <span class="n">"blue"</span>);
+<span class="k">var</span> config = <span class="t">Map</span>.of(
+    <span class="n">"timeout"</span>, <span class="n">30</span>,
+    <span class="n">"retries"</span>, <span class="n">3</span>
+);
+<span class="c">// 返回的是不可变集合，调用 add() 会抛 UnsupportedOperationException</span>
+<span class="c">// 如果需要可变的，用 new ArrayList&lt;&gt;(List.of(...))</span></pre>
+</div>
+
+<p>Java 11 的亮点特性：</p>
+
+<div class="srcbox">
+<div class="srcbox-head">HTTP Client 标准 API（JDK 11）</div>
+<pre class="srcbox-file"><span class="c">// 终于不用再依赖 Apache HttpClient 或 OkHttp 了</span>
+<span class="k">var</span> client = <span class="t">HttpClient</span>.newHttpClient();
+<span class="k">var</span> request = <span class="t">HttpRequest</span>.newBuilder()
+    .uri(<span class="t">URI</span>.create(<span class="n">"https://api.example.com/users"</span>))
+    .header(<span class="n">"Accept"</span>, <span class="n">"application/json"</span>)
+    .GET()
+    .build();
+
+<span class="t">HttpResponse</span>&lt;<span class="t">String</span>&gt; response =
+    client.send(request, <span class="t">HttpResponse</span>.<span class="k">BodyHandlers</span>.ofString());
+<span class="t">System</span>.out.println(response.statusCode());   <span class="c">// 200</span>
+<span class="t">System</span>.out.println(response.body());          <span class="c">// JSON 字符串</span></pre>
+</div>
+
+<p>Java 11 还给 String 加了几个实用方法：</p>
+
+<table class="nb-table">
+<thead><tr><th>方法</th><th>用途</th><th>示例</th></tr></thead>
+<tbody>
+  <tr><td><code>isBlank()</code></td><td>判断是否为空或纯空白</td><td><code>"  ".isBlank() → true</code></td></tr>
+  <tr><td><code>strip()</code></td><td>去除首尾空白（支持 Unicode 空白）</td><td>比 <code>trim()</code> 更准确</td></tr>
+  <tr><td><code>lines()</code></td><td>按行拆分为 Stream</td><td><code>"a\nb\nc".lines().count() → 3</code></td></tr>
+  <tr><td><code>repeat(n)</code></td><td>重复拼接 n 次</td><td><code>"ha".repeat(3) → "hahaha"</code></td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第 4 站：Java 14-17 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>Java 14-17（LTS）：Record、Sealed、Pattern Matching</h2></div>
+
+<p>Java 17 是 Spring Boot 3 的最低版本要求，也是目前企业升级的主流目标。从 Java 14 到 17，四个特性经历了 preview → 正式发布的完整过程，设计质量非常高。</p>
+
+<div class="srcbox">
+<div class="srcbox-head">Record：不可变数据载体（Java 16 正式）</div>
+<pre class="srcbox-file"><span class="c">// 一行代码 = getter + equals + hashCode + toString + 不可变</span>
+<span class="k">public record</span> <span class="t">Point</span>(<span class="k">int</span> x, <span class="k">int</span> y) {}
+
+<span class="c">// 编译器自动生成：</span>
+<span class="c">// - private final int x, y</span>
+<span class="c">// - 全参构造函数</span>
+<span class="c">// - x(), y() 访问器（注意：不是 getX()）</span>
+<span class="c">// - equals / hashCode / toString</span>
+
+<span class="k">var</span> p = <span class="k">new</span> <span class="t">Point</span>(<span class="n">3</span>, <span class="n">4</span>);
+<span class="t">System</span>.out.println(p.x());           <span class="c">// 3</span>
+<span class="t">System</span>.out.println(p);               <span class="c">// Point[x=3, y=4]</span>
+
+<span class="c">// 可以添加 compact constructor 做校验</span>
+<span class="k">public record</span> <span class="t">User</span>(<span class="t">String</span> name, <span class="k">int</span> age) {
+    <span class="k">public</span> <span class="t">User</span> {
+        <span class="k">if</span> (age &lt; <span class="n">0</span>) <span class="k">throw new</span> <span class="t">IllegalArgumentException</span>(<span class="n">"age &lt; 0"</span>);
+    }
+}</pre>
+</div>
+
+<div class="crack"><span class="crack-label">Record vs Lombok @Data</span>
+<p>Record 是语言级特性（JVM 直接支持），Lombok 是编译期注解处理器。Record 保证不可变（字段 final），Lombok 的 @Data 生成可变类。如果你的 DTO 不需要 setter，Record 是更好的选择；如果需要 mutable bean，Lombok 仍然有优势。</p>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head">Switch 表达式（Java 14 正式）</div>
+<pre class="srcbox-file"><span class="c">// 传统 switch：case 穿透、忘记 break 就出 bug</span>
+<span class="c">// 新 switch 表达式：有返回值，箭头语法无穿透</span>
+<span class="k">var</span> label = <span class="k">switch</span> (day) {
+    <span class="k">case</span> MONDAY, FRIDAY  -&gt; <span class="n">"工作日"</span>;
+    <span class="k">case</span> TUESDAY         -&gt; <span class="n">"周二"</span>;
+    <span class="k">case</span> SATURDAY, SUNDAY -&gt; <span class="n">"周末"</span>;
+    <span class="k">default</span>              -&gt; <span class="n">"其他"</span>;
+};
+<span class="c">// 不需要 break，不可能穿透，直接赋值给变量</span></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head">Sealed 类（Java 17 正式）</div>
+<pre class="srcbox-file"><span class="c">// 限制哪些类可以继承——实现"代数数据类型"</span>
+<span class="k">public sealed interface</span> <span class="t">Shape</span>
+    <span class="k">permits</span> <span class="t">Circle</span>, <span class="t">Rectangle</span>, <span class="t">Triangle</span> {}
+
+<span class="k">public record</span> <span class="t">Circle</span>(<span class="k">double</span> radius) <span class="k">implements</span> <span class="t">Shape</span> {}
+<span class="k">public record</span> <span class="t">Rectangle</span>(<span class="k">double</span> w, <span class="k">double</span> h) <span class="k">implements</span> <span class="t">Shape</span> {}
+<span class="k">public record</span> <span class="t">Triangle</span>(<span class="k">double</span> base, <span class="k">double</span> height) <span class="k">implements</span> <span class="t">Shape</span> {}
+
+<span class="c">// sealed + record 组合：编译器知道所有子类型</span>
+<span class="c">// 为 Java 21 的 switch 模式匹配铺路</span></pre>
+</div>
+
+<p>同期上线的其他实用特性：</p>
+
+<table class="nb-table">
+<thead><tr><th>特性</th><th>版本</th><th>一句话</th></tr></thead>
+<tbody>
+  <tr><td><strong>Text Blocks</strong></td><td>Java 15</td><td><code>"""</code> 三引号多行字符串，写 SQL/JSON 不用再拼 +</td></tr>
+  <tr><td><strong>instanceof 模式匹配</strong></td><td>Java 16</td><td><code>if (obj instanceof String s)</code> 直接拿到变量 s</td></tr>
+  <tr><td><strong>Helpful NPE</strong></td><td>Java 14</td><td>NPE 信息精确到"哪个字段是 null"，不再只报行号</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第 5 站：Java 21 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Java 21（LTS）：虚拟线程改写并发规则</h2></div>
+
+<p>Java 21 是近十年来最重要的 Java 版本，没有之一。<strong>虚拟线程</strong>（Virtual Threads）从根本上改变了 Java 的并发编程模型，让"一个请求一个线程"的简单模型重新变得可行。</p>
+
+<div class="srcbox">
+<div class="srcbox-head">虚拟线程：百万级并发不是梦</div>
+<pre class="srcbox-file"><span class="c">// 传统方式：平台线程，每个线程 ~1MB 栈内存</span>
+<span class="c">// 10000 个线程 = 10GB 内存——这就是"线程很贵"的原因</span>
+
+<span class="c">// Java 21：虚拟线程，极其轻量</span>
+<span class="k">try</span> (<span class="k">var</span> executor = <span class="t">Executors</span>.newVirtualThreadPerTaskExecutor()) {
+    <span class="t">IntStream</span>.range(<span class="n">0</span>, <span class="n">100_000</span>).forEach(i -&gt;
+        executor.submit(() -&gt; {
+            <span class="t">Thread</span>.sleep(<span class="t">Duration</span>.ofSeconds(<span class="n">1</span>));
+            <span class="k">return</span> i;
+        })
+    );
+}
+<span class="c">// 10 万个虚拟线程，内存占用可能不到 100MB</span>
+<span class="c">// 因为虚拟线程不绑定 OS 线程，在阻塞时自动让出</span></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head">Switch 模式匹配（Java 21 正式）</div>
+<pre class="srcbox-file"><span class="c">// sealed + record + switch 模式匹配 = 穷举检查</span>
+<span class="k">double</span> area = <span class="k">switch</span> (shape) {
+    <span class="k">case</span> <span class="t">Circle</span> c    -&gt; <span class="t">Math</span>.PI * c.radius() * c.radius();
+    <span class="k">case</span> <span class="t">Rectangle</span> r -&gt; r.w() * r.h();
+    <span class="k">case</span> <span class="t">Triangle</span> t  -&gt; <span class="n">0.5</span> * t.base() * t.height();
+    <span class="c">// 无需 default！编译器知道 sealed 只有这三种</span>
+};</pre>
+</div>
+
+<p>Java 21 的其他亮点：</p>
+
+<table class="nb-table">
+<thead><tr><th>特性</th><th>状态</th><th>说明</th></tr></thead>
+<tbody>
+  <tr><td><strong>Sequenced Collections</strong></td><td>正式</td><td>统一了 List、Deque、SortedSet 的顺序访问接口：<code>getFirst()</code>、<code>getLast()</code>、<code>reversed()</code></td></tr>
+  <tr><td><strong>Structured Concurrency</strong></td><td>Preview</td><td>将多个并发任务视为一个单元，统一取消、统一异常处理</td></tr>
+  <tr><td><strong>Scoped Values</strong></td><td>Preview</td><td>ThreadLocal 的替代品，为虚拟线程优化，不可变且更安全</td></tr>
+  <tr><td><strong>String Templates</strong></td><td>Preview</td><td>类似 Kotlin 的字符串模板 <code>STR."Hello \{name}"</code></td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">要点</span>
+<p>Java 21 最值得关注的特性排序：虚拟线程 &gt; switch 模式匹配 &gt; Sequenced Collections。虚拟线程是真正改变架构的特性，后两个是提升编码体验的语法糖。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第 6 站：虚拟线程深度 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>虚拟线程深度解析：它是如何工作的？</h2></div>
+
+<div class="think"><div class="think-q">面试高频追问："虚拟线程底层是怎么实现的？和 Kotlin 协程有什么区别？为什么有人说虚拟线程是'协程的反方向'？" 能回答这些问题，说明你不只是会用 API，而是理解了 JVM 并发模型的演进方向。</div></div>
+
+<div class="fig">
+<svg viewBox="0 0 820 380" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="820" height="380" rx="10" fill="#f8f9fb"/>
+  <text x="410" y="32" text-anchor="middle" font-size="17" font-weight="700" fill="#1a1a2e">虚拟线程调度模型</text>
+
+  <!-- Platform Thread Pool -->
+  <rect x="260" y="60" width="300" height="40" rx="6" fill="#3b82f6"/>
+  <text x="410" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">ForkJoinPool（Carrier Threads / 载体线程）</text>
+
+  <!-- Carrier threads -->
+  <rect x="60"  y="120" width="150" height="36" rx="6" fill="#60a5fa"/><text x="135" y="143" text-anchor="middle" font-size="12" fill="#fff">Carrier Thread-1</text>
+  <rect x="260" y="120" width="150" height="36" rx="6" fill="#60a5fa"/><text x="335" y="143" text-anchor="middle" font-size="12" fill="#fff">Carrier Thread-2</text>
+  <rect x="460" y="120" width="150" height="36" rx="6" fill="#60a5fa"/><text x="535" y="143" text-anchor="middle" font-size="12" fill="#fff">Carrier Thread-3</text>
+  <rect x="660" y="120" width="120" height="36" rx="6" fill="#94a3b8"/><text x="720" y="143" text-anchor="middle" font-size="12" fill="#fff">... N</text>
+
+  <!-- Lines from pool to carriers -->
+  <line x1="410" y1="100" x2="135" y2="120" stroke="#93c5fd" stroke-width="1.5"/>
+  <line x1="410" y1="100" x2="335" y2="120" stroke="#93c5fd" stroke-width="1.5"/>
+  <line x1="410" y1="100" x2="535" y2="120" stroke="#93c5fd" stroke-width="1.5"/>
+  <line x1="410" y1="100" x2="720" y2="120" stroke="#93c5fd" stroke-width="1.5"/>
+
+  <!-- Mount arrows -->
+  <text x="135" y="175" text-anchor="middle" font-size="10" fill="#64748b">mount ▼</text>
+  <text x="335" y="175" text-anchor="middle" font-size="10" fill="#64748b">mount ▼</text>
+  <text x="535" y="175" text-anchor="middle" font-size="10" fill="#64748b">mount ▼</text>
+
+  <!-- Virtual threads running -->
+  <rect x="50"  y="185" width="170" height="32" rx="5" fill="#10b981"/><text x="135" y="206" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">VThread-1 (running)</text>
+  <rect x="250" y="185" width="170" height="32" rx="5" fill="#10b981"/><text x="335" y="206" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">VThread-5 (running)</text>
+  <rect x="450" y="185" width="170" height="32" rx="5" fill="#10b981"/><text x="535" y="206" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">VThread-8 (running)</text>
+
+  <!-- Unmount + parked virtual threads -->
+  <text x="135" y="235" text-anchor="middle" font-size="10" fill="#64748b">unmount on I/O ▼</text>
+  <text x="335" y="235" text-anchor="middle" font-size="10" fill="#64748b">unmount on I/O ▼</text>
+
+  <!-- Parked queue -->
+  <rect x="50" y="260" width="720" height="44" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="70" y="287" font-size="12" font-weight="600" fill="#92400e">等待队列（Parked）:</text>
+  <rect x="220" y="268" width="60" height="26" rx="4" fill="#fbbf24"/><text x="250" y="286" text-anchor="middle" font-size="10" fill="#78350f">VT-2</text>
+  <rect x="290" y="268" width="60" height="26" rx="4" fill="#fbbf24"/><text x="320" y="286" text-anchor="middle" font-size="10" fill="#78350f">VT-3</text>
+  <rect x="360" y="268" width="60" height="26" rx="4" fill="#fbbf24"/><text x="390" y="286" text-anchor="middle" font-size="10" fill="#78350f">VT-4</text>
+  <rect x="430" y="268" width="60" height="26" rx="4" fill="#fbbf24"/><text x="460" y="286" text-anchor="middle" font-size="10" fill="#78350f">VT-6</text>
+  <rect x="500" y="268" width="60" height="26" rx="4" fill="#fbbf24"/><text x="530" y="286" text-anchor="middle" font-size="10" fill="#78350f">VT-7</text>
+  <rect x="570" y="268" width="60" height="26" rx="4" fill="#fbbf24"/><text x="600" y="286" text-anchor="middle" font-size="10" fill="#78350f">VT-9</text>
+  <text x="650" y="287" font-size="11" fill="#92400e">... 数万个</text>
+
+  <!-- Legend -->
+  <rect x="50" y="330" width="14" height="14" rx="3" fill="#60a5fa"/><text x="72" y="342" font-size="11" fill="#334155">Carrier Thread（OS 线程，~1MB 栈）</text>
+  <rect x="310" y="330" width="14" height="14" rx="3" fill="#10b981"/><text x="332" y="342" font-size="11" fill="#334155">Virtual Thread（JVM 对象，~几KB）</text>
+  <rect x="570" y="330" width="14" height="14" rx="3" fill="#fbbf24"/><text x="592" y="342" font-size="11" fill="#334155">Parked（等待 I/O 完成）</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> 虚拟线程通过 mount/unmount 机制在少量载体线程上复用，阻塞时不占用 OS 线程</figcaption>
+</div>
+
+<p>虚拟线程的核心工作原理可以用三个关键词概括：</p>
+
+<table class="nb-table">
+<thead><tr><th>机制</th><th>说明</th></tr></thead>
+<tbody>
+  <tr><td><strong>Carrier Thread（载体线程）</strong></td><td>底层是一个 ForkJoinPool，线程数默认等于 CPU 核心数。虚拟线程并不直接跑在 OS 上，而是被调度到载体线程上执行</td></tr>
+  <tr><td><strong>Mount（挂载）</strong></td><td>虚拟线程开始执行时，被"挂载"到一个载体线程上。此时它和普通线程一样运行</td></tr>
+  <tr><td><strong>Unmount（卸载）</strong></td><td>当虚拟线程遇到阻塞操作（I/O、sleep、lock）时，JVM 自动将其从载体线程上"卸载"，载体线程立刻去执行下一个虚拟线程。阻塞结束后，虚拟线程重新排队等待 mount</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head">虚拟线程 vs 平台线程 vs 协程</div>
+<pre class="srcbox-file"><span class="c">// 平台线程（OS Thread）</span>
+<span class="c">// - 1:1 映射到 OS 线程</span>
+<span class="c">// - 栈内存 ~1MB，创建/切换开销大</span>
+<span class="c">// - 通常线程池限制在几百到几千</span>
+
+<span class="c">// 虚拟线程（Virtual Thread）—— Java 的方式</span>
+<span class="c">// - M:N 调度：M 个虚拟线程复用 N 个载体线程</span>
+<span class="c">// - 栈内存 ~几KB（存在 JVM 堆上，可被 GC）</span>
+<span class="c>// - 轻松创建百万级，阻塞代价极低</span>
+<span class="c">// - 仍然是抢占式调度（不是协作式）</span>
+
+<span class="c">// 协程（Kotlin / Go）</span>
+<span class="c">// - 也是 M:N 调度，但使用协作式挂起（suspend）</span>
+<span class="c">// - 需要改写代码为 suspend/async 风格</span>
+<span class="c">// - Java 虚拟线程不需要改代码——所有阻塞自动处理</span></pre>
+</div>
+
+<div class="crack"><span class="crack-label">什么时候该用虚拟线程？</span>
+<p><strong>适合：</strong>I/O 密集型应用（HTTP 调用、数据库查询、文件读写）。虚拟线程在阻塞等待 I/O 时会自动让出载体线程，吞吐量可以提升数倍。<br>
+<strong>不适合：</strong>CPU 密集型计算。虚拟线程的载体线程池大小等于 CPU 核心数，纯计算场景下没有收益，还有调度开销。另外，<code>synchronized</code> 块和 native 方法会导致"pinned"（钉住）问题——载体线程无法被释放。此时应改用 <code>ReentrantLock</code>。</p>
+</div>
+
+<div class="formula">虚拟线程最佳场景 = I/O 密集型 + 高并发 + 阻塞型编程风格<br>避免场景 = CPU 密集型 + synchronized 热点 + JNI native 调用</div>
+</section>
+
+<!-- ═══════════════ 第 7 站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：特性采用优先级与时间线</h2></div>
+
+<p>面对这么多新特性，企业和个人应该按什么顺序升级？以下是一张优先级表：</p>
+
+<table class="nb-table">
+<thead><tr><th>优先级</th><th>特性</th><th>版本</th><th>采用理由</th></tr></thead>
+<tbody>
+  <tr><td style="text-align:center;font-size:1.3em">P0</td><td>Lambda + Stream</td><td>8</td><td>已成行业标准，不用就落后</td></tr>
+  <tr><td style="text-align:center;font-size:1.3em">P0</td><td>Optional + Date/Time</td><td>8</td><td>消灭 NPE 和时间处理 bug</td></tr>
+  <tr><td style="text-align:center;font-size:1.2em">P1</td><td>var 类型推断</td><td>10</td><td>减少样板代码，零运行时开销</td></tr>
+  <tr><td style="text-align:center;font-size:1.2em">P1</td><td>Text Blocks</td><td>15</td><td>SQL、JSON、测试数据编写体验飞跃</td></tr>
+  <tr><td style="text-align:center;font-size:1.2em">P1</td><td>Record</td><td>16</td><td>替代 Lombok 做 DTO/VO，更安全</td></tr>
+  <tr><td style="text-align:center;font-size:1.1em">P2</td><td>Sealed Classes</td><td>17</td><td>配合 Record + Switch 实现穷举模式</td></tr>
+  <tr><td style="text-align:center;font-size:1.1em">P2</td><td>Switch 模式匹配</td><td>21</td><td>替代 instanceof 链，编译器穷举检查</td></tr>
+  <tr><td style="text-align:center;font-size:1em;color:#dc2626">P0+</td><td><strong>虚拟线程</strong></td><td>21</td><td>颠覆并发模型，I/O 密集场景必用</td></tr>
+</tbody>
+</table>
+
+<div class="fig">
+<svg viewBox="0 0 820 200" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="820" height="200" rx="10" fill="#f8f9fb"/>
+  <text x="410" y="28" text-anchor="middle" font-size="16" font-weight="700" fill="#1a1a2e">Java 核心特性发布时间线</text>
+
+  <!-- Timeline axis -->
+  <line x1="50" y1="100" x2="770" y2="100" stroke="#cbd5e1" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Java 8 -->
+  <circle cx="100" cy="100" r="12" fill="#ef4444"/>
+  <text x="100" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#ef4444">Java 8</text>
+  <text x="100" y="66" text-anchor="middle" font-size="10" fill="#64748b">2014</text>
+  <text x="100" y="130" text-anchor="middle" font-size="10" fill="#334155">Lambda</text>
+  <text x="100" y="144" text-anchor="middle" font-size="10" fill="#334155">Stream</text>
+  <text x="100" y="158" text-anchor="middle" font-size="10" fill="#334155">Optional</text>
+
+  <!-- Java 10-11 -->
+  <circle cx="260" cy="100" r="12" fill="#f59e0b"/>
+  <text x="260" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#f59e0b">10 / 11</text>
+  <text x="260" y="66" text-anchor="middle" font-size="10" fill="#64748b">2018</text>
+  <text x="260" y="130" text-anchor="middle" font-size="10" fill="#334155">var</text>
+  <text x="260" y="144" text-anchor="middle" font-size="10" fill="#334155">HttpClient</text>
+
+  <!-- Java 14-17 -->
+  <circle cx="460" cy="100" r="12" fill="#10b981"/>
+  <text x="460" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#10b981">14 → 17</text>
+  <text x="460" y="66" text-anchor="middle" font-size="10" fill="#64748b">2020-21</text>
+  <text x="460" y="130" text-anchor="middle" font-size="10" fill="#334155">Record</text>
+  <text x="460" y="144" text-anchor="middle" font-size="10" fill="#334155">Sealed</text>
+  <text x="460" y="158" text-anchor="middle" font-size="10" fill="#334155">Pattern Match</text>
+
+  <!-- Java 21 -->
+  <circle cx="660" cy="100" r="14" fill="#3b82f6" stroke="#1d4ed8" stroke-width="2"/>
+  <text x="660" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="#3b82f6">Java 21</text>
+  <text x="660" y="66" text-anchor="middle" font-size="10" fill="#64748b">2023</text>
+  <text x="660" y="130" text-anchor="middle" font-size="10" font-weight="600" fill="#1d4ed8">Virtual Threads</text>
+  <text x="660" y="144" text-anchor="middle" font-size="10" fill="#334155">Switch Pattern</text>
+  <text x="660" y="158" text-anchor="middle" font-size="10" fill="#334155">Sequenced Coll.</text>
+
+  <!-- LTS markers -->
+  <rect x="80"  y="172" width="40" height="16" rx="3" fill="#fecaca"/><text x="100" y="184" text-anchor="middle" font-size="9" font-weight="600" fill="#dc2626">LTS</text>
+  <rect x="240" y="172" width="40" height="16" rx="3" fill="#fef3c7"/><text x="260" y="184" text-anchor="middle" font-size="9" font-weight="600" fill="#d97706">LTS</text>
+  <rect x="440" y="172" width="40" height="16" rx="3" fill="#d1fae5"/><text x="460" y="184" text-anchor="middle" font-size="9" font-weight="600" fill="#059669">LTS</text>
+  <rect x="640" y="172" width="40" height="16" rx="3" fill="#dbeafe"/><text x="660" y="184" text-anchor="middle" font-size="9" font-weight="600" fill="#2563eb">LTS</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> Java 8 → 21 核心特性发布时间线（每 6 个月一个版本，LTS 版本标红）</figcaption>
+</div>
+
+<div class="recap">
+<h3>全文回顾</h3>
+<ol>
+  <li><strong>Java 8</strong> 是函数式编程的基础——Lambda、Stream、Optional 至今仍是使用频率最高的特性</li>
+  <li><strong>Java 10-11</strong> 带来了 var 和 HTTP Client，减少了样板代码</li>
+  <li><strong>Java 14-17</strong> 通过 Record、Sealed、Switch 表达式构建了"代数数据类型"三件套</li>
+  <li><strong>Java 21</strong> 的虚拟线程是近十年最重要的特性，让 Java 在 I/O 密集场景下重获简洁的同步编程模型</li>
+  <li>升级建议：先巩固 Java 8 → 升级 Java 17 用 Record + Sealed → 评估 Java 21 虚拟线程</li>
+</ol>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">面试锦囊</span>
+<p>面试时不要罗列特性清单，而是围绕一个<strong>核心叙事</strong>来组织答案：Java 的演进方向是"减少样板代码 + 提升并发能力"。从 Lambda 到 Record 是在减少样板代码，从平台线程到虚拟线程是在提升并发能力。能把这两条线讲清楚，你的回答就有深度。</p>
+</div>
+</section>
+
+</main>
+</body>
+</html>

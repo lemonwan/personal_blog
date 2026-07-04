@@ -160,9 +160,9 @@ body {
 .ai-llm-scope .lesson-row:hover { background: color-mix(in srgb, var(--accent-wash) 40%, transparent); }
 .ai-llm-scope .step-dot { position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 8px; height: 8px; border-radius: 50%; background: var(--line); border: 1.5px solid var(--line); z-index: 1; transition: all 0.2s ease; }
 .ai-llm-scope .lesson-no { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--ink-faint); }
-.ai-llm-scope .lesson-link { text-decoration: none; color: inherit; display: block; }
+.ai-llm-scope .lesson-link { text-decoration: none; color: inherit; display: block; min-width: 0; }
 .ai-llm-scope .lesson-link:hover .lesson-title { color: var(--accent); }
-.ai-llm-scope .lesson-title { font-family: var(--sans); font-size: 17.5px; font-weight: 700; color: var(--ink); transition: color 0.12s; }
+.ai-llm-scope .lesson-title { font-family: var(--sans); font-size: 17.5px; font-weight: 700; color: var(--ink); transition: color 0.12s; word-break: break-word; }
 .ai-llm-scope .lesson-q { display: block; margin-top: 4px; font-size: 13.5px; color: var(--ink-soft); }
 
 /* ── Chips ── */
@@ -385,6 +385,19 @@ html, body { overflow-x: clip; max-width: 100%; }
 .article-main { flex: 1; min-width: 0; max-width: 788px; padding-top: 48px; padding-bottom: 80px; }
 .article-pager { display: flex; justify-content: space-between; gap: 12px; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .pager-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 999px; border: 2px solid var(--line); color: var(--ink-soft); font-weight: 700; font-size: 13px; text-decoration: none; max-width: 100%; }
+
+/* ── nb-card · 通用精致卡片 ── */
+.nb-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.nb-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(28,28,28,0.06);
+  border-color: #C5B99B;
+}
 
 /* 介绍页 volume 外壳 */
 .volumes-wrap { max-width: 1280px; margin: 0 auto; padding: 0 48px 48px; }

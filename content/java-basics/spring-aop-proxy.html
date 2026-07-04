@@ -1,0 +1,507 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Spring AOP 原理</title></head><body><main class="lesson-body">
+
+<!-- metadata
+title: Spring AOP 原理：JDK 动态代理 vs CGLIB
+difficulty: 高级
+interviewFreq: 必问
+desc: 有接口用 JDK 代理，没接口用 CGLIB——Spring Boot 2.x 之后默认改 CGLIB 了。切面执行顺序、代理失效场景全解。
+-->
+
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>开场：面试官到底想听什么</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"Spring AOP 的底层实现原理？"——这道题几乎是高级 Java 面试的必考题。</p>
+    <p>面试官真正想考的是三层理解：</p>
+    <ol>
+      <li><strong>概念层</strong>——你能准确说出 Aspect、Joinpoint、Pointcut、Advice 的关系；</li>
+      <li><strong>实现层</strong>——JDK 动态代理和 CGLIB 各自的原理、区别、限制；</li>
+      <li><strong>工程层</strong>——Spring Boot 2.x 为什么把默认改成了 CGLIB？代理失效怎么排查？</li>
+    </ol>
+  </div>
+
+  <p>很多候选人背了"有接口用 JDK，没接口用 CGLIB"就上场了。面试官追问一句"Boot 2.x 之后呢？"或者"自调用为什么失效？"就卡壳。本文把 AOP 从概念到字节码全部拆透，让你回答这道题时滴水不漏。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试核心</span>
+    <p>AOP ≠ 背概念。面试官要的是"我知道代理对象是怎么生成的"+"我能排查代理失效的坑"。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>AOP 核心概念：五个角色各就各位</h2>
+  </div>
+
+  <p>AOP 的本质是<strong>在不修改源代码的前提下，给程序动态添加横切关注点</strong>（日志、事务、权限……）。要理解它，先搞清楚五个核心概念的协作关系：</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 620 320" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="620" height="320" rx="14" fill="#f8f9fa" stroke="#dee2e6"/>
+      <text x="310" y="30" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">AOP 五大核心概念关系图</text>
+
+      <!-- Aspect -->
+      <rect x="230" y="48" width="160" height="52" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+      <text x="310" y="70" text-anchor="middle" font-size="13" font-weight="bold" fill="#1976d2">Aspect 切面</text>
+      <text x="310" y="88" text-anchor="middle" font-size="10" fill="#555">= Pointcut + Advice</text>
+
+      <!-- Pointcut -->
+      <rect x="30" y="140" width="160" height="52" rx="8" fill="#fff3e0" stroke="#f57c00" stroke-width="2"/>
+      <text x="110" y="162" text-anchor="middle" font-size="12" font-weight="bold" fill="#f57c00">Pointcut 切点</text>
+      <text x="110" y="180" text-anchor="middle" font-size="10" fill="#555">"在哪里织入"</text>
+      <line x1="230" y1="85" x2="155" y2="140" stroke="#f57c00" stroke-width="1.5" stroke-dasharray="5,3"/>
+
+      <!-- Advice -->
+      <rect x="430" y="140" width="160" height="52" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2"/>
+      <text x="510" y="162" text-anchor="middle" font-size="12" font-weight="bold" fill="#388e3c">Advice 通知</text>
+      <text x="510" y="180" text-anchor="middle" font-size="10" fill="#555">"织入什么逻辑"</text>
+      <line x1="390" y1="85" x2="465" y2="140" stroke="#388e3c" stroke-width="1.5" stroke-dasharray="5,3"/>
+
+      <!-- Joinpoint -->
+      <rect x="30" y="230" width="160" height="52" rx="8" fill="#fce4ec" stroke="#c62828" stroke-width="2"/>
+      <text x="110" y="252" text-anchor="middle" font-size="12" font-weight="bold" fill="#c62828">Joinpoint 连接点</text>
+      <text x="110" y="270" text-anchor="middle" font-size="10" fill="#555">所有可被拦截的方法</text>
+      <line x1="110" y1="192" x2="110" y2="230" stroke="#c62828" stroke-width="1.5"/>
+      <text x="118" y="215" font-size="9" fill="#c62828">从…中筛选</text>
+
+      <!-- Weaving -->
+      <rect x="430" y="230" width="160" height="52" rx="8" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="2"/>
+      <text x="510" y="252" text-anchor="middle" font-size="12" font-weight="bold" fill="#7b1fa2">Weaving 织入</text>
+      <text x="510" y="270" text-anchor="middle" font-size="10" fill="#555">生成代理对象的过程</text>
+      <line x1="510" y1="192" x2="510" y2="230" stroke="#7b1fa2" stroke-width="1.5"/>
+      <text x="518" y="215" font-size="9" fill="#7b1fa2">执行动作</text>
+
+      <!-- Center arrow -->
+      <line x1="190" y1="256" x2="430" y2="256" stroke="#9e9e9e" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="310" y="305" text-anchor="middle" font-size="11" fill="#616161">Joinpoint 是候选，Pointcut 是筛选条件，Advice 是要执行的代码，Weaving 是最终动作</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> AOP 五大核心概念关系图</figcaption>
+  </figure>
+
+  <h3>Advice 的 5 种类型</h3>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th>类型</th><th>注解</th><th>执行时机</th><th>典型场景</th></tr></thead>
+      <tbody>
+        <tr><td>前置通知</td><td><code>@Before</code></td><td>目标方法执行前</td><td>参数校验、日志</td></tr>
+        <tr><td>后置通知</td><td><code>@After</code></td><td>目标方法执行后（无论是否异常）</td><td>资源清理</td></tr>
+        <tr><td>返回通知</td><td><code>@AfterReturning</code></td><td>目标方法正常返回后</td><td>结果加工</td></tr>
+        <tr><td>异常通知</td><td><code>@AfterThrowing</code></td><td>目标方法抛出异常后</td><td>异常记录</td></tr>
+        <tr><td>环绕通知</td><td><code>@Around</code></td><td>包裹目标方法，完全控制</td><td>事务、缓存、性能统计</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">易错点</span>
+    <p><code>@Around</code> 必须手动调用 <code>ProceedingJoinPoint.proceed()</code>，否则目标方法不会执行。很多人写环绕通知忘了这一行，方法"神秘消失"。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话总结</span>
+    <p>Aspect = Pointcut（在哪切）+ Advice（切了干什么）。Joinpoint 是所有可以被切的候选点，Pointcut 从中筛选，Weaving 是最终把 Advice 织入 Joinpoint 的动作。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>JDK 动态代理：Proxy + InvocationHandler</h2>
+  </div>
+
+  <p>JDK 动态代理是 Java 原生提供的代理机制，核心 API 只有一个：<code>Proxy.newProxyInstance()</code>。它的要求很明确——<strong>被代理类必须实现接口</strong>。</p>
+
+  <h3>工作原理三步走</h3>
+  <ol>
+    <li>运行时生成一个实现了目标接口的代理类（类名形如 <code>$Proxy0</code>）；</li>
+    <li>代理类的每个方法调用都转发给 <code>InvocationHandler.invoke()</code>；</li>
+    <li>在 <code>invoke()</code> 里执行增强逻辑 + 反射调用目标对象的方法。</li>
+  </ol>
+
+  <div class="srcbox">
+    <div class="srcbox-head">JDK 动态代理完整示例</div>
+    <pre class="srcbox-file"><span class="c">// 1. 定义接口</span>
+<span class="k">public interface</span> <span class="t">UserService</span> {
+    <span class="k">void</span> <span class="n">save</span>(<span class="t">String</span> name);
+}
+
+<span class="c">// 2. 目标实现类</span>
+<span class="k">public class</span> <span class="t">UserServiceImpl</span> <span class="k">implements</span> <span class="t">UserService</span> {
+    <span class="k">public void</span> <span class="n">save</span>(<span class="t">String</span> name) {
+        <span class="t">System</span>.out.println(<span class="t">"保存用户: "</span> + name);
+    }
+}
+
+<span class="c">// 3. 自定义 InvocationHandler</span>
+<span class="k">public class</span> <span class="t">LogHandler</span> <span class="k">implements</span> <span class="t">InvocationHandler</span> {
+    <span class="k">private</span> <span class="t">Object</span> <span class="n">target</span>;
+
+    <span class="k">public</span> <span class="t">LogHandler</span>(<span class="t">Object</span> target) {
+        <span class="k">this</span>.<span class="n">target</span> = target;
+    }
+
+    <span class="k">public</span> <span class="t">Object</span> <span class="n">invoke</span>(<span class="t">Object</span> proxy, <span class="t">Method</span> method, <span class="t">Object</span>[] args)
+            <span class="k">throws</span> <span class="t">Throwable</span> {
+        <span class="t">System</span>.out.println(<span class="t">"[日志] 方法开始: "</span> + method.getName());
+        <span class="t">Object</span> result = method.invoke(<span class="n">target</span>, args);  <span class="c">// 反射调用目标</span>
+        <span class="t">System</span>.out.println(<span class="t">"[日志] 方法结束: "</span> + method.getName());
+        <span class="k">return</span> result;
+    }
+}
+
+<span class="c">// 4. 生成代理对象</span>
+<span class="t">UserService</span> real = <span class="k">new</span> <span class="t">UserServiceImpl</span>();
+<span class="t">UserService</span> proxy = (<span class="t">UserService</span>) <span class="t">Proxy</span>.<span class="n">newProxyInstance</span>(
+    real.getClass().getClassLoader(),   <span class="c">// 类加载器</span>
+    real.getClass().getInterfaces(),    <span class="c">// 接口列表</span>
+    <span class="k">new</span> <span class="t">LogHandler</span>(real)               <span class="c">// InvocationHandler</span>
+);
+proxy.save(<span class="t">"Alice"</span>);  <span class="c">// 输出日志 + 保存用户</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">底层真相</span>
+    <p>通过 <code>-Dsun.misc.ProxyGenerator.saveGeneratedFiles=true</code> 可以把 <code>$Proxy0.class</code> 保存到磁盘反编译。你会发现：代理类继承 <code>java.lang.reflect.Proxy</code>，实现了目标接口，每个方法体都是 <code>super.h.invoke(this, m, args)</code> 的形式。</p>
+  </div>
+
+  <div class="formula">
+    JDK 代理 = Proxy.newProxyInstance(classLoader, interfaces, handler)
+  </div>
+</section>
+
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>CGLIB 代理：子类字节码增强</h2>
+  </div>
+
+  <p>CGLIB（Code Generation Library）通过 ASM 在运行时动态生成目标类的<strong>子类</strong>来实现代理。它不要求接口，但有限制：<strong>无法代理 final 类和 final 方法</strong>。</p>
+
+  <h3>工作原理</h3>
+  <ol>
+    <li>在运行时生成目标类的子类（类名形如 <code>UserService$$EnhancerByCGLIB$$xxx</code>）；</li>
+    <li>子类重写目标类的所有非 final 方法；</li>
+    <li>每个重写方法内部通过 <code>MethodInterceptor.intercept()</code> 进行拦截；</li>
+    <li>通过 <code>FastClass</code> 机制绕过反射直接调用，性能优于 JDK 代理。</li>
+  </ol>
+
+  <div class="srcbox">
+    <div class="srcbox-head">CGLIB 代理完整示例</div>
+    <pre class="srcbox-file"><span class="c">// 目标类（不需要接口）</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">public void</span> <span class="n">createOrder</span>(<span class="t">String</span> orderId) {
+        <span class="t">System</span>.out.println(<span class="t">"创建订单: "</span> + orderId);
+    }
+    <span class="k">public final void</span> <span class="n">cancelOrder</span>(<span class="t">String</span> id) {
+        <span class="t">System</span>.out.println(<span class="t">"取消订单: "</span> + id);  <span class="c">// final 方法无法被代理</span>
+    }
+}
+
+<span class="c">// 自定义 MethodInterceptor</span>
+<span class="k">public class</span> <span class="t">LogInterceptor</span> <span class="k">implements</span> <span class="t">MethodInterceptor</span> {
+    <span class="k">public</span> <span class="t">Object</span> <span class="n">intercept</span>(<span class="t">Object</span> obj, <span class="t">Method</span> method,
+            <span class="t">Object</span>[] args, <span class="t">MethodProxy</span> proxy) <span class="k">throws</span> <span class="t">Throwable</span> {
+        <span class="t">System</span>.out.println(<span class="t">"[CGLIB] 前置: "</span> + method.getName());
+        <span class="t">Object</span> result = proxy.invokeSuper(obj, args);  <span class="c">// 调用父类方法</span>
+        <span class="t">System</span>.out.println(<span class="t">"[CGLIB] 后置: "</span> + method.getName());
+        <span class="k">return</span> result;
+    }
+}
+
+<span class="c">// 生成代理对象</span>
+<span class="t">Enhancer</span> enhancer = <span class="k">new</span> <span class="t">Enhancer</span>();
+enhancer.setSuperclass(<span class="t">OrderService</span>.<span class="k">class</span>);
+enhancer.setCallback(<span class="k">new</span> <span class="t">LogInterceptor</span>());
+<span class="t">OrderService</span> proxy = (<span class="t">OrderService</span>) enhancer.create();
+proxy.createOrder(<span class="t">"ORD-001"</span>);  <span class="c">// 有日志增强</span>
+proxy.cancelOrder(<span class="t">"ORD-001"</span>);   <span class="c">// 无日志增强（final 方法）</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">性能关键</span>
+    <p>CGLIB 内部使用 <strong>FastClass</strong> 机制：为目标类和代理类各生成一个 FastClass，通过方法索引直接调用，避免了 JDK 反射的 <code>Method.invoke()</code> 开销。这就是为什么 CGLIB 单次调用更快，但创建代理对象更慢（需要生成字节码）。</p>
+  </div>
+
+  <h3>CGLIB 的三个限制</h3>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th>限制</th><th>原因</th><th>表现</th></tr></thead>
+      <tbody>
+        <tr><td>不能代理 final 类</td><td>无法继承 final 类</td><td>抛 <code>IllegalArgumentException</code></td></tr>
+        <tr><td>不能代理 final 方法</td><td>子类无法重写 final 方法</td><td>静默跳过，不报错但无增强</td></tr>
+        <tr><td>不能代理 private 方法</td><td>子类无法访问父类 private 方法</td><td>静默跳过</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>Spring 的选择策略：Boot 2.x 的分水岭</h2>
+  </div>
+
+  <p>Spring 在创建代理时有一套决策逻辑，而且这个逻辑在 <strong>Spring Boot 2.0 发生了重大变化</strong>。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 640 400" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="640" height="400" rx="14" fill="#f8f9fa" stroke="#dee2e6"/>
+      <text x="320" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">Spring AOP 代理选择决策（JDK 代理 vs CGLIB）</text>
+
+      <!-- Left: Spring Framework / Boot 1.x -->
+      <rect x="20" y="46" width="290" height="340" rx="10" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="165" y="70" text-anchor="middle" font-size="13" font-weight="bold" fill="#1976d2">Spring Framework / Boot 1.x</text>
+      <text x="165" y="88" text-anchor="middle" font-size="11" fill="#1976d2">proxyTargetClass = false（默认）</text>
+
+      <rect x="55" y="104" width="220" height="36" rx="6" fill="#fff" stroke="#90caf9"/>
+      <text x="165" y="126" text-anchor="middle" font-size="11" fill="#333">目标类实现了接口？</text>
+
+      <text x="90" y="160" text-anchor="middle" font-size="11" fill="#388e3c" font-weight="bold">是</text>
+      <text x="240" y="160" text-anchor="middle" font-size="11" fill="#c62828" font-weight="bold">否</text>
+
+      <line x1="110" y1="140" x2="90" y2="170" stroke="#388e3c" stroke-width="1.5"/>
+      <line x1="220" y1="140" x2="240" y2="170" stroke="#c62828" stroke-width="1.5"/>
+
+      <rect x="35" y="174" width="110" height="44" rx="6" fill="#e8f5e9" stroke="#388e3c" stroke-width="2"/>
+      <text x="90" y="194" text-anchor="middle" font-size="11" font-weight="bold" fill="#388e3c">JDK 动态代理</text>
+      <text x="90" y="210" text-anchor="middle" font-size="9" fill="#555">基于接口</text>
+
+      <rect x="185" y="174" width="110" height="44" rx="6" fill="#fce4ec" stroke="#c62828" stroke-width="2"/>
+      <text x="240" y="194" text-anchor="middle" font-size="11" font-weight="bold" fill="#c62828">CGLIB 代理</text>
+      <text x="240" y="210" text-anchor="middle" font-size="9" fill="#555">基于子类</text>
+
+      <rect x="35" y="240" width="260" height="44" rx="6" fill="#fff3e0" stroke="#f57c00"/>
+      <text x="165" y="258" text-anchor="middle" font-size="10" fill="#e65100">强制 CGLIB: @EnableAspectJAutoProxy</text>
+      <text x="165" y="274" text-anchor="middle" font-size="10" fill="#e65100">(proxyTargetClass = true)</text>
+
+      <rect x="35" y="300" width="260" height="72" rx="6" fill="#f5f5f5" stroke="#9e9e9e"/>
+      <text x="165" y="320" text-anchor="middle" font-size="10" fill="#616161" font-weight="bold">问题：</text>
+      <text x="165" y="336" text-anchor="middle" font-size="9" fill="#616161">代理类型不一致（接口→JDK，无接口→CGLIB）</text>
+      <text x="165" y="350" text-anchor="middle" font-size="9" fill="#616161">注入时类型可能不匹配</text>
+      <text x="165" y="364" text-anchor="middle" font-size="9" fill="#616161">JDK 代理无法强转为实现类</text>
+
+      <!-- Right: Spring Boot 2.x+ -->
+      <rect x="330" y="46" width="290" height="340" rx="10" fill="#fce4ec" stroke="#c62828"/>
+      <text x="475" y="70" text-anchor="middle" font-size="13" font-weight="bold" fill="#c62828">Spring Boot 2.x+</text>
+      <text x="475" y="88" text-anchor="middle" font-size="11" fill="#c62828">proxyTargetClass = true（默认）</text>
+
+      <rect x="365" y="104" width="220" height="36" rx="6" fill="#fff" stroke="#ef9a9a"/>
+      <text x="475" y="126" text-anchor="middle" font-size="11" fill="#333">目标类是 final？</text>
+
+      <text x="400" y="160" text-anchor="middle" font-size="11" fill="#c62828" font-weight="bold">否</text>
+      <text x="550" y="160" text-anchor="middle" font-size="11" fill="#388e3c" font-weight="bold">是</text>
+
+      <line x1="420" y1="140" x2="400" y2="170" stroke="#c62828" stroke-width="1.5"/>
+      <line x1="530" y1="140" x2="550" y2="170" stroke="#388e3c" stroke-width="1.5"/>
+
+      <rect x="345" y="174" width="110" height="44" rx="6" fill="#fce4ec" stroke="#c62828" stroke-width="2"/>
+      <text x="400" y="194" text-anchor="middle" font-size="11" font-weight="bold" fill="#c62828">CGLIB 代理</text>
+      <text x="400" y="210" text-anchor="middle" font-size="9" fill="#555">统一使用</text>
+
+      <rect x="495" y="174" width="110" height="44" rx="6" fill="#e8f5e9" stroke="#388e3c" stroke-width="2"/>
+      <text x="550" y="194" text-anchor="middle" font-size="11" font-weight="bold" fill="#388e3c">抛异常</text>
+      <text x="550" y="210" text-anchor="middle" font-size="9" fill="#555">无法代理</text>
+
+      <rect x="345" y="240" width="260" height="44" rx="6" fill="#e8f5e9" stroke="#388e3c"/>
+      <text x="475" y="258" text-anchor="middle" font-size="10" fill="#2e7d32">显式切回 JDK 代理:</text>
+      <text x="475" y="274" text-anchor="middle" font-size="10" fill="#2e7d32">spring.aop.proxy-target-class=false</text>
+
+      <rect x="345" y="300" width="260" height="72" rx="6" fill="#f5f5f5" stroke="#9e9e9e"/>
+      <text x="475" y="320" text-anchor="middle" font-size="10" fill="#616161" font-weight="bold">优势：</text>
+      <text x="475" y="336" text-anchor="middle" font-size="9" fill="#616161">代理类型统一，行为可预测</text>
+      <text x="475" y="350" text-anchor="middle" font-size="9" fill="#616161">代理对象可直接强转为实现类</text>
+      <text x="475" y="364" text-anchor="middle" font-size="9" fill="#616161">避免了 JDK 代理的各种坑</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> Spring AOP 代理选择策略：Boot 2.x 前后对比</figcaption>
+  </figure>
+
+  <h3>为什么 Boot 2.x 要改默认？</h3>
+  <p>JDK 代理有一个非常隐蔽的坑：代理对象只实现了接口，<strong>不能强转为具体实现类</strong>。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">JDK 代理的经典坑</div>
+    <pre class="srcbox-file"><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">UserServiceImpl</span> <span class="k">implements</span> <span class="t">UserService</span> { ... }
+
+<span class="c">// JDK 代理下（proxyTargetClass=false）</span>
+<span class="k">@Autowired</span>
+<span class="k">private</span> <span class="t">UserServiceImpl</span> userService;  <span class="c">// ❌ BeanNotOfRequiredTypeException!</span>
+
+<span class="c">// 正确做法：面向接口编程</span>
+<span class="k">@Autowired</span>
+<span class="k">private</span> <span class="t">UserService</span> userService;  <span class="c">// ✅ 注入接口类型</span></pre>
+  </div>
+
+  <p>Boot 2.x 把默认改成 CGLIB 后，代理对象是目标类的子类，强转为实现类不会出错。这个改动消除了大量"按接口注入没问题，按实现类注入就报错"的诡异 bug。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Spring 内部决策伪代码</div>
+    <pre class="srcbox-file"><span class="c">// AbstractAutoProxyCreator 简化逻辑</span>
+<span class="k">if</span> (proxyTargetClass == <span class="k">true</span>) {
+    <span class="k">if</span> (targetClass 是 final <span class="k">||</span> targetClass 是 <span class="k">interface</span>) {
+        <span class="k">throw</span> 异常;  <span class="c">// 无法代理</span>
+    }
+    <span class="k">return</span> CGLIB代理;
+} <span class="k">else</span> {
+    <span class="k">if</span> (targetClass 实现了至少一个接口) {
+        <span class="k">return</span> JDK代理;
+    } <span class="k">else</span> {
+        <span class="k">return</span> CGLIB代理;  <span class="c">// 没接口也只能用 CGLIB</span>
+    }
+}</pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试回答</span>
+    <p>"Spring Boot 2.x 之前默认 JDK 代理，有接口走 JDK 没接口走 CGLIB；2.x 之后默认 proxyTargetClass=true，统一走 CGLIB。原因是 JDK 代理生成的对象不能强转为实现类，容易导致注入类型不匹配。"</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>代理失效场景：四大经典坑</h2>
+  </div>
+
+  <p>这是面试中区分"背过概念"和"真正理解"的关键环节。以下四种场景 AOP 会失效：</p>
+
+  <h3>坑 1：自调用（Self-invocation）——最高频</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">同类内部方法调用绕过代理</div>
+    <pre class="srcbox-file"><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+
+    <span class="k">@Transactional</span>  <span class="c">// 事务注解，依赖 AOP 代理</span>
+    <span class="k">public void</span> <span class="n">createOrder</span>() {
+        <span class="c">// 业务逻辑...</span>
+        <span class="n">saveLog</span>();  <span class="c">// ❌ 自调用，直接走 this，不经过代理</span>
+    }
+
+    <span class="k">@Async</span>  <span class="c">// 异步注解，同样依赖 AOP</span>
+    <span class="k">public void</span> <span class="n">saveLog</span>() {
+        <span class="c">// 日志保存...</span>
+    }
+}</pre>
+  </div>
+
+  <p><strong>原理</strong>：Spring 容器里存的是代理对象，外部调用 <code>orderService.createOrder()</code> 走的是代理。但 <code>createOrder()</code> 内部调 <code>saveLog()</code>，本质是 <code>this.saveLog()</code>，<code>this</code> 是目标对象本身，不是代理对象。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">三种解决方案</div>
+    <pre class="srcbox-file"><span class="c">// 方案 1：AopContext.currentProxy()（需开启 exposeProxy）</span>
+<span class="k">@EnableAspectJAutoProxy</span>(exposeProxy = <span class="k">true</span>)
+<span class="k">public void</span> <span class="n">createOrder</span>() {
+    ((<span class="t">OrderService</span>) <span class="t">AopContext</span>.<span class="n">currentProxy</span>()).saveLog();  <span class="c">// ✅</span>
+}
+
+<span class="c">// 方案 2：自注入（把自身注入进来）</span>
+<span class="k">@Autowired</span> <span class="k">private</span> <span class="t">OrderService</span> self;
+<span class="k">public void</span> <span class="n">createOrder</span>() {
+    self.saveLog();  <span class="c">// ✅ 走代理</span>
+}
+
+<span class="c">// 方案 3：把方法拆到不同类（推荐）</span>
+<span class="k">@Autowired</span> <span class="k">private</span> <span class="t">LogService</span> logService;
+<span class="k">public void</span> <span class="n">createOrder</span>() {
+    logService.saveLog();  <span class="c">// ✅ 跨类调用，天然走代理</span>
+}</pre>
+  </div>
+
+  <h3>坑 2：private 方法</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">private 方法无法被代理</div>
+    <pre class="srcbox-file"><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">PayService</span> {
+    <span class="k">@Transactional</span>
+    <span class="k">private void</span> <span class="n">deductBalance</span>() {  <span class="c">// ❌ private 方法，AOP 无法生效</span>
+        <span class="c">// CGLIB 子类无法重写 private 方法</span>
+        <span class="c">// JDK 代理只能代理接口方法</span>
+    }
+}</pre>
+  </div>
+
+  <h3>坑 3：final 方法 / final 类</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">final 阻止子类重写</div>
+    <pre class="srcbox-file"><span class="k">@Service</span>
+<span class="k">public final class</span> <span class="t">ConfigService</span> {  <span class="c">// ❌ final 类，CGLIB 无法继承</span>
+    <span class="k">@Cacheable</span>(<span class="t">"config"</span>)
+    <span class="k">public</span> <span class="t">String</span> <span class="n">getConfig</span>() { ... }  <span class="c">// 缓存注解失效</span>
+}
+
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">AuthService</span> {
+    <span class="k">@Cacheable</span>(<span class="t">"perm"</span>)
+    <span class="k">public final</span> <span class="t">boolean</span> <span class="n">checkPermission</span>() { ... }  <span class="c">// ❌ final 方法</span>
+}</pre>
+  </div>
+
+  <h3>坑 4：非 Spring 管理的对象</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">手动 new 的对象没有代理</div>
+    <pre class="srcbox-file"><span class="c">// 手动 new 的对象不经过 Spring 容器，没有代理增强</span>
+<span class="t">UserService</span> service = <span class="k">new</span> <span class="t">UserServiceImpl</span>();
+service.save(<span class="t">"Bob"</span>);  <span class="c">// ❌ 任何 @Transactional 等注解都不会生效</span>
+
+<span class="c">// 正确做法：从容器获取</span>
+<span class="t">UserService</span> service = applicationContext.getBean(<span class="t">UserService</span>.<span class="k">class</span>);
+service.save(<span class="t">"Bob"</span>);  <span class="c">// ✅ 拿到的是代理对象</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">速记口诀</span>
+    <p>代理失效四场景：<strong>自调、私有、终态、手 new</strong>。自调用最常考，AopContext 或拆类解决。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>总结：面试满分答案模板</h2>
+  </div>
+
+  <h3>JDK 动态代理 vs CGLIB 全面对比</h3>
+  <div class="nb-table">
+    <table>
+      <thead><tr><th>维度</th><th>JDK 动态代理</th><th>CGLIB</th></tr></thead>
+      <tbody>
+        <tr><td>实现方式</td><td>实现目标接口</td><td>继承目标类（子类）</td></tr>
+        <tr><td>是否需要接口</td><td>必须</td><td>不需要</td></tr>
+        <tr><td>能否代理 final</td><td>不涉及（基于接口）</td><td>不能代理 final 类/方法</td></tr>
+        <tr><td>能否代理 private</td><td>不能</td><td>不能</td></tr>
+        <tr><td>创建速度</td><td>快</td><td>慢（需生成字节码）</td></tr>
+        <tr><td>调用速度</td><td>慢（反射）</td><td>快（FastClass 直接调用）</td></tr>
+        <tr><td>类型转换</td><td>只能转为接口类型</td><td>可转为目标类及其接口</td></tr>
+        <tr><td>JDK 依赖</td><td>JDK 原生</td><td>需引入第三方库</td></tr>
+        <tr><td>Spring Boot 2.x 默认</td><td>否</td><td>是</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>常见面试追问</h3>
+  <div class="think">
+    <p class="think-q">"为什么 @Transactional 不生效？"</p>
+    <p>排查清单：① 方法是不是 private？② 是不是同一个类内部自调用？③ 类是不是 final？④ 对象是不是 Spring 管理的？⑤ 异常是不是被 catch 吃掉了（事务只回滚 RuntimeException 和 Error）？</p>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"多个 @Aspect 的执行顺序怎么控制？"</p>
+    <p>使用 <code>@Order</code> 注解控制切面优先级，数字越小优先级越高。同一 Aspect 内的 Advice 执行顺序：@Before → @Around(前半) → 目标方法 → @Around(后半) → @AfterReturning/@AfterThrowing → @After。</p>
+  </div>
+
+  <div class="recap">
+    <h3>面试回答模板（30 秒版）</h3>
+    <p>"Spring AOP 底层有两种代理实现：<strong>JDK 动态代理</strong>通过 <code>Proxy.newProxyInstance</code> 生成接口的代理实现类，所有调用转发给 <code>InvocationHandler.invoke</code>；<strong>CGLIB</strong> 通过 ASM 生成目标类的子类，重写方法实现拦截，内部用 FastClass 避免反射开销。Spring Boot 2.x 之前默认 JDK 代理（有接口走 JDK），2.x 之后默认 CGLIB，解决了 JDK 代理不能强转为实现类的问题。代理失效有四种场景：同类自调用绕过代理、private 方法、final 类/方法、非 Spring 管理的对象。"</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">最后叮嘱</span>
+    <p>面试官追问"自调用怎么解决"时，能说出 <code>AopContext.currentProxy()</code> 和"拆类"两种方案就加分。能讲出 CGLIB 的 FastClass 机制就是高级选手了。</p>
+  </div>
+</section>
+
+</main></body></html>

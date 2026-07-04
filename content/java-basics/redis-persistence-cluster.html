@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redis 持久化与高可用：RDB、AOF 与 Cluster 集群</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<section class="hero">
+  <span class="hero-badge">高级 · 面试极高</span>
+  <h1>Redis 持久化与高可用：RDB、AOF 与 Cluster 集群</h1>
+  <p class="hero-desc">RDB 快照 vs AOF 追加日志、混合持久化。哨兵模式 vs Cluster 分片集群。Redis 单线程为什么这么快？</p>
+  <div class="hero-tags">
+    <span>RDB</span><span>AOF</span><span>混合持久化</span><span>Sentinel</span><span>Cluster</span><span>单线程模型</span>
+  </div>
+</section>
+
+<!-- ==================== 第 1 站 ==================== -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>Redis 单线程为什么这么快？</h2>
+  </div>
+
+  <p>很多人疑惑：Redis 是单线程的，为什么还能达到 10 万+ QPS？答案是：<strong>瓶颈不在 CPU，在网络和内存</strong>。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">Redis 单线程高性能模型</text>
+
+      <!-- Client connections -->
+      <rect x="40" y="50" width="100" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="90" y="70" text-anchor="middle" font-size="10" fill="#94a3b8">Client 1</text>
+      <rect x="40" y="90" width="100" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="90" y="110" text-anchor="middle" font-size="10" fill="#94a3b8">Client 2</text>
+      <rect x="40" y="130" width="100" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="90" y="150" text-anchor="middle" font-size="10" fill="#94a3b8">Client N</text>
+
+      <!-- Arrows to event loop -->
+      <line x1="140" y1="65" x2="230" y2="100" stroke="#f59e0b" stroke-width="1"/>
+      <line x1="140" y1="105" x2="230" y2="105" stroke="#f59e0b" stroke-width="1"/>
+      <line x1="140" y1="145" x2="230" y2="110" stroke="#f59e0b" stroke-width="1"/>
+
+      <!-- Event Loop -->
+      <rect x="230" y="70" width="180" height="80" rx="10" fill="#064e3b" stroke="#6ee7b7" stroke-width="2"/>
+      <text x="320" y="95" text-anchor="middle" font-size="12" fill="#6ee7b7" font-weight="bold">I/O 多路复用</text>
+      <text x="320" y="115" text-anchor="middle" font-size="11" fill="#e2e8f0">epoll / kqueue</text>
+      <text x="320" y="135" text-anchor="middle" font-size="10" fill="#94a3b8">监听多个 socket 事件</text>
+
+      <!-- Arrow to command queue -->
+      <line x1="410" y1="110" x2="460" y2="110" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr5)"/>
+      <defs><marker id="arr5" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#f59e0b"/></marker></defs>
+
+      <!-- Command executor -->
+      <rect x="460" y="70" width="220" height="80" rx="10" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+      <text x="570" y="95" text-anchor="middle" font-size="12" fill="#93c5fd" font-weight="bold">单线程命令执行器</text>
+      <text x="570" y="115" text-anchor="middle" font-size="11" fill="#e2e8f0">串行执行 GET/SET/...</text>
+      <text x="570" y="135" text-anchor="middle" font-size="10" fill="#94a3b8">纯内存操作，无锁竞争</text>
+
+      <!-- Reasons -->
+      <rect x="40" y="180" width="640" height="70" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="200" font-size="12" fill="#fbbf24" font-weight="bold">快的三大原因</text>
+      <text x="60" y="220" font-size="11" fill="#e2e8f0">① 纯内存操作 — 数据在 RAM 中，读写纳秒级</text>
+      <text x="60" y="238" font-size="11" fill="#e2e8f0">② I/O 多路复用 — 一个线程同时处理数千个连接（epoll），避免阻塞</text>
+      <text x="280" y="238" font-size="11" fill="#e2e8f0">③ 单线程无锁竞争 — 无需加锁/解锁/上下文切换</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1-1</span> Redis 单线程模型：epoll 多路复用 + 内存操作 + 无锁</figcaption>
+  </div>
+
+  <div class="think">
+    <p class="think-q">Redis 6.0 引入了多线程，是怎么回事？</p>
+    <p>Redis 6.0 的<strong>多线程只用于网络 I/O</strong>（读写 socket、解析协议），命令执行仍然是单线程的。这是为了解决网络 I/O 成为瓶颈的问题（高并发时网络数据拷贝占用了大量 CPU）。所以"Redis 命令执行是单线程的"这个结论依然成立。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>Redis 快的本质：内存操作（ns级）+ epoll 多路复用（高并发）+ 单线程（无锁开销）。单线程不是"慢"的原因——瓶颈在网络/内存，不在 CPU。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 2 站 ==================== -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>RDB 快照——某一时刻的全量内存镜像</h2>
+  </div>
+
+  <p><strong>RDB（Redis Database）</strong>是 Redis 的默认持久化方式：在指定时间间隔内将内存中的全部数据快照写入磁盘的 <code>.rdb</code> 文件。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">RDB 快照流程（BGSAVE）</text>
+
+      <!-- Parent process -->
+      <rect x="40" y="50" width="280" height="80" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="180" y="72" text-anchor="middle" font-size="12" fill="#93c5fd" font-weight="bold">Redis 主进程</text>
+      <text x="180" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">继续处理客户端命令</text>
+      <text x="180" y="110" text-anchor="middle" font-size="10" fill="#94a3b8">fork() 后不阻塞</text>
+      <text x="180" y="125" text-anchor="middle" font-size="9" fill="#94a3b8">写时复制（COW）保证数据隔离</text>
+
+      <!-- Fork arrow -->
+      <text x="360" y="85" text-anchor="middle" font-size="18" fill="#f59e0b">fork()</text>
+
+      <!-- Child process -->
+      <rect x="400" y="50" width="280" height="80" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="540" y="72" text-anchor="middle" font-size="12" fill="#6ee7b7" font-weight="bold">子进程（bgSave）</text>
+      <text x="540" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">将内存快照写入 dump.rdb</text>
+      <text x="540" y="110" text-anchor="middle" font-size="10" fill="#94a3b8">写完后退出，通知主进程</text>
+      <text x="540" y="125" text-anchor="middle" font-size="9" fill="#94a3b8">临时替换旧的 .rdb 文件</text>
+
+      <!-- COW explanation -->
+      <rect x="40" y="150" width="640" height="40" rx="6" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="170" font-size="11" fill="#fbbf24" font-weight="bold">Copy-On-Write（写时复制）：</text>
+      <text x="320" y="170" font-size="11" fill="#e2e8f0">fork 后父子共享物理内存页。主进程修改某页时，OS 才复制该页 → 不额外占内存</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2-1</span> BGSAVE：fork 子进程写快照，主进程继续服务</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">RDB 触发条件配置</div>
+    <pre class="srcbox-file"><span class="c"># redis.conf</span>
+<span class="t">save</span> <span class="n">900</span> <span class="n">1</span>      <span class="c"># 900 秒内至少 1 次写操作 → 触发 BGSAVE</span>
+<span class="t">save</span> <span class="n">300</span> <span class="n">10</span>     <span class="c"># 300 秒内至少 10 次写操作</span>
+<span class="t">save</span> <span class="n">60</span> <span class="n">10000</span>   <span class="c"># 60 秒内至少 10000 次写操作</span>
+
+<span class="c"># 手动触发</span>
+<span class="n">SAVE</span>    <span class="c"># 阻塞主进程（生产慎用）</span>
+<span class="n">BGSAVE</span>  <span class="c"># fork 子进程（推荐）</span></pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>优点</th><th>缺点</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>文件紧凑，恢复速度快</td><td>两次快照之间的数据可能丢失</td></tr>
+      <tr><td>fork 子进程不影响主进程服务</td><td>fork 大内存进程时可能阻塞毫秒级</td></tr>
+      <tr><td>适合备份和灾难恢复</td><td>频繁 fork 有 CPU 和内存开销</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ==================== 第 3 站 ==================== -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>AOF 追加日志——记录每一条写命令</h2>
+  </div>
+
+  <p><strong>AOF（Append Only File）</strong>记录的是每一条写命令（SET/DEL/HSET 等），以 Redis 协议格式追加到 <code>.aof</code> 文件末尾。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">AOF 文件格式（RESP 协议）</div>
+    <pre class="srcbox-file"><span class="c"># appendonly.aof 文件内容示例</span>
+<span class="t">*2</span>
+<span class="t">$6</span>
+<span class="n">SELECT</span>
+<span class="t">$1</span>
+<span class="n">0</span>
+<span class="t">*3</span>
+<span class="t">$3</span>
+<span class="n">SET</span>
+<span class="t">$3</span>
+<span class="n">foo</span>
+<span class="t">$3</span>
+<span class="n">bar</span>
+<span class="t">*2</span>
+<span class="t">$3</span>
+<span class="n">DEL</span>
+<span class="t">$3</span>
+<span class="n">foo</span>
+
+<span class="c"># 恢复时重放这些命令 → 还原数据</span></pre>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">AOF 三种 fsync 策略</text>
+
+      <rect x="40" y="50" width="200" height="100" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1.5" opacity="0.5"/>
+      <text x="140" y="72" text-anchor="middle" font-size="11" fill="#fca5a5" font-weight="bold">always</text>
+      <text x="140" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">每条命令都 fsync</text>
+      <text x="140" y="112" text-anchor="middle" font-size="10" fill="#6ee7b7">数据最安全</text>
+      <text x="140" y="130" text-anchor="middle" font-size="10" fill="#f87171">性能最差（IO密集）</text>
+
+      <rect x="260" y="50" width="200" height="100" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5" opacity="0.5"/>
+      <text x="360" y="72" text-anchor="middle" font-size="11" fill="#6ee7b7" font-weight="bold">everysec（默认）</text>
+      <text x="360" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">每秒 fsync 一次</text>
+      <text x="360" y="112" text-anchor="middle" font-size="10" fill="#6ee7b7">最多丢 1 秒数据</text>
+      <text x="360" y="130" text-anchor="middle" font-size="10" fill="#6ee7b7">性能和安全折中</text>
+
+      <rect x="480" y="50" width="200" height="100" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5" opacity="0.5"/>
+      <text x="580" y="72" text-anchor="middle" font-size="11" fill="#93c5fd" font-weight="bold">no</text>
+      <text x="580" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">由 OS 决定 fsync</text>
+      <text x="580" y="112" text-anchor="middle" font-size="10" fill="#f87171">可能丢很多数据</text>
+      <text x="580" y="130" text-anchor="middle" font-size="10" fill="#6ee7b7">性能最好</text>
+
+      <text x="360" y="180" text-anchor="middle" font-size="11" fill="#fbbf24">生产环境推荐 everysec，兼顾安全和性能</text>
+    </svg>
+    <figcaption><span class="fig-no">图 3-1</span> AOF 三种 fsync 策略对比</figcaption>
+  </div>
+
+  <div class="think">
+    <p class="think-q">AOF 文件越来越大怎么办？</p>
+    <p>Redis 提供了 <strong>AOF 重写（BGREWRITEAOF）</strong>机制：fork 子进程，根据当前内存数据生成"最小等价命令集"，替换旧的 AOF 文件。例如对 key "x" 执行了 100 次 SET，重写后只保留最后一次。重写过程中新产生的命令会同时写入 AOF 重写缓冲区，完成后合并。</p>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>对比维度</th><th>RDB</th><th>AOF</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>数据安全性</td><td>可能丢失两次快照间的数据</td><td>取决于 fsync 策略（everysec 最多丢 1 秒）</td></tr>
+      <tr><td>文件大小</td><td>紧凑（二进制压缩）</td><td>较大（文本格式命令）</td></tr>
+      <tr><td>恢复速度</td><td>快（直接加载二进制）</td><td>慢（需重放所有命令）</td></tr>
+      <tr><td>写入性能</td><td>fork 时有瞬间阻塞</td><td>fsync 有持续 IO 开销</td></tr>
+      <tr><td>适用场景</td><td>备份、灾难恢复、冷备</td><td>数据安全要求高的生产环境</td></tr>
+      <tr><td>推荐策略</td><td>每小时一次定时备份</td><td>always/everysec + 自动重写</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">AOF 重写配置</div>
+    <pre class="srcbox-file"><span class="c"># 自动触发 AOF 重写的条件</span>
+<span class="t">auto-aof-rewrite-percentage</span> <span class="n">100</span>  <span class="c"># AOF 文件增长 100% 时触发</span>
+<span class="t">auto-aof-rewrite-min-size</span> <span class="n">64mb</span>  <span class="c"># 最小 64MB 才触发（避免频繁重写小文件）</span>
+
+<span class="c"># 手动触发</span>
+<span class="n">BGREWRITEAOF</span>
+
+<span class="c"># 查看 AOF 状态</span>
+<span class="n">INFO</span> <span class="n">persistence</span>
+<span class="c"># aof_enabled:1</span>
+<span class="c"># aof_rewrite_in_progress:0</span>
+<span class="c"># aof_current_size:104857600  (当前 AOF 文件大小)</span>
+<span class="c"># aof_base_size:52428800     (上次重写后的大小)</span></pre>
+  </div>
+</section>
+
+<!-- ==================== 第 4 站 ==================== -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>混合持久化（Redis 4.0+）</h2>
+  </div>
+
+  <p>Redis 4.0 引入了<strong>混合持久化</strong>：AOF 重写时，先以 RDB 格式写入全量数据，再追加增量 AOF 命令。兼顾了 RDB 的快速恢复和 AOF 的数据安全。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">混合持久化 AOF 文件结构</text>
+
+      <!-- File structure -->
+      <rect x="180" y="45" width="360" height="40" rx="4" fill="#334155" stroke="#475569" stroke-width="1"/>
+      <text x="360" y="65" text-anchor="middle" font-size="11" fill="#94a3b8">appendonly.aof</text>
+      <text x="360" y="80" text-anchor="middle" font-size="9" fill="#64748b">文件名不变，但内容分两段</text>
+
+      <rect x="180" y="90" width="360" height="50" rx="4" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="360" y="112" text-anchor="middle" font-size="12" fill="#93c5fd">前半段：RDB 格式（二进制快照）</text>
+      <text x="360" y="130" text-anchor="middle" font-size="10" fill="#94a3b8">以 REDIS 魔数开头，加载速度极快</text>
+
+      <rect x="180" y="145" width="360" height="50" rx="4" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="360" y="167" text-anchor="middle" font-size="12" fill="#6ee7b7">后半段：AOF 增量命令</text>
+      <text x="360" y="185" text-anchor="middle" font-size="10" fill="#94a3b8">重写期间新产生的写命令（RESP 格式）</text>
+
+      <text x="360" y="215" text-anchor="middle" font-size="11" fill="#fbbf24">恢复时先加载 RDB 部分（快），再重放 AOF 增量（补最新数据）</text>
+    </svg>
+    <figcaption><span class="fig-no">图 4-1</span> 混合持久化：RDB 快照 + AOF 增量命令，两全其美</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">开启混合持久化</div>
+    <pre class="srcbox-file"><span class="c"># redis.conf</span>
+<span class="t">aof-use-rdb-preamble</span> <span class="k">yes</span>  <span class="c"># Redis 5.0 默认开启</span>
+
+<span class="c"># 同时建议开启 AOF + RDB 双持久化</span>
+<span class="t">appendonly</span> <span class="k">yes</span>
+<span class="t">save</span> <span class="n">900</span> <span class="n">1</span>
+<span class="t">save</span> <span class="n">300</span> <span class="n">10</span>
+
+<span class="c"># 恢复优先级：AOF > RDB</span>
+<span class="c"># 如果 AOF 存在，Redis 优先加载 AOF；AOF 不存在才加载 RDB</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>生产环境最佳实践：<strong>RDB + AOF（混合持久化）</strong>同时开启。RDB 用于快速备份和恢复，AOF 保证数据不丢。Redis 4.0+ 的混合持久化让 AOF 重写后体积更小、恢复更快。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 5 站 ==================== -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>Sentinel 哨兵——自动故障转移</h2>
+  </div>
+
+  <p>Redis 主从复制（Master-Slave）解决了数据冗余，但主节点宕机时需要手动切换。Sentinel 实现了<strong>自动故障检测和故障转移</strong>。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">Sentinel 哨兵模式架构</text>
+
+      <!-- Master -->
+      <rect x="260" y="45" width="200" height="50" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="2"/>
+      <text x="360" y="68" text-anchor="middle" font-size="12" fill="#6ee7b7" font-weight="bold">Master (6379)</text>
+      <text x="360" y="84" text-anchor="middle" font-size="10" fill="#94a3b8">读写</text>
+
+      <!-- Slaves -->
+      <rect x="60" y="130" width="160" height="40" rx="6" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="140" y="154" text-anchor="middle" font-size="11" fill="#93c5fd">Slave-1 (6380)</text>
+
+      <rect x="500" y="130" width="160" height="40" rx="6" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="580" y="154" text-anchor="middle" font-size="11" fill="#93c5fd">Slave-2 (6381)</text>
+
+      <!-- Replication arrows -->
+      <line x1="290" y1="95" x2="160" y2="130" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <line x1="430" y1="95" x2="560" y2="130" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="200" y="108" font-size="9" fill="#94a3b8">复制</text>
+      <text x="510" y="108" font-size="9" fill="#94a3b8">复制</text>
+
+      <!-- Sentinels -->
+      <rect x="60" y="210" width="120" height="35" rx="6" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="120" y="232" text-anchor="middle" font-size="10" fill="#d8b4fe">Sentinel-1</text>
+      <rect x="300" y="210" width="120" height="35" rx="6" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="360" y="232" text-anchor="middle" font-size="10" fill="#d8b4fe">Sentinel-2</text>
+      <rect x="540" y="210" width="120" height="35" rx="6" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="600" y="232" text-anchor="middle" font-size="10" fill="#d8b4fe">Sentinel-3</text>
+
+      <!-- Monitoring arrows -->
+      <line x1="120" y1="210" x2="320" y2="95" stroke="#c084fc" stroke-width="0.8" stroke-dasharray="2,2"/>
+      <line x1="360" y1="210" x2="360" y2="95" stroke="#c084fc" stroke-width="0.8" stroke-dasharray="2,2"/>
+      <line x1="600" y1="210" x2="400" y2="95" stroke="#c084fc" stroke-width="0.8" stroke-dasharray="2,2"/>
+
+      <text x="360" y="275" text-anchor="middle" font-size="11" fill="#fbbf24">3 个 Sentinel 监控 Master，主观下线需 quorum（默认 2）个 Sentinel 同意</text>
+      <text x="360" y="293" text-anchor="middle" font-size="11" fill="#e2e8f0">Master 宕机 → Sentinel 选举 Leader → 选一个 Slave 提升为 Master → 通知客户端</text>
+    </svg>
+    <figcaption><span class="fig-no">图 5-1</span> Sentinel 哨兵模式：3 个哨兵节点监控主从，自动故障转移</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">故障转移流程</div>
+    <pre class="srcbox-file"><span class="c">1. 监控：Sentinel 每秒向 Master/Slave 发送 PING</span>
+<span class="c">2. 主观下线（SDOWN）：某个 Sentinel 超时未收到回复 → 认为该节点下线</span>
+<span class="c">3. 客观下线（ODOWN）：quorum 个 Sentinel 都同意 → 确认 Master 下线</span>
+<span class="c">4. 选举 Leader Sentinel：Raft 算法选出一个 Sentinel 执行故障转移</span>
+<span class="c">5. 选新 Master：从 Slave 中选一个（优先级 > 复制偏移量 > runid）</span>
+<span class="c">6. 切换：其他 Slave 复制新 Master，旧 Master 恢复后变 Slave</span>
+<span class="c">7. 通知：客户端通过 Sentinel 获取新 Master 地址</span></pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Sentinel 配置示例</div>
+    <pre class="srcbox-file"><span class="c"># sentinel.conf</span>
+<span class="t">port</span> <span class="n">26379</span>
+
+<span class="c"># 监控的 Master 名称、地址、quorum（最少几个 Sentinel 同意才算下线）</span>
+<span class="t">sentinel monitor</span> mymaster <span class="n">192.168.1.100</span> <span class="n">6379</span> <span class="n">2</span>
+
+<span class="c"># 主观下线超时（毫秒）：超过这个时间没回复就认为下线</span>
+<span class="t">sentinel down-after-milliseconds</span> mymaster <span class="n">5000</span>
+
+<span class="c"># 故障转移超时（毫秒）：整个故障转移过程的最大时间</span>
+<span class="t">sentinel failover-timeout</span> mymaster <span class="n">60000</span>
+
+<span class="c"># 故障转移时最多几个 Slave 同时切换 Master</span>
+<span class="t">sentinel parallel-syncs</span> mymaster <span class="n">1</span></pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">客户端连接 Sentinel 获取 Master</div>
+    <pre class="srcbox-file"><span class="c">// Jedis Sentinel 示例</span>
+<span class="t">Set</span>&lt;<span class="t">String</span>&gt; <span class="n">sentinels</span> = <span class="k">new</span> <span class="t">HashSet</span>&lt;&gt;();
+<span class="n">sentinels</span>.<span class="n">add</span>(<span class="t">"192.168.1.1:26379"</span>);
+<span class="n">sentinels</span>.<span class="n">add</span>(<span class="t">"192.168.1.2:26379"</span>);
+<span class="n">sentinels</span>.<span class="n">add</span>(<span class="t">"192.168.1.3:26379"</span>);
+
+<span class="t">JedisSentinelPool</span> <span class="n">pool</span> = <span class="k">new</span> <span class="t">JedisSentinelPool</span>(
+    <span class="t">"mymaster"</span>,       <span class="c">// 监控的 Master 名称</span>
+    <span class="n">sentinels</span>,       <span class="c">// Sentinel 节点列表</span>
+    <span class="n">jedisPoolConfig</span>, <span class="c">// 连接池配置</span>
+    <span class="t">"password"</span>       <span class="c">// Redis 密码</span>
+);
+
+<span class="c">// 自动获取当前 Master 连接（故障转移后自动切换）</span>
+<span class="k">try</span> (<span class="t">Jedis</span> <span class="n">jedis</span> = <span class="n">pool</span>.<span class="n">getResource</span>()) {
+    <span class="n">jedis</span>.<span class="n">set</span>(<span class="t">"key"</span>, <span class="t">"value"</span>);
+}</pre>
+  </div>
+  <div class="think">
+    <p class="think-q">Sentinel 模式有什么局限性？</p>
+    <p>Sentinel 解决了高可用问题，但没有解决<strong>数据分片</strong>问题——所有数据都存在一台 Master 上，内存上限受限于单机。写操作也无法并行。要水平扩展就需要 <strong>Cluster 集群</strong>。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 6 站 ==================== -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>Cluster 分片集群——数据分片 + 高可用</h2>
+  </div>
+
+  <p>Redis Cluster 是官方提供的<strong>分布式解决方案</strong>：数据按 slot 分片存储到多个 Master 节点，每个 Master 可以有 Slave 做高可用。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">Redis Cluster 架构（3 主 3 从）</text>
+
+      <!-- Hash slot distribution -->
+      <text x="360" y="50" text-anchor="middle" font-size="11" fill="#fbbf24">16384 个 hash slot 分配到 3 个 Master</text>
+
+      <!-- Master 1 -->
+      <rect x="40" y="65" width="200" height="80" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="140" y="88" text-anchor="middle" font-size="12" fill="#6ee7b7" font-weight="bold">Master-A</text>
+      <text x="140" y="108" text-anchor="middle" font-size="10" fill="#e2e8f0">Slot 0 ~ 5460</text>
+      <text x="140" y="128" text-anchor="middle" font-size="9" fill="#94a3b8">CRC16(key) % 16384 ∈ [0,5460]</text>
+
+      <!-- Master 2 -->
+      <rect x="260" y="65" width="200" height="80" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="360" y="88" text-anchor="middle" font-size="12" fill="#93c5fd" font-weight="bold">Master-B</text>
+      <text x="360" y="108" text-anchor="middle" font-size="10" fill="#e2e8f0">Slot 5461 ~ 10922</text>
+      <text x="360" y="128" text-anchor="middle" font-size="9" fill="#94a3b8">CRC16(key) % 16384 ∈ [5461,10922]</text>
+
+      <!-- Master 3 -->
+      <rect x="480" y="65" width="200" height="80" rx="8" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="580" y="88" text-anchor="middle" font-size="12" fill="#d8b4fe" font-weight="bold">Master-C</text>
+      <text x="580" y="108" text-anchor="middle" font-size="10" fill="#e2e8f0">Slot 10923 ~ 16383</text>
+      <text x="580" y="128" text-anchor="middle" font-size="9" fill="#94a3b8">CRC16(key) % 16384 ∈ [10923,16383]</text>
+
+      <!-- Slaves -->
+      <rect x="40" y="170" width="200" height="40" rx="6" fill="#1e293b" stroke="#475569"/>
+      <text x="140" y="194" text-anchor="middle" font-size="11" fill="#94a3b8">Slave-A'（复制 Master-A）</text>
+
+      <rect x="260" y="170" width="200" height="40" rx="6" fill="#1e293b" stroke="#475569"/>
+      <text x="360" y="194" text-anchor="middle" font-size="11" fill="#94a3b8">Slave-B'（复制 Master-B）</text>
+
+      <rect x="480" y="170" width="200" height="40" rx="6" fill="#1e293b" stroke="#475569"/>
+      <text x="580" y="194" text-anchor="middle" font-size="11" fill="#94a3b8">Slave-C'（复制 Master-C）</text>
+
+      <!-- Gossip -->
+      <text x="360" y="240" text-anchor="middle" font-size="11" fill="#fbbf24">节点间通过 Gossip 协议交换状态信息</text>
+      <text x="360" y="260" text-anchor="middle" font-size="11" fill="#e2e8f0">PING/PONG 心跳 | 客户端收到 MOVED/ASK 重定向到正确的节点</text>
+    </svg>
+    <figcaption><span class="fig-no">图 6-1</span> Redis Cluster：3 主 3 从，16384 slot 分片</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">数据路由：CRC16 + MOVED 重定向</div>
+    <pre class="srcbox-file"><span class="c">客户端写入 key="user:1001"</span>
+<span class="n">1</span>. 计算 slot = <span class="n">CRC16</span>(<span class="t">"user:1001"</span>) % <span class="n">16384</span> = <span class="n">7842</span>
+<span class="n">2</span>. slot <span class="n">7842</span> 属于 Master-B（<span class="n">5461</span>~<span class="n">10922</span>）
+<span class="n">3</span>. 如果客户端连的是 Master-A → 收到 <span class="t">MOVED 7842 192.168.1.2:6379</span>
+<span class="n">4</span>. 客户端重定向到 Master-B 执行命令
+
+<span class="c"># 批量操作的 key 必须落在同一 slot → 使用 hash tag</span>
+<span class="n">SET</span> {<span class="t">user</span>}:<span class="n">1001</span>:name  <span class="t">"Alice"</span>
+<span class="n">SET</span> {<span class="t">user</span>}:<span class="n">1001</span>:age   <span class="n">25</span>
+<span class="c"># {} 内的部分参与 CRC16 计算 → 保证同 slot</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>Cluster 将 16384 个 slot 分给多个 Master，key 通过 CRC16 定位 slot。最少 3 主 3 从部署。支持自动故障转移（类似 Sentinel 但内置于 Cluster）。不适合跨 slot 的批量操作（需要 hash tag 或 Lua 脚本）。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 7 站 ==================== -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>高可用架构选型总结</h2>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>架构</th><th>数据分片</th><th>高可用</th><th>适用场景</th><th>复杂度</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>单机</td><td>无</td><td>无</td><td>开发测试</td><td>低</td></tr>
+      <tr><td>主从复制</td><td>无</td><td>手动切换</td><td>读多写少</td><td>低</td></tr>
+      <tr><td>Sentinel 哨兵</td><td>无</td><td>自动故障转移</td><td>数据量不大，需高可用</td><td>中</td></tr>
+      <tr><td>Cluster 集群</td><td>16384 slot</td><td>自动故障转移</td><td>大数据量，高并发读写</td><td>高</td></tr>
+    </tbody>
+  </table>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">持久化 + 高可用 最佳实践</text>
+      <rect x="40" y="45" width="640" height="100" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="68" font-size="11" fill="#6ee7b7">持久化: RDB + AOF（混合持久化）同时开启</text>
+      <text x="60" y="88" font-size="11" fill="#6ee7b7">高可用: 生产环境至少 3 主 3 从 Cluster 或 1 主 2 从 + 3 哨兵</text>
+      <text x="60" y="108" font-size="11" fill="#fbbf24">内存: maxmemory + 淘汰策略（volatile-lru / allkeys-lru）</text>
+      <text x="60" y="128" font-size="11" fill="#e2e8f0">监控: INFO 命令 + Redis Exporter + Prometheus + Grafana</text>
+    </svg>
+    <figcaption><span class="fig-no">图 7-1</span> Redis 生产环境配置清单</figcaption>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>淘汰策略</th><th>淘汰范围</th><th>淘汰算法</th><th>适用场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>volatile-lru</strong></td><td>设置了 TTL 的 key</td><td>最近最少使用</td><td>缓存场景（推荐）</td></tr>
+      <tr><td><strong>allkeys-lru</strong></td><td>所有 key</td><td>最近最少使用</td><td>纯缓存，所有 key 都可淘汰</td></tr>
+      <tr><td>volatile-lfu</td><td>设置了 TTL 的 key</td><td>最不经常使用</td><td>Redis 4.0+，热点数据场景</td></tr>
+      <tr><td>allkeys-lfu</td><td>所有 key</td><td>最不经常使用</td><td>Redis 4.0+，访问频率差异大</td></tr>
+      <tr><td>volatile-random</td><td>设置了 TTL 的 key</td><td>随机</td><td>对淘汰无特殊要求</td></tr>
+      <tr><td>volatile-ttl</td><td>设置了 TTL 的 key</td><td>TTL 最短的优先</td><td>快过期的先淘汰</td></tr>
+      <tr><td>noeviction</td><td>不淘汰</td><td>—</td><td>内存满时拒绝写入（默认）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">慢查询分析与优化</div>
+    <pre class="srcbox-file"><span class="c"># 慢查询配置</span>
+<span class="t">slowlog-log-slower-than</span> <span class="n">10000</span>  <span class="c"># 超过 10ms 记录（微秒）</span>
+<span class="t">slowlog-max-len</span> <span class="n">128</span>            <span class="c"># 最多保留 128 条慢查询</span>
+
+<span class="c"># 查看慢查询</span>
+<span class="n">SLOWLOG GET</span> <span class="n">10</span>    <span class="c"># 最近 10 条慢查询</span>
+<span class="n">SLOWLOG LEN</span>       <span class="c"># 慢查询总数</span>
+
+<span class="c"># 常见慢查询原因及优化：</span>
+<span class="c"># 1. KEYS * → 改用 SCAN（渐进式遍历，不阻塞）</span>
+<span class="c"># 2. HGETALL 大 Hash → 改用 HMGET 取需要的 field</span>
+<span class="c"># 3. SMEMBERS 大 Set → 改用 SSCAN</span>
+<span class="c"># 4. 大 Key 操作 → 拆分成多个小 Key</span>
+<span class="c"># 5. FLUSHALL/FLUSHDB → 改用 UNLINK（异步删除，Redis 4.0+）</span></pre>
+  </div>
+
+  <div class="recap">
+    <h3>全篇回顾</h3>
+    <ol>
+      <li><strong>单线程快的原因</strong>：内存操作 + epoll 多路复用 + 无锁竞争（Redis 6.0 多线程只用于网络 IO）</li>
+      <li><strong>RDB</strong>：fork 子进程写快照，恢复快但可能丢数据（两次快照之间的写入）</li>
+      <li><strong>AOF</strong>：追加写命令，数据安全但文件大、恢复慢。everysec 是最佳策略</li>
+      <li><strong>混合持久化</strong>：AOF 重写时 RDB + AOF 增量，兼具两者优点</li>
+      <li><strong>Sentinel</strong>：自动故障转移，但不支持数据分片</li>
+      <li><strong>Cluster</strong>：16384 slot 分片 + 自动故障转移，适合大数据量场景</li>
+      <li><strong>选型</strong>：小数据 Sentinel，大数据 Cluster，持久化一律开 RDB + AOF</li>
+    </ol>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lambda 底层实现</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：Lambda 编译后是什么？</h2></div>
+
+<div class="think"><div class="think-q">"Lambda 表达式编译后是什么？匿名内部类？"——如果你回答"是"，面试官会立刻追问："那你用 javap 看过字节码吗？"</div></div>
+
+<p>这是 Java 面试中一道经典的"陷阱题"。绝大多数候选人会不假思索地回答："Lambda 就是匿名内部类的简化写法。"这个回答在<strong>语义层面</strong>勉强说得通——两者确实都能实现接口的单个方法。但在<strong>编译和运行时层面</strong>，这个答案是<strong>完全错误的</strong>。</p>
+
+<p>真正的区别：</p>
+<ul>
+  <li><strong>匿名内部类</strong>：编译时生成一个独立的 <code>.class</code> 文件（如 <code>Outer$1.class</code>），每次使用都是一个新的类</li>
+  <li><strong>Lambda 表达式</strong>：编译后不产生任何 <code>.class</code> 文件，而是生成一条 <code>invokedynamic</code> 字节码指令，由 JVM 在<strong>运行时动态生成</strong>实现类</li>
+</ul>
+
+<p>这篇文章我们将从语法到字节码，从 <code>LambdaMetafactory</code> 到性能基准测试，彻底拆解 Lambda 的底层机制。读完之后，你不仅能回答"Lambda 编译后是什么"，还能解释<strong>为什么这样设计</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第2站：Lambda 语法 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>Lambda 语法：从冗余到极简</h2></div>
+
+<p>在理解底层之前，先快速回顾 Lambda 的语法规则。Lambda 的核心思想是：<strong>把一段可执行的逻辑当作值来传递</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LambdaSyntax.java</b> · 语法演进：从匿名类到 Lambda</span></div>
+<pre><code><span class="c">// ① 匿名内部类：最冗长</span>
+<span class="t">Comparator</span>&lt;<span class="t">String</span>&gt; c1 = <span class="k">new</span> <span class="t">Comparator</span>&lt;<span class="t">String</span>&gt;() {
+    <span class="k">@Override</span>
+    <span class="k">public int</span> compare(<span class="t">String</span> a, <span class="t">String</span> b) {
+        <span class="k">return</span> <span class="t">Integer</span>.compare(a.length(), b.length());
+    }
+};
+
+<span class="c">// ② Lambda 完整写法：省略类名和方法名</span>
+<span class="t">Comparator</span>&lt;<span class="t">String</span>&gt; c2 = (<span class="t">String</span> a, <span class="t">String</span> b) -&gt; {
+    <span class="k">return</span> <span class="t">Integer</span>.compare(a.length(), b.length());
+};
+
+<span class="c">// ③ 类型推断：编译器自动推导参数类型</span>
+<span class="t">Comparator</span>&lt;<span class="t">String</span>&gt; c3 = (a, b) -&gt; <span class="t">Integer</span>.compare(a.length(), b.length());
+
+<span class="c">// ④ 方法引用：最极简的写法</span>
+<span class="t">Comparator</span>&lt;<span class="t">String</span>&gt; c4 = <span class="t">Comparator</span>.comparingInt(<span class="t">String</span>::length);</code></pre>
+</div>
+
+<h3>三条核心语法规则</h3>
+
+<ul>
+  <li><strong>参数类型可省略</strong>：编译器通过目标类型（Target Type）自动推断。左侧变量声明的类型越明确，右侧 Lambda 就可以越简洁</li>
+  <li><strong>单参数可省括号</strong>：<code>s -&gt; s.length()</code> 等价于 <code>(s) -&gt; s.length()</code></li>
+  <li><strong>单表达式可省花括号和 return</strong>：<code>(a, b) -&gt; a + b</code> 会自动返回计算结果</li>
+</ul>
+
+<h3>方法引用的四种形式</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MethodRef.java</b> · 方法引用 —— Lambda 的进一步简化</span></div>
+<pre><code><span class="c">// ① 静态方法引用：类名::静态方法名</span>
+<span class="t">Function</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; f1 = <span class="t">Integer</span>::parseInt;
+
+<span class="c">// ② 实例方法引用（已绑定）：对象::实例方法名</span>
+<span class="t">String</span> str = <span class="n">"hello"</span>;
+<span class="t">Supplier</span>&lt;<span class="t">Integer</span>&gt; f2 = str::length;
+
+<span class="c">// ③ 实例方法引用（未绑定）：类名::实例方法名</span>
+<span class="t">Function</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; f3 = <span class="t">String</span>::length;
+
+<span class="c">// ④ 构造方法引用：类名::new</span>
+<span class="t">Supplier</span>&lt;<span class="t">ArrayList</span>&lt;<span class="t">String</span>&gt;&gt; f4 = <span class="t">ArrayList</span>::<span class="k">new</span>;</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">语法本质</div>
+<p>Lambda 和方法引用并不是新的语言特性——它们只是<strong>函数式接口实例化</strong>的语法糖。编译器负责将 Lambda 体绑定到函数式接口的唯一抽象方法上。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：函数式接口 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>函数式接口：Lambda 的"着陆点"</h2></div>
+
+<p>Lambda 表达式不能独立存在，它必须赋值给一个<strong>函数式接口</strong>（Functional Interface）类型的变量。函数式接口的定义很简单：<strong>只包含一个抽象方法</strong>的接口。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>FunctionalInterface.java</b> · 函数式接口定义规则</span></div>
+<pre><code><span class="k">@FunctionalInterface</span>   <span class="c">// 编译期检查：确保只有一个抽象方法</span>
+<span class="k">public interface</span> <span class="t">MyAction</span>&lt;T&gt; {
+    <span class="k">void</span> execute(T input);        <span class="c">// 唯一的抽象方法</span>
+
+    <span class="c">// 可以有 default 方法 —— 不算抽象方法</span>
+    <span class="k">default void</span> log(T input) { <span class="t">System</span>.out.println(input); }
+
+    <span class="c">// 可以有 static 方法 —— 不算抽象方法</span>
+    <span class="k">static</span> &lt;T&gt; <span class="t">MyAction</span>&lt;T&gt; identity() { <span class="k">return</span> x -&gt; {}; }
+}
+
+<span class="c">// 编译报错！如果定义了第二个抽象方法：</span>
+<span class="c">// void execute2(T input);  ← @FunctionalInterface 检查失败</span></code></pre>
+</div>
+
+<p><code>@FunctionalInterface</code> 注解是<strong>可选的</strong>——只要接口满足"一个抽象方法"的约束，即使不加注解也是函数式接口。但加上注解可以让编译器帮你做检查，避免无意中添加第二个抽象方法。</p>
+
+<h3>四大核心函数式接口</h3>
+
+<p>JDK 在 <code>java.util.function</code> 包中预定义了一组常用接口，几乎所有 Lambda 场景都可以映射到这四个：</p>
+
+<div class="takeaway"><div class="takeaway-label">四大核心接口速查表</div>
+<table class="nb-table">
+  <thead>
+    <tr><th>接口</th><th>抽象方法</th><th>语义</th><th>典型场景</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>Predicate&lt;T&gt;</code></td>
+      <td><code>boolean test(T t)</code></td>
+      <td>判断/过滤</td>
+      <td><code>filter</code>、条件校验</td>
+    </tr>
+    <tr>
+      <td><code>Function&lt;T,R&gt;</code></td>
+      <td><code>R apply(T t)</code></td>
+      <td>转换/映射</td>
+      <td><code>map</code>、类型转换</td>
+    </tr>
+    <tr>
+      <td><code>Consumer&lt;T&gt;</code></td>
+      <td><code>void accept(T t)</code></td>
+      <td>消费/执行</td>
+      <td><code>forEach</code>、日志打印</td>
+    </tr>
+    <tr>
+      <td><code>Supplier&lt;T&gt;</code></td>
+      <td><code>T get()</code></td>
+      <td>生产/供给</td>
+      <td><code>Optional.orElseGet</code>、工厂</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StreamDemo.java</b> · 四大接口在 Stream 中的实战</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; names = <span class="t">List</span>.of(<span class="n">"Alice"</span>, <span class="n">"Bob"</span>, <span class="n">"Charlie"</span>, <span class="n">"David"</span>);
+
+<span class="c">// Predicate —— 过滤：名字长度 &gt; 3</span>
+<span class="t">Predicate</span>&lt;<span class="t">String</span>&gt; longName = s -&gt; s.length() &gt; <span class="n">3</span>;
+names.stream().filter(longName).collect(<span class="t">Collectors</span>.toList());
+<span class="c">// → ["Alice", "Charlie", "David"]</span>
+
+<span class="c">// Function —— 转换：名字 → 大写</span>
+<span class="t">Function</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; toUpper = <span class="t">String</span>::toUpperCase;
+names.stream().map(toUpper).collect(<span class="t">Collectors</span>.toList());
+<span class="c">// → ["ALICE", "BOB", "CHARLIE", "DAVID"]</span>
+
+<span class="c">// Consumer —— 消费：打印每个名字</span>
+<span class="t">Consumer</span>&lt;<span class="t">String</span>&gt; printer = s -&gt; <span class="t">System</span>.out.println(<span class="n">"Name: "</span> + s);
+names.forEach(printer);
+
+<span class="c">// Supplier —— 生产：懒加载默认值</span>
+<span class="t">Supplier</span>&lt;<span class="t">List</span>&lt;<span class="t">String</span>&gt;&gt; defaultList = <span class="t">ArrayList</span>::<span class="k">new</span>;
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; result = <span class="t">Optional</span>.&lt;<span class="t">List</span>&lt;<span class="t">String</span>&gt;&gt;empty()
+    .orElseGet(defaultList);</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">面试加分点：接口的组合能力</div>
+<p>四大接口都提供了<strong>组合方法</strong>。例如 <code>Predicate.and()</code>、<code>Predicate.or()</code> 可以链式组合多个条件；<code>Function.andThen()</code>、<code>Function.compose()</code> 可以串联多个转换步骤。在面试中提到这些组合能力，能展现你对函数式编程范式的理解深度。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：编译原理 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>字节码真相：invokedynamic 而非匿名类</h2></div>
+
+<p>这是整篇文章的核心。我们用 <code>javap</code> 来看 Lambda 编译后的字节码，直接对比匿名内部类。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LambdaVsAnon.java</b> · 对比源码</span></div>
+<pre><code><span class="k">public class</span> <span class="t">LambdaVsAnon</span> {
+
+    <span class="c">// 方式一：Lambda 表达式</span>
+    <span class="t">Runnable</span> r1 = () -&gt; <span class="t">System</span>.out.println(<span class="n">"lambda"</span>);
+
+    <span class="c">// 方式二：匿名内部类</span>
+    <span class="t">Runnable</span> r2 = <span class="k">new</span> <span class="t">Runnable</span>() {
+        <span class="k">@Override</span>
+        <span class="k">public void</span> run() {
+            <span class="t">System</span>.out.println(<span class="n">"anonymous"</span>);
+        }
+    };
+}</code></pre>
+</div>
+
+<h3>javap 字节码对比</h3>
+
+<p>编译后运行 <code>javap -p -c LambdaVsAnon.class</code>，关键差异一目了然：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file">Lambda 的字节码</span> · invokedynamic + 私有静态方法</div>
+<pre><code><span class="c">// 字段初始化中的 Lambda 编译结果：</span>
+<span class="n">0</span>: invokedynamic  <span class="c">// 关键指令！</span>
+   #2 &lt;run, ()Ljava/lang/Runnable;&gt;
+
+<span class="c">// 编译器生成的私有静态方法（Lambda 体）：</span>
+<span class="k">private static synthetic void</span> lambda$new$0();
+   <span class="n">0</span>: getstatic  java/lang/System.out
+   <span class="n">3</span>: ldc        <span class="n">"lambda"</span>
+   <span class="n">5</span>: invokevirtual java/io/PrintStream.println
+   <span class="n">8</span>: return</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file">匿名内部类的字节码</span> · 独立的 class 文件 + new 指令</div>
+<pre><code><span class="c">// 字段初始化中的匿名类编译结果：</span>
+<span class="n">0</span>: <span class="k">new</span>  LambdaVsAnon$1   <span class="c">// 创建新对象 —— 独立的类文件！</span>
+   <span class="n">3</span>: dup
+   <span class="n">4</span>: aload_0
+   <span class="n">5</span>: invokespecial LambdaVsAnon$1.&lt;init&gt;
+
+<span class="c">// 同时生成了 LambdaVsAnon$1.class 文件</span>
+<span class="c">// 其中包含完整的 Runnable 实现类</span></code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 340" role="img" aria-label="Lambda vs 匿名内部类编译对比">
+  <defs>
+    <marker id="arr1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+  </defs>
+  <text x="360" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Lambda vs 匿名内部类：编译产物对比</text>
+
+  <!-- 左侧：Lambda -->
+  <rect x="30" y="42" width="310" height="28" rx="4" fill="#3E6B8F" opacity="0.15"/>
+  <text x="185" y="61" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Lambda 表达式</text>
+
+  <rect x="40" y="85" width="290" height="40" rx="5" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="185" y="100" text-anchor="middle" font-family="monospace" font-size="10" fill="#1C1C1C">OuterClass.class</text>
+  <text x="185" y="116" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">+ invokedynamic 指令</text>
+
+  <line x1="185" y1="125" x2="185" y2="155" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text x="185" y="148" text-anchor="middle" font-size="9" fill="#3E6B8F">运行时触发</text>
+
+  <rect x="40" y="160" width="290" height="40" rx="5" fill="#fff" stroke="#3E6B8F" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="185" y="175" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">JVM 动态生成合成类</text>
+  <text x="185" y="191" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">LambdaForm / proxy class</text>
+
+  <line x1="185" y1="200" x2="185" y2="230" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr1)"/>
+
+  <rect x="55" y="235" width="260" height="40" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="185" y="255" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">无 .class 文件</text>
+  <text x="185" y="270" text-anchor="middle" font-size="9" fill="#57544E">类由 JVM 在首次调用时按需生成</text>
+
+  <!-- 右侧：匿名类 -->
+  <rect x="380" y="42" width="310" height="28" rx="4" fill="#C2410C" opacity="0.15"/>
+  <text x="535" y="61" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">匿名内部类</text>
+
+  <rect x="390" y="85" width="290" height="40" rx="5" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="535" y="100" text-anchor="middle" font-family="monospace" font-size="10" fill="#1C1C1C">OuterClass.class</text>
+  <text x="535" y="116" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">+ new Outer$1() 指令</text>
+
+  <line x1="535" y1="125" x2="535" y2="155" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <text x="535" y="148" text-anchor="middle" font-size="9" fill="#C2410C">编译时生成</text>
+
+  <rect x="390" y="160" width="290" height="40" rx="5" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="535" y="175" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">OuterClass$1.class</text>
+  <text x="535" y="191" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">独立的类文件</text>
+
+  <line x1="535" y1="200" x2="535" y2="230" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+  <rect x="405" y="235" width="260" height="40" rx="5" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <text x="535" y="255" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">产生 .class 文件</text>
+  <text x="535" y="270" text-anchor="middle" font-size="9" fill="#57544E">每个匿名类都增加一个 class 文件</text>
+
+  <!-- 底部总结 -->
+  <rect x="30" y="295" width="660" height="38" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="318" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Lambda：延迟到运行时 + 零 class 文件 | 匿名类：编译时绑定 + 每处一个 class 文件</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>Lambda 与匿名内部类的编译产物对比：Lambda 不产生 .class 文件，而是通过 invokedynamic 在运行时生成</figcaption>
+</figure>
+
+<div class="formula">
+<strong>关键指令</strong><br/>
+<code>invokedynamic</code>：JDK 7 引入的字节码指令，原本为动态语言设计（如 JRuby、Groovy）。<br/>
+JDK 8 借用了这条指令来实现 Lambda —— 把"生成实现类"这件事从编译期推迟到运行时。
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：LambdaMetafactory ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>LambdaMetafactory：运行时的魔法工厂</h2></div>
+
+<p>当 JVM 第一次遇到 <code>invokedynamic</code> 指令时，会调用一个<strong>引导方法</strong>（Bootstrap Method）来生成 Lambda 的实现类。这个引导方法就是 <code>java.lang.invoke.LambdaMetafactory</code>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LambdaMetafactory</b> · 引导方法签名（简化）</span></div>
+<pre><code><span class="c">// javap -v 可以看到的 BootstrapMethods 区段：</span>
+BootstrapMethods:
+  <span class="n">0</span>: #42 invokestatic
+     java/lang/invoke/<span class="t">LambdaMetafactory</span>.metafactory
+     (Lookup, String, MethodType, MethodType, MethodHandle, MethodType)
+     → CallSite
+
+<span class="c">// 三个关键参数：</span>
+<span class="c">//   samMethodType  → 函数式接口方法的签名</span>
+<span class="c">//   implMethod     → Lambda 体对应的私有方法句柄</span>
+<span class="c">//   instantiatedMethodType → 实例化后的具体方法签名</span></code></pre>
+</div>
+
+<h3>LambdaMetafactory 的工作流程</h3>
+
+<figure class="fig">
+<svg viewBox="0 0 720 260" role="img" aria-label="LambdaMetafactory 运行时流程">
+  <defs>
+    <marker id="arr3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+  <text x="360" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">LambdaMetafactory 运行时流程</text>
+
+  <!-- Step 1 -->
+  <rect x="20" y="45" width="140" height="55" rx="6" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1.2"/>
+  <text x="90" y="67" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">① invokedynamic</text>
+  <text x="90" y="85" text-anchor="middle" font-size="9" fill="#8C8676">首次执行时触发</text>
+
+  <line x1="160" y1="72" x2="190" y2="72" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- Step 2 -->
+  <rect x="195" y="45" width="140" height="55" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="265" y="63" text-anchor="middle" font-size="10" fill="#3E6B8F" font-weight="600">② Bootstrap Method</text>
+  <text x="265" y="78" text-anchor="middle" font-size="9" fill="#1C1C1C">LambdaMetafactory</text>
+  <text x="265" y="91" text-anchor="middle" font-size="9" fill="#1C1C1C">.metafactory()</text>
+
+  <line x1="335" y1="72" x2="365" y2="72" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- Step 3 -->
+  <rect x="370" y="45" width="155" height="55" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="447" y="63" text-anchor="middle" font-size="10" fill="#3E6B8F" font-weight="600">③ 动态生成合成类</text>
+  <text x="447" y="78" text-anchor="middle" font-size="9" fill="#1C1C1C">InnerClassLambdaMeta</text>
+  <text x="447" y="91" text-anchor="middle" font-size="9" fill="#1C1C1C">factory (ASM 字节码)</text>
+
+  <line x1="525" y1="72" x2="555" y2="72" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+  <!-- Step 4 -->
+  <rect x="560" y="45" width="140" height="55" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.2"/>
+  <text x="630" y="63" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">④ 返回 CallSite</text>
+  <text x="630" y="78" text-anchor="middle" font-size="9" fill="#8C8676">绑定到方法句柄</text>
+  <text x="630" y="91" text-anchor="middle" font-size="9" fill="#8C8676">后续调用直接执行</text>
+
+  <!-- 缓存说明 -->
+  <rect x="100" y="125" width="520" height="40" rx="5" fill="#3E6B8F" opacity="0.08" stroke="#3E6B8F" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="360" y="143" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="600">CallSite 被缓存！同一 Lambda 只有首次执行走 Bootstrap，后续直接走缓存</text>
+  <text x="360" y="158" text-anchor="middle" font-size="9" fill="#57544E">这是 Lambda 性能优于匿名内部类的关键原因之一</text>
+
+  <!-- 底层实现选择 -->
+  <rect x="40" y="185" width="640" height="65" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="207" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">合成类的生成策略（由 JVM 参数控制）</text>
+  <text x="360" y="226" text-anchor="middle" font-size="10" fill="#57544E">无捕获 Lambda → 共享单例（零开销）| 有捕获 Lambda → 每次 new 一个实例</text>
+  <text x="360" y="242" text-anchor="middle" font-size="10" fill="#C2410C">-Djdk.internal.lambda.dumpProxyClasses 可导出生成的 class 文件进行调试</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>LambdaMetafactory 工作流程：从 invokedynamic 触发到合成类生成，整个过程只在首次执行时发生</figcaption>
+</figure>
+
+<h3>无捕获 vs 有捕获 Lambda</h3>
+
+<p>LambdaMetafactory 对两类 Lambda 的处理策略完全不同，这是性能差异的根源：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CaptureDemo.java</b> · 无捕获与有捕获 Lambda 的区别</span></div>
+<pre><code><span class="k">int</span> factor = <span class="n">10</span>;
+
+<span class="c">// 无捕获 Lambda：不引用外部变量</span>
+<span class="t">Function</span>&lt;<span class="t">Integer</span>, <span class="t">Integer</span>&gt; f1 = x -&gt; x * <span class="n">2</span>;
+<span class="c">// → JVM 生成单例，所有调用点共享同一实例</span>
+
+<span class="c">// 有捕获 Lambda：引用了外部的 factor 变量</span>
+<span class="t">Function</span>&lt;<span class="t">Integer</span>, <span class="t">Integer</span>&gt; f2 = x -&gt; x * factor;
+<span class="c">// → 每次调用都 new 一个新实例（factor 作为构造参数传入）</span></code></pre>
+</div>
+
+<h3>性能对比：Lambda vs 匿名内部类</h3>
+
+<table class="nb-table">
+  <thead>
+    <tr><th>维度</th><th>Lambda 表达式</th><th>匿名内部类</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>class 文件数</strong></td>
+      <td>0（运行时动态生成）</td>
+      <td>每处 1 个 $N.class</td>
+    </tr>
+    <tr>
+      <td><strong>类加载开销</strong></td>
+      <td>首次执行时加载一次（有缓存）</td>
+      <td>类加载阶段全部加载</td>
+    </tr>
+    <tr>
+      <td><strong>无捕获实例</strong></td>
+      <td>共享单例，零 GC 压力</td>
+      <td>每次 new，产生垃圾</td>
+    </tr>
+    <tr>
+      <td><strong>Metaspace 占用</strong></td>
+      <td>按需生成，更省</td>
+      <td>每个匿名类都占 Metaspace</td>
+    </tr>
+    <tr>
+      <td><strong>JIT 优化</strong></td>
+      <td>合成类可被 JIT 内联优化</td>
+      <td>虚方法调用，优化空间较小</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">面试加分点：无状态 Lambda 的单例优化</div>
+<p>对于不捕获外部变量的 Lambda（即"无状态 Lambda"），JVM 会将其合成类设计为<strong>单例模式</strong>——所有调用点共享同一个实例。这意味着即使你在循环中写了 10000 次 <code>() -&gt; doSomething()</code>，内存中也只有<strong>一个</strong>对象实例。这是匿名内部类做不到的优化。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：实战用法 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>实战用法：Lambda 的六大常见场景</h2></div>
+
+<p>理解了底层原理之后，来看 Lambda 在实际开发中最常见的用法。</p>
+
+<h3>场景一：Stream API 链式操作</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StreamUsage.java</b> · Lambda + Stream 完整示例</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">Order</span>&gt; orders = getOrders();
+
+<span class="c">// 链式处理：过滤 → 转换 → 排序 → 收集</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; result = orders.stream()
+    .filter(o -&gt; o.getAmount() &gt; <span class="n">100</span>)           <span class="c">// Predicate</span>
+    .map(<span class="t">Order</span>::getProductName)                  <span class="c">// Function</span>
+    .sorted(<span class="t">String</span>::compareTo)                   <span class="c">// Comparator</span>
+    .distinct()                                  <span class="c">// 去重</span>
+    .collect(<span class="t">Collectors</span>.toList());</code></pre>
+</div>
+
+<h3>场景二：集合排序与自定义比较器</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SortDemo.java</b> · Comparator 链式组合</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">Employee</span>&gt; employees = getEmployees();
+
+<span class="c">// 先按部门升序 → 再按薪资降序 → 最后按姓名升序</span>
+employees.sort(
+    <span class="t">Comparator</span>.comparing(<span class="t">Employee</span>::getDepartment)
+        .thenComparing(<span class="t">Comparator</span>.comparingDouble(<span class="t">Employee</span>::getSalary).reversed())
+        .thenComparing(<span class="t">Employee</span>::getName)
+);</code></pre>
+</div>
+
+<h3>场景三：事件处理与回调</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>EventDemo.java</b> · GUI 和异步回调中的 Lambda</span></div>
+<pre><code><span class="c">// Swing / JavaFX 事件处理</span>
+button.addActionListener(e -&gt; <span class="t">System</span>.out.println(<span class="n">"clicked!"</span>));
+
+<span class="c">// CompletableFuture 异步回调</span>
+<span class="t">CompletableFuture</span>.supplyAsync(() -&gt; fetchFromDb())
+    .thenApply(data -&gt; transform(data))
+    .thenAccept(result -&gt; saveToCache(result))
+    .exceptionally(ex -&gt; { log.error(<span class="n">"Failed"</span>, ex); <span class="k">return null</span>; });</code></pre>
+</div>
+
+<h3>场景四：Map 的计算方法</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MapCompute.java</b> · computeIfAbsent / merge / forEach</span></div>
+<pre><code><span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">List</span>&lt;<span class="t">Order</span>&gt;&gt; grouped = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+
+<span class="c">// 按客户分组（computeIfAbsent 避免 null 检查）</span>
+<span class="k">for</span> (<span class="t">Order</span> o : orders) {
+    grouped.computeIfAbsent(o.getCustomer(), k -&gt; <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;())
+           .add(o);
+}
+
+<span class="c">// merge：合并统计</span>
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; wordCount = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+words.forEach(w -&gt; wordCount.merge(w, <span class="n">1</span>, <span class="t">Integer</span>::sum));</code></pre>
+</div>
+
+<h3>场景五：Optional 链式处理</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>OptionalDemo.java</b> · 用 Lambda 消灭 null 检查</span></div>
+<pre><code><span class="t">String</span> city = <span class="t">Optional</span>.ofNullable(user)
+    .map(<span class="t">User</span>::getAddress)
+    .map(<span class="t">Address</span>::getCity)
+    .map(<span class="t">String</span>::toUpperCase)
+    .orElse(<span class="n">"UNKNOWN"</span>);</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">最佳实践</div>
+<ul>
+  <li>Lambda 体保持<strong>简短</strong>（1-3 行），超过则提取为方法再用方法引用</li>
+  <li>优先使用<strong>方法引用</strong>（<code>::</code>），比 Lambda 可读性更强</li>
+  <li>避免在 Lambda 中修改外部变量（effectively final 不是限制，是设计意图）</li>
+  <li>复杂逻辑用<strong>具名方法</strong> + 方法引用，比匿名 Lambda 更易测试</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：面试回答模板</h2></div>
+
+<div class="recap"><h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>Lambda 不是匿名内部类</strong>：编译后不产生 .class 文件，而是生成 <code>invokedynamic</code> 指令</li>
+  <li><strong>invokedynamic</strong>：JDK 7 引入的字节码指令，JDK 8 借用它实现 Lambda 的延迟绑定</li>
+  <li><strong>LambdaMetafactory</strong>：JVM 首次执行 Lambda 时调用其 <code>metafactory()</code> 方法，动态生成合成类</li>
+  <li><strong>无捕获优化</strong>：不引用外部变量的 Lambda 共享单例实例，零 GC 压力</li>
+  <li><strong>函数式接口</strong>：只有一个抽象方法的接口，Lambda 的"着陆点"。四大核心接口 Predicate / Function / Consumer / Supplier</li>
+  <li><strong>方法引用</strong>：Lambda 的进一步简化，四种形式（静态、已绑定实例、未绑定实例、构造方法）</li>
+</ul>
+</div>
+
+<div class="think"><div class="think-q">面试官："Lambda 编译后是什么？跟匿名内部类有什么区别？"</div></div>
+
+<p><strong>标准回答模板（分层展开）：</strong></p>
+
+<p><strong>第一层 —— 直接回答：</strong>Lambda 编译后不是匿名内部类。匿名内部类在编译时生成独立的 <code>.class</code> 文件，而 Lambda 编译后生成的是 <code>invokedynamic</code> 字节码指令，不产生任何额外的 class 文件。</p>
+
+<p><strong>第二层 —— 展开原理：</strong>当 JVM 首次执行到这条 <code>invokedynamic</code> 指令时，会调用 <code>LambdaMetafactory.metafactory()</code> 这个引导方法，由 JVM 在运行时动态生成一个合成类来实现函数式接口。这个 CallSite 会被缓存，后续调用不再走引导方法。</p>
+
+<p><strong>第三层 —— 性能差异：</strong>对于无捕获的 Lambda（不引用外部变量），JVM 会生成单例实例，所有调用点共享，没有额外的对象分配和 GC 压力。而匿名内部类每次使用都是 <code>new</code> 一个新对象。此外，Lambda 的合成类可以被 JIT 更好地内联优化。</p>
+
+<p><strong>第四层 —— 加分补充：</strong>可以用 <code>-Djdk.internal.lambda.dumpProxyClasses</code> 参数导出生成的合成类进行调试。另外，<code>invokedynamic</code> 是 JDK 7 为动态语言设计的指令，JDK 8 巧妙地复用它来实现 Lambda，体现了 Java 平台在保持向后兼容的同时持续演进的设计哲学。</p>
+
+<div class="formula">
+<strong>一句话记住</strong><br/>
+匿名内部类 = 编译时生成的新类（每处一个 .class）<br/>
+Lambda = 运行时动态生成的合成类（零 .class，invokedynamic + LambdaMetafactory）
+</div>
+</section>
+
+</main>
+
+</body>
+</html>

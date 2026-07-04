@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线程安全设计模式</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!--
+  title: "线程安全设计模式：不可变对象、Thread-safe Singleton、生产者-消费者"
+  difficulty: 中级
+  interviewFreq: 中高
+  desc: "5 种单例写法（含 DCL 和枚举）、不可变对象的设计、BlockingQueue 实现生产者-消费者——并发编程的最佳实践。"
+-->
+
+<!-- ==================== 第 1 站 ==================== -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>线程安全不只是加锁——而是设计</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"面试问到线程安全，很多人第一反应就是 synchronized。但真正的高手知道——最好的线程安全，是从设计上就不需要加锁。"</p>
+  </div>
+
+  <p>加锁（<code>synchronized</code>、<code>ReentrantLock</code>）只是解决线程安全的"最后手段"。锁意味着竞争，竞争意味着上下文切换和性能损耗，用不好还会带来死锁。Doug Lea 说过：<strong>"线程安全的最高境界不是把锁用好，而是让共享可变状态尽量少出现。"</strong></p>
+
+  <p>本文将覆盖 5 种核心模式：不可变对象、单例 5 种写法、生产者-消费者、线程安全集合选型、编码军规。</p>
+
+  <div class="crack">
+    <span class="crack-label">面试官真正在考什么？</span>
+    <p>不是考你会不会写 <code>synchronized</code>，而是考你有没有<strong>设计并发程序的思维</strong>：能否从架构层面减少共享状态？能否选择合适的工具而不是万物皆锁？</p>
+  </div>
+</section>
+
+<!-- ==================== 第 2 站 ==================== -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>不可变对象：天生线程安全的设计</h2>
+  </div>
+
+  <p>如果对象创建后状态永远不能改变，那么无论多少线程同时访问它都不会有线程安全问题——没有"写"操作，就不存在数据竞争。JDK 中 <code>String</code>、<code>Integer</code>、<code>LocalDate</code> 都是不可变类。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">自定义不可变类——四条规则</div>
+    <pre class="srcbox-file"><span class="k">public final class</span> <span class="t">OrderSnapshot</span> {           <span class="c">// 规则 1：final 类，禁止继承</span>
+    <span class="k">private final</span> <span class="t">String</span> orderId;                <span class="c">// 规则 2：所有字段 private final</span>
+    <span class="k">private final</span> <span class="t">BigDecimal</span> totalAmount;
+    <span class="k">private final</span> <span class="t">LocalDateTime</span> createTime;
+    <span class="k">private final</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; items;
+
+    <span class="k">public</span> <span class="t">OrderSnapshot</span>(<span class="t">String</span> id, <span class="t">BigDecimal</span> amt,
+                        <span class="t">LocalDateTime</span> time, <span class="t">List</span>&lt;<span class="t">String</span>&gt; items) {
+        <span class="k">this</span>.orderId = id;
+        <span class="k">this</span>.totalAmount = amt;
+        <span class="k">this</span>.createTime = time;
+        <span class="k">this</span>.items = <span class="t">List</span>.copyOf(items);     <span class="c">// 规则 3：防御性拷贝</span>
+    }
+
+    <span class="c">// 规则 4：只提供 getter，不提供 setter</span>
+    <span class="k">public</span> <span class="t">String</span> <span class="n">getOrderId</span>()          { <span class="k">return</span> orderId; }
+    <span class="k">public</span> <span class="t">BigDecimal</span> <span class="n">getTotalAmount</span>()  { <span class="k">return</span> totalAmount; }
+    <span class="k">public</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; <span class="n">getItems</span>()     { <span class="k">return</span> items; } <span class="c">// List.copyOf 返回不可变 List</span>
+}</pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">不可变 = 线程安全的本质原因</span>
+    <p>线程安全的本质是防止多线程同时修改共享状态。如果状态<strong>根本不能修改</strong>，就不存在"同时修改"的问题。不可变对象可被任意多线程同时读取，无需任何同步——这是零开销的线程安全。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 3 站 ==================== -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>单例模式 5 种写法：从入门到最佳实践</h2>
+  </div>
+
+  <p><strong>写法一：饿汉式</strong></p>
+  <div class="srcbox">
+    <div class="srcbox-head">Eager——类加载即创建</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">EagerSingleton</span> {
+    <span class="k">private static final</span> <span class="t">EagerSingleton</span> INSTANCE = <span class="k">new</span> <span class="t">EagerSingleton</span>();
+    <span class="k">private</span> <span class="t">EagerSingleton</span>() {}
+    <span class="k">public static</span> <span class="t">EagerSingleton</span> <span class="n">getInstance</span>() { <span class="k">return</span> INSTANCE; }
+}  <span class="c">// 优点：简单可靠 | 缺点：可能浪费内存</span></pre>
+  </div>
+
+  <p><strong>写法二：懒汉式</strong></p>
+  <div class="srcbox">
+    <div class="srcbox-head">Lazy——每次都加锁</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">LazySingleton</span> {
+    <span class="k">private static</span> <span class="t">LazySingleton</span> instance;
+    <span class="k">private</span> <span class="t">LazySingleton</span>() {}
+    <span class="k">public static synchronized</span> <span class="t">LazySingleton</span> <span class="n">getInstance</span>() {
+        <span class="k">if</span> (instance == <span class="k">null</span>) instance = <span class="k">new</span> <span class="t">LazySingleton</span>();
+        <span class="k">return</span> instance;
+    }
+}  <span class="c">// 优点：延迟加载 | 缺点：每次调用都加锁，性能差</span></pre>
+  </div>
+
+  <p><strong>写法三：双重检查锁（DCL）</strong></p>
+  <div class="srcbox">
+    <div class="srcbox-head">DCL——面试最常考</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">DclSingleton</span> {
+    <span class="k">private static volatile</span> <span class="t">DclSingleton</span> instance; <span class="c">// 必须 volatile！</span>
+    <span class="k">private</span> <span class="t">DclSingleton</span>() {}
+    <span class="k">public static</span> <span class="t">DclSingleton</span> <span class="n">getInstance</span>() {
+        <span class="k">if</span> (instance == <span class="k">null</span>) {                     <span class="c">// 第一次检查（无锁）</span>
+            <span class="k">synchronized</span> (<span class="t">DclSingleton</span>.<span class="k">class</span>) {
+                <span class="k">if</span> (instance == <span class="k">null</span>)                 <span class="c">// 第二次检查（有锁）</span>
+                    instance = <span class="k">new</span> <span class="t">DclSingleton</span>();
+            }
+        }
+        <span class="k">return</span> instance;
+    }
+}</pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">为什么 DCL 必须用 volatile？</span>
+    <p><code>new DclSingleton()</code> 字节码层面分三步：① 分配内存 → ② 构造函数初始化 → ③ 引用指向地址。JIT 可能将 ②③ 重排为 ①③②。线程 A 执行到 ③（引用非 null）但还没 ②（未初始化），线程 B 直接返回半初始化对象——<strong>NPE</strong>。<code>volatile</code> 禁止此重排序。</p>
+  </div>
+
+  <p><strong>写法四：静态内部类</strong></p>
+  <div class="srcbox">
+    <div class="srcbox-head">Holder Pattern——优雅推荐</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">HolderSingleton</span> {
+    <span class="k">private</span> <span class="t">HolderSingleton</span>() {}
+    <span class="k">private static class</span> <span class="t">Holder</span> {
+        <span class="k">private static final</span> <span class="t">HolderSingleton</span> INSTANCE = <span class="k">new</span> <span class="t">HolderSingleton</span>();
+    }
+    <span class="k">public static</span> <span class="t">HolderSingleton</span> <span class="n">getInstance</span>() { <span class="k">return</span> <span class="t">Holder</span>.INSTANCE; }
+}  <span class="c">// 延迟加载 + ClassLoader 保证线程安全 + 无锁</span></pre>
+  </div>
+
+  <p><strong>写法五：枚举（Joshua Bloch 推荐）</strong></p>
+  <div class="srcbox">
+    <div class="srcbox-head">Enum——Effective Java 推荐</div>
+    <pre class="srcbox-file"><span class="k">public enum</span> <span class="t">EnumSingleton</span> {
+    INSTANCE;
+    <span class="k">public void</span> <span class="n">doSomething</span>() { System.out.println(<span class="t">"Working..."</span>); }
+}
+<span class="c">// EnumSingleton.INSTANCE.doSomething();</span>
+<span class="c">// 线程安全 + 防反射 + 防序列化 + 代码极简</span></pre>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
+      <defs>
+        <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
+        <linearGradient id="sg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+        <linearGradient id="sg3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#6d28d9"/></linearGradient>
+        <linearGradient id="sg4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        <linearGradient id="sg5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+      </defs>
+      <text x="410" y="24" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">单例模式 5 种写法对比</text>
+      <rect x="10" y="36" width="800" height="32" rx="6" fill="#1e293b"/>
+      <text x="90"  y="57" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">写法</text>
+      <text x="250" y="57" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">线程安全</text>
+      <text x="410" y="57" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">延迟加载</text>
+      <text x="570" y="57" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">防反射/序列化</text>
+      <text x="720" y="57" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">性能</text>
+
+      <rect x="10" y="72" width="800" height="44" rx="6" fill="url(#sg1)" opacity="0.12"/>
+      <rect x="10" y="72" width="4" height="44" rx="2" fill="url(#sg1)"/>
+      <text x="90"  y="99" text-anchor="middle" font-size="12" fill="#1e293b" font-weight="bold">饿汉式</text>
+      <text x="250" y="99" text-anchor="middle" font-size="12" fill="#059669">&#10004; ClassLoader</text>
+      <text x="410" y="99" text-anchor="middle" font-size="12" fill="#dc2626">&#10008; 类加载即创建</text>
+      <text x="570" y="99" text-anchor="middle" font-size="12" fill="#d97706">&#9679; 可被反射破坏</text>
+      <text x="720" y="99" text-anchor="middle" font-size="12" fill="#059669">&#9733;&#9733;&#9733;&#9733;&#9733;</text>
+
+      <rect x="10" y="120" width="800" height="44" rx="6" fill="url(#sg2)" opacity="0.12"/>
+      <rect x="10" y="120" width="4" height="44" rx="2" fill="url(#sg2)"/>
+      <text x="90"  y="147" text-anchor="middle" font-size="12" fill="#1e293b" font-weight="bold">懒汉式</text>
+      <text x="250" y="147" text-anchor="middle" font-size="12" fill="#059669">&#10004; synchronized</text>
+      <text x="410" y="147" text-anchor="middle" font-size="12" fill="#059669">&#10004; 延迟</text>
+      <text x="570" y="147" text-anchor="middle" font-size="12" fill="#dc2626">&#10008; 可被破坏</text>
+      <text x="720" y="147" text-anchor="middle" font-size="12" fill="#dc2626">&#9733;&#9733;&#9734;&#9734;&#9734;</text>
+
+      <rect x="10" y="168" width="800" height="44" rx="6" fill="url(#sg3)" opacity="0.12"/>
+      <rect x="10" y="168" width="4" height="44" rx="2" fill="url(#sg3)"/>
+      <text x="90"  y="195" text-anchor="middle" font-size="12" fill="#1e293b" font-weight="bold">DCL</text>
+      <text x="250" y="195" text-anchor="middle" font-size="12" fill="#059669">&#10004; volatile+锁</text>
+      <text x="410" y="195" text-anchor="middle" font-size="12" fill="#059669">&#10004; 延迟</text>
+      <text x="570" y="195" text-anchor="middle" font-size="12" fill="#dc2626">&#10008; 可被破坏</text>
+      <text x="720" y="195" text-anchor="middle" font-size="12" fill="#d97706">&#9733;&#9733;&#9733;&#9733;&#9734;</text>
+
+      <rect x="10" y="216" width="800" height="44" rx="6" fill="url(#sg4)" opacity="0.12"/>
+      <rect x="10" y="216" width="4" height="44" rx="2" fill="url(#sg4)"/>
+      <text x="90"  y="243" text-anchor="middle" font-size="12" fill="#1e293b" font-weight="bold">静态内部类</text>
+      <text x="250" y="243" text-anchor="middle" font-size="12" fill="#059669">&#10004; ClassLoader</text>
+      <text x="410" y="243" text-anchor="middle" font-size="12" fill="#059669">&#10004; 延迟</text>
+      <text x="570" y="243" text-anchor="middle" font-size="12" fill="#d97706">&#9679; 可被反射破坏</text>
+      <text x="720" y="243" text-anchor="middle" font-size="12" fill="#059669">&#9733;&#9733;&#9733;&#9733;&#9733;</text>
+
+      <rect x="10" y="264" width="800" height="44" rx="6" fill="url(#sg5)" opacity="0.12"/>
+      <rect x="10" y="264" width="4" height="44" rx="2" fill="url(#sg5)"/>
+      <text x="90"  y="291" text-anchor="middle" font-size="12" fill="#1e293b" font-weight="bold">枚举 &#9733;</text>
+      <text x="250" y="291" text-anchor="middle" font-size="12" fill="#059669">&#10004; JVM 保证</text>
+      <text x="410" y="291" text-anchor="middle" font-size="12" fill="#dc2626">&#10008; 类加载即创建</text>
+      <text x="570" y="291" text-anchor="middle" font-size="12" fill="#059669">&#10004; 天然防护</text>
+      <text x="720" y="291" text-anchor="middle" font-size="12" fill="#059669">&#9733;&#9733;&#9733;&#9733;&#9733;</text>
+      <text x="410" y="328" text-anchor="middle" font-size="11" fill="#64748b">&#9733; = Joshua Bloch《Effective Java》推荐</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> 单例模式 5 种写法多维度对比——枚举是综合最优解</figcaption>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试回答策略</span>
+    <p>"不需要延迟加载选饿汉式；需要延迟加载且 JDK 允许用枚举——天然防反射、防序列化；框架限制不能用枚举时用静态内部类。DCL 容易写错 volatile，生产环境谨慎使用。"</p>
+  </div>
+</section>
+
+<!-- ==================== 第 4 站 ==================== -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>生产者-消费者：BlockingQueue 的经典协作</h2>
+  </div>
+
+  <p>生产者负责生产数据放入缓冲区，消费者从缓冲区取出处理。缓冲区满时生产者阻塞，空时消费者阻塞。<code>BlockingQueue</code> 把这个同步逻辑封装好了：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 780 200" xmlns="http://www.w3.org/2000/svg" style="max-width:780px;width:100%">
+      <defs>
+        <linearGradient id="pg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
+        <linearGradient id="pg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/></marker>
+      </defs>
+      <rect x="20" y="40" width="150" height="100" rx="12" fill="url(#pg1)"/>
+      <text x="95" y="80" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">Producer</text>
+      <text x="95" y="100" text-anchor="middle" font-size="11" fill="#bfdbfe">queue.put(data)</text>
+      <text x="95" y="118" text-anchor="middle" font-size="10" fill="#93c5fd">满时阻塞</text>
+      <line x1="175" y1="90" x2="270" y2="90" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="270" y="30" width="240" height="120" rx="12" fill="#f59e0b" opacity="0.12" stroke="#f59e0b" stroke-width="2"/>
+      <text x="390" y="55" text-anchor="middle" font-size="13" fill="#92400e" font-weight="bold">ArrayBlockingQueue(100)</text>
+      <rect x="290" y="68" width="28" height="22" rx="4" fill="#f59e0b" opacity="0.7"/>
+      <rect x="322" y="68" width="28" height="22" rx="4" fill="#f59e0b" opacity="0.7"/>
+      <rect x="354" y="68" width="28" height="22" rx="4" fill="#f59e0b" opacity="0.5"/>
+      <rect x="386" y="68" width="28" height="22" rx="4" fill="#f59e0b" opacity="0.3"/>
+      <rect x="418" y="68" width="28" height="22" rx="4" fill="#e5e7eb" stroke="#d1d5db"/>
+      <text x="304" y="83" text-anchor="middle" font-size="9" fill="#fff">D1</text>
+      <text x="336" y="83" text-anchor="middle" font-size="9" fill="#fff">D2</text>
+      <text x="368" y="83" text-anchor="middle" font-size="9" fill="#fff">D3</text>
+      <text x="390" y="120" text-anchor="middle" font-size="10" fill="#78716c">head &#8592; &#8212;&#8212;&#8212;&#8212; &#8594; tail</text>
+      <line x1="515" y1="90" x2="610" y2="90" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="610" y="40" width="150" height="100" rx="12" fill="url(#pg2)"/>
+      <text x="685" y="80" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">Consumer</text>
+      <text x="685" y="100" text-anchor="middle" font-size="11" fill="#bbf7d0">queue.take()</text>
+      <text x="685" y="118" text-anchor="middle" font-size="10" fill="#86efac">空时阻塞</text>
+      <text x="390" y="185" text-anchor="middle" font-size="11" fill="#64748b">put() 满时阻塞 | take() 空时阻塞 | 线程安全，无需额外同步</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> 生产者-消费者模型——BlockingQueue 作为线程安全缓冲区</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">完整生产者-消费者示例</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">ProducerConsumerDemo</span> {
+    <span class="k">private static final</span> <span class="t">BlockingQueue</span>&lt;<span class="t">String</span>&gt; queue =
+            <span class="k">new</span> <span class="t">ArrayBlockingQueue</span>&lt;&gt;(<span class="n">100</span>);  <span class="c">// 有界队列！</span>
+
+    <span class="k">static class</span> <span class="t">Producer</span> <span class="k">implements</span> <span class="t">Runnable</span> {
+        <span class="k">private final</span> <span class="t">String</span> name;
+        <span class="t">Producer</span>(<span class="t">String</span> name) { <span class="k">this</span>.name = name; }
+        <span class="k">@Override public void</span> <span class="n">run</span>() {
+            <span class="k">try</span> {
+                <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">50</span>; i++) {
+                    queue.put(name + <span class="t">"-item-"</span> + i);  <span class="c">// 满时阻塞</span>
+                }
+            } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) { <span class="t">Thread</span>.currentThread().interrupt(); }
+        }
+    }
+
+    <span class="k">static class</span> <span class="t">Consumer</span> <span class="k">implements</span> <span class="t">Runnable</span> {
+        <span class="k">@Override public void</span> <span class="n">run</span>() {
+            <span class="k">try</span> {
+                <span class="k">while</span> (<span class="k">true</span>) {
+                    <span class="t">String</span> data = queue.take();  <span class="c">// 空时阻塞</span>
+                    <span class="c">// process(data)...</span>
+                }
+            } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) { <span class="t">Thread</span>.currentThread().interrupt(); }
+        }
+    }
+}</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>BlockingQueue 实现</th><th>有界/无界</th><th>适用场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>ArrayBlockingQueue</strong></td><td>有界</td><td>通用生产者-消费者，首选</td></tr>
+      <tr><td><strong>LinkedBlockingQueue</strong></td><td>可选（默认无界）</td><td>高吞吐，但一定要指定容量！</td></tr>
+      <tr><td><strong>SynchronousQueue</strong></td><td>容量 0</td><td>线程间直接交接（CachedThreadPool）</td></tr>
+      <tr><td><strong>DelayQueue</strong></td><td>无界</td><td>定时任务、延迟重试</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">有界 vs 无界：为什么生产环境推荐有界？</span>
+    <p>无界队列在生产者速度远大于消费者时会无限增长，最终 OOM。有界队列<strong>天然形成反压</strong>：队列满时生产者阻塞，被迫降速，系统自动达到平衡。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 5 站 ==================== -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>线程安全集合选型：别再用错容器了</h2>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>场景</th><th>推荐</th><th>避免</th><th>原因</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>并发 Map</strong></td><td><code>ConcurrentHashMap</code></td><td><code>synchronizedMap</code></td><td>CHM 读不加锁；syncMap 全表加锁，差 5-10x</td></tr>
+      <tr><td><strong>并发 List</strong></td><td><code>CopyOnWriteArrayList</code></td><td><code>Vector</code></td><td>COW 读无锁（读多写少）；Vector 每方法 synchronized</td></tr>
+      <tr><td><strong>并发 Queue</strong></td><td><code>ConcurrentLinkedQueue</code></td><td><code>synchronizedList</code> 当队列</td><td>无锁 CAS，高并发性能远优于包装</td></tr>
+      <tr><td><strong>并发 Set</strong></td><td><code>ConcurrentHashMap.newKeySet()</code></td><td><code>synchronizedSet</code></td><td>底层就是 CHM</td></tr>
+      <tr><td><strong>阻塞队列</strong></td><td><code>ArrayBlockingQueue</code></td><td>自己 wait/notify</td><td>JDK 已封装好，自写易出 Bug</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">核心差异速览</div>
+    <pre class="srcbox-file"><span class="c">// synchronizedMap：读和读之间也互斥！100 线程读也要排队</span>
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; syncMap = <span class="t">Collections</span>.synchronizedMap(<span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;());
+
+<span class="c">// ConcurrentHashMap：100 线程可以同时读，互不影响</span>
+<span class="t">ConcurrentMap</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; chm = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();
+<span class="c">// get()  → 无锁读取（volatile 保证可见性）</span>
+<span class="c">// put()  → CAS + synchronized(只锁单个桶节点)</span>
+
+<span class="c">// CopyOnWriteArrayList：写时复制整个数组</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; cow = <span class="k">new</span> <span class="t">CopyOnWriteArrayList</span>&lt;&gt;();
+cow.add(<span class="t">"hello"</span>); <span class="c">// 加锁 → 复制数组 → 修改 → 替换引用</span>
+cow.get(<span class="n">0</span>);       <span class="c">// 无锁读 volatile 数组</span>
+<span class="c">// 适合：读 10000 次才写 1 次（配置、监听器列表）</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">选型口诀</span>
+    <p><strong>Map 选 CHM，List 选 COW（读多写少），Queue 选 ConcurrentLinked，要阻塞就上 BlockingQueue。</strong>忘掉 Vector、Hashtable、synchronizedXxx。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 6 站 ==================== -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>线程安全编码六大军规</h2>
+  </div>
+
+  <div class="formula">
+    <p><strong>规则 1：最小化共享状态</strong> —— <code>能线程局部就不共享，能局部变量就不实例变量</code>。用 <code>ThreadLocal</code> 但记得 <code>remove()</code>。</p>
+  </div>
+  <div class="formula">
+    <p><strong>规则 2：优先不可变对象</strong> —— <code>不可变 = 天生线程安全 = 零同步开销</code>。DTO、VO、配置对象都应是 Immutable。</p>
+  </div>
+  <div class="formula">
+    <p><strong>规则 3：用并发集合代替同步包装</strong> —— <code>ConcurrentHashMap &gt; synchronizedMap</code>，锁粒度更细、算法更优。</p>
+  </div>
+  <div class="formula">
+    <p><strong>规则 4：避免有状态单例</strong> —— <code>有状态单例 = 定时炸弹</code>。把状态外移到 <code>AtomicInteger</code> 或数据库。</p>
+  </div>
+  <div class="formula">
+    <p><strong>规则 5：永远使用线程池</strong> —— <code>new Thread().start() &#10008;</code>。手动创建线程无法控制并发数量，高峰期 OOM。</p>
+  </div>
+  <div class="formula">
+    <p><strong>规则 6：缩小同步范围</strong> —— <code>synchronized 块越短越好</code>，绝不在 synchronized 里做 IO。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">反面教材 vs 正面写法</div>
+    <pre class="srcbox-file"><span class="c">// &#10008; 反面：在 synchronized 里做 IO</span>
+<span class="k">public synchronized void</span> <span class="n">processOrder</span>(<span class="t">Order</span> order) {
+    validateOrder(order);              <span class="c">// 需要锁</span>
+    updateInventory(order);            <span class="c">// 需要锁</span>
+    sendEmail(order.getUserEmail());   <span class="c">// 发邮件可能 2 秒！其他线程干等</span>
+}
+
+<span class="c">// &#10004; 正面：只锁必要部分</span>
+<span class="k">public void</span> <span class="n">processOrder</span>(<span class="t">Order</span> order) {
+    <span class="k">synchronized</span> (<span class="k">this</span>) {
+        validateOrder(order);
+        updateInventory(order);
+    }
+    sendEmail(order.getUserEmail());   <span class="c">// IO 移到锁外</span>
+}</pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">SimpleDateFormat 的坑</span>
+    <p><code>SimpleDateFormat</code> 非线程安全！定义为 <code>static</code> 共享，多线程 <code>format()</code>/<code>parse()</code> 会日期错乱。方案：用 Java 8 的 <code>DateTimeFormatter</code>（不可变，线程安全，推荐）。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 7 站 ==================== -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>总结：模式选型与常见陷阱</h2>
+  </div>
+
+  <div class="recap">
+    <p><strong>线程安全设计模式选型指南：</strong></p>
+    <ul>
+      <li><strong>状态不变</strong> → 不可变对象，零开销线程安全</li>
+      <li><strong>全局唯一实例</strong> → 枚举（最佳）或静态内部类（需延迟加载）</li>
+      <li><strong>生产-消费解耦</strong> → ArrayBlockingQueue（有界）</li>
+      <li><strong>并发 Map</strong> → ConcurrentHashMap</li>
+      <li><strong>读多写少 List</strong> → CopyOnWriteArrayList</li>
+    </ul>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>常见陷阱</th><th>后果</th><th>正确做法</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>DCL 忘写 volatile</td><td>半初始化对象，NPE</td><td>instance 必须 volatile</td></tr>
+      <tr><td>static SimpleDateFormat</td><td>日期解析错乱</td><td>用 DateTimeFormatter</td></tr>
+      <tr><td>无界队列不限容量</td><td>生产者快于消费者时 OOM</td><td>始终用有界队列</td></tr>
+      <tr><td>手动 new Thread()</td><td>线程数失控 OOM</td><td>使用线程池</td></tr>
+      <tr><td>HashMap 多线程使用</td><td>数据丢失（JDK 8+）</td><td>换 ConcurrentHashMap</td></tr>
+      <tr><td>synchronized 里做 IO</td><td>吞吐量暴跌</td><td>IO 移到锁外</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试终极回答框架</span>
+    <p>"线程安全的核心是<strong>减少共享可变状态</strong>。首先用不可变对象，其次用并发集合（ConcurrentHashMap、BlockingQueue），配合线程池管理生命周期。单例用枚举或静态内部类。真正需要锁时，优先 <code>ReentrantLock</code> 或 <code>ReadWriteLock</code>，且锁范围尽可能小。"</p>
+  </div>
+
+  <p><strong>下一篇预告：</strong><code>CompletableFuture</code> 异步编程——用链式 API 编排复杂的异步任务流。</p>
+</section>
+
+</main>
+</body>
+</html>

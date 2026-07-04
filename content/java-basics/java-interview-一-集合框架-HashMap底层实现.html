@@ -3,596 +3,512 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Java 面试卡片 - Java基础 - 集合框架 - HashMap底层实现</title>
-<style>
-:root {
-  --header-bg: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  --module-color: #e94560;
-  --accent-blue: #0ea5e9;
-  --accent-green: #10b981;
-  --accent-purple: #8b5cf6;
-  --accent-orange: #f59e0b;
-  --accent-red: #ef4444;
-  --accent-cyan: #06b6d4;
-  --card-shadow: 0 4px 20px rgba(0,0,0,0.08);
-}
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-  background: #f0f2f5;
-  color: #333;
-  line-height: 1.8;
-}
-
-.header {
-  background: var(--header-bg);
-  color: #fff;
-  padding: 40px 20px 30px;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
-}
-.header::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(233,69,96,0.15) 0%, transparent 60%);
-  animation: pulse 8s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
-}
-.header h1 { font-size: 1.8em; position: relative; z-index: 1; font-weight: 700; }
-.header .subtitle { font-size: 1em; opacity: 0.85; margin-top: 8px; position: relative; z-index: 1; }
-.header .day-badge {
-  display: inline-block;
-  background: var(--module-color);
-  color: #fff;
-  padding: 4px 18px;
-  border-radius: 20px;
-  font-size: 0.85em;
-  margin-top: 12px;
-  position: relative;
-  z-index: 1;
-}
-
-.container {
-  max-width: 900px;
-  margin: -20px auto 40px;
-  padding: 0 16px;
-  position: relative;
-  z-index: 2;
-}
-
-.progress-bar-container {
-  background: #fff;
-  border-radius: 12px;
-  padding: 16px 24px;
-  margin-bottom: 24px;
-  box-shadow: var(--card-shadow);
-}
-.progress-label { font-size: 0.9em; color: #666; margin-bottom: 8px; }
-.progress-track {
-  height: 10px;
-  background: #e5e7eb;
-  border-radius: 5px;
-  overflow: hidden;
-}
-.progress-fill {
-  height: 100%;
-  border-radius: 5px;
-  background: linear-gradient(90deg, var(--module-color), var(--accent-orange));
-  width: 1.5%;
-  transition: width 0.5s ease;
-}
-.progress-text { font-size: 0.85em; color: #999; margin-top: 6px; text-align: right; }
-
-.module-card {
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: var(--card-shadow);
-  margin-bottom: 24px;
-  overflow: hidden;
-}
-.module-header {
-  padding: 20px 28px;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.module-header .module-num {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.25);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.4em;
-  font-weight: 800;
-  flex-shrink: 0;
-}
-.module-header h2 { font-size: 1.3em; font-weight: 700; }
-.module-header .module-tag {
-  margin-left: auto;
-  background: rgba(255,255,255,0.2);
-  padding: 4px 14px;
-  border-radius: 20px;
-  font-size: 0.8em;
-}
-
-.section {
-  padding: 24px 28px;
-  border-bottom: 1px solid #f0f0f0;
-}
-.section:last-child { border-bottom: none; }
-.section-title {
-  font-size: 1.15em;
-  font-weight: 700;
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.section-title .dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-ul { list-style: none; padding-left: 22px; }
-ul li {
-  position: relative;
-  padding: 6px 0;
-  padding-left: 18px;
-}
-ul li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 14px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-ul li p { margin: 0; }
-.highlight { color: var(--module-color); font-weight: 600; }
-.code { 
-  background: #f8f9fa; 
-  border: 1px solid #e5e7eb; 
-  border-radius: 6px; 
-  padding: 2px 8px; 
-  font-family: "SF Mono", "Fira Code", Consolas, monospace;
-  font-size: 0.92em;
-  color: #e94560;
-}
-.tip-box {
-  background: linear-gradient(135deg, #fef3c7, #fde68a);
-  border-left: 4px solid var(--accent-orange);
-  border-radius: 8px;
-  padding: 14px 18px;
-  margin: 12px 0;
-  font-size: 0.95em;
-}
-.warn-box {
-  background: linear-gradient(135deg, #fee2e2, #fecaca);
-  border-left: 4px solid var(--accent-red);
-  border-radius: 8px;
-  padding: 14px 18px;
-  margin: 12px 0;
-  font-size: 0.95em;
-}
-.success-box {
-  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
-  border-left: 4px solid var(--accent-green);
-  border-radius: 8px;
-  padding: 14px 18px;
-  margin: 12px 0;
-  font-size: 0.95em;
-}
-
-.diagram {
-  background: #1a1a2e;
-  color: #e0e0e0;
-  border-radius: 12px;
-  padding: 24px;
-  margin: 16px 0;
-  font-family: "SF Mono", "Fira Code", Consolas, monospace;
-  font-size: 0.85em;
-  line-height: 1.6;
-  overflow-x: auto;
-  white-space: pre;
-}
-
-.comparison-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0;
-  font-size: 0.92em;
-}
-.comparison-table th {
-  background: #1a1a2e;
-  color: #fff;
-  padding: 10px 14px;
-  text-align: left;
-}
-.comparison-table td {
-  padding: 10px 14px;
-  border-bottom: 1px solid #e5e7eb;
-}
-.comparison-table tr:nth-child(even) td { background: #f9fafb; }
-
-.footer {
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: var(--card-shadow);
-  padding: 24px 28px;
-  margin-bottom: 30px;
-}
-.footer h3 { font-size: 1.05em; margin-bottom: 10px; color: #555; }
-.next-topic {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
-  border: 1px solid #bae6fd;
-  border-radius: 10px;
-  padding: 14px 18px;
-  margin-top: 10px;
-}
-.next-topic .arrow { font-size: 1.5em; }
-.next-topic .info { flex: 1; }
-.next-topic .info .label { font-size: 0.8em; color: #0284c7; font-weight: 600; }
-.next-topic .info .name { font-size: 1em; color: #0c4a6e; font-weight: 700; }
-
-.watermark {
-  text-align: center;
-  padding: 20px;
-  color: #aaa;
-  font-size: 0.8em;
-}
-
-@media print {
-  body { background: #fff; }
-  .header { padding: 20px; }
-  .module-card { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
-  .footer { box-shadow: none; border: 1px solid #ddd; }
-}
-
-@media (max-width: 640px) {
-  .header h1 { font-size: 1.3em; }
-  .module-header { padding: 16px 18px; }
-  .section { padding: 18px; }
-  .diagram { font-size: 0.75em; padding: 16px; }
-}
-</style>
-    <link rel="stylesheet" href="/assets/reading-theme.css">
-    <script defer src="/assets/theme.js"></script>
+<title>HashMap 高频面试题全解</title>
 </head>
 <body>
 
-<div class="header">
-  <h1>📋 Java 中高级开发面试知识点复习</h1>
-  <div class="subtitle">集合框架 · HashMap 底层实现全解析</div>
-  <div class="day-badge">Day 1 · 模块一</div>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>为什么 HashMap 是面试"钉子户"？</h2></div>
+
+<p>如果 Java 面试只能考一道集合题，那一定是 HashMap。我在面试和被面试的十几年里，几乎没有遇到过不考 HashMap 的 Java 岗位。原因很简单——<strong>一个 HashMap 能把数据结构、哈希算法、并发安全、JDK 源码设计全串起来</strong>，面试官用一个类就能摸清你的功底。</p>
+
+<div class="think"><div class="think-q">"HashMap 为什么允许 null key？遍历顺序为什么不保证？多线程下 HashMap 会出什么问题？" —— 这三个追问几乎出现在每一场 Java 中高级面试中。</div></div>
+
+<p>但大多数人准备 HashMap 面试的方式是"背八股"：数组+链表+红黑树、负载因子 0.75、扩容翻倍……这些没错，但面试官想听的不是背诵，而是<strong>你能把这些设计决策串成一条逻辑链</strong>——为什么是这个结构？为什么 null 被特殊对待？为什么遍历顺序会变？</p>
+
+<p>这篇文章不讲 put 流程的细节（那是上一篇的内容），我们聚焦面试中最高频的几个追问方向，把每一个"为什么"讲透。</p>
+</section>
+
+<!-- ═══════════════ 第2站：null key ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>null key：HashMap 为什么"网开一面"？</h2></div>
+
+<p>面试中经常被问到："HashMap 和 ConcurrentHashMap 都基于哈希表，为什么前者允许 null key，后者不允许？"——这不是随意的设计，背后有清晰的工程权衡。</p>
+
+<h3>HashMap 的 hash() 方法：一行代码定乾坤</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.hash()</b> · null key 的特殊处理</span></div>
+<pre><code><span class="k">static final</span> <span class="t">int</span> hash(<span class="t">Object</span> key) {
+    <span class="t">int</span> h;
+    <span class="c">// key == null → 直接返回 0，不调用 hashCode()</span>
+    <span class="k">return</span> (key == <span class="k">null</span>) ? <span class="n">0</span>
+         : (h = key.hashCode()) ^ (h &gt;&gt;&gt; <span class="n">16</span>);
+}</code></pre>
 </div>
 
-<div class="container">
+<p>看到了吗？当 <code>key == null</code> 时，hash 函数直接返回 <strong>0</strong>。这意味着：</p>
 
-  <!-- 进度条 -->
-  <div class="progress-bar-container">
-    <div class="progress-label">📚 学习进度</div>
-    <div class="progress-track"><div class="progress-fill"></div></div>
-    <div class="progress-text">1 / 66 知识点</div>
-  </div>
+<ul>
+  <li>null key 的桶下标永远是 <code>0 &amp; (n-1) = 0</code>，即 <strong>0 号桶</strong></li>
+  <li>null key 不需要调用 <code>hashCode()</code>，所以不存在空指针风险</li>
+  <li>get(null) 时同样走 <code>hash(null) → 0 → 0 号桶</code>，能正确找到值</li>
+</ul>
 
-  <!-- ===================== 一、Java 基础 ===================== -->
-  <div class="module-card">
-    <div class="module-header" style="background: linear-gradient(135deg, #e94560, #c2185b);">
-      <div class="module-num">一</div>
-      <h2>Java 基础（必考，深度掌握）</h2>
-      <div class="module-tag">模块 1/11</div>
-    </div>
+<figure class="fig">
+<svg viewBox="0 0 700 220" role="img" aria-label="null key 在 HashMap 中的存储位置">
+  <defs>
+    <marker id="nk-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+  <!-- 标题 -->
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">null key 永远落在 0 号桶</text>
 
-    <!-- 1.1 集合框架 -->
-    <div class="section" style="background: linear-gradient(135deg, #fff5f5, #fff);">
-      <div class="section-title">
-        <span class="dot" style="background: #e94560;"></span>
-        1.1 集合框架 — HashMap 底层实现
-      </div>
+  <!-- 数组 -->
+  <rect x="250" y="45" width="200" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="65" text-anchor="middle" font-family="monospace" font-size="11" fill="#57544E">table[] 数组</text>
 
-      <!-- 1.1.1 HashMap 底层实现 -->
-      <div class="section">
-        <div class="section-title">
-          <span class="dot" style="background: #0ea5e9;"></span>
-          1.1.1 HashMap 底层实现（数组+链表+红黑树，1.8变化）
-        </div>
+  <!-- 桶 0 高亮 -->
+  <rect x="80" y="95" width="90" height="36" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/>
+  <text x="125" y="118" text-anchor="middle" font-family="monospace" font-size="13" fill="#C2410C" font-weight="700">[0]</text>
 
-        <p style="margin-bottom:12px;color:#555;">HashMap 是 Java 中最常用的数据结构之一，面试中几乎必考。理解其底层实现是掌握集合框架的<strong>基石</strong>。</p>
+  <!-- 桶 1 -->
+  <rect x="190" y="95" width="80" height="36" rx="4" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="230" y="118" text-anchor="middle" font-family="monospace" font-size="12" fill="#8C8676">[1]</text>
 
-        <h4 style="margin:16px 0 8px;color:#333;">核心数据结构演变</h4>
-        <div class="diagram">// JDK 1.7: 数组 + 链表（头插法）
-+-------+    +----+----+----+
-| hash  | →  |[0]→[1]→[2]     |  ← 每个位置挂一条链表
-+-------+    +----+----+----+
+  <!-- 桶 2 -->
+  <rect x="290" y="95" width="80" height="36" rx="4" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="330" y="118" text-anchor="middle" font-family="monospace" font-size="12" fill="#8C8676">[2]</text>
 
-// JDK 1.8+: 数组 + 链表 + 红黑树（尾插法）
-+-------+    +------------------+
-| hash  | →  | Node | Node ...  |  ← 链表长度 &gt;= 8 且数组长度 &gt;= 64
-+-------+    |    ↓             |
-              | TreeNode         |  ← 转为红黑树
-              |    ↓             |
-              | TreeNode         |
-              +------------------+
+  <!-- 桶 ... -->
+  <text x="410" y="118" text-anchor="middle" font-size="14" fill="#8C8676">...</text>
 
-// 节点结构（Node 实现 Map.Entry）
-static class Node&lt;K,V&gt; implements Map.Entry&lt;K,V&gt; {
-    final int hash;
-    final K key;
-    V value;
-    Node&lt;K,V&gt; next;
-}</div>
+  <!-- 桶 n -->
+  <rect x="450" y="95" width="80" height="36" rx="4" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="490" y="118" text-anchor="middle" font-family="monospace" font-size="12" fill="#8C8676">[n-1]</text>
 
-        <h4 style="margin:16px 0 8px;color:#333;">1.7 → 1.8 关键变化</h4>
-        <table class="comparison-table">
-          <tr><th>特性</th><th>JDK 1.7</th><th>JDK 1.8+</th></tr>
-          <tr><td>数据结构</td><td>数组 + 链表</td><td>数组 + 链表 + 红黑树</td></tr>
-          <tr><td>插入方式</td><td>头插法</td><td>尾插法</td></tr>
-          <tr><td>扩容后链表顺序</td><td>倒序</td><td>保持原序</td></tr>
-          <tr><td>树化条件</td><td>不支持</td><td>链表长度 ≥ 8 且数组长度 ≥ 64</td></tr>
-          <tr><td>退化条件</td><td>不支持</td><td>红黑树节点 ≤ 6 时退化为链表</td></tr>
-          <tr><td>线程安全</td><td>多线程扩容可能死循环</td><td>尾插法避免死循环，但仍非线程安全</td></tr>
-        </table>
+  <!-- null key node -->
+  <line x1="125" y1="131" x2="125" y2="155" stroke="#C2410C" stroke-width="1.5" marker-end="url(#nk-arrow)"/>
+  <rect x="55" y="158" width="140" height="40" rx="6" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="125" y="175" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C">hash = 0</text>
+  <text x="125" y="192" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">key=null, value=...</text>
 
-        <div class="tip-box">
-          💡 <strong>面试要点：</strong>1.7 头插法在多线程扩容时可能导致环形链表（死循环），1.8 改为尾插法解决了这个问题。但 HashMap 仍然不是线程安全的！
-        </div>
+  <!-- 说明 -->
+  <text x="500" y="175" text-anchor="middle" font-size="12" fill="#57544E">hash(null) 返回 0</text>
+  <text x="500" y="195" text-anchor="middle" font-size="12" fill="#57544E">0 &amp; (n-1) = 0</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>null key 的 hash 值为 0，永远存储在 table[0] 桶中</figcaption>
+</figure>
 
-        <h4 style="margin:16px 0 8px;color:#333;">哈希计算（hash 方法）</h4>
-        <div class="diagram">// 高 16 位异或低 16 位，减少哈希冲突
-static final int hash(Object key) {
-    int h;
-    return (key == null) ? 0 : (h ^ (h >>> 16));
+<h3>为什么 HashMap 选择允许 null？</h3>
+
+<p>这不是技术限制，而是<strong>设计哲学</strong>。Joshua Bloch（Java 集合框架设计者）认为：</p>
+
+<ul>
+  <li><strong>便利性</strong>：很多业务场景中 null 是一个有意义的值——"用户未选择""配置项缺失""缓存未命中"。允许 null key 让开发者可以直接 <code>map.put(null, defaultValue)</code>，省去额外的判空逻辑</li>
+  <li><strong>单线程场景无歧义</strong>：HashMap 设计初衷是单线程使用，null 不会带来语义混乱</li>
+  <li><strong>hash 函数做了兜底</strong>：null → 0 的映射简单明确，不会引入 bug</li>
+</ul>
+
+<h3>ConcurrentHashMap 为什么拒绝 null？</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ConcurrentHashMap.putVal()</b> · 直接拒绝 null</span></div>
+<pre><code><span class="k">if</span> (key == <span class="k">null</span> || value == <span class="k">null</span>)
+    <span class="k">throw new</span> <span class="t">NullPointerException</span>();  <span class="c">// 没有任何商量</span></code></pre>
+</div>
+
+<p>Doug Lea（ConcurrentHashMap 作者）在邮件列表中解释过这个设计决策：</p>
+
+<div class="crack"><div class="crack-label">null 在并发环境中有二义性</div>
+<p>在单线程的 HashMap 中，如果 <code>map.get(key)</code> 返回 null，你可以再调 <code>map.containsKey(key)</code> 来区分"key 不存在"和"value 是 null"。但在多线程环境下，<strong>两次调用之间其他线程可能已经修改了 map</strong>，所以 containsKey 的结果不可信。</p>
+<p>为了避免这种无法排查的歧义，ConcurrentHashMap 选择了最简单粗暴的方案：<strong>禁止 null key 和 null value</strong>，从源头消除二义性。</p>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">面试标准答案</div>
+<ul>
+  <li>HashMap 允许 null key，因为 <code>hash(null)</code> 直接返回 0，null key 存储在 0 号桶</li>
+  <li>HashMap 允许 null value，因为单线程下 get() 返回 null 可以用 containsKey 区分</li>
+  <li>ConcurrentHashMap 不允许 null key/value，因为并发环境下 get() 返回 null 有二义性（key 不存在 vs value 为 null），且无法通过 containsKey 二次确认</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：遍历顺序 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>遍历顺序：为什么 HashMap "不守规矩"？</h2></div>
+
+<div class="think"><div class="think-q">"我按 A、B、C 的顺序 put 进 HashMap，为什么遍历出来是 B、A、C？" —— 这是新手最常踩的坑。</div></div>
+
+<p>答案藏在 HashMap 的哈希分布机制里。元素在数组中的位置取决于 <code>hash &amp; (n-1)</code>，而不是插入顺序。我们用一个例子来看：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Demo.java</b> · 插入顺序 ≠ 遍历顺序</span></div>
+<pre><code><span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+map.put(<span class="s">"apple"</span>,  <span class="n">1</span>);
+map.put(<span class="s">"banana"</span>, <span class="n">2</span>);
+map.put(<span class="s">"cherry"</span>, <span class="n">3</span>);
+map.put(<span class="s">"date"</span>,   <span class="n">4</span>);
+
+<span class="c">// 遍历结果（取决于 hashCode 和数组长度）：</span>
+<span class="c">// 可能是 banana, apple, date, cherry —— 和插入顺序完全不同</span>
+<span class="k">for</span> (<span class="t">String</span> key : map.keySet()) {
+    System.out.println(key + <span class="s">" → "</span> + map.get(key));
+}</code></pre>
+</div>
+
+<h3>为什么顺序会乱？</h3>
+
+<p>"apple" 的 hashCode 和 "banana" 的 hashCode 经过扰动后，取模得到的桶下标可能分别是 3、1、7、5。遍历 HashMap 时，迭代器从 <code>table[0]</code> 开始逐个桶扫描，所以输出顺序取决于<strong>桶下标的大小</strong>，而不是插入的先后。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="三种 Map 遍历顺序对比">
+  <defs>
+    <marker id="ord-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+  <text x="350" y="20" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">三种 Map 的遍历顺序对比</text>
+
+  <!-- HashMap -->
+  <rect x="20" y="40" width="200" height="250" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="120" y="62" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C" font-weight="700">HashMap</text>
+  <text x="120" y="82" text-anchor="middle" font-size="11" fill="#57544E">按桶下标顺序遍历</text>
+
+  <rect x="40" y="98" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="120" y="113" text-anchor="middle" font-family="monospace" font-size="10" fill="#8C8676">[1] banana</text>
+  <rect x="40" y="124" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="120" y="139" text-anchor="middle" font-family="monospace" font-size="10" fill="#8C8676">[3] apple</text>
+  <rect x="40" y="150" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="120" y="165" text-anchor="middle" font-family="monospace" font-size="10" fill="#8C8676">[5] date</text>
+  <rect x="40" y="176" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="120" y="191" text-anchor="middle" font-family="monospace" font-size="10" fill="#8C8676">[7] cherry</text>
+
+  <text x="120" y="225" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">顺序：不保证</text>
+  <text x="120" y="245" text-anchor="middle" font-size="10" fill="#57544E">扩容后顺序可能再变</text>
+  <text x="120" y="275" text-anchor="middle" font-size="10" fill="#57544E">性能最优 O(n)</text>
+
+  <!-- LinkedHashMap -->
+  <rect x="250" y="40" width="200" height="250" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="350" y="62" text-anchor="middle" font-family="monospace" font-size="12" fill="#3E6B8F" font-weight="700">LinkedHashMap</text>
+  <text x="350" y="82" text-anchor="middle" font-size="11" fill="#57544E">按插入顺序遍历</text>
+
+  <rect x="270" y="98" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="113" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">1st apple</text>
+  <rect x="270" y="124" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="139" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">2nd banana</text>
+  <rect x="270" y="150" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="165" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">3rd cherry</text>
+  <rect x="270" y="176" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="191" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">4th date</text>
+
+  <text x="350" y="225" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="600">双向链表维护顺序</text>
+  <text x="350" y="245" text-anchor="middle" font-size="10" fill="#57544E">额外内存开销 ~30%</text>
+  <text x="350" y="275" text-anchor="middle" font-size="10" fill="#57544E">LRU 缓存首选</text>
+
+  <!-- TreeMap -->
+  <rect x="480" y="40" width="200" height="250" rx="6" fill="#fff" stroke="#533483" stroke-width="1.5"/>
+  <text x="580" y="62" text-anchor="middle" font-family="monospace" font-size="12" fill="#533483" font-weight="700">TreeMap</text>
+  <text x="580" y="82" text-anchor="middle" font-size="11" fill="#57544E">按 key 排序遍历</text>
+
+  <rect x="500" y="98" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="580" y="113" text-anchor="middle" font-family="monospace" font-size="10" fill="#533483">apple (a)</text>
+  <rect x="500" y="124" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="580" y="139" text-anchor="middle" font-family="monospace" font-size="10" fill="#533483">banana (b)</text>
+  <rect x="500" y="150" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="580" y="165" text-anchor="middle" font-family="monospace" font-size="10" fill="#533483">cherry (c)</text>
+  <rect x="500" y="176" width="160" height="22" rx="3" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="580" y="191" text-anchor="middle" font-family="monospace" font-size="10" fill="#533483">date (d)</text>
+
+  <text x="580" y="225" text-anchor="middle" font-size="11" fill="#533483" font-weight="600">红黑树自然排序</text>
+  <text x="580" y="245" text-anchor="middle" font-size="10" fill="#57544E">put/get O(log n)</text>
+  <text x="580" y="275" text-anchor="middle" font-size="10" fill="#57544E">需要排序时用</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>HashMap（无序）、LinkedHashMap（插入序）、TreeMap（排序）三种遍历行为对比</figcaption>
+</figure>
+
+<h3>LinkedHashMap 如何记住插入顺序？</h3>
+
+<p>LinkedHashMap 继承自 HashMap，在 HashMap 的 Node 基础上额外维护一条<strong>双向链表</strong>。每次 put 新元素时，除了照常放入哈希桶，还会把新节点追加到双向链表尾部。遍历 LinkedHashMap 时，走的是双向链表而不是哈希桶数组，所以输出顺序 = 插入顺序。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LinkedHashMap.Entry</b> · 额外的前后指针</span></div>
+<pre><code><span class="k">static class</span> <span class="t">Entry</span>&lt;K,V&gt; <span class="k">extends</span> <span class="t">HashMap.Node</span>&lt;K,V&gt; {
+    <span class="t">Entry</span>&lt;K,V&gt; before, after;  <span class="c">// 双向链表的前后指针</span>
+    <span class="t">Entry</span>(<span class="t">int</span> hash, K key, V value, <span class="t">Node</span>&lt;K,V&gt; next) {
+        <span class="k">super</span>(hash, key, value, next);
+    }
+}</code></pre>
+</div>
+
+<p>LinkedHashMap 还有一个杀手级特性：<strong>accessOrder 模式</strong>。构造时传 <code>accessOrder = true</code>，每次 get/put 都会把被访问的节点移到链表末尾，配合 <code>removeEldestEntry()</code> 就能实现 LRU 缓存。</p>
+
+<div class="takeaway"><div class="takeaway-label">选型指南</div>
+<ul>
+  <li>不需要顺序保证 → <strong>HashMap</strong>（性能最优）</li>
+  <li>需要保持插入顺序或访问顺序 → <strong>LinkedHashMap</strong>（LRU 缓存场景）</li>
+  <li>需要按 key 排序 → <strong>TreeMap</strong>（自然序或自定义 Comparator）</li>
+  <li>扩容后 HashMap 的遍历顺序可能改变，LinkedHashMap 不会</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：equals/hashCode ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>equals / hashCode 契约：最经典的 Bug 制造机</h2></div>
+
+<div class="think"><div class="think-q">"重写 equals() 为什么必须同时重写 hashCode()？能举个只重写一个导致 Bug 的例子吗？"</div></div>
+
+<p>先看 HashMap 查找 key 的流程——理解了查找方式，就理解了为什么这两个方法必须成对出现：</p>
+
+<div class="formula">
+<strong>HashMap 查找 key 的三步</strong><br/>
+① 计算 hashCode → 定位桶下标：hash &amp; (n-1)<br/>
+② 遍历桶中的链表/红黑树<br/>
+③ 对每个节点：先比 hash（int 比较），再比 ==（引用比较），最后才 equals()
+</div>
+
+<p>关键点在第 ③ 步：<strong>hashCode 不同的两个对象，HashMap 直接认为它们不相等</strong>，根本不会调用 equals()。</p>
+
+<h3>Bug 实例：只重写 equals 不重写 hashCode</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BugDemo.java</b> · 经典翻车现场</span></div>
+<pre><code><span class="k">class</span> <span class="t">User</span> {
+    <span class="t">String</span> name;
+    <span class="t">int</span> age;
+
+    <span class="t">User</span>(<span class="t">String</span> name, <span class="t">int</span> age) {
+        <span class="k">this</span>.name = name; <span class="k">this</span>.age = age;
+    }
+
+    <span class="c">// 只重写了 equals，没重写 hashCode —— 这是一个 Bug</span>
+    <span class="k">@Override</span>
+    <span class="k">public boolean</span> equals(<span class="t">Object</span> o) {
+        <span class="k">if</span> (<span class="k">this</span> == o) <span class="k">return true</span>;
+        <span class="k">if</span> (!(o <span class="k">instanceof</span> <span class="t">User</span>)) <span class="k">return false</span>;
+        <span class="t">User</span> u = (<span class="t">User</span>) o;
+        <span class="k">return</span> age == u.age &amp;&amp; name.equals(u.name);
+    }
+    <span class="c">// hashCode() 继承 Object —— 基于内存地址，每次 new 都不同</span>
 }
-// 等价于：(h = key.hashCode()) ^ (h >>> 16)
 
-// 为什么这样做？
-// 数组长度总是 2 的幂，index = (n - 1) & hash
-// 只取低位参与计算的话，高位信息丢失容易冲突
-// 高低位异或后，既保留高位信息又利用低位，分布更均匀</div>
+<span class="t">Map</span>&lt;<span class="t">User</span>, <span class="t">String</span>&gt; map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+<span class="t">User</span> u1 = <span class="k">new</span> <span class="t">User</span>(<span class="s">"Alice"</span>, <span class="n">25</span>);
+<span class="t">User</span> u2 = <span class="k">new</span> <span class="t">User</span>(<span class="s">"Alice"</span>, <span class="n">25</span>);
 
-        <h4 style="margin:16px 0 8px;color:#333;">Put 操作完整流程</h4>
-        <div class="diagram">put(key, value) 流程：
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. 判断数组是否为空，为空则初始化（默认容量 16，阈值 12）
-2. 计算 key 的 hash 值 → index = (n - 1) & hash
-3. 如果 bucket[i] 为空，直接新建 Node 放入
-4. 如果不为空：
-   a) key 与头节点相同 → 直接覆盖 value
-   b) 如果是 TreeNode → 调用 putTreeVal 红黑树插入
-   c) 如果是链表 → 尾插法遍历插入
-      - 遍历过程中发现 key 已存在 → 覆盖 value
-      - 插入后链表长度 >= 8 → 检查是否树化
-5. 元素个数 > 阈值 (threshold) → 扩容（翻倍）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+map.put(u1, <span class="s">"VIP"</span>);
+System.out.println(u1.equals(u2));        <span class="c">// true —— equals 认为相等</span>
+System.out.println(map.get(u2));           <span class="c">// null —— 但 HashMap 找不到！</span>
+<span class="c">// 原因：u1 和 u2 的 hashCode 不同，落到了不同的桶</span></code></pre>
+</div>
 
-        <div class="warn-box">
-          ⚠️ <strong>踩坑经验：</strong>
-          ① 自定义对象作为 Key 必须重写 <code class="code">hashCode()</code> 和 <code class="code">equals()</code>；
-          ② Key 为 null 时，始终存放在 index=0 的位置；
-          ③ HashMap 允许一个 null key 和多个 null value。
-        </div>
+<div class="crack"><div class="crack-label">反过来：只重写 hashCode 不重写 equals 也会出事</div>
+<p>如果只重写 hashCode 让两个对象落到同一个桶，但 equals 沿用 Object 默认（比引用地址），那么 <code>get(u2)</code> 在桶内遍历时，<code>u1.equals(u2)</code> 返回 false——同样找不到。所以<strong>两个方法必须同时重写，且逻辑一致</strong>。</p>
+</div>
 
-        <h4 style="margin:16px 0 8px;color:#333;">扩容机制（resize）</h4>
-        <table class="comparison-table">
-          <tr><th>参数</th><th>值</th><th>说明</th></tr>
-          <tr><td>默认初始容量</td><td>16 (2⁴)</td><td>必须是 2 的幂</td></tr>
-          <tr><td>负载因子 (loadFactor)</td><td>0.75</td><td>容量与阈值的比例，权衡空间和时间</td></tr>
-          <tr><td>扩容阈值</td><td>capacity × 0.75</td><td>达到阈值触发扩容</td></tr>
-          <tr><td>扩容策略</td><td>容量翻倍</td><td>从 16→32→64→128...</td></tr>
-          <tr><td>树化阈值</td><td>8 (TREEIFY_THRESHOLD)</td><td>链表长度达到 8</td></tr>
-          <tr><td>退化阈值</td><td>6 (UNTREEIFY_THRESHOLD)</td><td>红黑树节点 ≤ 6 退化</td></tr>
-        </table>
+<h3>Java 官方的契约规则</h3>
 
-        <div class="diagram">// 扩容时 1.8 的优化：不需要重新 hash！
-// 扩容后 index 只有两种可能：
-//   原 index 或 原 index + oldCapacity
-// 判断方式：(e.hash & oldCapacity) == 0 ? 原位置 : 原位置+oldCapacity
-// 链表中的元素只需遍历一次，比 1.7 需要遍历两次更高效</div>
+<div class="formula">
+<strong>equals / hashCode 三条铁律</strong><br/>
+1. 如果 a.equals(b) == true → a.hashCode() == b.hashCode()（必须）<br/>
+2. 如果 a.hashCode() == b.hashCode() → a.equals(b) 不一定（允许碰撞）<br/>
+3. 同一个对象多次调用 hashCode() 返回值不变（除非影响 hash 的字段被修改）
+</div>
 
-        <h4 style="margin:16px 0 8px;color:#333;">面试模拟</h4>
-        <div class="success-box">
-          <strong>Q1：为什么 HashMap 的容量必须是 2 的幂？</strong><br>
-          <strong>A：</strong>① 使得 <code class="code">(n-1) & hash</code> 等价于 <code class="code">hash % n</code>，位运算更高效；② 2 的幂减 1 全为 1，能最大程度利用 hash 值的所有位，减少碰撞。
-        </div>
-        <div class="success-box" style="margin-top:10px;">
-          <strong>Q2：为什么负载因子默认是 0.75？</strong><br>
-          <strong>A：</strong>0.75 是时间开销和空间开销的折中。值越大，空间利用率高但冲突概率增大；值越小，冲突少但浪费空间。统计表明 0.75 是较优平衡点。
-        </div>
-        <div class="success-box" style="margin-top:10px;">
-          <strong>Q3：JDK 1.7 为什么用头插法，1.8 改为尾插法？</strong><br>
-          <strong>A：</strong>头插法在多线程扩容时，逆序会导致环形链表产生死循环。尾插法保持原序，避免此问题。同时 1.8 引入红黑树后，头插法会反转树的遍历顺序，尾插法则不会。
-        </div>
-        <div class="success-box" style="margin-top:10px;">
-          <strong>Q4：HashMap 扩容的 time complexity？</strong><br>
-          <strong>A：</strong>put/get 平均 O(1)，最差（全部碰撞入树）O(log n)。扩容本身 O(n)，均摊后不影响整体效率。
-        </div>
-      </div>
+<div class="takeaway"><div class="takeaway-label">生产环境建议</div>
+<ul>
+  <li>用 IDE 或 <code>@Data</code> / <code>@EqualsAndHashCode</code>（Lombok）自动生成，避免手写遗漏</li>
+  <li>Java 14+ 可用 <code>record</code> 类型——自动实现 equals、hashCode、toString</li>
+  <li>hashCode 计算时记得用 <code>Objects.hash(field1, field2)</code>，不要手写位运算（容易写错）</li>
+  <li>作为 HashMap key 的字段必须是 <strong>final</strong> 或不可变的，否则 put 后修改字段会导致"丢失"</li>
+</ul>
+</div>
+</section>
 
-      <!-- 1.1.2 ConcurrentHashMap -->
-      <div class="section">
-        <div class="section-title">
-          <span class="dot" style="background: #10b981;"></span>
-          1.1.2 ConcurrentHashMap 分段锁到 CAS+synchronized 演进
-        </div>
+<!-- ═══════════════ 第5站：线程安全 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>线程安全：HashMap 在并发下会出什么问题？</h2></div>
 
-        <h4 style="margin:12px 0 8px;color:#333;">三个版本的演进路线</h4>
-        <table class="comparison-table">
-          <tr><th>版本</th><th>线程安全方案</th><th>粒度</th><th>特点</th></tr>
-          <tr><td>JDK 1.7</td><td>分段锁 (Segment)</td><td>Segment 级别</td><td>继承 ReentrantLock，默认 16 个 Segment，最多 16 线程并发</td></tr>
-          <tr><td>JDK 1.8 (初版)</td><td>CAS + synchronized (Node 级别)</td><td>Node 级别</td><td>放弃 Segment，锁粒度细化到桶节点，并发度大幅提升</td></tr>
-          <tr><td>JDK 1.8 (树化后)</td><td>synchronized (TreeNode 级别)</td><td>TreeNode 级别</td><td>红黑树节点锁竞争更小</td></tr>
-        </table>
+<div class="think"><div class="think-q">"HashMap 不是线程安全的——那它具体会出什么问题？仅仅是数据丢失吗？"</div></div>
 
-        <div class="diagram">// 1.7 Segment 结构
-┌─────────────┬──────────────────────────┐
-│  Segment[0]  │  HashMap: Node[] table   │
-│  (继承锁)     │  每个 Segment 独立锁          │
-├─────────────┼──────────────────────────┤
-│  Segment[1]  │  ...                     │
-└─────────────┴──────────────────────────┘
-// 最大并发度 = Segment 数量（默认 16）
+<p>HashMap 在并发环境下至少有<strong>三个层次</strong>的问题，面试官想听的不只是"会死循环"：</p>
 
-// 1.8 Node 结构 — 无 Segment，直接锁桶
-static class Node&lt;K,V&gt; {
-    volatile V value;          // volatile 保证可见性
-    final int hash;
-    final K key;
-    volatile Node&lt;K,V&gt; next;   // volatile 防扩容时链表断裂
-}
-// put 操作: CAS 插入头节点 → 失败则 synchronized 锁头节点</div>
+<h3>问题 1：size 不准确</h3>
 
-        <div class="tip-box">
-          💡 <strong>核心原理：</strong>1.8 中 put 操作先尝试 CAS 插入新节点（无锁），失败后用 synchronized 锁住桶头节点再插入。get 操作不需要同步，只读取 volatile 字段，因此是<strong>无锁读取</strong>。
-        </div>
+<p><code>++size</code> 不是原子操作（读→加→写三步），两个线程同时执行 <code>put()</code> 时，可能两个 <code>++size</code> 只增加了一次。结果就是 <code>map.size()</code> 比实际元素数少。</p>
 
-        <h4 style="margin:16px 0 8px;color:#333;">面试要点</h4>
-        <ul>
-          <li><span class="dot" style="background:#10b981;"></span> <strong>为什么 1.8 放弃分段锁？</strong> Segment 数量固定导致并发度上限，且扩容时整个 Segment 锁住影响大。Node 级别锁更细粒度。
-          <li><span class="dot" style="background:#10b981;"></span> <strong>size() 方法怎么统计？</strong> 1.8 使用 <code class="code">baseCount + CounterCell[]</code>（类似 LongAdder），通过 volatile + CAS 累加，保证近似精确。
-          <li><span class="dot" style="background:#10b981;"></span> <strong>与 HashMap 区别：</strong> 线程安全、不允许 null key/value、扩容策略不同、size() 为近似值。
-        </ul>
+<h3>问题 2：数据覆盖（丢失更新）</h3>
 
-        <div class="success-box" style="margin-top:12px;">
-          <strong>Q：ConcurrentHashMap 和 Hashtable 的区别？</strong><br>
-          <strong>A：</strong>Hashtable 用 synchronized 锁整张表，并发性能极差；ConcurrentHashMap 1.8 锁粒度为桶级别，并发度接近 Integer.MAX_VALUE。且 Hashtable 不允许 null，ConcurrentHashMap 不允许 null key/value。
-        </div>
-      </div>
+<p>线程 A 和线程 B 同时发现 <code>table[i] == null</code>，都执行了 <code>tab[i] = newNode(...)</code>。后写入的那个会覆盖先写入的——数据悄悄丢了，没有任何异常。</p>
 
-      <!-- 1.1.3 ArrayList vs LinkedList -->
-      <div class="section">
-        <div class="section-title">
-          <span class="dot" style="background: #8b5cf6;"></span>
-          1.1.3 ArrayList vs LinkedList 使用场景
-        </div>
+<h3>问题 3：JDK 1.7 的死循环（CPU 100%）</h3>
 
-        <table class="comparison-table">
-          <tr><th>维度</th><th>ArrayList</th><th>LinkedList</th></tr>
-          <tr><td>底层结构</td><td>动态数组</td><td>双向链表</td></tr>
-          <tr><td>随机访问 get(i)</td><td>O(1) ⭐</td><td>O(n)</td></tr>
-          <tr><td>尾部插入 add</td><td>均摊 O(1) ⭐</td><td>O(1) ⭐</td></tr>
-          <tr><td>中间插入/删除</td><td>O(n)（需移动元素）</td><td>O(1)（找到位置后）</td></tr>
-          <tr><td>内存占用</td><td>较紧凑（仅存元素）</td><td>较大（每个节点 +2 个引用）</td></tr>
-          <tr><td>缓存友好性</td><td>高（连续内存）⭐</td><td>低（分散内存）</td></tr>
-          <tr><td>线程安全</td><td>否</td><td>否</td></tr>
-        </table>
+<p>这是最"经典"的问题。JDK 1.7 使用头插法扩容，两个线程同时 resize 时，链表会被<strong>逆序重建</strong>。如果线程 A 执行到一半被挂起，线程 B 完成扩容后链表顺序反转，线程 A 恢复后继续按旧引用操作——最终可能形成<strong>环形链表</strong>，后续所有经过这个桶的 <code>get()</code> 都变成死循环。</p>
 
-        <div class="tip-box">
-          💡 <strong>实战场景：</strong>
-          ① 读多写少、按索引访问 → ArrayList；
-          ② 频繁在头部/中间插入删除 → LinkedList（但实际项目中 ArrayList 更常用，因为缓存友好，LinkedList 的实际性能未必更好）；
-          ③ Java 9 起 LinkedList 内部结构有所优化。
-        </div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>生产事故案例</b></span></div>
+<pre><code><span class="c">// 典型事故场景：全局缓存使用 HashMap</span>
+<span class="k">public class</span> <span class="t">CacheService</span> {
+    <span class="c">// ❌ 错误：多线程环境用了 HashMap</span>
+    <span class="k">private</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; cache = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
 
-        <div class="warn-box">
-          ⚠️ <strong>面试陷阱：</strong>不要迷信"LinkedList 插入删除 O(1)"——<strong>找到位置本身就是 O(n)</strong>，所以实际使用中 ArrayList 在大多数场景下性能更好。
-        </div>
-      </div>
-
-      <!-- 1.1.4 HashSet/TreeSet -->
-      <div class="section">
-        <div class="section-title">
-          <span class="dot" style="background: #f59e0b;"></span>
-          1.1.4 HashSet / TreeSet 底层原理
-        </div>
-
-        <ul>
-          <li><span class="dot" style="background:#f59e0b;"></span> <strong>HashSet：</strong>底层就是 HashMap，新元素作为 Key 存入 HashMap，Value 固定为 <code class="code">PRESENT</code>（一个 static final Object）。因此 HashSet 也不允许重复元素。
-          <li><span class="dot" style="background:#f59e0b;"></span> <strong>TreeSet：</strong>底层是 TreeMap（基于红黑树），元素按自然顺序或 Comparator 排序。支持 <code class="code">first()/last()/subSet()</code> 等操作。
-          <li><span class="dot" style="background:#f59e0b;"></span> <strong>LinkedHashSet：</strong>在 HashSet 基础上加了双向链表维护插入顺序。
-        </ul>
-
-        <div class="success-box" style="margin-top:10px;">
-          <strong>Q：如何保证 HashSet 元素的唯一性？</strong><br>
-          <strong>A：</strong>hashCode() 和 equals() 双重校验。先比较 hash 值，hash 相同再比较 equals。两个自定义对象要视为相等，必须同时满足 hashCode 相同且 equals 返回 true。
-        </div>
-      </div>
-
-      <!-- 1.1.5 Iterator -->
-      <div class="section">
-        <div class="section-title">
-          <span class="dot" style="background: #06b6d4;"></span>
-          1.1.5 Iterator 遍历机制和 fail-fast 机制
-        </div>
-
-        <h4 style="margin:12px 0 8px;color:#333;">Iterator 工作原理</h4>
-        <div class="diagram">// 使用示例
-Iterator&lt;String&gt; it = list.iterator();
-while (it.hasNext()) {
-    String s = it.next();
-    if (s.equals("target")) {
-        it.remove(); // 正确：通过 Iterator 删除
+    <span class="k">public void</span> refreshCache(<span class="t">List</span>&lt;<span class="t">Config</span>&gt; configs) {
+        <span class="c">// 多个线程同时调用 → 并发 put → 触发并发 resize</span>
+        configs.forEach(c -&gt; cache.put(c.getKey(), c.getValue()));
     }
 }
 
-// 错误做法：遍历中直接操作集合会触发 fail-fast
-for (String s : list) {
-    list.remove(s); // ❌ ConcurrentModificationException</div>
-
-        <h4 style="margin:12px 0 8px;color:#333;">fail-fast 机制</h4>
-        <ul>
-          <li><span class="dot" style="background:#06b6d4;"></span> Java 集合框架中的迭代器在遍历过程中检测到集合结构被修改（非通过迭代器的 remove），会抛出 <code class="code">ConcurrentModificationException</code>。
-          <li><span class="dot" style="background:#06b6d4;"></span> 实现原理：每个集合维护一个 <code class="code">modCount</code> 字段，每次结构修改时递增。迭代器创建时记录 <code class="code">expectedModCount</code>，每次 next() 时校验两者是否一致。
-          <li><span class="dot" style="background:#06b6d4;"></span> <strong>注意：</strong>fail-fast 是<strong>快速失败</strong>而非安全保证，不能保证 100% 检测到并发修改，仅用于检测 bug。
-          <li><span class="dot" style="background:#06b6d4;"></span> 用 fail-safe 的集合（如 ConcurrentHashMap、CopyOnWriteArrayList）遍历不会因为并发修改抛异常。
-        </ul>
-
-        <div class="tip-box">
-          💡 <strong>面试高频：</strong>fail-fast 和 fail-safe 的区别是集合框架的经典考点。HashMap 的迭代器是 fail-fast，ConcurrentHashMap 的是 fail-safe。
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- 页脚 -->
-  <div class="footer">
-    <h3>📊 今日总结</h3>
-    <p style="color:#666;margin-bottom:14px;">集合框架是 Java 面试的第一道大题，HashMap 更是其中的核心。建议能手写 HashMap 的 put/get 流程，并说出 JDK 1.7 到 1.8 的每一个变化点。</p>
-    
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">
-      <div class="tip-box" style="margin:0;"><strong>核心概念</strong><br>数组+链表+红黑树</div>
-      <div class="success-box" style="margin:0;"><strong>扩容机制</strong><br>容量翻倍，2 的幂</div>
-      <div class="warn-box" style="margin:0;"><strong>线程安全</strong><br>非线程安全</div>
-    </div>
-
-    <div style="margin-top:20px;">
-      <div class="progress-label">📚 学习进度</div>
-      <div class="progress-track"><div class="progress-fill"></div></div>
-      <div class="progress-text">1 / 66 知识点</div>
-    </div>
-
-    <div class="next-topic">
-      <div class="arrow">👉</div>
-      <div class="info">
-        <div class="label">明日预告 · Day 2</div>
-        <div class="name">ConcurrentHashMap 分段锁到 CAS+synchronized 的演进</div>
-      </div>
-    </div>
-  </div>
-
+<span class="c">// 修复方案：替换为 ConcurrentHashMap</span>
+<span class="k">private</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; cache = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();</code></pre>
 </div>
 
-<div class="watermark">Java 中高级面试复习 · java-interview-outline · Day 1/66</div>
+<div class="crack"><div class="crack-label">JDK 1.8 修复了死循环，但 HashMap 仍然不是线程安全的</div>
+<p>1.8 改用尾插法后，并发扩容不再形成环形链表——这是事实。但 <code>size</code> 不准确和数据覆盖的问题依然存在。所以<strong>"JDK 1.8 的 HashMap 可以安全用在多线程环境"是错误结论</strong>。面试时如果被追问，一定要明确区分"修复了死循环"和"线程安全"是两码事。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：面试陷阱 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>高频面试陷阱题</h2></div>
+
+<div class="think"><div class="think-q">陷阱 1："HashMap 的容量为什么必须是 2 的幂？" —— 大部分人都能答对一半。</div></div>
+
+<p>完整答案有三层：</p>
+<ul>
+  <li><strong>数学等价</strong>：当 n = 2<sup>k</sup> 时，<code>hash &amp; (n-1)</code> 等价于 <code>hash % n</code>，位运算比取模快几个数量级</li>
+  <li><strong>均匀分布</strong>：2 的幂减 1 的二进制全是 1（如 15 = 1111₂），hash 的每一位都参与运算，碰撞最小化</li>
+  <li><strong>扩容优化</strong>：1.8 扩容时利用 <code>hash &amp; oldCap</code> 直接判断新位置，省去重新 hash——这个优化也依赖"2 的幂"的前提</li>
+</ul>
+
+<div class="think"><div class="think-q">陷阱 2："两个 key 的 hashCode 相同会怎样？" —— 面试官想看你是否理解冲突解决。</div></div>
+
+<p>hashCode 相同 ≠ 同一个 key。HashMap 的处理方式：</p>
+<ol>
+  <li>两个 key 的 hash 值相同 → 落到同一个桶</li>
+  <li>桶里形成链表（或红黑树），两个节点共存</li>
+  <li><code>get(key)</code> 时，先定位到桶，再遍历链表用 <code>equals()</code> 逐个比对</li>
+</ol>
+<p>这就是<strong>哈希冲突的正常处理方式</strong>，不会丢数据。只有当大量 key 碰撞到同一个桶时，性能才从 O(1) 退化为 O(n) 或 O(log n)。</p>
+
+<div class="think"><div class="think-q">陷阱 3："put 之后修改 key 的值会怎样？" —— 这是一道"坑题"。</div></div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MutableKeyBug.java</b> · 修改 key 后 HashMap "找不到"</span></div>
+<pre><code><span class="k">class</span> <span class="t">Key</span> {
+    <span class="t">String</span> value;
+    <span class="k">public int</span> hashCode() { <span class="k">return</span> value.hashCode(); }
+    <span class="k">public boolean</span> equals(<span class="t">Object</span> o) {
+        <span class="k">return</span> o <span class="k">instanceof</span> <span class="t">Key</span> &amp;&amp; value.equals(((<span class="t">Key</span>)o).value);
+    }
+}
+
+<span class="t">Map</span>&lt;<span class="t">Key</span>, <span class="t">String</span>&gt; map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+<span class="t">Key</span> k = <span class="k">new</span> <span class="t">Key</span>();
+k.value = <span class="s">"hello"</span>;
+map.put(k, <span class="s">"world"</span>);
+
+k.value = <span class="s">"changed"</span>;    <span class="c">// 修改了影响 hashCode 的字段</span>
+System.out.println(map.get(k));  <span class="c">// null —— 找不到！</span>
+<span class="c">// 原因：put 时 k 在 hash("hello") 对应的桶里</span>
+<span class="c">// get 时用 hash("changed") 去查，去了完全不同的桶</span></code></pre>
+</div>
+
+<p>结论：<strong>put 之后不要修改 key</strong>。这也是为什么 String、Integer 这些不可变类是最佳 key 选择——它们的 hashCode 永远不变。</p>
+</section>
+
+<!-- ═══════════════ 第7站：生产最佳实践 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>生产环境最佳实践</h2></div>
+
+<h3>初始容量：别偷懒用默认值</h3>
+
+<p>阿里开发手册明确要求：<strong>初始化 HashMap 时必须指定容量</strong>。公式如下：</p>
+
+<div class="formula">
+<strong>initialCapacity = (int)(expectedSize / 0.75) + 1</strong><br/>
+<br/>
+示例：预计存 100 个元素 → (int)(100 / 0.75) + 1 = 134<br/>
+HashMap 构造器内部会调 tableSizeFor() 向上取到 2 的幂 → 实际容量 256<br/>
+全程零扩容，性能最优
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BestPractice.java</b> · 初始容量设置</span></div>
+<pre><code><span class="c">// ❌ 默认容量 16，存 1000 个元素会触发多次扩容</span>
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; bad = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+
+<span class="c">// ✅ 正确：预估元素数量，指定初始容量</span>
+<span class="t">int</span> expectedSize = <span class="n">1000</span>;
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; good = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;(
+    (<span class="t">int</span>)(expectedSize / <span class="n">0.75f</span>) + <span class="n">1</span>
+);
+
+<span class="c">// ✅ 更简洁：Google Guava</span>
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; guava = <span class="t">Maps</span>.newHashMapWithExpectedSize(<span class="n">1000</span>);</code></pre>
+</div>
+
+<h3>Java 9+ 不可变 Map</h3>
+
+<p>如果你的 Map 在创建后不需要修改（配置项、常量映射），Java 9 引入的工厂方法更简洁安全：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ImmutableMap.java</b> · Java 9+ 不可变 Map</span></div>
+<pre><code><span class="c">// Java 9+ Map.of() —— 不可变，不允许 null key/value</span>
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; config = <span class="t">Map</span>.of(
+    <span class="s">"timeout"</span>,  <span class="n">3000</span>,
+    <span class="s">"retries"</span>,  <span class="n">3</span>,
+    <span class="s">"poolSize"</span>, <span class="n">10</span>
+);
+
+<span class="c">// Map.copyOf() —— 从已有 Map 创建不可变副本</span>
+<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; snapshot = <span class="t">Map</span>.copyOf(config);
+
+<span class="c">// config.put("new", 1)  → UnsupportedOperationException</span>
+<span class="c">// Map.of("key", null)   → NullPointerException</span></code></pre>
+</div>
+
+<h3>HashMap vs ConcurrentHashMap vs Hashtable 选型</h3>
+
+<div class="takeaway"><div class="takeaway-label">选型决策表</div>
+<table class="nb-table">
+  <thead><tr><th>场景</th><th>推荐方案</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td>单线程，无顺序要求</td><td><strong>HashMap</strong></td><td>性能最优，零额外开销</td></tr>
+    <tr><td>单线程，需保持插入顺序</td><td><strong>LinkedHashMap</strong></td><td>双向链表维护顺序，LRU 缓存</td></tr>
+    <tr><td>单线程，需按 key 排序</td><td><strong>TreeMap</strong></td><td>红黑树自然排序，O(log n)</td></tr>
+    <tr><td>多线程并发读写</td><td><strong>ConcurrentHashMap</strong></td><td>CAS + synchronized，桶级锁</td></tr>
+    <tr><td>创建后只读</td><td><strong>Map.of() / Map.copyOf()</strong></td><td>不可变，线程安全，内存紧凑</td></tr>
+    <tr><td>任何新代码</td><td><strong>❌ 不要用 Hashtable</strong></td><td>全方法 synchronized，性能极差</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>全篇速查表</h2></div>
+
+<p>面试前快速过一遍，确保每个点都能讲清楚"为什么"：</p>
+
+<div class="takeaway"><div class="takeaway-label">HashMap 面试速查表</div>
+<table class="nb-table">
+  <thead><tr><th>问题</th><th>核心答案</th></tr></thead>
+  <tbody>
+    <tr><td>为什么允许 null key？</td><td><code>hash(null)</code> 返回 0，存 table[0]；ConcurrentHashMap 不允许，因为并发下 null 有二义性</td></tr>
+    <tr><td>遍历顺序为什么不保证？</td><td>元素位置由 <code>hash &amp; (n-1)</code> 决定，与插入顺序无关；扩容后可能再变</td></tr>
+    <tr><td>需要有序遍历怎么办？</td><td>LinkedHashMap（插入序/访问序）或 TreeMap（排序序）</td></tr>
+    <tr><td>equals/hashCode 的关系？</td><td>equals 相等 → hashCode 必相等；必须同时重写，否则 HashMap 找不到 key</td></tr>
+    <tr><td>多线程下会出什么问题？</td><td>size 不准、数据覆盖、JDK 1.7 死循环（1.8 修复死循环但仍有前两个问题）</td></tr>
+    <tr><td>容量为什么是 2 的幂？</td><td><code>hash &amp; (n-1)</code> 等价 <code>hash % n</code>；位运算快；保证每一位参与分布</td></tr>
+    <tr><td>put 后能改 key 吗？</td><td>不能。key 的 hashCode 变了 → 找不到原来的桶 → get 返回 null</td></tr>
+    <tr><td>初始容量怎么设？</td><td><code>(int)(expectedSize / 0.75) + 1</code>，避免扩容开销</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="recap"><h3>这篇文章的核心收获</h3>
+<ul>
+  <li><strong>null key</strong> 是 HashMap 刻意的工程设计（hash 返回 0 存桶 0），ConcurrentHashMap 因并发二义性禁止 null</li>
+  <li><strong>遍历无序</strong> 是哈希分布的必然结果，LinkedHashMap 用双向链表补偿了这一点</li>
+  <li><strong>equals/hashCode</strong> 必须成对重写，这是 HashMap 查找机制（先 hash 定位桶、再 equals 匹配）决定的</li>
+  <li><strong>线程安全</strong> 不能靠 JDK 版本兜底——即使用 1.8，并发环境也必须用 ConcurrentHashMap</li>
+  <li><strong>生产实践</strong>：指定初始容量、用不可变 key、选对 Map 类型</li>
+</ul>
+</div>
+</section>
+
+</main>
 
 </body>
 </html>

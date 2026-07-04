@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spring 核心注解速查：@Autowired vs @Resource、@Component vs @Bean</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：DI 注入注解对比 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：@Autowired 和 @Resource 有什么区别？</h2></div>
+<div class="think"><div class="think-q">"都是注入 Bean，@Autowired、@Resource、@Inject 到底有什么不同？什么场景该用哪个？面试时被追问 byType 和 byName 你怎么答？" —— 注解选择看似简单，背后涉及 Spring 的依赖解析策略。</div></div>
+
+<p>Spring 支持三种依赖注入注解，分别来自不同的规范：</p>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>注解</th><th>来源</th><th>默认策略</th><th>是否必须 Spring</th></tr></thead>
+<tbody>
+<tr><td><code>@Autowired</code></td><td>Spring 框架</td><td>byType（按类型）</td><td>是</td></tr>
+<tr><td><code>@Resource</code></td><td>JSR-250（javax.annotation）</td><td>byName（按名称）</td><td>否（JDK 自带）</td></tr>
+<tr><td><code>@Inject</code></td><td>JSR-330（javax.inject）</td><td>byType（按类型）</td><td>否（需引包）</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>三种注入注解用法对比</b></span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+
+    <span class="c">// ① @Autowired：按类型匹配，多个实现时用 @Qualifier 指定</span>
+    <span class="k">@Autowired</span>
+    <span class="k">@Qualifier</span>(<span class="t">"mysqlUserDao"</span>)
+    <span class="k">private</span> <span class="t">UserDao</span> userDao;
+
+    <span class="c">// ② @Resource：默认按字段名匹配，可指定 name</span>
+    <span class="k">@Resource</span>(name = <span class="t">"mysqlUserDao"</span>)
+    <span class="k">private</span> <span class="t">UserDao</span> userDao2;
+
+    <span class="c">// ③ @Inject：按类型匹配，无 required 属性</span>
+    <span class="k">@Inject</span>
+    <span class="k">@Named</span>(<span class="t">"mysqlUserDao"</span>)
+    <span class="k">private</span> <span class="t">UserDao</span> userDao3;
+}</code></pre>
+</div>
+
+<p><strong>@Autowired 的 byType 匹配规则</strong>：当存在多个同类型 Bean 时，按以下优先级解析：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@Autowired 多实现解析顺序</b></span></div>
+<pre><code><span class="c">// 假设 UserDao 有两个实现：MysqlUserDao 和 RedisUserDao</span>
+
+<span class="c">// 方式 1：@Qualifier 指定 Bean 名称</span>
+<span class="k">@Autowired</span>
+<span class="k">@Qualifier</span>(<span class="t">"mysqlUserDao"</span>)
+<span class="k">private</span> <span class="t">UserDao</span> userDao;
+
+<span class="c">// 方式 2：@Primary 标记优先（在配置类或实现类上）</span>
+<span class="k">@Primary</span>
+<span class="k">@Component</span>
+<span class="k">public class</span> <span class="t">MysqlUserDao</span> <span class="k">implements</span> <span class="t">UserDao</span> { ... }
+
+<span class="c">// 方式 3：变量名自动匹配（最后兜底）</span>
+<span class="k">@Autowired</span>
+<span class="k">private</span> <span class="t">UserDao</span> mysqlUserDao; <span class="c">// 变量名 = Bean 名 → 匹配</span></code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 680 200" role="img" aria-label="@Autowired vs @Resource 匹配策略">
+  <defs><marker id="n1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="340" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">@Autowired vs @Resource 匹配策略</text>
+  <!-- @Autowired -->
+  <rect x="30" y="50" width="290" height="130" rx="8" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="175" y="72" text-anchor="middle" font-family="monospace" font-size="12" fill="#2E7D32" font-weight="700">@Autowired (byType)</text>
+  <text x="50" y="95" font-size="10" fill="#555">① 按类型查找所有候选 Bean</text>
+  <text x="50" y="115" font-size="10" fill="#555">② 如果多个 → @Qualifier 指定</text>
+  <text x="50" y="135" font-size="10" fill="#555">③ 如果多个且无 Qualifier → @Primary</text>
+  <text x="50" y="155" font-size="10" fill="#555">④ 兜底：变量名 == Bean 名</text>
+  <text x="50" y="172" font-size="10" fill="#8C8676">required=false → 找不到也不报错</text>
+  <!-- @Resource -->
+  <rect x="360" y="50" width="290" height="130" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="505" y="72" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C" font-weight="700">@Resource (byName)</text>
+  <text x="380" y="95" font-size="10" fill="#555">① 指定 name → 直接按名称查找</text>
+  <text x="380" y="115" font-size="10" fill="#555">② 未指定 name → 用字段名查找</text>
+  <text x="380" y="135" font-size="10" fill="#555">③ 按名称找不到 → 降级为 byType</text>
+  <text x="380" y="155" font-size="10" fill="#555">④ 可用 type 属性限定类型</text>
+  <text x="380" y="172" font-size="10" fill="#8C8676">无 required 属性，找不到直接报错</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> @Autowired 按类型、@Resource 按名称的匹配策略对比</figcaption>
+</figure>
+
+<div class="takeaway"><div class="takeaway-label">推荐用法</div>Spring 项目中推荐用 <code>@Autowired</code>（Spring 原生，支持 required、@Qualifier、@Primary 等丰富特性）。如果团队要求与 Spring 解耦，可用 <code>@Resource</code>（JSR-250 标准，JDK 自带）。</div>
+</section>
+
+<!-- ═══════════════ 第2站：Bean 声明注解对比 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>@Component vs @Bean vs @Service vs @Repository</h2></div>
+
+<p>声明一个 Bean 有两种基本方式：<strong>类级别注解扫描</strong> 和 <strong>方法级别显式声明</strong>。</p>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>注解</th><th>位置</th><th>声明方式</th><th>使用场景</th></tr></thead>
+<tbody>
+<tr><td><code>@Component</code></td><td>类上</td><td>自动扫描</td><td>通用组件，无特殊语义</td></tr>
+<tr><td><code>@Service</code></td><td>类上</td><td>自动扫描</td><td>业务逻辑层（@Component 的特化）</td></tr>
+<tr><td><code>@Repository</code></td><td>类上</td><td>自动扫描</td><td>数据访问层 + 异常转换</td></tr>
+<tr><td><code>@Controller</code></td><td>类上</td><td>自动扫描</td><td>Web 控制器层</td></tr>
+<tr><td><code>@Bean</code></td><td>方法上</td><td>显式声明</td><td>第三方库、复杂初始化逻辑</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@Component 扫描 vs @Bean 声明</b></span></div>
+<pre><code><span class="c">// 方式一：@Component 自动扫描</span>
+<span class="k">@Service</span>  <span class="c">// 等价于 @Component + "业务层"语义</span>
+<span class="k">public class</span> <span class="t">UserService</span> {
+    <span class="k">@Autowired</span>
+    <span class="k">private</span> <span class="t">UserDao</span> userDao;
+}
+
+<span class="c">// 方式二：@Bean 显式声明（在 @Configuration 类中）</span>
+<span class="k">@Configuration</span>
+<span class="k">public class</span> <span class="t">AppConfig</span> {
+
+    <span class="k">@Bean</span>
+    <span class="k">public</span> <span class="t">DataSource</span> dataSource() {
+        <span class="c">// 可以写复杂的初始化逻辑</span>
+        <span class="t">HikariDataSource</span> ds = <span class="k">new</span> <span class="t">HikariDataSource</span>();
+        ds.setJdbcUrl(<span class="t">"jdbc:mysql://localhost/mydb"</span>);
+        ds.setMaximumPoolSize(<span class="n">20</span>);
+        <span class="k">return</span> ds;
+    }
+
+    <span class="k">@Bean</span>
+    <span class="k">public</span> <span class="t">UserDao</span> userDao(<span class="t">DataSource</span> dataSource) {
+        <span class="k">return new</span> <span class="t">UserDaoImpl</span>(dataSource); <span class="c">// 方法参数 = 其他 Bean</span>
+    }
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 640 190" role="img" aria-label="@Component 族谱">
+  <text x="320" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">@Component 家族：语义递进</text>
+  <rect x="220" y="40" width="200" height="40" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="320" y="65" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C" font-weight="700">@Component</text>
+  <line x1="180" y1="80" x2="180" y2="110" stroke="#3E6B8F" stroke-width="1"/>
+  <line x1="320" y1="80" x2="320" y2="110" stroke="#3E6B8F" stroke-width="1"/>
+  <line x1="460" y1="80" x2="460" y2="110" stroke="#3E6B8F" stroke-width="1"/>
+  <line x1="100" y1="80" x2="540" y2="80" stroke="#3E6B8F" stroke-width="1"/>
+  <rect x="100" y="110" width="160" height="40" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="180" y="135" text-anchor="middle" font-family="monospace" font-size="11" fill="#2E7D32" font-weight="600">@Service</text>
+  <rect x="240" y="110" width="160" height="40" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="320" y="135" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C" font-weight="600">@Repository</text>
+  <rect x="380" y="110" width="160" height="40" rx="6" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="460" y="135" text-anchor="middle" font-family="monospace" font-size="11" fill="#7B1FA2" font-weight="600">@Controller</text>
+  <text x="180" y="168" text-anchor="middle" font-size="9" fill="#8C8676">业务层</text>
+  <text x="320" y="168" text-anchor="middle" font-size="9" fill="#8C8676">持久层 + 异常转换</text>
+  <text x="460" y="168" text-anchor="middle" font-size="9" fill="#8C8676">Web 控制层</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> @Component 是基础，@Service / @Repository / @Controller 是语义化特化</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">@Repository 的隐藏功能</div>除了标记为 Bean，@Repository 还会自动启用 <strong>持久层异常转换</strong>（PersistenceExceptionTranslationPostProcessor），将底层的数据访问异常（如 SQLException）转为 Spring 统一的 DataAccessException 体系。</div>
+
+<div class="takeaway"><div class="takeaway-label">何时用 @Bean</div>自己写的类优先用 @Component / @Service / @Repository；第三方库的类（如 DataSource、RestTemplate）无法加注解，必须用 @Bean 在配置类中显式声明。</div>
+</section>
+
+<!-- ═══════════════ 第3站：配置注解对比 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>@Value vs @ConfigurationProperties vs @PropertySource</h2></div>
+
+<p>Spring 提供了多种从配置文件读取属性的方式：</p>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>方式</th><th>注入粒度</th><th>SpEL 支持</th><th>类型安全</th><th>适用场景</th></tr></thead>
+<tbody>
+<tr><td><code>@Value</code></td><td>单个属性</td><td>✅</td><td>❌</td><td>少量简单配置</td></tr>
+<tr><td><code>@ConfigurationProperties</code></td><td>整组属性</td><td>❌</td><td>✅ 绑定到 POJO</td><td>批量配置、复杂结构</td></tr>
+<tr><td><code>@PropertySource</code></td><td>加载外部文件</td><td>—</td><td>—</td><td>加载自定义 properties 文件</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@Value 用法</b></span></div>
+<pre><code><span class="k">@Component</span>
+<span class="k">public class</span> <span class="t">AppConfig</span> {
+
+    <span class="c">// 基本用法：注入单个属性</span>
+    <span class="k">@Value</span>(<span class="t">"${app.name}"</span>)
+    <span class="k">private</span> <span class="t">String</span> appName;
+
+    <span class="c">// 默认值：找不到时使用默认</span>
+    <span class="k">@Value</span>(<span class="t">"${app.port:8080}"</span>)
+    <span class="k">private int</span> port;
+
+    <span class="c">// SpEL 表达式</span>
+    <span class="k">@Value</span>(<span class="t">"#{systemProperties['user.name']}"</span>)
+    <span class="k">private</span> <span class="t">String</span> systemUser;
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@ConfigurationProperties 用法</b> · 推荐</span></div>
+<pre><code><span class="c">// application.yml</span>
+<span class="c">// app:</span>
+<span class="c">//   name: my-service</span>
+<span class="c">//   port: 8080</span>
+<span class="c">//   features:</span>
+<span class="c">//     - logging</span>
+<span class="c">//     - metrics</span>
+
+<span class="k">@Component</span>
+<span class="k">@ConfigurationProperties</span>(prefix = <span class="t">"app"</span>)
+<span class="k">public class</span> <span class="t">AppProperties</span> {
+    <span class="k">private</span> <span class="t">String</span> name;
+    <span class="k">private int</span> port;
+    <span class="k">private</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; features;
+
+    <span class="c">// 必须有 getter / setter（Spring 通过 setter 绑定）</span>
+    <span class="k">public</span> <span class="t">String</span> getName() { <span class="k">return</span> name; }
+    <span class="k">public void</span> setName(<span class="t">String</span> name) { <span class="k">this</span>.name = name; }
+    <span class="c">// ... 其他 getter/setter</span>
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@PropertySource</b> · 加载自定义配置文件</span></div>
+<pre><code><span class="k">@Configuration</span>
+<span class="k">@PropertySource</span>(<span class="t">"classpath:custom.properties"</span>)
+<span class="k">public class</span> <span class="t">CustomConfig</span> {
+    <span class="k">@Value</span>(<span class="t">"${custom.key}"</span>)
+    <span class="k">private</span> <span class="t">String</span> customValue;
+}</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">配置注入选型</div>1-2 个简单属性用 @Value；一组相关配置用 @ConfigurationProperties（类型安全、支持嵌套、IDE 提示）。@PropertySource 用于加载非默认的 properties 文件（注意：不支持 YAML）。</div>
+</section>
+
+<!-- ═══════════════ 第4站：作用域与生命周期注解 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>@Scope、@Lazy、@DependsOn：控制 Bean 的作用域与生命周期</h2></div>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>注解</th><th>作用</th><th>常用值</th></tr></thead>
+<tbody>
+<tr><td><code>@Scope</code></td><td>定义 Bean 的作用域</td><td>singleton / prototype / request / session</td></tr>
+<tr><td><code>@Lazy</code></td><td>延迟初始化</td><td>首次使用时才创建 Bean</td></tr>
+<tr><td><code>@DependsOn</code></td><td>声明初始化顺序依赖</td><td>确保某些 Bean 先初始化</td></tr>
+<tr><td><code>@PostConstruct</code></td><td>初始化回调</td><td>Bean 创建完成后执行</td></tr>
+<tr><td><code>@PreDestroy</code></td><td>销毁回调</td><td>Bean 销毁前执行</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@Scope 示例</b> · prototype 多例模式</span></div>
+<pre><code><span class="k">@Component</span>
+<span class="k">@Scope</span>(<span class="t">"prototype"</span>)  <span class="c">// 每次注入都创建新实例</span>
+<span class="k">public class</span> <span class="t">OrderProcessor</span> {
+    <span class="c">// 有状态的处理器，不能用单例</span>
+    <span class="k">private</span> <span class="t">List</span>&lt;<span class="t">OrderItem</span>&gt; items = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@Lazy + @DependsOn</b></span></div>
+<pre><code><span class="k">@Component</span>
+<span class="k">@Lazy</span>  <span class="c">// 启动时不创建，第一次使用时才初始化</span>
+<span class="k">public class</span> <span class="t">HeavyReportService</span> {
+    <span class="c">// 初始化耗时，延迟加载优化启动速度</span>
+}
+
+<span class="k">@Component</span>
+<span class="k">@DependsOn</span>(<span class="t">"cacheManager"</span>)  <span class="c">// 确保 cacheManager 先初始化</span>
+<span class="k">public class</span> <span class="t">DataService</span> {
+    <span class="c">// 启动时需要预热缓存</span>
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@PostConstruct / @PreDestroy</b> · 生命周期回调</span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">CacheService</span> {
+
+    <span class="k">@PostConstruct</span>
+    <span class="k">public void</span> init() {
+        <span class="c">// Bean 创建完成后自动调用：预热缓存</span>
+        loadInitialData();
+    }
+
+    <span class="k">@PreDestroy</span>
+    <span class="k">public void</span> cleanup() {
+        <span class="c">// 容器关闭时调用：释放资源</span>
+        clearCache();
+    }
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 640 130" role="img" aria-label="Bean 生命周期关键节点">
+  <defs><marker id="n2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="320" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Bean 生命周期关键节点</text>
+  <rect x="20" y="50" width="80" height="40" rx="6" fill="#EDE3C4" stroke="#C2410C" stroke-width="1"/>
+  <text x="60" y="75" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">实例化</text>
+  <path d="M100,70 L120,70" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#n2)"/>
+  <rect x="125" y="50" width="80" height="40" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="165" y="75" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">属性填充</text>
+  <path d="M205,70 L225,70" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#n2)"/>
+  <rect x="230" y="50" width="100" height="40" rx="6" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="280" y="67" text-anchor="middle" font-size="9" fill="#7B1FA2" font-weight="600">Aware 接口</text>
+  <text x="280" y="82" text-anchor="middle" font-size="9" fill="#8C8676">BeanNameAware...</text>
+  <path d="M330,70 L350,70" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#n2)"/>
+  <rect x="355" y="50" width="100" height="40" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="405" y="67" text-anchor="middle" font-size="9" fill="#2E7D32" font-weight="600">@PostConstruct</text>
+  <text x="405" y="82" text-anchor="middle" font-size="9" fill="#8C8676">初始化回调</text>
+  <path d="M455,70 L475,70" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#n2)"/>
+  <rect x="480" y="50" width="70" height="40" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="515" y="75" text-anchor="middle" font-size="10" fill="#2E7D32" font-weight="700">就绪</text>
+  <path d="M550,70 L570,70" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#n2)"/>
+  <rect x="575" y="50" width="60" height="40" rx="6" fill="#F8D7DA" stroke="#C2410C" stroke-width="1"/>
+  <text x="605" y="67" text-anchor="middle" font-size="9" fill="#C2410C" font-weight="600">@PreDestroy</text>
+  <text x="605" y="82" text-anchor="middle" font-size="9" fill="#8C8676">销毁</text>
+  <text x="320" y="115" text-anchor="middle" font-size="10" fill="#8C8676">实例化 → 属性填充 → Aware → BeanPostProcessor → @PostConstruct → 就绪 → @PreDestroy → 销毁</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span> Bean 生命周期的关键回调节点</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第5站：Web 注解 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Web 层注解：@RequestMapping 家族</h2></div>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>注解</th><th>作用</th><th>示例</th></tr></thead>
+<tbody>
+<tr><td><code>@RequestMapping</code></td><td>通用映射（类 / 方法）</td><td>@RequestMapping("/api")</td></tr>
+<tr><td><code>@GetMapping</code></td><td>GET 请求</td><td>@GetMapping("/users/{id}")</td></tr>
+<tr><td><code>@PostMapping</code></td><td>POST 请求</td><td>@PostMapping("/users")</td></tr>
+<tr><td><code>@PutMapping</code></td><td>PUT 请求</td><td>@PutMapping("/users/{id}")</td></tr>
+<tr><td><code>@DeleteMapping</code></td><td>DELETE 请求</td><td>@DeleteMapping("/users/{id}")</td></tr>
+<tr><td><code>@PathVariable</code></td><td>URL 路径变量</td><td>@PathVariable Long id</td></tr>
+<tr><td><code>@RequestParam</code></td><td>查询参数 / 表单参数</td><td>@RequestParam String name</td></tr>
+<tr><td><code>@RequestBody</code></td><td>请求体（JSON 反序列化）</td><td>@RequestBody User user</td></tr>
+<tr><td><code>@RequestHeader</code></td><td>请求头</td><td>@RequestHeader("Authorization")</td></tr>
+<tr><td><code>@ResponseBody</code></td><td>返回值写入响应体</td><td>自动 JSON 序列化</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>完整 Controller 示例</b></span></div>
+<pre><code><span class="k">@RestController</span>
+<span class="k">@RequestMapping</span>(<span class="t">"/api/users"</span>)
+<span class="k">public class</span> <span class="t">UserController</span> {
+
+    <span class="c">// GET /api/users?page=1&size=10</span>
+    <span class="k">@GetMapping</span>
+    <span class="k">public</span> <span class="t">Page</span>&lt;<span class="t">User</span>&gt; list(
+            <span class="k">@RequestParam</span>(defaultValue = <span class="t">"1"</span>) <span class="k">int</span> page,
+            <span class="k">@RequestParam</span>(defaultValue = <span class="t">"10"</span>) <span class="k">int</span> size) {
+        <span class="k">return</span> userService.findByPage(page, size);
+    }
+
+    <span class="c">// GET /api/users/42</span>
+    <span class="k">@GetMapping</span>(<span class="t">"/{id}"</span>)
+    <span class="k">public</span> <span class="t">User</span> getById(
+            <span class="k">@PathVariable</span> <span class="t">Long</span> id,
+            <span class="k">@RequestHeader</span>(<span class="t">"Accept"</span>) <span class="t">String</span> accept) {
+        <span class="k">return</span> userService.findById(id);
+    }
+
+    <span class="c">// POST /api/users  body: {"name":"Alice","email":"..."} </span>
+    <span class="k">@PostMapping</span>
+    <span class="k">public</span> <span class="t">User</span> create(<span class="k">@RequestBody</span> <span class="k">@Valid</span> <span class="t">CreateUserRequest</span> req) {
+        <span class="k">return</span> userService.create(req);
+    }
+
+    <span class="c">// DELETE /api/users/42</span>
+    <span class="k">@DeleteMapping</span>(<span class="t">"/{id}"</span>)
+    <span class="k">public void</span> delete(<span class="k">@PathVariable</span> <span class="t">Long</span> id) {
+        userService.delete(id);
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">@RequestParam vs @PathVariable</div>@RequestParam 用于查询参数（?key=value）和表单数据；@PathVariable 用于 URL 路径中的变量（/users/{id}）。语义上：PathVariable 标识资源，RequestParam 过滤/分页资源。</div>
+</section>
+
+<!-- ═══════════════ 第6站：总结速查表 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>总结：Spring 核心注解速查表</h2></div>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>分类</th><th>注解</th><th>核心要点</th></tr></thead>
+<tbody>
+<tr><td rowspan="3"><strong>依赖注入</strong></td><td>@Autowired</td><td>Spring 原生，byType，支持 required=false、@Qualifier</td></tr>
+<tr><td>@Resource</td><td>JSR-250 标准，byName，可指定 name 属性</td></tr>
+<tr><td>@Inject</td><td>JSR-330 标准，byType，无 required，需引入 javax.inject</td></tr>
+<tr><td rowspan="4"><strong>Bean 声明</strong></td><td>@Component</td><td>通用组件，自动扫描注册</td></tr>
+<tr><td>@Service / @Repository / @Controller</td><td>@Component 的语义化特化，分别对应业务层/持久层/控制层</td></tr>
+<tr><td>@Bean</td><td>方法级别，用于第三方库或复杂初始化</td></tr>
+<tr><td>@Configuration</td><td>标记配置类，配合 @Bean 使用</td></tr>
+<tr><td rowspan="3"><strong>配置读取</strong></td><td>@Value</td><td>单个属性注入，支持 SpEL 和默认值</td></tr>
+<tr><td>@ConfigurationProperties</td><td>批量属性绑定到 POJO，类型安全</td></tr>
+<tr><td>@PropertySource</td><td>加载自定义 .properties 文件</td></tr>
+<tr><td rowspan="3"><strong>生命周期</strong></td><td>@Scope</td><td>singleton / prototype / request / session</td></tr>
+<tr><td>@Lazy</td><td>延迟初始化，首次使用时创建</td></tr>
+<tr><td>@PostConstruct / @PreDestroy</td><td>初始化回调 / 销毁回调</td></tr>
+<tr><td rowspan="4"><strong>Web 层</strong></td><td>@RequestMapping / @GetMapping ...</td><td>URL 映射，类级别为前缀，方法级别为完整路径</td></tr>
+<tr><td>@PathVariable</td><td>URL 路径变量 /users/{id}</td></tr>
+<tr><td>@RequestParam</td><td>查询参数 ?key=value</td></tr>
+<tr><td>@RequestBody</td><td>请求体 JSON 反序列化</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="recap">
+<strong>面试回答模板</strong>
+<ul>
+  <li><strong>@Autowired vs @Resource</strong>：@Autowired 是 Spring 的，默认 byType，多实现用 @Qualifier；@Resource 是 JSR-250 标准，默认 byName。推荐 Spring 项目用 @Autowired</li>
+  <li><strong>@Component vs @Bean</strong>：@Component 是类级别自动扫描；@Bean 是方法级别显式声明，用于第三方类或需要复杂初始化的场景</li>
+  <li><strong>@Value vs @ConfigurationProperties</strong>：@Value 注入单个属性，支持 SpEL；@ConfigurationProperties 绑定一组属性到 POJO，类型安全、支持嵌套结构</li>
+  <li><strong>@Service/@Repository/@Controller</strong>：都是 @Component 的特化注解，语义不同。@Repository 额外提供持久层异常转换</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThreadLocal 原理与内存泄漏</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场——真实 OOM 事故 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>线上 OOM 事故：200 万个幽灵对象</h2></div>
+
+<p>凌晨三点，监控报警。某电商核心服务的 JVM Heap 使用率从 40% 一路飙升到 96%，Full GC 频繁触发但回收不了多少空间。最终服务 OOM 宕机。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>incident.log</b> · 事故现场日志</span></div>
+<pre><code><span class="c">// 服务运行 3 天后，运维导出 Heap Dump（4.2GB）</span>
+<span class="c">// MAT (Memory Analyzer Tool) 分析结果：</span>
+
+<span class="k">Dominator Tree</span>:
+  ThreadLocalMap$Entry[]         <span class="n"> retained: 3.1 GB</span>
+    └── Entry[<span class="n">0</span>..1999999]        <span class="n"> retained: 2.8 GB</span>
+         └── UserContext × <span class="n">2000000</span>  <span class="c">← 200 万个用户上下文对象！</span>
+              ├── userId: Long
+              ├── tenantId: String
+              └── permissions: List&lt;String&gt;
+
+<span class="c">// 根因：Filter 中 set 了 ThreadLocal，但忘了 remove</span>
+<span class="c">// 线程池中的线程被复用，Entry 永远不会被清理</span></code></pre>
+</div>
+
+<p>事故根因：开发者在请求 Filter 中用 <code>ThreadLocal</code> 存储了用户上下文信息，但<strong>没有在 finally 块中调用 remove()</strong>。由于 Tomcat 使用线程池，线程不会被销毁，ThreadLocalMap 中的 Entry 永远不会被清理，UserContext 对象越积越多，最终 OOM。</p>
+
+<div class="think"><div class="think-q">为什么不是强引用导致 Key（ThreadLocal 对象）无法回收？Entry 的 Key 不是弱引用吗？<br/><br/>
+弱引用只能保证 ThreadLocal <strong>实例本身</strong>被回收，但 Entry 中的 <strong>Value</strong> 是强引用——只要线程不死，Value 就永远无法被 GC。这就是 ThreadLocal 内存泄漏的核心矛盾，后面第 6 站会详细分析。</div></div>
+</section>
+
+<!-- ═══════════════ 第2站：使用场景 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>ThreadLocal 四大经典场景</h2></div>
+
+<p>ThreadLocal 的本质是<strong>线程隔离的存储</strong>——每个线程拥有自己独立的变量副本，互不干扰。它在生产中有四大典型用途：</p>
+
+<table class="nb-table">
+<thead><tr><th>场景</th><th>问题</th><th>ThreadLocal 方案</th></tr></thead>
+<tbody>
+  <tr><td><strong>数据库连接</strong></td><td>一个请求可能需要多次 DB 操作，每次都新建连接太贵</td><td>一个线程绑定一个 Connection，整个请求复用</td></tr>
+  <tr><td><strong>SimpleDateFormat</strong></td><td>SDF 不是线程安全的，共享实例会日期错乱</td><td>每个线程持有自己的 SDF 实例</td></tr>
+  <tr><td><strong>请求上下文传播</strong></td><td>用户信息需要从 Controller 传到 Service 再到 DAO</td><td>Spring Security 的 SecurityContextHolder 底层用 ThreadLocal</td></tr>
+  <tr><td><strong>链路追踪 TraceId</strong></td><td>日志需要携带 traceId 串联完整调用链</td><td>MDC（Mapped Diagnostic Context）底层用 ThreadLocal 存 traceId</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>UsageScenarios.java</b> · 四种场景示例</span></div>
+<pre><code><span class="c">/* ─── 场景 1：数据库连接管理（类似 Spring 的实现思路） ─── */</span>
+<span class="k">public class</span> <span class="t">DBUtil</span> {
+    <span class="k">private static final</span> <span class="t">ThreadLocal</span>&lt;<span class="t">Connection</span>&gt; connHolder = <span class="k">new</span> <span class="t">ThreadLocal</span>&lt;&gt;();
+
+    <span class="k">public static</span> <span class="t">Connection</span> getConnection() {
+        <span class="t">Connection</span> conn = connHolder.get();
+        <span class="k">if</span> (conn == <span class="k">null</span>) {
+            conn = dataSource.getConnection();
+            connHolder.set(conn);
+        }
+        <span class="k">return</span> conn;
+    }
+
+    <span class="k">public static void</span> close() {
+        <span class="t">Connection</span> conn = connHolder.get();
+        <span class="k">if</span> (conn != <span class="k">null</span>) { conn.close(); connHolder.remove(); }
+    }
+}
+
+<span class="c">/* ─── 场景 2：SimpleDateFormat 线程安全 ─── */</span>
+<span class="k">private static final</span> <span class="t">ThreadLocal</span>&lt;<span class="t">SimpleDateFormat</span>&gt; sdfHolder =
+    <span class="t">ThreadLocal</span>.withInitial(() -&gt; <span class="k">new</span> <span class="t">SimpleDateFormat</span>(<span class="s">"yyyy-MM-dd HH:mm:ss"</span>));
+
+<span class="t">String</span> formatted = sdfHolder.get().format(<span class="k">new</span> <span class="t">Date</span>());
+
+<span class="c">/* ─── 场景 3：请求上下文（Spring Security 的思路） ─── */</span>
+<span class="k">public class</span> <span class="t">UserContext</span> {
+    <span class="k">private static final</span> <span class="t">ThreadLocal</span>&lt;<span class="t">UserInfo</span>&gt; holder = <span class="k">new</span> <span class="t">ThreadLocal</span>&lt;&gt;();
+    <span class="k">public static void</span> set(<span class="t">UserInfo</span> user) { holder.set(user); }
+    <span class="k">public static</span> <span class="t">UserInfo</span> get() { <span class="k">return</span> holder.get(); }
+    <span class="k">public static void</span> clear() { holder.remove(); }
+}
+
+<span class="c">/* ─── 场景 4：MDC TraceId ─── */</span>
+MDC.put(<span class="s">"traceId"</span>, UUID.randomUUID().toString());
+<span class="c">// logback 日志格式: %d [%X{traceId}] %-5level %msg%n</span></code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：内部实现原理 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>内部实现：Thread → ThreadLocalMap → Entry[]</h2></div>
+
+<p>ThreadLocal 的数据并不存储在 ThreadLocal 对象本身中，而是存储在<strong>每个 Thread 对象内部的 ThreadLocalMap</strong> 中。理解这个结构是理解一切问题的前提：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 720 420" role="img" aria-label="ThreadLocal 内部结构">
+  <text x="360" y="26" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">ThreadLocal 内部数据结构全景</text>
+
+  <!-- Thread 对象 -->
+  <rect x="30" y="50" width="180" height="100" rx="10" fill="#E8F4FD" stroke="#3E6B8F" stroke-width="2"/>
+  <text x="120" y="76" text-anchor="middle" font-size="14" fill="#3E6B8F" font-weight="700">Thread (当前线程)</text>
+  <text x="120" y="98" text-anchor="middle" font-size="11" fill="#57544E">name: "http-nio-8080-1"</text>
+  <text x="120" y="116" text-anchor="middle" font-size="11" fill="#57544E">threadLocals:</text>
+  <text x="120" y="134" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">ThreadLocalMap</text>
+
+  <!-- 箭头 Thread → Map -->
+  <line x1="210" y1="100" x2="265" y2="100" stroke="#C2410C" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ThreadLocalMap -->
+  <rect x="270" y="50" width="180" height="100" rx="10" fill="#FFF7ED" stroke="#C2410C" stroke-width="2"/>
+  <text x="360" y="76" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">ThreadLocalMap</text>
+  <text x="360" y="98" text-anchor="middle" font-size="11" fill="#57544E">size: 3</text>
+  <text x="360" y="116" text-anchor="middle" font-size="11" fill="#57544E">threshold: 10</text>
+  <text x="360" y="134" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">Entry[] table</text>
+
+  <!-- 箭头 Map → Entry[] -->
+  <line x1="450" y1="100" x2="485" y2="100" stroke="#C2410C" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Entry[] 数组 -->
+  <rect x="490" y="50" width="200" height="100" rx="10" fill="#F0FDF4" stroke="#16A34A" stroke-width="2"/>
+  <text x="590" y="76" text-anchor="middle" font-size="13" fill="#16A34A" font-weight="700">Entry[16]</text>
+  <text x="590" y="98" text-anchor="middle" font-size="11" fill="#57544E">[0] = Entry(userCtx)</text>
+  <text x="590" y="116" text-anchor="middle" font-size="11" fill="#57544E">[1] = null</text>
+  <text x="590" y="134" text-anchor="middle" font-size="11" fill="#57544E">[7] = Entry(sdf)</text>
+
+  <!-- Entry 详细结构 -->
+  <text x="360" y="190" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">单个 Entry 的结构</text>
+
+  <rect x="160" y="210" width="400" height="90" rx="10" fill="#fff" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="360" y="236" text-anchor="middle" font-size="13" fill="#8B5CF6" font-weight="700">ThreadLocalMap.Entry</text>
+  <text x="240" y="260" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">extends WeakReference&lt;ThreadLocal&lt;?&gt;&gt;</text>
+  <text x="240" y="282" text-anchor="middle" font-size="11" fill="#57544E">key = ThreadLocal 实例（弱引用）</text>
+  <text x="480" y="282" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">value = 实际存储值（强引用）</text>
+
+  <!-- 引用链说明 -->
+  <rect x="80" y="320" width="560" height="80" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="360" y="346" text-anchor="middle" font-size="13" fill="#EF4444" font-weight="700">关键引用链</text>
+  <text x="360" y="368" text-anchor="middle" font-size="11" fill="#57544E">Thread ──(强引用)──▶ ThreadLocalMap ──(强引用)──▶ Entry[] ──(强引用)──▶ Value</text>
+  <text x="360" y="388" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">Entry ──(弱引用)──▶ ThreadLocal（Key 可被 GC 回收，但 Value 不能！）</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#C2410C"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption><span class="fig-no">图 1</span>ThreadLocal 内部结构：Thread 持有 ThreadLocalMap，Map 内部是 Entry[] 数组，每个 Entry 的 Key 是弱引用指向 ThreadLocal，Value 是强引用指向实际值</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">为什么 Map 挂在 Thread 上而不是 ThreadLocal 上？</div>
+<p>如果 Map 挂在 ThreadLocal 上（<code>Map&lt;Thread, Value&gt;</code>），那么所有线程共享一个 Map，需要处理并发问题（加锁），而且 Thread 对象会作为 Key 被强引用，导致线程无法被回收。</p>
+<p>把 Map 挂在 Thread 上（<code>Map&lt;ThreadLocal, Value&gt;</code>），天然线程隔离无需加锁，而且 ThreadLocal 作为弱引用 Key 可以被 GC。这是 Josh Bloch 和 Doug Lea 的设计选择。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：get/set 源码 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>源码剖析：set() 与 get() 的完整流程</h2></div>
+
+<p>面试高频题："说说 ThreadLocal 的 set/get 原理"。来看 JDK 源码（带关键注释）：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ThreadLocal.java</b> · set() 方法源码</span></div>
+<pre><code><span class="k">public void</span> set(<span class="t">T</span> value) {
+    <span class="c">// 1. 获取当前线程</span>
+    <span class="t">Thread</span> t = <span class="t">Thread</span>.currentThread();
+
+    <span class="c">// 2. 获取该线程的 ThreadLocalMap</span>
+    <span class="t">ThreadLocalMap</span> map = getMap(t);  <span class="c">// return t.threadLocals;</span>
+
+    <span class="k">if</span> (map != <span class="k">null</span>) {
+        <span class="c">// 3. 以 this（当前 ThreadLocal 实例）为 key 存入 map</span>
+        map.set(<span class="k">this</span>, value);
+    } <span class="k">else</span> {
+        <span class="c">// 4. 首次使用，为线程创建 ThreadLocalMap</span>
+        createMap(t, value);
+    }
+}
+
+<span class="c">// ThreadLocalMap.set() 内部逻辑（简化）：</span>
+<span class="k">private void</span> set(<span class="t">ThreadLocal</span>&lt;?&gt; key, <span class="t">Object</span> value) {
+    <span class="t">Entry</span>[] tab = table;
+    <span class="k">int</span> len = tab.length;
+    <span class="c">// 用 ThreadLocal 的 threadLocalHashCode 计算槽位</span>
+    <span class="k">int</span> i = key.threadLocalHashCode &amp; (len - <span class="n">1</span>);
+
+    <span class="k">for</span> (<span class="t">Entry</span> e = tab[i]; e != <span class="k">null</span>; e = tab[i = nextIndex(i, len)]) {
+        <span class="t">ThreadLocal</span>&lt;?&gt; k = e.get();  <span class="c">// 弱引用获取 key</span>
+
+        <span class="k">if</span> (k == key)        <span class="c">// 找到同一个 ThreadLocal → 更新 value</span>
+            { e.value = value; <span class="k">return</span>; }
+        <span class="k">if</span> (k == <span class="k">null</span>)       <span class="c">// key 已被 GC → 替换过期 Entry</span>
+            { replaceStaleEntry(key, value, i); <span class="k">return</span>; }
+    }
+    <span class="c">// 没找到 → 新建 Entry</span>
+    tab[i] = <span class="k">new</span> <span class="t">Entry</span>(key, value);
+    <span class="c">// 检查是否需要扩容（threshold = len * 2/3）</span>
+    <span class="k">if</span> (++size &gt;= threshold) rehash();
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ThreadLocal.java</b> · get() 方法源码</span></div>
+<pre><code><span class="k">public</span> <span class="t">T</span> get() {
+    <span class="t">Thread</span> t = <span class="t">Thread</span>.currentThread();
+    <span class="t">ThreadLocalMap</span> map = getMap(t);
+
+    <span class="k">if</span> (map != <span class="k">null</span>) {
+        <span class="t">ThreadLocalMap.Entry</span> e = map.getEntry(<span class="k">this</span>);
+        <span class="k">if</span> (e != <span class="k">null</span>) {
+            <span class="k">@SuppressWarnings</span>(<span class="s">"unchecked"</span>)
+            <span class="t">T</span> result = (<span class="t">T</span>) e.value;
+            <span class="k">return</span> result;
+        }
+    }
+    <span class="c">// map 为空 或 没找到 Entry → 调用 initialValue()</span>
+    <span class="k">return</span> setInitialValue();
+}
+
+<span class="k">private</span> <span class="t">T</span> setInitialValue() {
+    <span class="t">T</span> value = initialValue();  <span class="c">// 默认返回 null</span>
+    <span class="t">Thread</span> t = <span class="t">Thread</span>.currentThread();
+    <span class="t">ThreadLocalMap</span> map = getMap(t);
+    <span class="k">if</span> (map != <span class="k">null</span>)
+        map.set(<span class="k">this</span>, value);
+    <span class="k">else</span>
+        createMap(t, value);
+    <span class="k">return</span> value;
+}</code></pre>
+</div>
+
+<div class="formula">
+<strong>Hash 冲突处理：线性探测法（非链地址法）</strong><br/><br/>
+ThreadLocalMap 不用 HashMap 的链表解决冲突，而是用<strong>开放寻址</strong>：冲突时向后找下一个空槽。<br/>
+原因：Entry 数量通常很少（一个线程一般就几个 ThreadLocal），开放寻址在小表上更高效，且避免了链表节点的额外内存开销。
+</div>
+
+<div class="think"><div class="think-q">threadLocalHashCode 是怎么算出来的？为什么不用普通的 hashCode()？<br/><br/>
+每个 ThreadLocal 实例有一个 <code>threadLocalHashCode</code>，由一个 AtomicInteger 累加 <code>0x61c88647</code>（黄金比例的哈希增量）生成。这保证了同一线程上多个 ThreadLocal 的 hash 值在数组上<strong>均匀分散</strong>，大幅减少线性探测的次数。</div></div>
+</section>
+
+<!-- ═══════════════ 第5站：弱引用的设计考量 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>弱引用的设计考量：两害相权取其轻</h2></div>
+
+<p>面试官最爱追问："ThreadLocal 的 Entry 为什么用弱引用做 Key？" 这需要从<strong>生命周期管理</strong>的角度来分析。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>WeakRefDemo.java</b> · Java 四种引用类型回顾</span></div>
+<pre><code><span class="c">// 强引用：只要引用存在，GC 绝不回收</span>
+<span class="t">Object</span> obj = <span class="k">new</span> <span class="t">Object</span>();   <span class="c">// obj 是强引用</span>
+
+<span class="c">// 软引用：内存不足时才回收（适合做缓存）</span>
+<span class="t">SoftReference</span>&lt;<span class="t">Object</span>&gt; soft = <span class="k">new</span> <span class="t">SoftReference</span>&lt;&gt;(obj);
+
+<span class="c">// 弱引用：下次 GC 必定回收（不管内存够不够）</span>
+<span class="t">WeakReference</span>&lt;<span class="t">Object</span>&gt; weak = <span class="k">new</span> <span class="t">WeakReference</span>&lt;&gt;(obj);
+
+<span class="c">// 虚引用：随时可回收，无法通过它获取对象（仅用于跟踪回收）</span>
+<span class="t">PhantomReference</span>&lt;<span class="t">Object</span>&gt; phantom = <span class="k">new</span> <span class="t">PhantomReference</span>&lt;&gt;(obj, queue);</code></pre>
+</div>
+
+<p>假设 Entry 的 Key 用<strong>强引用</strong>：</p>
+
+<table class="nb-table">
+<thead><tr><th>引用类型</th><th>ThreadLocal 实例能否被 GC？</th><th>后果</th></tr></thead>
+<tbody>
+  <tr><td><strong>强引用</strong>（假设）</td><td>不能。Entry.key 强引用 ThreadLocal，只要线程活着，ThreadLocal 就无法回收</td><td>ThreadLocal 对象 + Value 都泄漏</td></tr>
+  <tr><td><strong>弱引用</strong>（实际）</td><td>能。当外部不再持有 ThreadLocal 强引用时，下次 GC 会回收 ThreadLocal 实例</td><td>ThreadLocal 本身可回收，但 Value 仍有泄漏风险（见第 6 站）</td></tr>
+</tbody>
+</table>
+
+<div class="crack"><div class="crack-label">弱引用不是万能的——它只解决了一半问题</div>
+<p>弱引用保证了：当你的代码中不再持有 <code>ThreadLocal&lt;UserContext&gt;</code> 这个变量的引用时（比如它是一个局部变量，方法结束后就没了），ThreadLocal <strong>实例本身</strong>可以被 GC 回收。</p>
+<p>但问题是：Entry 中的 <code>value</code> 字段是<strong>强引用</strong>。即使 key 变成了 null（ThreadLocal 被回收了），value 依然被 Entry 强引用着。这就是著名的 "key 为 null 的脏 Entry" 问题。</p>
+</div>
+
+<div class="formula">
+<strong>引用关系总结：</strong><br/>
+Thread ──<span style="color:#16A34A">强引用</span>──▶ ThreadLocalMap ──<span style="color:#16A34A">强引用</span>──▶ Entry ──<span style="color:#16A34A">强引用</span>──▶ <strong>Value（不可回收！）</strong><br/>
+Entry ──<span style="color:#C2410C">弱引用</span>──▶ ThreadLocal（可回收，但回收后 key=null，Value 孤立）
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：内存泄漏详解 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>内存泄漏详解：脏 Entry 与被动清理</h2></div>
+
+<p>ThreadLocal 内存泄漏的完整发生条件： <strong>ThreadLocal 实例不再被外部引用 + 线程仍然存活（线程池）+ 后续没有 get/set 触发清理</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 720 400" role="img" aria-label="ThreadLocal 内存泄漏引用链">
+  <text x="360" y="26" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">内存泄漏时的引用链状态</text>
+
+  <!-- 阶段1：正常使用 -->
+  <text x="60" y="56" font-size="13" fill="#16A34A" font-weight="700">① 正常使用时</text>
+
+  <rect x="40" y="66" width="110" height="40" rx="6" fill="#E8F4FD" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="95" y="90" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="600">Thread</text>
+
+  <line x1="150" y1="86" x2="190" y2="86" stroke="#16A34A" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="170" y="78" text-anchor="middle" font-size="9" fill="#16A34A">强</text>
+
+  <rect x="195" y="66" width="120" height="40" rx="6" fill="#FFF7ED" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="255" y="90" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">Entry</text>
+
+  <line x1="315" y1="86" x2="355" y2="86" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
+  <text x="335" y="78" text-anchor="middle" font-size="9" fill="#C2410C">弱</text>
+
+  <rect x="360" y="66" width="120" height="40" rx="6" fill="#F0FDF4" stroke="#16A34A" stroke-width="1.5"/>
+  <text x="420" y="90" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">ThreadLocal</text>
+
+  <line x1="315" y1="96" x2="355" y2="120" stroke="#16A34A" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="350" y="118" text-anchor="middle" font-size="9" fill="#16A34A">强</text>
+
+  <rect x="360" y="116" width="120" height="40" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="420" y="140" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">UserContext</text>
+
+  <rect x="520" y="66" width="170" height="90" rx="6" fill="#E8F4FD" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="605" y="88" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="600">static ThreadLocal&lt;&gt; TL</text>
+  <text x="605" y="106" text-anchor="middle" font-size="10" fill="#57544E">外部持有强引用</text>
+  <text x="605" y="124" text-anchor="middle" font-size="10" fill="#57544E">→ ThreadLocal 不会被 GC</text>
+  <text x="605" y="142" text-anchor="middle" font-size="10" fill="#16A34A" font-weight="600">一切正常 ✓</text>
+
+  <line x1="520" y1="100" x2="480" y2="86" stroke="#3E6B8F" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
+
+  <!-- 阶段2：泄漏 -->
+  <text x="60" y="195" font-size="13" fill="#EF4444" font-weight="700">② ThreadLocal 被 GC 后（内存泄漏！）</text>
+
+  <rect x="40" y="210" width="110" height="40" rx="6" fill="#E8F4FD" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="95" y="234" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="600">Thread（线程池）</text>
+
+  <line x1="150" y1="230" x2="190" y2="230" stroke="#16A34A" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="170" y="222" text-anchor="middle" font-size="9" fill="#16A34A">强</text>
+
+  <rect x="195" y="210" width="120" height="40" rx="6" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+  <text x="255" y="234" text-anchor="middle" font-size="11" fill="#EF4444" font-weight="700">Entry（脏）</text>
+
+  <!-- 弱引用断裂 -->
+  <line x1="315" y1="230" x2="355" y2="230" stroke="#EF4444" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="335" y="222" text-anchor="middle" font-size="9" fill="#EF4444" font-weight="700">弱 ✗</text>
+  <text x="380" y="222" text-anchor="start" font-size="10" fill="#EF4444">已被 GC 回收</text>
+
+  <!-- ThreadLocal 消失 -->
+  <rect x="360" y="210" width="120" height="40" rx="6" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="420" y="234" text-anchor="middle" font-size="11" fill="#94A3B8" font-weight="600">null（已回收）</text>
+
+  <line x1="315" y1="240" x2="355" y2="264" stroke="#EF4444" stroke-width="2.5" marker-end="url(#arr2)"/>
+  <text x="350" y="262" text-anchor="middle" font-size="9" fill="#EF4444" font-weight="700">强!</text>
+
+  <rect x="360" y="260" width="120" height="40" rx="6" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+  <text x="420" y="284" text-anchor="middle" font-size="11" fill="#EF4444" font-weight="700">UserContext</text>
+
+  <rect x="520" y="240" width="170" height="70" rx="6" fill="#FEF2F2" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="605" y="262" text-anchor="middle" font-size="11" fill="#EF4444" font-weight="600">泄漏！</text>
+  <text x="605" y="280" text-anchor="middle" font-size="10" fill="#57544E">Key = null，无法定位</text>
+  <text x="605" y="296" text-anchor="middle" font-size="10" fill="#57544E">Value 被强引用，无法 GC</text>
+
+  <!-- 说明 -->
+  <rect x="40" y="330" width="650" height="55" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="360" y="352" text-anchor="middle" font-size="12" fill="#EF4444" font-weight="700">泄漏条件：ThreadLocal 被 GC + 线程池中线程不销毁 + 没有后续 get/set 触发清理</text>
+  <text x="360" y="372" text-anchor="middle" font-size="11" fill="#57544E">线程池中线程长期存活，Value 对象永远无法被垃圾回收 → 内存持续增长 → OOM</text>
+
+  <defs>
+    <marker id="arr2" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#3E6B8F"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption><span class="fig-no">图 2</span>内存泄漏引用链：ThreadLocal 被 GC 后，Entry 的 key 变为 null，但 value 仍被强引用，线程池中线程不死则 value 永远无法回收</figcaption>
+</figure>
+
+<p>JDK 设计者意识到了这个问题，所以在 ThreadLocalMap 的 <code>get()</code>、<code>set()</code>、<code>remove()</code> 方法中加入了<strong>被动清理机制</strong>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ThreadLocalMap.java</b> · 被动清理逻辑（简化）</span></div>
+<pre><code><span class="c">// getEntry 时会顺手清理脏 Entry</span>
+<span class="k">private</span> <span class="t">Entry</span> getEntry(<span class="t">ThreadLocal</span>&lt;?&gt; key) {
+    <span class="k">int</span> i = key.threadLocalHashCode &amp; (table.length - <span class="n">1</span>);
+    <span class="t">Entry</span> e = table[i];
+
+    <span class="k">if</span> (e != <span class="k">null</span> &amp;&amp; e.get() == key) {
+        <span class="k">return</span> e;  <span class="c">// 直接命中</span>
+    } <span class="k">else</span> {
+        <span class="c">// 线性探测过程中，遇到 key=null 的脏 Entry 会调用清理</span>
+        <span class="k">return</span> getEntryAfterMiss(key, i, e);
+        <span class="c">// getEntryAfterMiss 内部调用 expungeStaleEntry(i)</span>
+    }
+}
+
+<span class="c">// expungeStaleEntry：清理指定位置的脏 Entry 及其后续的连续段</span>
+<span class="k">private int</span> expungeStaleEntry(<span class="k">int</span> staleSlot) {
+    <span class="t">Entry</span>[] tab = table;
+    <span class="k">int</span> len = tab.length;
+
+    <span class="c">// 1. 清除脏 Entry 的 value 引用</span>
+    tab[staleSlot].value = <span class="k">null</span>;  <span class="c">// ← 解除强引用，value 可被 GC</span>
+    tab[staleSlot] = <span class="k">null</span>;        <span class="c">// ← 清除整个 Entry</span>
+    size--;
+
+    <span class="c">// 2. 继续向后扫描，重新放置被挤偏的 Entry 或清理更多脏 Entry</span>
+    <span class="t">Entry</span> e;
+    <span class="k">int</span> i;
+    <span class="k">for</span> (i = nextIndex(staleSlot, len); (e = tab[i]) != <span class="k">null</span>; i = nextIndex(i, len)) {
+        <span class="t">ThreadLocal</span>&lt;?&gt; k = e.get();
+        <span class="k">if</span> (k == <span class="k">null</span>) {  <span class="c">// 又一个脏 Entry</span>
+            e.value = <span class="k">null</span>;
+            tab[i] = <span class="k">null</span>;
+            size--;
+        } <span class="k">else</span> {
+            <span class="c">// 重新 hash 这个 Entry，放到正确位置</span>
+        }
+    }
+    <span class="k">return</span> i;
+}</code></pre>
+</div>
+
+<div class="think"><div class="think-q">被动清理够用吗？什么时候会失效？<br/><br/>
+<b>够用</b>：如果你的 ThreadLocal 是 static final（常见写法），它永远不会被 GC，Key 不会变 null，不存在泄漏问题。<br/><br/>
+<b>不够用</b>：如果 ThreadLocal 是局部变量或方法参数中创建的（用完就没人引用了），且线程池中的线程<strong>后续不再调用 get/set</strong>（比如该业务逻辑不再触发），那脏 Entry 就永远不会被清理。<br/><br/>
+<b>结论</b>：被动清理是"保险丝"，不是"安全网"。你必须主动调用 <code>remove()</code>。</div></div>
+</section>
+
+<!-- ═══════════════ 第7站：解决方案 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>解决方案：remove()、InheritableThreadLocal 与 TTL</h2></div>
+
+<p><strong>方案一：永远在 finally 中调用 remove()</strong>——这是最基本也是最重要的规则。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CorrectPattern.java</b> · ThreadLocal 正确使用模板</span></div>
+<pre><code><span class="k">public class</span> <span class="t">UserContextFilter</span> <span class="k">implements</span> <span class="t">Filter</span> {
+    <span class="k">private static final</span> <span class="t">ThreadLocal</span>&lt;<span class="t">UserContext</span>&gt; USER_HOLDER = <span class="k">new</span> <span class="t">ThreadLocal</span>&lt;&gt;();
+
+    <span class="k">@Override</span>
+    <span class="k">public void</span> doFilter(<span class="t">ServletRequest</span> req, <span class="t">ServletResponse</span> resp,
+                         <span class="t">FilterChain</span> chain) <span class="k">throws</span> <span class="t">IOException</span> {
+        <span class="k">try</span> {
+            <span class="t">UserContext</span> ctx = parseUser(req);
+            USER_HOLDER.set(ctx);  <span class="c">// 设置上下文</span>
+            chain.doFilter(req, resp);
+        } <span class="k">finally</span> {
+            USER_HOLDER.remove();  <span class="c">// ← 必须在 finally 中清理！</span>
+            <span class="c">// 不能用 remove() 以外的方法，不能用 clear()</span>
+            <span class="c">// 不能漏掉，不能放在 try 块中（异常时会跳过）</span>
+        }
+    }
+}</code></pre>
+</div>
+
+<p><strong>方案二：InheritableThreadLocal</strong>——解决父子线程传递问题。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>InheritableDemo.java</b> · 子线程继承父线程的 ThreadLocal</span></div>
+<pre><code><span class="t">ThreadLocal</span>&lt;<span class="t">String</span>&gt; tl = <span class="k">new</span> <span class="t">InheritableThreadLocal</span>&lt;&gt;();
+tl.set(<span class="s">"main-thread-value"</span>);
+
+<span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+    <span class="c">// 子线程可以读到父线程的值！</span>
+    System.out.println(tl.get());  <span class="c">// 输出: main-thread-value</span>
+}).start();
+
+<span class="c">// 原理：Thread.init() 时，如果父线程的 inheritableThreadLocals 不为空，</span>
+<span class="c">// 会把整个 Map 拷贝给子线程（浅拷贝，共享 value 引用）</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">InheritableThreadLocal 在线程池中为什么不灵？</div>
+<p>InheritableThreadLocal 只在<strong>创建子线程时</strong>拷贝一次。线程池中的线程是预先创建并复用的，不会为每个任务重新创建线程。所以：</p>
+<p>1. 任务 A 设置了 ThreadLocal 值，线程 T1 执行完后值还留在 T1 的 Map 中<br/>
+2. 任务 B 复用线程 T1，读到的可能是任务 A 留下的脏数据<br/>
+3. 子线程在创建时拷贝的值，之后父线程再修改，子线程看不到</p>
+</div>
+
+<p><strong>方案三：TransmittableThreadLocal（TTL）</strong>——阿里巴巴开源，解决线程池场景的上下文传递。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TTLDemo.java</b> · TransmittableThreadLocal 用法</span></div>
+<pre><code><span class="c">// Maven: com.alibaba:transmittable-thread-local:2.14.x</span>
+
+<span class="c">// 1. 使用 TTL 替代 ThreadLocal</span>
+<span class="t">TransmittableThreadLocal</span>&lt;<span class="t">UserContext</span>&gt; ctx = <span class="k">new</span> <span class="t">TransmittableThreadLocal</span>&lt;&gt;();
+
+<span class="c">// 2. 包装线程池（关键步骤！）</span>
+<span class="t">ExecutorService</span> pool = <span class="t">TtlExecutors</span>.getTtlExecutorService(
+    <span class="t">Executors</span>.newFixedThreadPool(<span class="n">10</span>)
+);
+
+<span class="c">// 3. 提交任务时，TTL 会自动 capture → replay → restore</span>
+ctx.set(<span class="k">new</span> <span class="t">UserContext</span>(<span class="s">"user-123"</span>));
+
+pool.submit(() -&gt; {
+    <span class="c">// 线程池线程能正确读到提交时的值！</span>
+    <span class="t">UserContext</span> user = ctx.get();  <span class="c">// user-123</span>
+    processRequest(user);
+});
+
+<span class="c">/*
+ * TTL 的三步机制：
+ * ① capture：任务提交时，快照当前线程所有 TTL 的值
+ * ② replay：任务执行前，把快照值设置到执行线程
+ * ③ restore：任务执行后，恢复执行线程之前的值
+ */</span></code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结：正确使用清单与高频踩坑表</h2></div>
+
+<div class="takeaway">
+<div class="takeaway-label">ThreadLocal 正确使用清单</div>
+<ul>
+  <li><strong>始终用 static final</strong> 声明 ThreadLocal，避免 ThreadLocal 实例本身被 GC 导致 key 变 null</li>
+  <li><strong>始终在 finally 中调用 remove()</strong>，确保线程池场景下不泄漏</li>
+  <li>不要用 <code>ThreadLocal.set(null)</code> 代替 <code>remove()</code>——set(null) 只是把 value 设为 null，Entry 还在</li>
+  <li>优先使用 <code>withInitial()</code> 工厂方法，确保首次 get() 有合理的默认值</li>
+  <li>线程池场景需要跨线程传递上下文时，使用 <strong>TransmittableThreadLocal</strong></li>
+</ul>
+</div>
+
+<table class="nb-table">
+<thead><tr><th>踩坑场景</th><th>现象</th><th>根因</th><th>解决方案</th></tr></thead>
+<tbody>
+  <tr><td>忘了 remove()</td><td>线程池 OOM，Heap 中大量业务对象</td><td>Value 被 Entry 强引用，线程不死不回收</td><td>finally 中 remove()</td></tr>
+  <tr><td>ThreadLocal 声明为局部变量</td><td>get() 返回 null 或读到脏数据</td><td>ThreadLocal 实例被 GC，key 变 null</td><td>声明为 static final</td></tr>
+  <tr><td>线程池 + InheritableThreadLocal</td><td>子线程读不到父线程最新值</td><td>线程复用，不是每次新建</td><td>使用 TTL</td></tr>
+  <tr><td>SimpleDateFormat 共享</td><td>日期格式化结果错乱</td><td>SDF 内部 Calendar 不是线程安全的</td><td>ThreadLocal 包装或换 DateTimeFormatter</td></tr>
+  <tr><td>ThreadLocal 存大对象</td><td>内存占用异常</td><td>每个线程都有一份拷贝</td><td>减小对象体积，或考虑其他方案</td></tr>
+</tbody>
+</table>
+
+<div class="recap">
+<p><strong>面试回答模板：</strong></p>
+<p>"ThreadLocal 的 Entry 使用弱引用作为 Key，是为了当外部不再持有 ThreadLocal 引用时，ThreadLocal 实例本身可以被 GC 回收。但 Value 是强引用，如果线程池中的线程不销毁且没有调用 remove()，就会出现 key 为 null 但 value 无法回收的内存泄漏。ThreadLocalMap 在 get/set 时会被动清理脏 Entry，但这不够可靠，所以最佳实践是：1) ThreadLocal 声明为 static final；2) 在 finally 中调用 remove()；3) 线程池场景使用 TransmittableThreadLocal。"</p>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TTLProduction.java</b> · 生产环境 TTL 完整配置示例</span></div>
+<pre><code><span class="c">/* ─── 配合 Spring + 线程池的完整配置 ─── */</span>
+<span class="k">@Configuration</span>
+<span class="k">public class</span> <span class="t">AsyncConfig</span> {
+
+    <span class="k">@Bean</span>(<span class="s">"taskExecutor"</span>)
+    <span class="k">public</span> <span class="t">Executor</span> taskExecutor() {
+        <span class="t">ThreadPoolTaskExecutor</span> executor = <span class="k">new</span> <span class="t">ThreadPoolTaskExecutor</span>();
+        executor.setCorePoolSize(<span class="n">10</span>);
+        executor.setMaxPoolSize(<span class="n">50</span>);
+        executor.setQueueCapacity(<span class="n">200</span>);
+        executor.setThreadNamePrefix(<span class="s">"async-ttl-"</span>);
+        <span class="c">// 用 TTL 装饰，确保 @Async 方法能正确传递上下文</span>
+        executor.setTaskDecorator(<span class="k">new</span> <span class="t">TtlTaskDecorator</span>());
+        executor.initialize();
+        <span class="k">return</span> executor;
+    }
+}
+
+<span class="c">/* ─── 自定义 TaskDecorator（Spring 集成） ─── */</span>
+<span class="k">public class</span> <span class="t">TtlTaskDecorator</span> <span class="k">implements</span> <span class="t">TaskDecorator</span> {
+    <span class="k">@Override</span>
+    <span class="k">public</span> <span class="t">Runnable</span> decorate(<span class="t">Runnable</span> runnable) {
+        <span class="c">// TtlRunnable 会自动 capture/replay/restore</span>
+        <span class="k">return</span> <span class="t">TtlRunnable</span>.get(runnable);
+    }
+}
+
+<span class="c">/* ─── 使用方式 ─── */</span>
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">@Async</span>(<span class="s">"taskExecutor"</span>)
+    <span class="k">public</span> <span class="t">CompletableFuture</span>&lt;<span class="t">Void</span>&gt; processAsync() {
+        <span class="c">// 即使在不同线程执行，也能拿到正确的用户上下文</span>
+        <span class="t">UserContext</span> user = <span class="t">UserContextHolder</span>.get();
+        log.info(<span class="s">"processing order for user: {}"</span>, user.getUserId());
+        <span class="k">return</span> <span class="t">CompletableFuture</span>.completedFuture(<span class="k">null</span>);
+    }
+}</code></pre>
+</div>
+
+</section>
+
+</main>
+</body>
+</html>

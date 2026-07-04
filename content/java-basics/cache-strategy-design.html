@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>缓存设计：穿透、击穿、雪崩与一致性方案</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<section class="hero">
+  <span class="hero-badge">高级 · 面试必问</span>
+  <h1>缓存设计：穿透、击穿、雪崩与一致性方案</h1>
+  <p class="hero-desc">缓存穿透用布隆过滤器、击穿用互斥锁、雪崩用过期时间随机化。双写一致性：先删缓存还是先更新数据库？延迟双删怎么做？</p>
+  <div class="hero-tags">
+    <span>缓存穿透</span><span>缓存击穿</span><span>缓存雪崩</span><span>布隆过滤器</span><span>双写一致性</span><span>延迟双删</span>
+  </div>
+</section>
+
+<!-- ==================== 第 1 站 ==================== -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>缓存穿透——查一个根本不存在的数据</h2>
+  </div>
+
+  <p><strong>缓存穿透</strong>：客户端请求的 key 在缓存和数据库中都不存在，每次都要穿透到数据库。如果被恶意利用（大量请求不存在的 key），数据库会被打垮。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">缓存穿透攻击流程</text>
+
+      <rect x="40" y="50" width="120" height="40" rx="6" fill="#1e293b" stroke="#475569"/>
+      <text x="100" y="74" text-anchor="middle" font-size="11" fill="#94a3b8">恶意请求</text>
+
+      <line x1="160" y1="70" x2="220" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr6)"/>
+      <defs><marker id="arr6" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#f59e0b"/></marker></defs>
+
+      <rect x="220" y="45" width="160" height="50" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1.5" opacity="0.5"/>
+      <text x="300" y="68" text-anchor="middle" font-size="11" fill="#fca5a5">Redis 缓存</text>
+      <text x="300" y="84" text-anchor="middle" font-size="10" fill="#f87171">miss! (key不存在)</text>
+
+      <line x1="380" y1="70" x2="440" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr6)"/>
+
+      <rect x="440" y="45" width="160" height="50" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="2"/>
+      <text x="520" y="68" text-anchor="middle" font-size="11" fill="#fca5a5">MySQL 数据库</text>
+      <text x="520" y="84" text-anchor="middle" font-size="10" fill="#f87171">查不到 → 返回 null</text>
+
+      <text x="360" y="130" text-anchor="middle" font-size="11" fill="#e2e8f0">key=id:-1, id:-2, id:-999 ... 每次都是 miss → 全打到 DB</text>
+      <text x="360" y="155" text-anchor="middle" font-size="12" fill="#fbbf24" font-weight="bold">解决方案</text>
+      <text x="180" y="180" text-anchor="middle" font-size="11" fill="#6ee7b7">方案 1: 缓存空值（TTL 2~5 分钟）</text>
+      <text x="540" y="180" text-anchor="middle" font-size="11" fill="#6ee7b7">方案 2: 布隆过滤器（前置拦截）</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1-1</span> 缓存穿透：不存在的 key 直达数据库</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">方案 1：缓存空值</div>
+    <pre class="srcbox-file"><span class="k">public</span> <span class="t">User</span> <span class="n">getUser</span>(<span class="t">Long</span> <span class="n">id</span>) {
+    <span class="t">String</span> <span class="n">key</span> = <span class="t">"user:"</span> + <span class="n">id</span>;
+    <span class="t">String</span> <span class="n">cached</span> = <span class="n">redis</span>.<span class="n">get</span>(<span class="n">key</span>);
+
+    <span class="c">// 注意区分"key 不存在"和"key 存在但值为空"</span>
+    <span class="k">if</span> (<span class="n">cached</span> != <span class="k">null</span>) {
+        <span class="k">if</span> (<span class="t">"NULL"</span>.<span class="n">equals</span>(<span class="n">cached</span>)) <span class="k">return null</span>; <span class="c">// 之前缓存的空值</span>
+        <span class="k">return</span> <span class="n">JSON</span>.<span class="n">parseObject</span>(<span class="n">cached</span>, <span class="t">User</span>.<span class="k">class</span>);
+    }
+
+    <span class="t">User</span> <span class="n">user</span> = <span class="n">db</span>.<span class="n">selectById</span>(<span class="n">id</span>);
+    <span class="k">if</span> (<span class="n">user</span> != <span class="k">null</span>) {
+        <span class="n">redis</span>.<span class="n">set</span>(<span class="n">key</span>, <span class="n">JSON</span>.<span class="n">toJSONString</span>(<span class="n">user</span>), <span class="n">30</span>, <span class="t">MINUTES</span>);
+    } <span class="k">else</span> {
+        <span class="c">// 缓存空值，设置较短的 TTL</span>
+        <span class="n">redis</span>.<span class="n">set</span>(<span class="n">key</span>, <span class="t">"NULL"</span>, <span class="n">5</span>, <span class="t">MINUTES</span>);
+    }
+    <span class="k">return</span> <span class="n">user</span>;
+}</pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">缓存空值有什么缺点？什么时候该用布隆过滤器？</p>
+    <p>缓存空值的问题是：如果攻击者用大量不同的不存在的 key 来请求，Redis 里会存很多"NULL"值（虽然 TTL 短，但数量大时仍然占内存）。<strong>布隆过滤器</strong>更适合这种场景——它在 Redis 之前加一层，用极小的内存（位数组）判断 key 是否可能存在。判断"不存在"是 100% 准确的，可以直接拦截。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">布隆过滤器原理</div>
+    <pre class="srcbox-file"><span class="c">布隆过滤器 = 位数组（bit array）+ 多个哈希函数</span>
+
+<span class="c">写入：对 key 用 k 个哈希函数得到 k 个位置，全部置 1</span>
+<span class="n">BF.add</span>(<span class="t">"user:1001"</span>)
+  → hash1(<span class="t">"user:1001"</span>) = <span class="n">3</span>,  hash2(<span class="t">"user:1001"</span>) = <span class="n">17</span>,  hash3(<span class="t">"user:1001"</span>) = <span class="n">42</span>
+  → bitArray[<span class="n">3</span>] = <span class="n">1</span>,  bitArray[<span class="n">17</span>] = <span class="n">1</span>,  bitArray[<span class="n">42</span>] = <span class="n">1</span>
+
+<span class="c">查询：检查 k 个位置是否全为 1</span>
+<span class="n">BF.mightContain</span>(<span class="t">"user:9999"</span>)
+  → hash1 = <span class="n">5</span>, hash2 = <span class="n">23</span>, hash3 = <span class="n">42</span>
+  → bitArray[<span class="n">5</span>] = <span class="n">0</span> → <span class="k">肯定不存在</span>！直接返回 null
+
+<span class="c">特点：可能误判"存在"（false positive），但不会误判"不存在"</span>
+<span class="c">Redis 有 RedisBloom 模块，也可用 Redisson 的 RBloomFilter</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>穿透 = 查不存在的数据。<strong>简单场景</strong>用缓存空值（TTL 2~5 分钟），<strong>高风险场景</strong>用布隆过滤器前置拦截。两者可组合使用。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 2 站 ==================== -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>缓存击穿——热点 key 过期的瞬间</h2>
+  </div>
+
+  <p><strong>缓存击穿</strong>：某个热点 key 突然过期，大量并发请求同时发现缓存 miss，全部涌向数据库，瞬间压垮 DB。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">缓存击穿时序</text>
+
+      <!-- Timeline -->
+      <line x1="60" y1="80" x2="660" y2="80" stroke="#475569" stroke-width="2"/>
+      <text x="100" y="70" font-size="10" fill="#94a3b8">热点 key 存在</text>
+      <text x="300" y="70" font-size="10" fill="#f87171">TTL 到期！</text>
+      <text x="500" y="70" font-size="10" fill="#94a3b8">缓存重建完成</text>
+
+      <circle cx="300" cy="80" r="6" fill="#f87171"/>
+
+      <!-- Concurrent requests -->
+      <rect x="260" y="100" width="160" height="80" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1.5" opacity="0.5"/>
+      <text x="340" y="120" text-anchor="middle" font-size="11" fill="#fca5a5" font-weight="bold">瞬间 10000 并发请求</text>
+      <text x="340" y="140" text-anchor="middle" font-size="10" fill="#e2e8f0">全部 cache miss</text>
+      <text x="340" y="158" text-anchor="middle" font-size="10" fill="#f87171">同时查数据库！</text>
+      <text x="340" y="175" text-anchor="middle" font-size="10" fill="#f87171">DB 连接池被打满</text>
+
+      <text x="360" y="210" text-anchor="middle" font-size="11" fill="#fbbf24">与穿透的区别：击穿针对的是"存在的热点 key"，穿透是"不存在的 key"</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2-1</span> 缓存击穿：热点 key 过期瞬间的并发风暴</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">方案 1：互斥锁（Mutex Lock）</div>
+    <pre class="srcbox-file"><span class="k">public</span> <span class="t">User</span> <span class="n">getUser</span>(<span class="t">Long</span> <span class="n">id</span>) {
+    <span class="t">String</span> <span class="n">key</span> = <span class="t">"user:"</span> + <span class="n">id</span>;
+    <span class="t">String</span> <span class="n">cached</span> = <span class="n">redis</span>.<span class="n">get</span>(<span class="n">key</span>);
+    <span class="k">if</span> (<span class="n">cached</span> != <span class="k">null</span>) <span class="k">return</span> <span class="n">parse</span>(<span class="n">cached</span>);
+
+    <span class="c">// 尝试获取分布式锁（SET NX EX）</span>
+    <span class="t">String</span> <span class="n">lockKey</span> = <span class="t">"lock:"</span> + <span class="n">key</span>;
+    <span class="k">boolean</span> <span class="n">locked</span> = <span class="n">redis</span>.<span class="n">set</span>(<span class="n">lockKey</span>, <span class="t">"1"</span>, <span class="t">NX</span>, <span class="n">10</span>, <span class="t">SECONDS</span>);
+
+    <span class="k">if</span> (<span class="n">locked</span>) {
+        <span class="k">try</span> {
+            <span class="c">// 双重检查：可能别的线程已经重建了缓存</span>
+            <span class="n">cached</span> = <span class="n">redis</span>.<span class="n">get</span>(<span class="n">key</span>);
+            <span class="k">if</span> (<span class="n">cached</span> != <span class="k">null</span>) <span class="k">return</span> <span class="n">parse</span>(<span class="n">cached</span>);
+
+            <span class="t">User</span> <span class="n">user</span> = <span class="n">db</span>.<span class="n">selectById</span>(<span class="n">id</span>);
+            <span class="n">redis</span>.<span class="n">set</span>(<span class="n">key</span>, <span class="n">toJSON</span>(<span class="n">user</span>), <span class="n">30</span>, <span class="t">MINUTES</span>);
+            <span class="k">return</span> <span class="n">user</span>;
+        } <span class="k">finally</span> {
+            <span class="n">redis</span>.<span class="n">del</span>(<span class="n">lockKey</span>); <span class="c">// 释放锁</span>
+        }
+    } <span class="k">else</span> {
+        <span class="c">// 没拿到锁 → 短暂等待后重试</span>
+        <span class="t">Thread</span>.<span class="n">sleep</span>(<span class="n">50</span>);
+        <span class="k">return</span> <span class="n">getUser</span>(<span class="n">id</span>); <span class="c">// 递归重试</span>
+    }
+}</pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">方案 2：逻辑过期（不设置 TTL，由业务代码判断）</div>
+    <pre class="srcbox-file"><span class="c">// 缓存值中嵌入过期时间</span>
+<span class="k">class</span> <span class="n">CacheData</span>&lt;<span class="t">T</span>&gt; {
+    <span class="t">T</span> <span class="n">data</span>;
+    <span class="t">long</span> <span class="n">expireTime</span>; <span class="c">// 逻辑过期时间戳</span>
+}
+
+<span class="c">// 查询时发现逻辑过期 → 异步线程重建缓存，当前线程返回旧数据</span>
+<span class="k">if</span> (<span class="t">System</span>.<span class="n">currentTimeMillis</span>() > <span class="n">cacheData</span>.<span class="n">expireTime</span>) {
+    <span class="c">// 提交异步任务重建缓存（用线程池 / 协程）</span>
+    <span class="n">executor</span>.<span class="n">submit</span>(() -> <span class="n">rebuildCache</span>(<span class="n">key</span>, <span class="n">id</span>));
+}
+<span class="k">return</span> <span class="n">cacheData</span>.<span class="n">data</span>; <span class="c">// 返回旧数据（可接受短暂过期）</span></pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>方案</th><th>优点</th><th>缺点</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>互斥锁</td><td>保证一致性，不会返回旧数据</td><td>没拿到锁的线程要等待/重试，有延迟</td></tr>
+      <tr><td>逻辑过期</td><td>无阻塞，性能好</td><td>会返回过期数据，一致性弱；需要额外内存存过期时间</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ==================== 第 3 站 ==================== -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>缓存雪崩——大面积 key 同时失效</h2>
+  </div>
+
+  <p><strong>缓存雪崩</strong>：大量缓存 key 在同一时间集中过期（或 Redis 宕机），所有请求都打到数据库。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 180" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">缓存雪崩 vs 击穿 vs 穿透</text>
+      <rect x="40" y="45" width="200" height="110" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1.5" opacity="0.4"/>
+      <text x="140" y="67" text-anchor="middle" font-size="12" fill="#fca5a5" font-weight="bold">穿透</text>
+      <text x="140" y="88" text-anchor="middle" font-size="10" fill="#e2e8f0">不存在的 key</text>
+      <text x="140" y="108" text-anchor="middle" font-size="10" fill="#e2e8f0">每次 miss</text>
+      <text x="140" y="128" text-anchor="middle" font-size="10" fill="#6ee7b7">布隆过滤器</text>
+      <text x="140" y="146" text-anchor="middle" font-size="10" fill="#6ee7b7">缓存空值</text>
+
+      <rect x="260" y="45" width="200" height="110" rx="8" fill="#78350f" stroke="#f59e0b" stroke-width="1.5" opacity="0.4"/>
+      <text x="360" y="67" text-anchor="middle" font-size="12" fill="#fcd34d" font-weight="bold">击穿</text>
+      <text x="360" y="88" text-anchor="middle" font-size="10" fill="#e2e8f0">单个热点 key 过期</text>
+      <text x="360" y="108" text-anchor="middle" font-size="10" fill="#e2e8f0">并发集中打 DB</text>
+      <text x="360" y="128" text-anchor="middle" font-size="10" fill="#6ee7b7">互斥锁</text>
+      <text x="360" y="146" text-anchor="middle" font-size="10" fill="#6ee7b7">逻辑过期</text>
+
+      <rect x="480" y="45" width="200" height="110" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5" opacity="0.4"/>
+      <text x="580" y="67" text-anchor="middle" font-size="12" fill="#93c5fd" font-weight="bold">雪崩</text>
+      <text x="580" y="88" text-anchor="middle" font-size="10" fill="#e2e8f0">大量 key 同时过期</text>
+      <text x="580" y="108" text-anchor="middle" font-size="10" fill="#e2e8f0">或 Redis 宕机</text>
+      <text x="580" y="128" text-anchor="middle" font-size="10" fill="#6ee7b7">随机 TTL</text>
+      <text x="580" y="146" text-anchor="middle" font-size="10" fill="#6ee7b7">多级缓存</text>
+    </svg>
+    <figcaption><span class="fig-no">图 3-1</span> 三大缓存问题的对比</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">雪崩解决方案</div>
+    <pre class="srcbox-file"><span class="c">方案 1：过期时间随机化</span>
+<span class="c">// 基础 TTL + 随机偏移量 → 避免集中过期</span>
+<span class="t">int</span> <span class="n">baseTTL</span> = <span class="n">30</span> * <span class="n">60</span>; <span class="c">// 30 分钟</span>
+<span class="t">int</span> <span class="n">randomOffset</span> = <span class="t">ThreadLocalRandom</span>.<span class="n">current</span>().<span class="n">nextInt</span>(<span class="n">60</span>, <span class="n">300</span>); <span class="c">// 1~5 分钟随机</span>
+<span class="n">redis</span>.<span class="n">set</span>(<span class="n">key</span>, <span class="n">value</span>, <span class="n">baseTTL</span> + <span class="n">randomOffset</span>);
+
+<span class="c">方案 2：多级缓存</span>
+<span class="c">// L1: 本地缓存（Caffeine/Guava） → L2: Redis 分布式缓存</span>
+<span class="c">// 即使 Redis 宕机，本地缓存还能扛一段时间</span>
+
+<span class="c">方案 3：限流 + 降级</span>
+<span class="c">// 缓存大面积失效时，对 DB 查询做限流（令牌桶 / 信号量）</span>
+<span class="c">// 超出阈值的请求直接降级返回默认值或友好提示</span>
+
+<span class="c">方案 4：集群 + 高可用</span>
+<span class="c">// Redis Cluster / Sentinel 避免单点故障导致全部缓存失效</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>雪崩的根因是"集中失效"或"缓存不可用"。核心解法：<strong>①</strong> 随机 TTL 打散过期时间；<strong>②</strong> 多级缓存（本地 + Redis）兜底；<strong>③</strong> 限流降级保护 DB；<strong>④</strong> 高可用集群防宕机。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 4 站 ==================== -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>双写一致性——先删缓存还是先更新数据库？</h2>
+  </div>
+
+  <p>这是面试中最高频的缓存一致性问题。核心矛盾：<strong>缓存和数据库是两个独立的数据源，无法做到原子性地同时更新</strong>。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 340" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">四种更新策略对比</text>
+
+      <!-- Strategy 1 -->
+      <rect x="40" y="42" width="310" height="60" rx="6" fill="#7f1d1d" stroke="#f87171" stroke-width="1" opacity="0.4"/>
+      <text x="195" y="62" text-anchor="middle" font-size="11" fill="#fca5a5" font-weight="bold">① 先更新DB，再更新缓存</text>
+      <text x="195" y="80" text-anchor="middle" font-size="10" fill="#f87171">并发写可能覆盖：A写DB→B写DB→B更新缓存→A更新缓存</text>
+      <text x="195" y="95" text-anchor="middle" font-size="10" fill="#f87171">结果缓存=A的值，但DB=B的值 → 不一致</text>
+
+      <!-- Strategy 2 -->
+      <rect x="370" y="42" width="310" height="60" rx="6" fill="#7f1d1d" stroke="#f87171" stroke-width="1" opacity="0.4"/>
+      <text x="525" y="62" text-anchor="middle" font-size="11" fill="#fca5a5" font-weight="bold">② 先删缓存，再更新DB</text>
+      <text x="525" y="80" text-anchor="middle" font-size="10" fill="#f87171">读请求在删缓存和更新DB之间读到旧数据</text>
+      <text x="525" y="95" text-anchor="middle" font-size="10" fill="#f87171">并写回缓存 → 脏数据残留到 TTL 过期</text>
+
+      <!-- Strategy 3 -->
+      <rect x="40" y="115" width="310" height="60" rx="6" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5" opacity="0.4"/>
+      <text x="195" y="135" text-anchor="middle" font-size="11" fill="#6ee7b7" font-weight="bold">③ 先更新DB，再删缓存（推荐）</text>
+      <text x="195" y="153" text-anchor="middle" font-size="10" fill="#6ee7b7">Cache Aside 模式，问题最少</text>
+      <text x="195" y="168" text-anchor="middle" font-size="10" fill="#fbbf24">极端情况：读请求读到旧缓存（概率极低）</text>
+
+      <!-- Strategy 4 -->
+      <rect x="370" y="115" width="310" height="60" rx="6" fill="#78350f" stroke="#f59e0b" stroke-width="1" opacity="0.4"/>
+      <text x="525" y="135" text-anchor="middle" font-size="11" fill="#fcd34d" font-weight="bold">④ 延迟双删</text>
+      <text x="525" y="153" text-anchor="middle" font-size="10" fill="#fcd34d">先删缓存 → 更新DB → sleep N ms → 再删缓存</text>
+      <text x="525" y="168" text-anchor="middle" font-size="10" fill="#fbbf24">第二次删除清理读请求写入的脏数据</text>
+
+      <!-- Recommended flow -->
+      <text x="360" y="200" text-anchor="middle" font-size="13" fill="#6ee7b7" font-weight="bold">推荐方案 ③：Cache Aside（旁路缓存）</text>
+      <rect x="100" y="215" width="520" height="110" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="120" y="238" font-size="11" fill="#e2e8f0">读流程: 查缓存 → miss → 查DB → 写入缓存</text>
+      <text x="120" y="258" font-size="11" fill="#e2e8f0">写流程: 更新DB → 删除缓存（不是更新缓存！）</text>
+      <text x="120" y="280" font-size="11" fill="#fbbf24">为什么是"删"不是"更新"缓存？</text>
+      <text x="120" y="298" font-size="11" fill="#e2e8f0">→ 避免并发写覆盖问题；→ 懒加载，下次读的时候再重建；→ 减少无效计算（缓存可能还没被读就被更新了）</text>
+    </svg>
+    <figcaption><span class="fig-no">图 4-1</span> 四种双写策略对比，Cache Aside 最推荐</figcaption>
+  </div>
+
+  <div class="think">
+    <p class="think-q">方案 ③ "先更新DB再删缓存"真的万无一失吗？</p>
+    <p>有一个极端场景：缓存刚好过期 → 读请求查DB得到旧值 → 写请求更新DB并删缓存 → 读请求把旧值写入缓存。但这个场景要求"缓存恰好失效 + 读DB比写DB还慢"，概率极低。如果对一致性要求极高，可以用<strong>延迟双删</strong>或<strong>消息队列重试删缓存</strong>。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 5 站 ==================== -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>延迟双删与最终一致性方案</h2>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">延迟双删实现</div>
+    <pre class="srcbox-file"><span class="k">public void</span> <span class="n">updateUser</span>(<span class="t">Long</span> <span class="n">id</span>, <span class="t">User</span> <span class="n">user</span>) {
+    <span class="t">String</span> <span class="n">key</span> = <span class="t">"user:"</span> + <span class="n">id</span>;
+
+    <span class="c">// 第一次删除缓存</span>
+    <span class="n">redis</span>.<span class="n">del</span>(<span class="n">key</span>);
+
+    <span class="c">// 更新数据库</span>
+    <span class="n">db</span>.<span class="n">updateById</span>(<span class="n">user</span>);
+
+    <span class="c">// 延迟第二次删除（异步）</span>
+    <span class="c">// 延迟时间 >= 读请求的耗时（通常 500ms ~ 1s）</span>
+    <span class="n">executor</span>.<span class="n">schedule</span>(() -> {
+        <span class="n">redis</span>.<span class="n">del</span>(<span class="n">key</span>);
+    }, <span class="n">1000</span>, <span class="t">MILLISECONDS</span>);
+}</pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">更可靠的方案：消息队列重试删缓存</div>
+    <pre class="srcbox-file"><span class="c">方案：Canal 监听 binlog + MQ 异步删缓存</span>
+
+<span class="n">1</span>. 业务代码正常更新 DB（无需关心缓存）
+<span class="n">2</span>. Canal（阿里开源）订阅 MySQL binlog
+<span class="n">3</span>. 解析出变更的表和 key → 发送 MQ 消息
+<span class="n">4</span>. 消费者收到消息 → 删除对应的 Redis key
+<span class="n">5</span>. 如果删除失败 → MQ 自动重试（保证最终一致）
+
+<span class="c">优点：</span>
+<span class="c">- 业务代码与缓存解耦，不需要手动维护一致性</span>
+<span class="c">- MQ 重试机制保证删除一定成功</span>
+<span class="c">- 适合中大型项目</span></pre>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">Canal + MQ 异步删缓存架构</text>
+
+      <rect x="40" y="50" width="100" height="40" rx="6" fill="#1e3a5f" stroke="#60a5fa"/>
+      <text x="90" y="74" text-anchor="middle" font-size="10" fill="#93c5fd">业务服务</text>
+
+      <line x1="140" y1="70" x2="190" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <defs><marker id="arr7" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#f59e0b"/></marker></defs>
+
+      <rect x="190" y="50" width="100" height="40" rx="6" fill="#064e3b" stroke="#6ee7b7"/>
+      <text x="240" y="74" text-anchor="middle" font-size="10" fill="#6ee7b7">MySQL</text>
+
+      <line x1="290" y1="70" x2="340" y2="70" stroke="#c084fc" stroke-width="1.5" marker-end="url(#arr7)"/>
+      <text x="315" y="62" font-size="8" fill="#d8b4fe">binlog</text>
+
+      <rect x="340" y="50" width="100" height="40" rx="6" fill="#4a1942" stroke="#c084fc"/>
+      <text x="390" y="74" text-anchor="middle" font-size="10" fill="#d8b4fe">Canal</text>
+
+      <line x1="440" y1="70" x2="490" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr7)"/>
+
+      <rect x="490" y="50" width="80" height="40" rx="6" fill="#78350f" stroke="#f59e0b"/>
+      <text x="530" y="74" text-anchor="middle" font-size="10" fill="#fcd34d">MQ</text>
+
+      <line x1="570" y1="70" x2="620" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr7)"/>
+
+      <rect x="620" y="50" width="80" height="40" rx="6" fill="#7f1d1d" stroke="#f87171"/>
+      <text x="660" y="74" text-anchor="middle" font-size="10" fill="#fca5a5">Redis</text>
+
+      <text x="360" y="120" text-anchor="middle" font-size="11" fill="#fbbf24">业务只写 DB → Canal 监听 binlog → MQ → 消费者删缓存</text>
+      <text x="360" y="140" text-anchor="middle" font-size="11" fill="#94a3b8">删除失败时 MQ 自动重试，保证最终一致性</text>
+    </svg>
+    <figcaption><span class="fig-no">图 5-1</span> Canal + MQ 实现缓存最终一致性</figcaption>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试话术</span>
+    <p>"我们用的是 Cache Aside 模式：先更新DB再删缓存。对于一致性要求更高的场景，用延迟双删或者 Canal 监听 binlog 异步删缓存，配合 MQ 重试机制保证最终一致性。"</p>
+  </div>
+</section>
+
+<!-- ==================== 第 6 站 ==================== -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>多级缓存架构——L1 本地 + L2 分布式</h2>
+  </div>
+
+  <p>在高并发场景下，仅靠 Redis 可能成为瓶颈（网络开销、序列化开销）。<strong>多级缓存</strong>在应用进程内加一层本地缓存，进一步减少 Redis 的压力。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">多级缓存请求链路</text>
+
+      <rect x="40" y="50" width="100" height="40" rx="6" fill="#1e293b" stroke="#475569"/>
+      <text x="90" y="74" text-anchor="middle" font-size="10" fill="#94a3b8">请求</text>
+
+      <line x1="140" y1="70" x2="180" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr8)"/>
+      <defs><marker id="arr8" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#f59e0b"/></marker></defs>
+
+      <rect x="180" y="45" width="120" height="50" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="240" y="67" text-anchor="middle" font-size="11" fill="#6ee7b7">L1 本地缓存</text>
+      <text x="240" y="84" text-anchor="middle" font-size="9" fill="#94a3b8">Caffeine, 10s TTL</text>
+
+      <text x="320" y="60" font-size="10" fill="#f87171">miss</text>
+      <line x1="300" y1="70" x2="350" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr8)"/>
+
+      <rect x="350" y="45" width="120" height="50" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1.5" opacity="0.6"/>
+      <text x="410" y="67" text-anchor="middle" font-size="11" fill="#fca5a5">L2 Redis</text>
+      <text x="410" y="84" text-anchor="middle" font-size="9" fill="#94a3b8">分布式, 30min TTL</text>
+
+      <text x="490" y="60" font-size="10" fill="#f87171">miss</text>
+      <line x1="470" y1="70" x2="520" y2="70" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr8)"/>
+
+      <rect x="520" y="45" width="120" height="50" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="580" y="67" text-anchor="middle" font-size="11" fill="#93c5fd">MySQL</text>
+      <text x="580" y="84" text-anchor="middle" font-size="9" fill="#94a3b8">持久化存储</text>
+
+      <!-- Hit rates -->
+      <rect x="40" y="120" width="640" height="80" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="142" font-size="12" fill="#fbbf24" font-weight="bold">多级缓存设计要点</text>
+      <text x="60" y="162" font-size="11" fill="#e2e8f0">L1 本地缓存: Caffeine（高性能，堆内），TTL 短（5~30秒），容量小（热点数据）</text>
+      <text x="60" y="180" font-size="11" fill="#e2e8f0">L2 分布式缓存: Redis Cluster，TTL 中等（5~30分钟），容量大</text>
+      <text x="60" y="198" font-size="11" fill="#e2e8f0">一致性: 更新时通过 MQ 广播通知所有节点清除 L1 本地缓存</text>
+    </svg>
+    <figcaption><span class="fig-no">图 6-1</span> L1 本地缓存 + L2 Redis 多级缓存架构</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">L1 本地缓存一致性方案</div>
+    <pre class="srcbox-file"><span class="c">问题：多个应用实例各自有 L1 本地缓存，更新后如何同步？</span>
+
+<span class="c">方案：Redis Pub/Sub 广播 + MQ</span>
+<span class="n">1</span>. 更新 DB 后，发送消息到 MQ（如 RocketMQ）
+<span class="n">2</span>. 所有应用实例订阅该 topic
+<span class="n">3</span>. 收到消息后，清除本地 L1 缓存中对应的 key
+<span class="n">4</span>. 下次读请求会重新从 L2/DB 加载
+
+<span class="c">也可以用 Redis Pub/Sub：</span>
+<span class="n">PUBLISH</span> <span class="t">cache:invalidate</span> <span class="t">"user:1001"</span>
+<span class="c">所有订阅者收到后清除本地缓存</span></pre>
+  </div>
+</section>
+
+<!-- ==================== 第 7 站 ==================== -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>缓存监控与运维最佳实践</h2>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>监控指标</th><th>含义</th><th>告警阈值参考</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>命中率 (hit rate)</td><td>缓存命中数 / 总请求数</td><td>< 90% 需关注</td></tr>
+      <tr><td>内存使用率</td><td>used_memory / maxmemory</td><td>> 80% 告警</td></tr>
+      <tr><td>驱逐数 (evicted_keys)</td><td>因内存满而被淘汰的 key 数</td><td>持续增长需关注</td></tr>
+      <tr><td>连接数</td><td>当前客户端连接数</td><td>接近 maxclients 告警</td></tr>
+      <tr><td>慢查询</td><td>SLOWLOG 中 O(N) 命令</td><td>KEYS * / 大 key 操作</td></tr>
+      <tr><td>延迟</td><td>PING 响应时间</td><td>> 5ms 需关注</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">生产环境 Redis 配置清单</div>
+    <pre class="srcbox-file"><span class="c"># 内存</span>
+<span class="t">maxmemory</span> <span class="n">8gb</span>
+<span class="t">maxmemory-policy</span> <span class="k">volatile-lru</span>  <span class="c"># 优先淘汰设了 TTL 的 key</span>
+
+<span class="c"># 持久化</span>
+<span class="t">appendonly</span> <span class="k">yes</span>
+<span class="t">aof-use-rdb-preamble</span> <span class="k">yes</span>
+<span class="t">save</span> <span class="n">900</span> <span class="n">1</span>
+
+<span class="c"># 安全</span>
+<span class="t">rename-command</span> <span class="n">FLUSHALL</span> <span class="t">""</span>    <span class="c"># 禁用危险命令</span>
+<span class="t">rename-command</span> <span class="n">KEYS</span> <span class="t">""</span>
+<span class="t">requirepass</span> <span class="t">your_strong_password</span>
+
+<span class="c"># 性能</span>
+<span class="t">tcp-backlog</span> <span class="n">2048</span>
+<span class="t">timeout</span> <span class="n">300</span>                    <span class="c"># 空闲连接超时</span>
+<span class="t">hz</span> <span class="n">50</span>                          <span class="c"># 事件循环频率（默认 10）</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试一招鲜</span>
+    <p>缓存三板斧：穿透（布隆过滤器/空值缓存）、击穿（互斥锁/逻辑过期）、雪崩（随机TTL/多级缓存/限流降级）。一致性：Cache Aside + 延迟双删或 Canal + MQ。这套组合拳打出去，缓存设计的问题基本就覆盖全了。</p>
+  </div>
+
+  <div class="recap">
+    <h3>全篇回顾</h3>
+    <ol>
+      <li><strong>缓存穿透</strong>：查不存在的数据 → 布隆过滤器 / 缓存空值</li>
+      <li><strong>缓存击穿</strong>：热点 key 过期 → 互斥锁 / 逻辑过期</li>
+      <li><strong>缓存雪崩</strong>：大面积 key 同时过期 → 随机 TTL / 多级缓存 / 限流</li>
+      <li><strong>双写一致性</strong>：推荐 Cache Aside（先更新DB再删缓存）</li>
+      <li><strong>延迟双删</strong>：删缓存 → 更新DB → sleep → 再删缓存</li>
+      <li><strong>最终一致性</strong>：Canal 监听 binlog + MQ 异步删缓存</li>
+      <li><strong>多级缓存</strong>：L1 本地（Caffeine）+ L2 Redis，广播清除 L1</li>
+    </ol>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

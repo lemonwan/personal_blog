@@ -3,125 +3,406 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Java 中高级面试 - Day 15 | 接口默认方法/静态方法</title>
-<style>
-:root {
-  --header-bg: #1a1a2e;
-  --accent-blue: #0ea5e9;
-  --accent-green: #22c55e;
-  --accent-purple: #a855f7;
-  --accent-orange: #f97316;
-  --accent-pink: #ec4899;
-  --accent-red: #ef4444;
-  --accent-cyan: #06b6d4;
-  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  --dot-blue: #3b82f6;
-  --dot-green: #10b981;
-  --dot-purple: #8b5cf6;
-  --dot-orange: #f59e0b;
-  --dot-pink: #ec4899;
-  --dot-red: #ef4444;
-  --dot-cyan: #06b6d4;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
-.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
-.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
-.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
-.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
-.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
-.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
-.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
-.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
-.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
-.module-card .card-body { padding: 20px; }
-.section { margin-bottom: 20px; }
-.section:last-child { margin-bottom: 0; }
-.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
-.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
-.section .content { padding-left: 32px; }
-.section .content p { margin-bottom: 6px; }
-.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
-.section .content li { margin-bottom: 4px; }
-.section .content strong { color: #0f172a; }
-.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
-.bullet-list { list-style: none; padding-left: 0; }
-.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
-.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
-.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
-.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-.code-block .comment { color: #64748b; }
-.code-block .keyword { color: #c084fc; }
-.code-block .string { color: #86efac; }
-.code-block .method { color: #67e8f9; }
-.code-block .number { color: #fbbf24; }
-.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
-.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
-.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
-.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
-.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
-.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
-.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-.comparison-table tr:nth-child(even) td { background: #f8fafc; }
-.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
-.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
-.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
-.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
-.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
-.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
-.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
-.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
-.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-.next-preview .next-content p { font-size: 13px; color: #475569; }
-@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
-@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
-</style>
-    <link rel="stylesheet" href="/assets/reading-theme.css">
-    <script defer src="/assets/theme.js"></script>
+<title>接口进化：默认方法、静态方法与私有方法</title>
 </head>
 <body>
-<div class="header">
-  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
-  <h1>Day 15 — 接口默认方法/静态方法</h1>
-  <div class="tag">模块：Java 基础 · Java 8+ 新特性</div>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：Java 8 之前的接口 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>Java 8 之前的接口：纯粹的契约</h2></div>
+
+<p>在 Java 8 之前，接口的定义极其简单——<strong>只能包含常量和抽象方法</strong>。它是一个纯粹的契约：你告诉我"做什么"，但不告诉我"怎么做"。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BeforeJava8.java</b> - 传统接口的限制</span></div>
+<pre><code><span class="c">// Java 7 及之前：接口只能有抽象方法和常量</span>
+<span class="k">public interface</span> <span class="t">MyCollection</span>&lt;<span class="t">E</span>&gt; {
+    <span class="c">// 常量（隐式 public static final）</span>
+    <span class="k">int</span> MAX_SIZE = <span class="n">1000</span>;
+
+    <span class="c">// 抽象方法（隐式 public abstract）</span>
+    <span class="k">void</span> add(<span class="t">E</span> element);
+    <span class="k">boolean</span> remove(<span class="t">E</span> element);
+    <span class="k">int</span> size();
+}
+
+<span class="c">// 问题：如果 Collection 接口要新增一个 forEach 方法？</span>
+<span class="c">// 答：所有实现类（ArrayList、HashMap、LinkedList...）全部编译失败！</span></code></pre>
 </div>
-<div class="container">
-<div class="module-card">
-  <div class="card-header">
-    <span class="card-number">15</span>
-    <span class="card-title">接口默认方法/静态方法</span>
-  </div>
-  <div class="card-body">
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>接口默认方法（default methods）</h3>
-      <div class="content"><p>Java 8 引入了 default 关键字，允许在接口中定义带有默认实现的方法。</p><p><span class='highlight'>核心目的</span>：在不破坏已有实现类的前提下，对接口进行演进升级。</p><ul class='bullet-list'><li><span class='highlight'>语法</span>：<code>default</code> 修饰方法，提供默认实现</li><li><span class='highlight'>实现类</span>：可以继承接口的默认实现，也可以覆写</li><li><span class='highlight'>优先级</span>：类的方法 &gt; 接口的默认方法 &gt; 父接口的 default 方法</li></ul><div class='note-box'><div class='note-title'>💡 经典场景</div>Java 8 的 Collection 接口大量使用了 default 方法（如 stream()、forEach()、removeIf()），在不破坏已有类（如 ArrayList、HashMap）的前提下新增了函数式能力。</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>接口静态方法（static methods）</h3>
-      <div class="content"><p>Java 8 还允许在接口中定义 static 方法，直接通过接口名调用。</p><ul class='bullet-list'><li><span class='highlight'>语法</span>：<code>static</code> 修饰方法，不能有默认实现依赖 this</li><li><span class='highlight'>调用方式</span>：<code>InterfaceName.staticMethod()</code></li><li><span class='highlight'>区别</span>：默认方法可被实现类覆写，static 方法不能覆写</li></ul><div class='note-box'><div class='note-title'>💡 设计意图</div>静态方法用于提供与接口相关的工具方法，如 Comparator 中的 comparing()、comparingInt()、reversed() 等工厂方法。</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>默认方法与继承的冲突解决</h3>
-      <div class="content"><p>当一个类实现多个接口，且这些接口有同名 default 方法时，编译器会报错，需要显式选择。</p><ul class='bullet-list'><li><span class='highlight'>规则 1</span>：类的方法优先级高于任何接口的 default 方法</li><li><span class='highlight'>规则 2</span>：如果继承的父类提供了实现，优先使用父类的</li><li><span class='highlight'>规则 3</span>：多个接口有同名 default 方法 → <strong>必须显式选择</strong></li></ul><div class='code-block'><span class='comment'>// 必须通过 super 显式选择</span>
-<span class='keyword'>class</span> MyClass implements InterfaceA, InterfaceB {
-    <span class='keyword'>public void</span> doSomething() {
-        InterfaceA.<span class='keyword'>super</span>.doSomething(); <span class='comment'>// 显式指定</span>
+
+<p>这就是 Java 8 之前接口面临的<strong>核心困境</strong>：</p>
+
+<div class="think"><div class="think-q">"接口一旦发布，就无法演进"——这被称为接口的冻结问题</div>
+<p>Java 标准库的 <code>Collection</code> 接口被数百万个类实现。如果要在 Java 8 中给 <code>Collection</code> 加一个 <code>stream()</code> 方法或 <code>forEach()</code> 方法，所有现有的实现类——包括第三方库中的——都会在升级 JDK 后编译失败。这在生态庞大的 Java 世界中是不可接受的。</p></div>
+
+<p>Java 设计者面前有三条路：</p>
+<ul>
+  <li><strong>选项 A</strong>：不升级接口 → 放弃函数式编程能力</li>
+  <li><strong>选项 B</strong>：强制所有实现类适配 → 生态灾难</li>
+  <li><strong>选项 C</strong>：允许接口有默认实现 → <strong>这就是 default 方法</strong></li>
+</ul>
+
+<figure class="fig">
+<svg viewBox="0 0 700 220" role="img" aria-label="接口演进时间线">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">Java 接口的三次进化</text>
+
+  <!-- 时间线 -->
+  <line x1="80" y1="110" x2="620" y2="110" stroke="#D8CEB6" stroke-width="2"/>
+
+  <!-- Java 1.0 -->
+  <circle cx="140" cy="110" r="8" fill="#3E6B8F"/>
+  <text x="140" y="80" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">Java 1.0</text>
+  <text x="140" y="140" text-anchor="middle" font-size="11" fill="#57544E">纯抽象方法</text>
+  <text x="140" y="158" text-anchor="middle" font-size="11" fill="#57544E">+ 常量</text>
+
+  <!-- Java 8 -->
+  <circle cx="350" cy="110" r="8" fill="#C2410C"/>
+  <text x="350" y="80" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Java 8</text>
+  <text x="350" y="140" text-anchor="middle" font-size="11" fill="#57544E">+ default 方法</text>
+  <text x="350" y="158" text-anchor="middle" font-size="11" fill="#57544E">+ static 方法</text>
+
+  <!-- Java 9 -->
+  <circle cx="560" cy="110" r="8" fill="#1C1C1C"/>
+  <text x="560" y="80" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">Java 9</text>
+  <text x="560" y="140" text-anchor="middle" font-size="11" fill="#57544E">+ private 方法</text>
+  <text x="560" y="158" text-anchor="middle" font-size="11" fill="#57544E">+ private static</text>
+
+  <!-- 箭头标注 -->
+  <text x="245" y="198" text-anchor="middle" font-size="10" fill="#8C8676">为了解决接口冻结问题</text>
+  <text x="455" y="198" text-anchor="middle" font-size="10" fill="#8C8676">为了消除 default 方法间的重复代码</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>Java 接口三次进化：从纯契约到可包含实现代码</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第2站：默认方法 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>default 方法：接口进化的钥匙</h2></div>
+
+<p>Java 8 引入了 <code>default</code> 关键字，允许在接口中定义<strong>带有方法体的默认实现</strong>。实现类可以选择继承默认实现，也可以覆写。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DefaultMethodDemo.java</b> - default 方法的语法与使用</span></div>
+<pre><code><span class="k">public interface</span> <span class="t">Greeting</span> {
+    <span class="c">// 抽象方法 —— 实现类必须实现</span>
+    <span class="t">String</span> getName();
+
+    <span class="c">// 默认方法 —— 提供默认实现，实现类可选覆写</span>
+    <span class="k">default</span> <span class="t">String</span> greet() {
+        <span class="k">return</span> <span class="s">"Hello, "</span> + getName() + <span class="s">"!"</span>;
     }
-}</div><div class='note-box warning'><div class='note-title'>⚠️ 面试考点</div>这个冲突解决规则体现了 Java 的设计哲学：类的实现优先于接口的契约，同时要求开发者显式处理歧义。</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>函数式接口与 @FunctionalInterface</h3>
-      <div class="content"><p>Java 8 定义了四大核心函数式接口，是 Lambda 表达式的基础。</p><table class='comparison-table'><tr><th>接口</th><th>方法签名</th><th>用途</th></tr><tr><td>Supplier&lt;T&gt;</td><td>T get()</td><td>供给型：无入参，有出参</td></tr><tr><td>Consumer&lt;T&gt;</td><td>void accept(T t)</td><td>消费型：有入参，无出参</td></tr><tr><td>Function&lt;T,R&gt;</td><td>R apply(T t)</td><td>函数型：有入参，有出参</td></tr><tr><td>Predicate&lt;T&gt;</td><td>boolean test(T t)</td><td>断言型：有入参，返回布尔值</td></tr></table><div class='note-box'><div class='note-title'>🎤 面试要点</div>@FunctionalInterface 注解是可选的，但强烈建议加上。它会在编译期检查是否确实只有一个抽象方法，防止接口误用。如果接口中有多个抽象方法，标注了 @FunctionalInterface 会编译报错。</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-orange)">⚖️</span>默认方法 vs 抽象类 vs 工具类</h3>
-      <div class="content"><p>默认方法的出现引发了一个常见设计问题：什么时候用接口 default，什么时候用抽象类或工具类？</p><table class='comparison-table'><tr><th>维度</th><th>接口 default</th><th>抽象类</th><th>工具类（static）</th></tr><tr><td>多实现</td><td>✅ 支持</td><td>❌ 不支持</td><td>✅ 支持</td></tr><tr><td>状态维护</td><td>❌ 不能</td><td>✅ 可以</td><td>❌ 不能</td></tr><tr><td>向后兼容</td><td>✅ 完美</td><td>⚠️ 可能破坏</td><td>✅ 完美</td></tr><tr><td>覆写</td><td>✅ 可以</td><td>✅ 可以</td><td>❌ 不能</td></tr></table><div class='note-box warning'><div class='note-title'>💡 最佳实践</div>接口 default 适合<strong>不依赖状态</strong>的行为扩展；有状态的行为应使用抽象类；纯工具方法应使用 static 工具类。</div></div></div>
-  </div>
+
+    <span class="c">// 另一个默认方法，可以调用其他方法</span>
+    <span class="k">default</span> <span class="t">String</span> greetFormal() {
+        <span class="k">return</span> <span class="s">"Dear "</span> + getName() + <span class="s">", welcome."</span>;
+    }
+}
+
+<span class="c">// 实现类 A：继承默认实现</span>
+<span class="k">public class</span> <span class="t">EnglishGreeting</span> <span class="k">implements</span> <span class="t">Greeting</span> {
+    <span class="k">public</span> <span class="t">String</span> getName() { <span class="k">return</span> <span class="s">"Alice"</span>; }
+    <span class="c">// greet() 和 greetFormal() 自动继承默认实现</span>
+}
+
+<span class="c">// 实现类 B：覆写默认方法</span>
+<span class="k">public class</span> <span class="t">ChineseGreeting</span> <span class="k">implements</span> <span class="t">Greeting</span> {
+    <span class="k">public</span> <span class="t">String</span> getName() { <span class="k">return</span> <span class="s">"张三"</span>; }
+
+    <span class="k">@Override</span>
+    <span class="k">public</span> <span class="t">String</span> greet() {
+        <span class="k">return</span> <span class="s">"你好，"</span> + getName() + <span class="s">"！"</span>;
+    }
+}</code></pre>
 </div>
-<div class="footer">
-  <h4>📊 今日总结</h4>
-  <div class="progress-bar"><div class="progress-fill" style="width: 22.7%"></div></div>
-  <div class="progress-text">15 / 66 知识点</div>
-  <div class="next-preview">
-    <div class="next-icon">👉</div>
-    <div class="next-content">
-      <h5>明日预告</h5>
-      <p>明日将学习 CompletableFuture 异步编程——Java 8 最强大的异步编排工具，掌握链式调用、异常处理和多阶段异步编排，是理解现代响应式编程的基础。</p>
-    </div>
-  </div>
+
+<p>Java 8 标准库中大量使用了 default 方法。最经典的例子是 <code>Collection</code> 接口：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CollectionDefaults.java</b> - Java 8 给 Collection 接口新增的 default 方法</span></div>
+<pre><code><span class="k">public interface</span> <span class="t">Collection</span>&lt;<span class="t">E</span>&gt; {
+    <span class="c">// ... 原有的抽象方法 ...</span>
+
+    <span class="c">// Java 8 新增 —— 全部是 default 方法！</span>
+    <span class="k">default</span> <span class="t">Stream</span>&lt;<span class="t">E</span>&gt; stream() {
+        <span class="k">return</span> <span class="t">StreamSupport</span>.stream(spliterator(), <span class="k">false</span>);
+    }
+
+    <span class="k">default</span> <span class="k">void</span> forEach(<span class="t">Consumer</span>&lt;? <span class="k">super</span> <span class="t">E</span>&gt; action) {
+        <span class="k">for</span> (<span class="t">E</span> e : <span class="k">this</span>) {
+            action.accept(e);
+        }
+    }
+
+    <span class="k">default boolean</span> removeIf(<span class="t">Predicate</span>&lt;? <span class="k">super</span> <span class="t">E</span>&gt; filter) {
+        <span class="t">Iterator</span>&lt;<span class="t">E</span>&gt; it = iterator();
+        <span class="k">while</span> (it.hasNext()) {
+            <span class="k">if</span> (filter.test(it.next())) { it.remove(); <span class="k">return true</span>; }
+        }
+        <span class="k">return false</span>;
+    }
+}</code></pre>
 </div>
+
+<div class="formula">
+<strong>default 方法的核心价值：</strong><br/>
+在不破坏已有实现类的前提下，给接口新增方法。<br/><br/>
+这是 Java 8 引入 Lambda + Stream 的<strong>基础设施</strong>——没有 default 方法，<code>stream()</code>、<code>forEach()</code>、<code>removeIf()</code> 都无法加到 Collection 接口中。
 </div>
-<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 15/66</div>
+</section>
+
+<!-- ═══════════════ 第3站：冲突解决规则 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>钻石冲突：多接口的 default 方法碰撞</h2></div>
+
+<p>Java 的类只能单继承，但一个类可以实现多个接口。当两个接口都有同名的 default 方法时，就产生了"钻石问题"。Java 定义了三条明确的优先级规则：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 280" role="img" aria-label="default 方法冲突解决三规则">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">default 方法冲突解决三规则</text>
+
+  <!-- 规则 1 -->
+  <rect x="30" y="44" width="200" height="100" rx="8" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <rect x="30" y="44" width="200" height="28" rx="8" fill="#3E6B8F"/>
+  <text x="130" y="63" text-anchor="middle" font-size="12" fill="#fff" font-weight="700">规则 1</text>
+  <text x="130" y="90" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">类优先于接口</text>
+  <text x="130" y="110" text-anchor="middle" font-size="10" fill="#57544E">父类的方法 > 接口的</text>
+  <text x="130" y="128" text-anchor="middle" font-size="10" fill="#57544E">default 方法</text>
+
+  <!-- 规则 2 -->
+  <rect x="250" y="44" width="200" height="100" rx="8" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <rect x="250" y="44" width="200" height="28" rx="8" fill="#C2410C"/>
+  <text x="350" y="63" text-anchor="middle" font-size="12" fill="#fff" font-weight="700">规则 2</text>
+  <text x="350" y="90" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">子接口优先</text>
+  <text x="350" y="110" text-anchor="middle" font-size="10" fill="#57544E">更具体的接口 > 更</text>
+  <text x="350" y="128" text-anchor="middle" font-size="10" fill="#57544E">宽泛的父接口</text>
+
+  <!-- 规则 3 -->
+  <rect x="470" y="44" width="200" height="100" rx="8" fill="#fff" stroke="#1C1C1C" stroke-width="1.5"/>
+  <rect x="470" y="44" width="200" height="28" rx="8" fill="#1C1C1C"/>
+  <text x="570" y="63" text-anchor="middle" font-size="12" fill="#FAC94A" font-weight="700">规则 3</text>
+  <text x="570" y="90" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">必须显式选择</text>
+  <text x="570" y="110" text-anchor="middle" font-size="10" fill="#57544E">平级接口冲突时</text>
+  <text x="570" y="128" text-anchor="middle" font-size="10" fill="#57544E">编译器报错</text>
+
+  <!-- 钻石问题图示 -->
+  <rect x="120" y="164" width="460" height="100" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="188" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">规则 3 的解决方案：InterfaceA.super.method()</text>
+
+  <text x="350" y="214" text-anchor="middle" font-size="11" fill="#57544E" font-family="monospace">class MyClass implements A, B {</text>
+  <text x="350" y="232" text-anchor="middle" font-size="11" fill="#C2410C" font-family="monospace">    public void doX() { A.super.doX(); }</text>
+  <text x="350" y="250" text-anchor="middle" font-size="11" fill="#57544E" font-family="monospace">}</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>三条冲突解决规则：类优先 > 子接口优先 > 显式选择</figcaption>
+</figure>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DiamondProblem.java</b> - 三条规则的完整演示</span></div>
+<pre><code><span class="c">/* ─── 规则 1：类优先于接口 ─── */</span>
+<span class="k">interface</span> <span class="t">Greetable</span> {
+    <span class="k">default</span> <span class="t">String</span> hello() { <span class="k">return</span> <span class="s">"Hi from interface"</span>; }
+}
+<span class="k">class</span> <span class="t">Base</span> {
+    <span class="k">public</span> <span class="t">String</span> hello() { <span class="k">return</span> <span class="s">"Hi from class"</span>; }
+}
+<span class="k">class</span> <span class="t">Child</span> <span class="k">extends</span> <span class="t">Base</span> <span class="k">implements</span> <span class="t">Greetable</span> {}
+<span class="c">// new Child().hello() → "Hi from class"  (类优先)</span>
+
+<span class="c">/* ─── 规则 2：子接口优先于父接口 ─── */</span>
+<span class="k">interface</span> <span class="t">Animal</span> {
+    <span class="k">default</span> <span class="t">String</span> speak() { <span class="k">return</span> <span class="s">"..."</span>; }
+}
+<span class="k">interface</span> <span class="t">Dog</span> <span class="k">extends</span> <span class="t">Animal</span> {
+    <span class="k">default</span> <span class="t">String</span> speak() { <span class="k">return</span> <span class="s">"Woof!"</span>; }
+}
+<span class="k">class</span> <span class="t">Puppy</span> <span class="k">implements</span> <span class="t">Dog</span> {}
+<span class="c">// new Puppy().speak() → "Woof!"  (Dog 比 Animal 更具体)</span>
+
+<span class="c">/* ─── 规则 3：平级冲突 → 必须显式选择 ─── */</span>
+<span class="k">interface</span> <span class="t">A</span> { <span class="k">default void</span> log() { System.out.println(<span class="s">"A"</span>); } }
+<span class="k">interface</span> <span class="t">B</span> { <span class="k">default void</span> log() { System.out.println(<span class="s">"B"</span>); } }
+
+<span class="k">class</span> <span class="t">MyService</span> <span class="k">implements</span> <span class="t">A</span>, <span class="t">B</span> {
+    <span class="c">// 编译器报错！必须覆写并显式选择</span>
+    <span class="k">@Override</span>
+    <span class="k">public void</span> log() {
+        A.<span class="k">super</span>.log();  <span class="c">// 显式选择 A 的实现</span>
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么"类优先于接口"？</div>
+<p>这条规则保证了<strong>向后兼容</strong>。假设你有一个类已经实现了某个接口的方法，后来接口又加了同名的 default 方法——类优先规则确保你原有的代码不会被接口的 default 实现覆盖。</p>
+<p>这也是 Java 和 C# 在设计上的重要区别：C# 8.0 也引入了 default interface methods，但选择了不同的解析策略。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：静态方法 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>接口静态方法：把工具方法放回接口</h2></div>
+
+<p>Java 8 还允许在接口中定义 <code>static</code> 方法。以前这些工具方法只能放在单独的 <code>XxxUtils</code> 类中（如 <code>Collections</code>、<code>Arrays</code>），现在可以直接放在接口里。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StaticMethodDemo.java</b> - 接口静态方法的使用</span></div>
+<pre><code><span class="k">public interface</span> <span class="t">Validator</span>&lt;<span class="t">T</span>&gt; {
+    <span class="k">boolean</span> isValid(<span class="t">T</span> value);
+
+    <span class="c">// 静态方法：通过接口名直接调用</span>
+    <span class="k">static</span> &lt;<span class="t">T</span>&gt; <span class="t">Validator</span>&lt;<span class="t">T</span>&gt; always() {
+        <span class="k">return</span> value -&gt; <span class="k">true</span>;
+    }
+
+    <span class="k">static</span> &lt;<span class="t">T</span>&gt; <span class="t">Validator</span>&lt;<span class="t">T</span>&gt; notNull() {
+        <span class="k">return</span> Objects::nonNull;
+    }
+}
+
+<span class="c">// 使用：不需要单独的 ValidatorUtils 类</span>
+<span class="t">Validator</span>&lt;<span class="t">String</span>&gt; v1 = <span class="t">Validator</span>.always();
+<span class="t">Validator</span>&lt;<span class="t">String</span>&gt; v2 = <span class="t">Validator</span>.notNull();</code></pre>
+</div>
+
+<p>标准库中最经典的静态方法例子是 <code>Comparator</code> 接口：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ComparatorStatics.java</b> - Comparator 接口的静态工厂方法</span></div>
+<pre><code><span class="k">public interface</span> <span class="t">Comparator</span>&lt;<span class="t">T</span>&gt; {
+    <span class="k">int</span> compare(<span class="t">T</span> o1, <span class="t">T</span> o2);
+
+    <span class="c">// 静态工厂方法 —— 以前在 Collections 工具类中</span>
+    <span class="k">static</span> &lt;<span class="t">T</span>, <span class="t">U</span> <span class="k">extends</span> <span class="t">Comparable</span>&lt;? <span class="k">super</span> <span class="t">U</span>&gt;&gt;
+    <span class="t">Comparator</span>&lt;<span class="t">T</span>&gt; comparing(<span class="t">Function</span>&lt;? <span class="k">super</span> <span class="t">T</span>, ? <span class="k">extends</span> <span class="t">U</span>&gt; keyExtractor) {
+        <span class="k">return</span> (a, b) -&gt; keyExtractor.apply(a).compareTo(keyExtractor.apply(b));
+    }
+
+    <span class="k">static</span> &lt;<span class="t">T</span>&gt; <span class="t">Comparator</span>&lt;<span class="t">T</span>&gt; naturalOrder() { ... }
+    <span class="k">static</span> &lt;<span class="t">T</span>&gt; <span class="t">Comparator</span>&lt;<span class="t">T</span>&gt; reverseOrder() { ... }
+}
+
+<span class="c">// 使用：直接通过接口名调用</span>
+users.sort(<span class="t">Comparator</span>.comparing(<span class="t">User</span>::getAge));</code></pre>
+</div>
+
+<table>
+  <thead><tr><th>对比维度</th><th>default 方法</th><th>static 方法</th></tr></thead>
+  <tbody>
+    <tr><td><strong>可覆写</strong></td><td>实现类可以覆写</td><td>不能覆写，不能继承</td></tr>
+    <tr><td><strong>调用方式</strong></td><td>通过实例调用</td><td>通过接口名调用</td></tr>
+    <tr><td><strong>this 引用</strong></td><td>有（指向实现类实例）</td><td>没有（不能访问实例成员）</td></tr>
+    <tr><td><strong>典型用途</strong></td><td>向后兼容的方法扩展</td><td>工厂方法、工具方法</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第5站：Java 9 私有方法 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Java 9 私有方法：消除 default 方法中的重复代码</h2></div>
+
+<p>Java 8 的 default 方法解决了接口演进的问题，但引入了一个新痛点：当多个 default 方法有<strong>公共逻辑</strong>时，代码无法复用——你既不能把它抽到另一个 default 方法（会暴露给实现类），也不能用 private 方法（Java 8 不支持）。</p>
+
+<p>Java 9 解决了这个问题：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>PrivateMethodDemo.java</b> - Java 9 接口私有方法</span></div>
+<pre><code><span class="k">public interface</span> <span class="t">Logger</span> {
+
+    <span class="c">// 公共逻辑：格式化和输出（私有方法，不暴露给实现类）</span>
+    <span class="k">private</span> <span class="t">String</span> format(<span class="t">String</span> level, <span class="t">String</span> msg) {
+        <span class="k">return</span> <span class="t">String</span>.format(<span class="s">"[%s] %s - %s"</span>, level, <span class="t">LocalDateTime</span>.now(), msg);
+    }
+
+    <span class="c">// 私有 static 方法</span>
+    <span class="k">private static</span> <span class="k">void</span> writeToConsole(<span class="t">String</span> formatted) {
+        System.out.println(formatted);
+    }
+
+    <span class="c">// default 方法复用私有方法</span>
+    <span class="k">default void</span> info(<span class="t">String</span> msg) {
+        writeToConsole(format(<span class="s">"INFO"</span>, msg));
+    }
+
+    <span class="k">default void</span> warn(<span class="t">String</span> msg) {
+        writeToConsole(format(<span class="s">"WARN"</span>, msg));
+    }
+
+    <span class="k">default void</span> error(<span class="t">String</span> msg) {
+        writeToConsole(format(<span class="s">"ERROR"</span>, msg));
+    }
+
+    <span class="c">// 唯一的抽象方法</span>
+    <span class="k">void</span> write(<span class="t">String</span> formatted);
+}</code></pre>
+</div>
+
+<div class="formula">
+<strong>Java 9 接口支持的完整成员类型：</strong><br/>
+1. 常量（public static final）<br/>
+2. 抽象方法（public abstract）<br/>
+3. 默认方法（public default） — Java 8+<br/>
+4. 静态方法（public static） — Java 8+<br/>
+5. <strong>私有方法（private）</strong> — Java 9+<br/>
+6. <strong>私有静态方法（private static）</strong> — Java 9+
+</div>
+
+<div class="crack"><div class="crack-label">私有方法的本质：接口的"内部实现细节"</div>
+<p>私有方法让接口的 default 方法可以复用代码，同时不暴露任何实现细节。实现类看不到也调不了这些私有方法——它们纯粹是接口内部的辅助函数。</p>
+<p>这使得接口的设计更加<strong>高内聚</strong>：公共契约（抽象方法 + default 方法）和内部实现（private 方法）清晰地分离开来。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：实战用法与总结 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>实战选型与面试要点</h2></div>
+
+<p>理解了语法之后，更重要的问题是：<strong>什么时候该用接口的 default / static / private 方法？什么时候该用抽象类？</strong></p>
+
+<table>
+  <thead><tr><th>维度</th><th>接口 default</th><th>抽象类</th><th>工具类（static）</th></tr></thead>
+  <tbody>
+    <tr><td><strong>多实现</strong></td><td>支持（核心优势）</td><td>不支持（单继承限制）</td><td>支持</td></tr>
+    <tr><td><strong>状态维护</strong></td><td>不能（接口无实例字段）</td><td>可以</td><td>不能</td></tr>
+    <tr><td><strong>向后兼容</strong></td><td>完美（不破坏实现类）</td><td>可能破坏子类</td><td>完美</td></tr>
+    <tr><td><strong>可覆写</strong></td><td>可以</td><td>可以</td><td>不能</td></tr>
+    <tr><td><strong>适用场景</strong></td><td>无状态的行为扩展</td><td>有状态的模板方法</td><td>纯工具函数</td></tr>
+  </tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>InterviewQ.java</b> - 面试高频问题速答</span></div>
+<pre><code><span class="c">// Q1: 接口可以有方法体吗？</span>
+<span class="c">// 答：Java 8 起支持 default 和 static 方法，Java 9 起支持 private 方法</span>
+
+<span class="c">// Q2: 一个类实现多个接口，default 方法冲突了怎么办？</span>
+<span class="c">// 答：三条规则——类优先 > 子接口优先 > 平级冲突必须显式 InterfaceA.super.method()</span>
+
+<span class="c">// Q3: default 方法和抽象类有什么区别？</span>
+<span class="c">// 答：接口支持多实现但不能有状态（实例字段），抽象类有状态但只能单继承</span>
+
+<span class="c">// Q4: @FunctionalInterface 注解和 default 方法的关系？</span>
+<span class="c">// 答：default 方法不影响函数式接口判定，@FunctionalInterface 只看抽象方法数量</span>
+<span class="c">//     例如 Predicate<T> 有 test() 抽象方法 + and()/or()/negate() default 方法</span>
+
+<span class="c">// Q5: Java 9 的接口私有方法解决了什么问题？</span>
+<span class="c">// 答：解决多个 default 方法之间的代码重复问题，</span>
+<span class="c">//     允许抽取公共逻辑而不暴露给实现类</span></code></pre>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">本篇核心要点</div>
+<ul>
+  <li><strong>Java 8 之前</strong>：接口只能有抽象方法和常量，一旦发布就无法演进（冻结问题）</li>
+  <li><strong>default 方法</strong>（Java 8）：允许接口提供默认实现，实现类可选覆写。核心目的是向后兼容地演进接口</li>
+  <li><strong>冲突解决三规则</strong>：类优先 > 子接口优先 > 平级冲突用 <code>InterfaceA.super.method()</code> 显式选择</li>
+  <li><strong>static 方法</strong>（Java 8）：接口的工具方法/工厂方法，通过接口名直接调用，不可覆写</li>
+  <li><strong>private 方法</strong>（Java 9）：接口内部的辅助方法，不暴露给实现类，用于消除 default 方法间的重复代码</li>
+  <li><strong>选型原则</strong>：无状态行为扩展用接口 default，有状态用抽象类，纯工具用 static</li>
+  <li><strong>经典实例</strong>：Collection 的 <code>stream()</code>、<code>forEach()</code>；Comparator 的 <code>comparing()</code></li>
+</ul>
+</div>
+</section>
+
+</main>
 </body>
 </html>

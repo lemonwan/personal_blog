@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spring 循环依赖：三级缓存解决方案</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：什么是循环依赖 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：Spring 是怎么解决循环依赖的？</h2></div>
+<div class="think"><div class="think-q">"A 依赖 B，B 依赖 A，Spring 为什么没报 StackOverflow？三级缓存每一级分别存什么？为什么两级不够？构造器注入为什么解决不了？" —— 这道题区分度极高，能一口气讲清楚的人不超过 10%。</div></div>
+
+<p><strong>循环依赖（Circular Dependency）</strong>：两个或多个 Bean 之间形成闭环的依赖关系。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 520 200" role="img" aria-label="循环依赖示意图">
+  <defs><marker id="a1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="260" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">循环依赖：A → B → A</text>
+  <rect x="80" y="60" width="140" height="60" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="150" y="88" text-anchor="middle" font-family="monospace" font-size="13" fill="#C2410C" font-weight="700">ServiceA</text>
+  <text x="150" y="106" text-anchor="middle" font-size="10" fill="#8C8676">@Autowired ServiceB</text>
+  <rect x="300" y="60" width="140" height="60" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="370" y="88" text-anchor="middle" font-family="monospace" font-size="13" fill="#C2410C" font-weight="700">ServiceB</text>
+  <text x="370" y="106" text-anchor="middle" font-size="10" fill="#8C8676">@Autowired ServiceA</text>
+  <path d="M220,78 Q260,50 300,78" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a1)"/>
+  <path d="M300,102 Q260,132 220,102" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a1)"/>
+  <text x="260" y="46" text-anchor="middle" font-size="10" fill="#3E6B8F">依赖</text>
+  <text x="260" y="148" text-anchor="middle" font-size="10" fill="#3E6B8F">依赖</text>
+  <text x="260" y="185" text-anchor="middle" font-size="11" fill="#8C8676">三种形式：构造器注入 / Setter 注入 / 字段注入（@Autowired）</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> 最简单的循环依赖：A 和 B 互相注入</figcaption>
+</figure>
+
+<p>循环依赖有三种注入方式，Spring 能解决的只有后两种：</p>
+<div class="nb-table">
+<table>
+<thead><tr><th>注入方式</th><th>Spring 能否解决</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>构造器注入</td><td>❌ 不能</td><td>对象还没 new 出来，无法放入缓存</td></tr>
+<tr><td>Setter 注入</td><td>✅ 三级缓存</td><td>对象已实例化，可以提前暴露引用</td></tr>
+<tr><td>字段注入（@Autowired）</td><td>✅ 三级缓存</td><td>同 Setter，对象已实例化</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：为什么循环依赖是问题 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>为什么循环依赖会导致问题？</h2></div>
+
+<p>Spring 创建 Bean 的标准流程是 <strong>实例化 → 属性填充 → 初始化</strong>。循环依赖会让这个流程陷入死循环：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>死循环推演</b> · 无缓存时的创建过程</span></div>
+<pre><code><span class="c">// Spring 尝试创建 A</span>
+<span class="n">1.</span> <span class="k">new</span> <span class="t">ServiceA</span>()  <span class="c">// 实例化 A（空对象）</span>
+<span class="n">2.</span> 填充 A 的属性 → 发现需要 <span class="t">ServiceB</span>
+<span class="n">3.</span>   <span class="k">new</span> <span class="t">ServiceB</span>()  <span class="c">// 实例化 B</span>
+<span class="n">4.</span>   填充 B 的属性 → 发现需要 <span class="t">ServiceA</span>
+<span class="n">5.</span>     <span class="k">new</span> <span class="t">ServiceA</span>()  <span class="c">// 又去创建 A → 回到步骤 1 → 无限循环！</span></code></pre>
+</div>
+
+<p>问题的根源：<strong>创建 A 需要 B，创建 B 又需要 A，形成递归</strong>。如果不做任何处理，Spring 容器启动时就会 StackOverflowError。</p>
+
+<div class="think"><div class="think-q">破解思路：能不能在 A 还没完全初始化时，先把 A 的"半成品"引用给 B？等 B 创建完了，A 再完成剩余初始化？—— 这就是"提前暴露引用"的核心思想。</div></div>
+
+<p>Spring 的解决方案：<strong>三级缓存（Three-level Cache）</strong>。通过提前暴露"半成品"Bean 的引用，打断循环依赖的递归链。</p>
+</section>
+
+<!-- ═══════════════ 第3站：三级缓存逐步拆解 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>三级缓存逐步拆解</h2></div>
+
+<p>Spring 在 <code>DefaultSingletonBeanRegistry</code> 中定义了三个 Map：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DefaultSingletonBeanRegistry.java</b> · Spring 5.x</span></div>
+<pre><code><span class="k">public class</span> <span class="t">DefaultSingletonBeanRegistry</span> {
+
+    <span class="c">/** 一级缓存：存放完全初始化好的单例 Bean */</span>
+    <span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; <span class="n">singletonObjects</span>
+            = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;(<span class="n">256</span>);
+
+    <span class="c">/** 二级缓存：存放提前暴露的半成品 Bean（已实例化，未填充属性） */</span>
+    <span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; <span class="n">earlySingletonObjects</span>
+            = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;(<span class="n">16</span>);
+
+    <span class="c">/** 三级缓存：存放 Bean 工厂对象（ObjectFactory），用于生成早期引用 */</span>
+    <span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">ObjectFactory</span>&lt;?&gt;&gt; <span class="n">singletonFactories</span>
+            = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;(<span class="n">16</span>);
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 310" role="img" aria-label="三级缓存结构">
+  <defs><marker id="a2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="360" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Spring 三级缓存</text>
+  <!-- 一级缓存 -->
+  <rect x="60" y="45" width="200" height="70" rx="8" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="160" y="70" text-anchor="middle" font-family="monospace" font-size="11" fill="#2E7D32" font-weight="700">一级缓存 singletonObjects</text>
+  <text x="160" y="88" text-anchor="middle" font-size="10" fill="#555">完全初始化的成品 Bean</text>
+  <text x="160" y="104" text-anchor="middle" font-size="9" fill="#8C8676">可直接使用</text>
+  <!-- 二级缓存 -->
+  <rect x="280" y="45" width="200" height="70" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="380" y="70" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C" font-weight="700">二级缓存 earlySingletonObjects</text>
+  <text x="380" y="88" text-anchor="middle" font-size="10" fill="#555">提前暴露的半成品 Bean</text>
+  <text x="380" y="104" text-anchor="middle" font-size="9" fill="#8C8676">已实例化，未填充属性</text>
+  <!-- 三级缓存 -->
+  <rect x="500" y="45" width="200" height="70" rx="8" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1.5"/>
+  <text x="600" y="70" text-anchor="middle" font-family="monospace" font-size="10" fill="#7B1FA2" font-weight="700">三级缓存 singletonFactories</text>
+  <text x="600" y="88" text-anchor="middle" font-size="10" fill="#555">ObjectFactory&lt;?&gt; 工厂</text>
+  <text x="600" y="104" text-anchor="middle" font-size="9" fill="#8C8676">用于生成代理对象</text>
+  <!-- 流程箭头 -->
+  <text x="360" y="148" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">Bean 的"升级"路径</text>
+  <rect x="510" y="170" width="180" height="40" rx="6" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="600" y="194" text-anchor="middle" font-size="10" fill="#7B1FA2">① 实例化后 → 放入三级缓存</text>
+  <path d="M510,190 L490,190" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a2)"/>
+  <rect x="290" y="170" width="190" height="40" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="385" y="194" text-anchor="middle" font-size="10" fill="#C2410C">② 被引用时 → 升级到二级缓存</text>
+  <path d="M290,190 L270,190" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a2)"/>
+  <rect x="60" y="170" width="200" height="40" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="160" y="194" text-anchor="middle" font-size="10" fill="#2E7D32">③ 初始化完成 → 升级到一级缓存</text>
+  <!-- 查找顺序 -->
+  <text x="360" y="248" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">getSingleton() 查找顺序</text>
+  <text x="360" y="270" text-anchor="middle" font-size="11" fill="#555">一级缓存 → 二级缓存 → 三级缓存（调用工厂后升级到二级）</text>
+  <text x="360" y="295" text-anchor="middle" font-size="10" fill="#8C8676">找到即返回，不再继续往下查</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> 三级缓存结构与 Bean 升级路径</figcaption>
+</figure>
+
+<p>下面用 <strong>A → B → A</strong> 的循环依赖场景，逐步推演三级缓存的工作过程：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>完整推演</b> · A 依赖 B，B 依赖 A</span></div>
+<pre><code><span class="c">========== 第一步：创建 A ==========</span>
+
+<span class="n">1.</span> <span class="k">实例化</span> A：<span class="k">new</span> <span class="t">ServiceA</span>()  → 得到空对象 A'
+<span class="n">2.</span> 将 A' 包装成 <span class="t">ObjectFactory</span>，放入 <span class="n">三级缓存</span>：
+   singletonFactories.put(<span class="t">"serviceA"</span>, () -> getEarlyBeanReference(A'))
+
+<span class="c">========== 第二步：填充 A 的属性 ==========</span>
+
+<span class="n">3.</span> 发现 A 需要 <span class="t">ServiceB</span> → 去获取 B
+<span class="n">4.</span> <span class="k">实例化</span> B：<span class="k">new</span> <span class="t">ServiceB</span>()  → 得到空对象 B'
+<span class="n">5.</span> 将 B' 包装成 <span class="t">ObjectFactory</span>，放入 <span class="n">三级缓存</span>
+
+<span class="c">========== 第三步：填充 B 的属性（关键！） ==========</span>
+
+<span class="n">6.</span> 发现 B 需要 <span class="t">ServiceA</span> → 去获取 A
+<span class="n">7.</span> getSingleton(<span class="t">"serviceA"</span>)：
+   一级缓存？没有
+   二级缓存？没有
+   <span class="k">三级缓存</span>？有！调用 ObjectFactory.getObject()
+   → 如果需要 AOP，这里返回代理对象；否则返回 A'
+   → 将结果放入 <span class="n">二级缓存</span>，从三级缓存移除
+<span class="n">8.</span> B 拿到了 A 的早期引用（A' 或代理），<span class="k">完成属性填充和初始化</span>
+<span class="n">9.</span> B 初始化完成 → 放入 <span class="n">一级缓存</span>
+
+<span class="c">========== 第四步：A 完成创建 ==========</span>
+
+<span class="n">10.</span> A 拿到完整的 B → 完成属性填充
+<span class="n">11.</span> A 初始化完成 → 放入 <span class="n">一级缓存</span>
+<span class="n">12.</span> 清理二级缓存中 A 的早期引用</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">核心要点</div>三级缓存的查找是"降级"的：一级 → 二级 → 三级。三级缓存命中后会调用 ObjectFactory 生成对象，并将结果升级到二级缓存，同时从三级缓存移除。</div>
+
+<p>下面是 <code>getSingleton()</code> 的源码，展示三级缓存的查找逻辑：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DefaultSingletonBeanRegistry.java</b> · getSingleton 三级查找</span></div>
+<pre><code><span class="k">protected</span> <span class="t">Object</span> getSingleton(<span class="t">String</span> beanName, <span class="k">boolean</span> allowEarlyReference) {
+    <span class="c">// ① 先查一级缓存：成品 Bean</span>
+    <span class="t">Object</span> singletonObject = <span class="k">this</span>.singletonObjects.get(beanName);
+
+    <span class="k">if</span> (singletonObject == <span class="k">null</span> &amp;&amp; isSingletonCurrentlyInCreation(beanName)) {
+        <span class="c">// ② 查二级缓存：提前暴露的半成品</span>
+        singletonObject = <span class="k">this</span>.earlySingletonObjects.get(beanName);
+
+        <span class="k">if</span> (singletonObject == <span class="k">null</span> &amp;&amp; allowEarlyReference) {
+            <span class="k">synchronized</span> (<span class="k">this</span>.singletonObjects) {
+                <span class="c">// 双重检查（防止并发重复创建）</span>
+                singletonObject = <span class="k">this</span>.singletonObjects.get(beanName);
+                <span class="k">if</span> (singletonObject == <span class="k">null</span>) {
+                    singletonObject = <span class="k">this</span>.earlySingletonObjects.get(beanName);
+                    <span class="k">if</span> (singletonObject == <span class="k">null</span>) {
+                        <span class="c">// ③ 查三级缓存：调用工厂生成对象</span>
+                        <span class="t">ObjectFactory</span>&lt;?&gt; factory =
+                                <span class="k">this</span>.singletonFactories.get(beanName);
+                        <span class="k">if</span> (factory != <span class="k">null</span>) {
+                            <span class="c">// 关键：这里会触发 AOP 代理创建</span>
+                            singletonObject = factory.getObject();
+                            <span class="c">// 升级到二级缓存</span>
+                            <span class="k">this</span>.earlySingletonObjects.put(beanName, singletonObject);
+                            <span class="c">// 从三级缓存移除</span>
+                            <span class="k">this</span>.singletonFactories.remove(beanName);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    <span class="k">return</span> singletonObject;
+}</code></pre>
+</div>
+
+<p>注意同步块和双重检查的设计：<strong>三级缓存的工厂只会调用一次</strong>，生成结果后立即升级到二级缓存，后续查找直接从二级缓存返回。</p>
+</section>
+
+<!-- ═══════════════ 第4站：为什么两级缓存不够 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>为什么两级缓存不够？—— AOP 代理的难题</h2></div>
+
+<div class="think"><div class="think-q">"一级缓存存成品、二级缓存存半成品，不就够了吗？为什么还要三级缓存？" —— 这是面试中最常见的追问，答案只有一个词：<strong>AOP</strong>。</div></div>
+
+<p>如果没有 AOP，两级缓存确实够用。问题出在：<strong>当 Bean 需要被 AOP 代理时，其他 Bean 注入的应该是代理对象，而不是原始对象</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>问题场景</b> · 如果只有两级缓存</span></div>
+<pre><code><span class="c">// 假设 ServiceA 被 @Transactional 标注，需要生成代理</span>
+
+<span class="c">// 只有二级缓存的情况：</span>
+<span class="n">1.</span> 实例化 A → A'（原始对象）
+<span class="n">2.</span> 放入二级缓存：earlySingletonObjects.put(<span class="t">"serviceA"</span>, A')
+<span class="n">3.</span> 创建 B，B 需要 A → 从二级缓存拿到 A'（原始对象）
+<span class="n">4.</span> A 初始化时生成代理 → ProxyA
+<span class="n">5.</span> 问题！B 持有的是 A'，而不是 ProxyA → <span class="k">事务失效！</span></code></pre>
+</div>
+
+<p>三级缓存的精妙之处在于：<strong>三级缓存存的不是 Bean 本身，而是一个 ObjectFactory（工厂）</strong>。这个工厂在 <code>getEarlyBeanReference()</code> 中判断是否需要创建代理：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AbstractAutowireCapableBeanFactory.java</b> · getEarlyBeanReference</span></div>
+<pre><code><span class="k">protected</span> <span class="t">Object</span> getEarlyBeanReference(<span class="t">String</span> beanName, <span class="t">RootBeanDefinition</span> mbd, <span class="t">Object</span> bean) {
+    <span class="t">Object</span> actualBean = bean;
+    <span class="k">if</span> (bean != <span class="k">null</span>) {
+        <span class="c">// 检查缓存中是否已有早期引用</span>
+        <span class="t">Object</span> cacheKey = getCacheKey(bean.getClass(), beanName);
+        <span class="k">if</span> (!<span class="k">this</span>.earlyProxyReferences.containsKey(cacheKey)) {
+            <span class="c">// 关键！遍历所有 SmartInstantiationAwareBeanPostProcessor</span>
+            <span class="c">// 如果 Bean 需要 AOP 代理，这里会返回代理对象</span>
+            actualBean = applyBeanPostProcessorsAfterInitialization(bean, beanName);
+        }
+    }
+    <span class="k">return</span> actualBean; <span class="c">// 可能是原始对象，也可能是代理对象</span>
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 250" role="img" aria-label="三级缓存解决 AOP 代理问题">
+  <defs><marker id="a3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">三级缓存如何解决 AOP 代理问题</text>
+  <!-- 步骤1 -->
+  <rect x="20" y="55" width="150" height="55" rx="6" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="95" y="78" text-anchor="middle" font-size="10" fill="#7B1FA2" font-weight="600">① 实例化 A'</text>
+  <text x="95" y="96" text-anchor="middle" font-size="9" fill="#555">放入三级缓存(工厂)</text>
+  <path d="M170,82 L200,82" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a3)"/>
+  <!-- 步骤2 -->
+  <rect x="205" y="55" width="150" height="55" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="280" y="78" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">② B 需要 A</text>
+  <text x="280" y="96" text-anchor="middle" font-size="9" fill="#555">调用工厂.getObject()</text>
+  <path d="M355,82 L385,82" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a3)"/>
+  <!-- 步骤3 -->
+  <rect x="390" y="55" width="150" height="55" rx="6" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="465" y="74" text-anchor="middle" font-size="10" fill="#7B1FA2" font-weight="600">③ 工厂判断</text>
+  <text x="465" y="90" text-anchor="middle" font-size="9" fill="#555">需要 AOP？</text>
+  <text x="465" y="104" text-anchor="middle" font-size="9" fill="#2E7D32">是 → 返回 ProxyA</text>
+  <path d="M465,110 L465,140" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a3)"/>
+  <!-- 步骤4 -->
+  <rect x="390" y="145" width="150" height="55" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="465" y="168" text-anchor="middle" font-size="10" fill="#2E7D32" font-weight="600">④ 升级到二级缓存</text>
+  <text x="465" y="186" text-anchor="middle" font-size="9" fill="#555">ProxyA 存入二级</text>
+  <path d="M390,172 L240,172" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a3)"/>
+  <!-- 步骤5 -->
+  <rect x="20" y="145" width="215" height="55" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="128" y="168" text-anchor="middle" font-size="10" fill="#2E7D32" font-weight="600">⑤ B 拿到 ProxyA</text>
+  <text x="128" y="186" text-anchor="middle" font-size="9" fill="#555">B 持有的是代理对象，AOP 生效！</text>
+  <text x="350" y="235" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">关键：代理对象的创建被"延迟"到了真正需要的时候</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span> 三级缓存的 ObjectFactory 延迟创建代理对象</figcaption>
+</figure>
+
+<div class="takeaway"><div class="takeaway-label">为什么需要三级</div>三级缓存的本质是将"是否创建代理"的判断延迟到真正需要早期引用的时刻。如果没有循环依赖，Bean 正常走完初始化流程，在初始化后阶段创建代理；如果发生循环依赖，三级缓存的工厂会提前触发代理创建，确保其他 Bean 拿到的是代理对象而非原始对象。</div>
+</section>
+
+<!-- ═══════════════ 第5站：构造器注入为什么不行 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>构造器注入为什么无法解决循环依赖？</h2></div>
+
+<div class="think"><div class="think-q">"为什么构造器注入的循环依赖 Spring 解决不了？Setter 和字段注入就可以？" —— 理解这一点，需要回到 Bean 的创建时间线。</div></div>
+
+<p>三级缓存的前提是：<strong>Bean 必须先完成实例化（new 出来），才能将引用放入缓存</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>构造器注入的死结</b></span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">ServiceA</span> {
+    <span class="k">private final</span> <span class="t">ServiceB</span> b;
+    <span class="k">public</span> <span class="t">ServiceA</span>(<span class="t">ServiceB</span> b) { <span class="k">this</span>.b = b; } <span class="c">// 构造器注入</span>
+}
+
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">ServiceB</span> {
+    <span class="k">private final</span> <span class="t">ServiceA</span> a;
+    <span class="k">public</span> <span class="t">ServiceB</span>(<span class="t">ServiceA</span> a) { <span class="k">this</span>.a = a; } <span class="c">// 构造器注入</span>
+}
+
+<span class="c">// 创建过程：</span>
+<span class="n">1.</span> 要 new ServiceA → 需要 ServiceB 作为参数
+<span class="n">2.</span> 要 new ServiceB → 需要 ServiceA 作为参数
+<span class="n">3.</span> 要 new ServiceA → ...  → <span class="k">BeanCurrentlyInCreationException</span>!</code></pre>
+</div>
+
+<p>根本原因：<strong>构造器注入要求在 new 对象的时候就拿到依赖，此时对象还不存在，无法放入任何缓存</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 640 180" role="img" aria-label="构造器注入 vs Setter 注入时间线">
+  <text x="320" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Bean 生命周期与注入时机</text>
+  <!-- 构造器注入 -->
+  <text x="20" y="60" font-size="11" fill="#C2410C" font-weight="600">构造器注入：</text>
+  <rect x="130" y="42" width="100" height="30" rx="4" fill="#F8D7DA" stroke="#C2410C" stroke-width="1"/>
+  <text x="180" y="62" text-anchor="middle" font-size="10" fill="#C2410C">实例化(需要B!)</text>
+  <text x="240" y="62" font-size="18" fill="#C2410C">✗</text>
+  <text x="270" y="62" font-size="10" fill="#8C8676">对象还没创建，无法放入缓存</text>
+  <!-- Setter/字段注入 -->
+  <text x="20" y="110" font-size="11" fill="#2E7D32" font-weight="600">Setter/字段注入：</text>
+  <rect x="130" y="92" width="80" height="30" rx="4" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="170" y="112" text-anchor="middle" font-size="10" fill="#2E7D32">实例化 ✓</text>
+  <rect x="225" y="92" width="120" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="285" y="112" text-anchor="middle" font-size="10" fill="#C2410C">放入三级缓存 ✓</text>
+  <rect x="360" y="92" width="100" height="30" rx="4" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="410" y="112" text-anchor="middle" font-size="10" fill="#2E7D32">属性填充</text>
+  <rect x="475" y="92" width="80" height="30" rx="4" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="515" y="112" text-anchor="middle" font-size="10" fill="#2E7D32">初始化</text>
+  <text x="320" y="165" text-anchor="middle" font-size="11" fill="#555">构造器注入：实例化和注入是同一个动作 → 无法"提前暴露"</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span> 构造器注入在实例化阶段就需要依赖，无法提前暴露</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">破解构造器循环依赖</div>可以使用 <code>@Lazy</code> 注解：Spring 不会立即注入真实对象，而是注入一个代理，等到第一次调用方法时才去获取真实 Bean。</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>@Lazy 打破构造器循环</b></span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">ServiceA</span> {
+    <span class="k">private final</span> <span class="t">ServiceB</span> b;
+    <span class="k">public</span> <span class="t">ServiceA</span>(<span class="k">@Lazy</span> <span class="t">ServiceB</span> b) {
+        <span class="k">this</span>.b = b; <span class="c">// 注入的是代理，不会触发 B 的创建</span>
+    }
+}</code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：Spring Boot 2.6 默认禁止 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>Spring Boot 2.6+ 默认禁止循环依赖</h2></div>
+
+<p>从 Spring Boot 2.6 开始，<strong>循环依赖默认被禁止</strong>，应用启动时会直接报错：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>启动报错</b> · Spring Boot 2.6+</span></div>
+<pre><code><span class="k">***************************</span>
+<span class="n">APPLICATION FAILED TO START</span>
+<span class="k">***************************</span>
+
+The dependencies of some of the beans in the application context
+form a cycle:
+
+   serviceA
+      ↓
+   serviceB
+      ↓
+   serviceA
+<span class="c">// BeanCurrentlyInCreationException</span></code></pre>
+</div>
+
+<p>Spring 团队认为循环依赖是<strong>设计缺陷的信号</strong>，不应被默默容忍。禁止循环依赖可以：</p>
+<ul>
+  <li>迫使开发者重新审视类职责划分</li>
+  <li>避免隐藏的初始化顺序问题</li>
+  <li>提高代码可维护性和可测试性</li>
+</ul>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>application.yml</b> · 如果确实需要临时允许</span></div>
+<pre><code><span class="k">spring</span>:
+  <span class="k">main</span>:
+    <span class="n">allow-circular-references</span>: <span class="k">true</span>  <span class="c"># 不推荐，仅作为迁移过渡</span></code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">最佳实践</div>不要依赖 <code>allow-circular-references=true</code> 来掩盖问题。循环依赖几乎总是意味着类职责耦合，应该通过重构来消除。</div>
+</section>
+
+<!-- ═══════════════ 第7站：替代方案与总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>替代方案与面试总结</h2></div>
+
+<p>消除循环依赖的常用手段：</p>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>方案</th><th>做法</th><th>适用场景</th></tr></thead>
+<tbody>
+<tr><td>提取公共类</td><td>将 A、B 共同依赖的部分抽到 C</td><td>A、B 共享数据或逻辑</td></tr>
+<tr><td>事件驱动</td><td>A 发布事件，B 监听，解耦直接依赖</td><td>通知型依赖（如创建后回调）</td></tr>
+<tr><td>@Lazy</td><td>延迟注入代理对象</td><td>必须用构造器注入的遗留代码</td></tr>
+<tr><td>Setter 注入 + @Autowired(required=false)</td><td>将构造器注入改为 Setter</td><td>依赖非必须的场景</td></tr>
+<tr><td>ApplicationContext.getBean()</td><td>运行时动态获取</td><td>极端情况，不推荐</td></tr>
+</tbody>
+</table>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 640 200" role="img" aria-label="重构消除循环依赖">
+  <defs><marker id="a4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="320" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">重构：提取公共类消除循环依赖</text>
+  <!-- Before -->
+  <text x="150" y="50" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">Before: A ⇄ B</text>
+  <rect x="70" y="65" width="70" height="40" rx="6" fill="#F8D7DA" stroke="#C2410C" stroke-width="1"/>
+  <text x="105" y="90" text-anchor="middle" font-size="11" fill="#C2410C">A</text>
+  <rect x="170" y="65" width="70" height="40" rx="6" fill="#F8D7DA" stroke="#C2410C" stroke-width="1"/>
+  <text x="205" y="90" text-anchor="middle" font-size="11" fill="#C2410C">B</text>
+  <path d="M140,75 Q170,55 170,75" fill="none" stroke="#C2410C" stroke-width="1" marker-end="url(#a4)"/>
+  <path d="M170,95 Q140,115 140,95" fill="none" stroke="#C2410C" stroke-width="1" marker-end="url(#a4)"/>
+  <!-- After -->
+  <text x="470" y="50" text-anchor="middle" font-size="11" fill="#2E7D32" font-weight="600">After: A → C ← B</text>
+  <rect x="380" y="65" width="70" height="40" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="415" y="90" text-anchor="middle" font-size="11" fill="#2E7D32">A</text>
+  <rect x="480" y="65" width="70" height="40" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="515" y="90" text-anchor="middle" font-size="11" fill="#2E7D32">B</text>
+  <rect x="430" y="130" width="70" height="40" rx="6" fill="#EDE3C4" stroke="#C2410C" stroke-width="1"/>
+  <text x="465" y="155" text-anchor="middle" font-size="11" fill="#C2410C">C</text>
+  <path d="M415,105 L445,130" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a4)"/>
+  <path d="M515,105 L485,130" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text x="320" y="192" text-anchor="middle" font-size="10" fill="#8C8676">C 承载 A、B 的共同逻辑，A 和 B 不再直接互相依赖</text>
+</svg>
+<figcaption><span class="fig-no">图 5</span> 通过提取公共类消除循环依赖</figcaption>
+</figure>
+
+<div class="recap">
+<strong>面试回答模板</strong>
+<ul>
+  <li><strong>是什么</strong>：循环依赖指 Bean 之间形成闭环依赖，Spring 通过三级缓存解决 Setter / 字段注入的循环依赖</li>
+  <li><strong>三级缓存</strong>：一级 singletonObjects（成品）→ 二级 earlySingletonObjects（半成品）→ 三级 singletonFactories（工厂）</li>
+  <li><strong>为什么三级</strong>：二级缓存无法处理 AOP 代理场景。三级缓存通过 ObjectFactory 延迟创建代理对象，确保其他 Bean 拿到的是代理而非原始对象</li>
+  <li><strong>构造器注入</strong>：不行，因为构造器注入时对象还未实例化，无法放入缓存。可用 @Lazy 缓解</li>
+  <li><strong>Spring Boot 2.6+</strong>：默认禁止循环依赖，鼓励通过重构消除设计缺陷</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

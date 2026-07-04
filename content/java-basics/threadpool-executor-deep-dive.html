@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThreadPoolExecutor 深度解析</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "线程池 ThreadPoolExecutor：7 大参数与 4 种拒绝策略"
+  difficulty: 高级
+  interviewFreq: 必问
+  desc: "corePoolSize、maximumPoolSize、keepAliveTime、workQueue 类型选择——生产环境线程池参数怎么定？附带调优公式。"
+-->
+
+<!-- ================================================================
+     第 1 站 — 开场：一次真实线上事故
+     ================================================================ -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>凌晨 2 点的告警：200 个请求同时超时</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"线上服务 200 个请求同时超时，jstack 打出来一看——线程池队列满了，200 个线程全部 WAITING。" 这不是段子，是真实 P0 事故。</p>
+  </div>
+
+  <p>那天晚上，运营做了一波大促预热，流量比平时翻了 5 倍。我们的订单查询服务使用了一个"看起来挺合理"的线程池配置：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">事故现场配置</div>
+    <pre class="srcbox-file"><span class="c">// 当时的"合理"配置</span>
+<span class="k">ExecutorService</span> pool = <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>(
+    <span class="n">10</span>,                       <span class="c">// corePoolSize</span>
+    <span class="n">10</span>,                       <span class="c">// maximumPoolSize —— 和 core 一样！</span>
+    <span class="n">0L</span>, <span class="t">TimeUnit</span>.SECONDS,
+    <span class="k">new</span> <span class="t">LinkedBlockingQueue</span>&lt;&gt;() <span class="c">// 无界队列！默认容量 Integer.MAX_VALUE</span>
+);</pre>
+  </div>
+
+  <p>问题一目了然：<code>LinkedBlockingQueue</code> 默认容量是 <code>Integer.MAX_VALUE</code>（约 21 亿），队列永远不会满，所以 <code>maximumPoolSize</code> 形同虚设——线程池永远只有 10 个核心线程在干活。当流量洪峰涌入，10 个线程处理不过来，任务全部堆在队列里排队，每个请求都在等队列里的任务被执行，而队列里的任务在等线程来取——死等，超时，雪崩。</p>
+
+  <div class="crack">
+    <span class="crack-label">面试为什么总考线程池？</span>
+    <p>线程池是并发编程面试出现频率最高的主题，没有之一。原因有三：</p>
+    <ol>
+      <li><strong>覆盖面广</strong>——7 个参数串联了线程管理、队列、锁、OOM、GC 等核心知识点</li>
+      <li><strong>生产强相关</strong>——几乎每个 Java 后端项目都在用，配置错误真的会炸</li>
+      <li><strong>区分度高</strong>——能说清楚 execute() 决策树的候选人，基本功不会差</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 2 站 — 7 大参数详解
+     ================================================================ -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>7 大参数详解：把线程池想象成一家餐厅</h2>
+  </div>
+
+  <p><code>ThreadPoolExecutor</code> 的构造函数有 7 个参数，死记硬背容易混。我们用一个类比来串起来：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg" style="max-width:800px;width:100%">
+      <!-- 餐厅类比图 -->
+      <defs>
+        <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
+        <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+        <linearGradient id="g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        <linearGradient id="g4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+      </defs>
+
+      <!-- corePoolSize -->
+      <rect x="30" y="30" width="160" height="80" rx="10" fill="url(#g1)"/>
+      <text x="110" y="62" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">corePoolSize</text>
+      <text x="110" y="85" text-anchor="middle" fill="#e0e7ff" font-size="12">正式厨师 = 4 人</text>
+
+      <!-- maximumPoolSize -->
+      <rect x="220" y="30" width="175" height="80" rx="10" fill="url(#g2)"/>
+      <text x="307" y="62" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">maximumPoolSize</text>
+      <text x="307" y="85" text-anchor="middle" fill="#fef3c7" font-size="12">正式+临时工 = 8 人</text>
+
+      <!-- keepAliveTime -->
+      <rect x="425" y="30" width="170" height="80" rx="10" fill="url(#g3)"/>
+      <text x="510" y="62" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">keepAliveTime</text>
+      <text x="510" y="85" text-anchor="middle" fill="#d1fae5" font-size="12">临时工空闲 60s 就下班</text>
+
+      <!-- workQueue -->
+      <rect x="625" y="30" width="155" height="80" rx="10" fill="url(#g4)"/>
+      <text x="702" y="62" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">workQueue</text>
+      <text x="702" y="85" text-anchor="middle" fill="#fecaca" font-size="12">等候区 = 50 个座位</text>
+
+      <!-- 关系箭头 -->
+      <line x1="190" y1="70" x2="220" y2="70" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+      <line x1="395" y1="70" x2="425" y2="70" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+      <defs><marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#64748b"/></marker></defs>
+
+      <!-- 流程说明 -->
+      <rect x="30" y="145" width="740" height="50" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="400" y="175" text-anchor="middle" fill="#334155" font-size="13">任务来了 → 先看正式厨师有没有空的 → 没有就排队（等候区）→ 等候区满了 → 叫临时工 → 临时工也满了 → 拒绝（关门谢客）</text>
+
+      <!-- 下方三个参数 -->
+      <rect x="30" y="225" width="220" height="85" rx="10" fill="#8b5cf6"/>
+      <text x="140" y="258" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">threadFactory</text>
+      <text x="140" y="281" text-anchor="middle" fill="#ede9fe" font-size="11">厨师招聘渠道（线程命名）</text>
+
+      <rect x="280" y="225" width="220" height="85" rx="10" fill="#ec4899"/>
+      <text x="390" y="258" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">rejectedExecutionHandler</text>
+      <text x="390" y="281" text-anchor="middle" fill="#fce7f3" font-size="11">客满后的处理方式（拒绝策略）</text>
+
+      <rect x="530" y="225" width="240" height="85" rx="10" fill="#06b6d4"/>
+      <text x="650" y="258" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">unit (TimeUnit)</text>
+      <text x="650" y="281" text-anchor="middle" fill="#cffafe" font-size="11">keepAliveTime 的时间单位</text>
+
+      <!-- 底部注释 -->
+      <text x="400" y="355" text-anchor="middle" fill="#94a3b8" font-size="12">图：ThreadPoolExecutor 7 大参数关系 —— 餐厅模型</text>
+      <text x="400" y="375" text-anchor="middle" fill="#94a3b8" font-size="11">正式厨师（core）永远在岗；临时工（max - core）在高峰期才上班，空闲超时就下班</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> ThreadPoolExecutor 7 大参数——餐厅类比关系图</figcaption>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>参数</th><th>餐厅类比</th><th>技术含义</th><th>默认值/常见值</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>corePoolSize</code></td><td>正式厨师</td><td>核心线程数，即使空闲也不会被回收</td><td>按业务设定</td></tr>
+      <tr><td><code>maximumPoolSize</code></td><td>正式 + 临时工上限</td><td>池中允许的最大线程数</td><td>≥ corePoolSize</td></tr>
+      <tr><td><code>keepAliveTime</code></td><td>临时工空闲多久下班</td><td>非核心线程空闲存活时间</td><td>60s</td></tr>
+      <tr><td><code>unit</code></td><td>时间的单位</td><td>keepAliveTime 的时间单位</td><td>SECONDS</td></tr>
+      <tr><td><code>workQueue</code></td><td>等候区</td><td>存放待执行任务的阻塞队列</td><td>LinkedBlockingQueue</td></tr>
+      <tr><td><code>threadFactory</code></td><td>招聘渠道</td><td>创建线程的工厂，常用于设置线程名</td><td>Executors.defaultThreadFactory()</td></tr>
+      <tr><td><code>rejectedExecutionHandler</code></td><td>客满怎么处理</td><td>线程池和队列都满时的拒绝策略</td><td>AbortPolicy</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心记忆</span>
+    <p>corePoolSize 是"保底编制"，maximumPoolSize 是"最大编制"，keepAliveTime 只管非核心线程的去留，workQueue 是核心和最大线程之间的缓冲区。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 3 站 — execute() 完整流程
+     ================================================================ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>execute() 决策树：一个任务的生死之旅</h2>
+  </div>
+
+  <p>当你调用 <code>pool.execute(task)</code> 时，线程池内部会经过一系列判断来决定这个任务的命运。这段逻辑是整个 ThreadPoolExecutor 的灵魂，面试必问。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 820 540" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
+      <defs>
+        <marker id="ar2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#475569"/></marker>
+        <linearGradient id="grn" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#22c55e"/><stop offset="100%" stop-color="#16a34a"/></linearGradient>
+        <linearGradient id="blu" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#2563eb"/></linearGradient>
+        <linearGradient id="org" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+        <linearGradient id="red" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+      </defs>
+
+      <!-- 起始节点 -->
+      <rect x="300" y="15" width="220" height="40" rx="20" fill="#1e293b"/>
+      <text x="410" y="40" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">execute(Runnable task)</text>
+
+      <!-- 决策1 -->
+      <polygon points="410,80 530,130 410,180 290,130" fill="url(#blu)" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="410" y="125" text-anchor="middle" fill="#fff" font-size="12" font-weight="500">workerCount</text>
+      <text x="410" y="142" text-anchor="middle" fill="#fff" font-size="12" font-weight="500">&lt; corePoolSize ?</text>
+
+      <!-- YES → 创建核心线程 -->
+      <line x1="290" y1="130" x2="130" y2="130" stroke="#475569" stroke-width="1.5" marker-end="url(#ar2)"/>
+      <text x="210" y="122" text-anchor="middle" fill="#22c55e" font-size="12" font-weight="600">YES</text>
+      <rect x="20" y="110" width="110" height="40" rx="8" fill="url(#grn)"/>
+      <text x="75" y="135" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">创建核心线程</text>
+
+      <!-- NO ↓ -->
+      <line x1="410" y1="180" x2="410" y2="220" stroke="#475569" stroke-width="1.5" marker-end="url(#ar2)"/>
+      <text x="430" y="205" fill="#ef4444" font-size="12" font-weight="600">NO</text>
+
+      <!-- 决策2: workQueue.offer -->
+      <polygon points="410,225 540,280 410,335 280,280" fill="url(#org)" stroke="#b45309" stroke-width="1.5"/>
+      <text x="410" y="275" text-anchor="middle" fill="#fff" font-size="12" font-weight="500">workQueue.offer()</text>
+      <text x="410" y="292" text-anchor="middle" fill="#fff" font-size="12" font-weight="500">入队成功?</text>
+
+      <!-- YES → 入队 -->
+      <line x1="280" y1="280" x2="130" y2="280" stroke="#475569" stroke-width="1.5" marker-end="url(#ar2)"/>
+      <text x="210" y="272" text-anchor="middle" fill="#22c55e" font-size="12" font-weight="600">YES</text>
+      <rect x="20" y="260" width="110" height="40" rx="8" fill="url(#grn)"/>
+      <text x="75" y="285" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">入队等待</text>
+
+      <!-- NO ↓ -->
+      <line x1="410" y1="335" x2="410" y2="370" stroke="#475569" stroke-width="1.5" marker-end="url(#ar2)"/>
+      <text x="430" y="358" fill="#ef4444" font-size="12" font-weight="600">NO (队列满)</text>
+
+      <!-- 决策3 -->
+      <polygon points="410,375 540,425 410,475 280,425" fill="url(#blu)" stroke="#1e40af" stroke-width="1.5"/>
+      <text x="410" y="420" text-anchor="middle" fill="#fff" font-size="12" font-weight="500">workerCount</text>
+      <text x="410" y="437" text-anchor="middle" fill="#fff" font-size="12" font-weight="500">&lt; maximumPoolSize ?</text>
+
+      <!-- YES → 创建非核心线程 -->
+      <line x1="540" y1="425" x2="670" y2="425" stroke="#475569" stroke-width="1.5" marker-end="url(#ar2)"/>
+      <text x="605" y="417" text-anchor="middle" fill="#22c55e" font-size="12" font-weight="600">YES</text>
+      <rect x="670" y="405" width="130" height="40" rx="8" fill="url(#grn)"/>
+      <text x="735" y="425" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">创建非核心线程</text>
+      <text x="735" y="440" text-anchor="middle" fill="#d1fae5" font-size="10">直接执行 task</text>
+
+      <!-- NO ↓ -->
+      <line x1="410" y1="475" x2="410" y2="500" stroke="#475569" stroke-width="1.5" marker-end="url(#ar2)"/>
+      <text x="430" y="493" fill="#ef4444" font-size="12" font-weight="600">NO</text>
+
+      <!-- 拒绝 -->
+      <rect x="310" y="500" width="200" height="35" rx="8" fill="url(#red)"/>
+      <text x="410" y="522" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">执行拒绝策略 reject()</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> ThreadPoolExecutor.execute() 完整决策流程</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">JDK 8 源码 — ThreadPoolExecutor.execute()</div>
+    <pre class="srcbox-file"><span class="k">public void</span> <span class="n">execute</span>(<span class="t">Runnable</span> command) {
+    <span class="k">if</span> (command == <span class="k">null</span>)
+        <span class="k">throw new</span> <span class="t">NullPointerException</span>();
+
+    <span class="k">int</span> c = ctl.get();                        <span class="c">// ctl 是 AtomicInteger，高3位=状态，低29位=线程数</span>
+    <span class="k">int</span> workerCount = workerCountOf(c);
+
+    <span class="c">// 第一步：线程数 < corePoolSize → 创建核心线程</span>
+    <span class="k">if</span> (workerCount &lt; corePoolSize) {
+        <span class="k">if</span> (addWorker(command, <span class="k">true</span>))         <span class="c">// true = 创建核心线程</span>
+            <span class="k">return</span>;
+        c = ctl.get();
+    }
+
+    <span class="c">// 第二步：尝试入队</span>
+    <span class="k">if</span> (isRunning(c) &amp;&amp; workQueue.offer(command)) {
+        <span class="k">int</span> recheck = ctl.get();
+        <span class="k">if</span> (!isRunning(recheck) &amp;&amp; remove(command))
+            reject(command);                   <span class="c">// 池已关闭，拒绝</span>
+        <span class="k">else if</span> (workerCountOf(recheck) == <span class="n">0</span>)
+            addWorker(<span class="k">null</span>, <span class="k">false</span>);           <span class="c">// 兜底：确保至少有一个线程消费队列</span>
+        <span class="k">return</span>;
+    }
+
+    <span class="c">// 第三步：队列满 → 创建非核心线程</span>
+    <span class="k">if</span> (!addWorker(command, <span class="k">false</span>))           <span class="c">// false = 创建非核心线程</span>
+        reject(command);                       <span class="c">// 第四步：线程也满了 → 拒绝</span>
+}</pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">面试官追问：为什么入队成功后还要 recheck 一次线程池状态？</p>
+    <p>因为在 <code>offer()</code> 成功和 <code>recheck</code> 之间，线程池可能被调用了 <code>shutdown()</code>。如果此时线程池已关闭且任务可以从队列中移除，就拒绝该任务。如果线程池还在运行但 workerCount 已经为 0（所有线程都意外退出了），就创建一个非核心线程来保证队列中的任务能被消费。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 4 站 — workQueue 选择
+     ================================================================ -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>workQueue 选择：4 种队列的取舍</h2>
+  </div>
+
+  <p>workQueue 的选择直接决定了线程池在流量高峰期的表现。这是很多候选人容易忽略的点——他们能背出 7 个参数名，却说不出不同队列的适用场景。</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>队列类型</th><th>容量</th><th>特点</th><th>风险</th><th>适用场景</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>LinkedBlockingQueue</code></td>
+        <td>默认 Integer.MAX_VALUE（≈无界）</td>
+        <td>链表实现，吞吐量高</td>
+        <td style="color:#dc2626;font-weight:600">OOM !</td>
+        <td>必须指定容量后使用</td>
+      </tr>
+      <tr>
+        <td><code>ArrayBlockingQueue</code></td>
+        <td>有界，必须指定 capacity</td>
+        <td>数组实现，一把 ReentrantLock</td>
+        <td>队列满时触发 max 线程或拒绝</td>
+        <td>生产环境首选</td>
+      </tr>
+      <tr>
+        <td><code>SynchronousQueue</code></td>
+        <td>0（不存储任务）</td>
+        <td>直接交付，生产者必须等消费者</td>
+        <td>无线程接收就立即走拒绝策略</td>
+        <td>Executors.newCachedThreadPool()</td>
+      </tr>
+      <tr>
+        <td><code>PriorityBlockingQueue</code></td>
+        <td>无界</td>
+        <td>按优先级排序</td>
+        <td>优先级低的任务可能饥饿</td>
+        <td>任务有明确优先级的场景</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">生产推荐配置</div>
+    <pre class="srcbox-file"><span class="c">// 推荐：有界队列 + CallerRunsPolicy = 天然背压</span>
+<span class="k">new</span> <span class="t">ThreadPoolExecutor</span>(
+    <span class="n">20</span>,                                       <span class="c">// core</span>
+    <span class="n">50</span>,                                       <span class="c">// max</span>
+    <span class="n">60L</span>, <span class="t">TimeUnit</span>.SECONDS,                    <span class="c">// 非核心线程空闲 60s 回收</span>
+    <span class="k">new</span> <span class="t">ArrayBlockingQueue</span>&lt;&gt;(<span class="n">1000</span>),          <span class="c">// 有界队列，容量 1000</span>
+    <span class="k">new</span> <span class="t">ThreadFactoryBuilder</span>()                <span class="c">// Guava 工具</span>
+        .setNameFormat(<span class="t">"order-pool-%d"</span>)
+        .setDaemon(<span class="k">true</span>)
+        .build(),
+    <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>.<span class="t">CallerRunsPolicy</span>()  <span class="c">// 队列满 + 线程满 → 调用者线程自己跑</span>
+);</pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">为什么 ArrayBlockingQueue 用一把锁而 LinkedBlockingQueue 用两把锁？</p>
+    <p><code>LinkedBlockingQueue</code> 内部使用 <code>putLock</code> 和 <code>takeLock</code> 两把锁分离生产和消费操作，在高并发下吞吐量更高。<code>ArrayBlockingQueue</code> 只有一把 <code>lock</code>，但实现更简单、内存占用更低，且强制有界——对于线程池场景，这点吞吐量差异远不如"有界"带来的安全性重要。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 5 站 — 4 种拒绝策略
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>4 种拒绝策略：任务被拒后的 4 种命运</h2>
+  </div>
+
+  <p>当线程池的线程数已达 maximumPoolSize 且 workQueue 已满，新提交的任务将被拒绝。ThreadPoolExecutor 内置了 4 种拒绝策略：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">源码 — 4 种 RejectedExecutionHandler</div>
+    <pre class="srcbox-file"><span class="c">// 1. AbortPolicy（默认）—— 直接抛异常</span>
+<span class="k">public static class</span> <span class="t">AbortPolicy</span> <span class="k">implements</span> <span class="t">RejectedExecutionHandler</span> {
+    <span class="k">public void</span> <span class="n">rejectedExecution</span>(<span class="t">Runnable</span> r, <span class="t">ThreadPoolExecutor</span> e) {
+        <span class="k">throw new</span> <span class="t">RejectedExecutionException</span>(
+            <span class="t">"Task "</span> + r.toString() + <span class="t">" rejected from "</span> + e.toString());
+    }
+}
+
+<span class="c">// 2. CallerRunsPolicy —— 谁提交谁执行（反压利器）</span>
+<span class="k">public static class</span> <span class="t">CallerRunsPolicy</span> <span class="k">implements</span> <span class="t">RejectedExecutionHandler</span> {
+    <span class="k">public void</span> <span class="n">rejectedExecution</span>(<span class="t">Runnable</span> r, <span class="t">ThreadPoolExecutor</span> e) {
+        <span class="k">if</span> (!e.isShutdown()) {
+            r.run();    <span class="c">// 在调用者线程直接执行，不抛异常，不丢任务</span>
+        }
+    }
+}
+
+<span class="c">// 3. DiscardPolicy —— 默默丢弃，不声张</span>
+<span class="k">public static class</span> <span class="t">DiscardPolicy</span> <span class="k">implements</span> <span class="t">RejectedExecutionHandler</span> {
+    <span class="k">public void</span> <span class="n">rejectedExecution</span>(<span class="t">Runnable</span> r, <span class="t">ThreadPoolExecutor</span> e) {
+        <span class="c">// 空实现，任务被静默丢弃</span>
+    }
+}
+
+<span class="c">// 4. DiscardOldestPolicy —— 丢弃队列头部最旧的任务</span>
+<span class="k">public static class</span> <span class="t">DiscardOldestPolicy</span> <span class="k">implements</span> <span class="t">RejectedExecutionHandler</span> {
+    <span class="k">public void</span> <span class="n">rejectedExecution</span>(<span class="t">Runnable</span> r, <span class="t">ThreadPoolExecutor</span> e) {
+        <span class="k">if</span> (!e.isShutdown()) {
+            e.getQueue().poll();   <span class="c">// 丢弃队列头部的任务</span>
+            e.execute(r);          <span class="c">// 重新尝试提交当前任务</span>
+        }
+    }
+}</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>策略</th><th>行为</th><th>适用场景</th><th>风险</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>AbortPolicy</strong></td>
+        <td>抛 RejectedExecutionException</td>
+        <td>快速失败，让调用方感知</td>
+        <td>上层必须 catch，否则请求 500</td>
+      </tr>
+      <tr>
+        <td><strong>CallerRunsPolicy</strong></td>
+        <td>调用者线程自己执行任务</td>
+        <td>Web 服务反压：自动降低提交速度</td>
+        <td>调用者线程（如 Tomcat 线程）被阻塞</td>
+      </tr>
+      <tr>
+        <td><strong>DiscardPolicy</strong></td>
+        <td>静默丢弃</td>
+        <td>日志采集、监控上报等可丢失场景</td>
+        <td>任务丢失无任何通知，排查困难</td>
+      </tr>
+      <tr>
+        <td><strong>DiscardOldestPolicy</strong></td>
+        <td>丢弃最旧任务，重试提交</td>
+        <td>只关心最新数据的场景（如股价推送）</td>
+        <td>旧任务丢失，不适合要求严格顺序的业务</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">CallerRunsPolicy 的反压原理</span>
+    <p>假设 Tomcat 工作线程向线程池提交任务，队列满了。此时 <code>CallerRunsPolicy</code> 会让 Tomcat 线程自己执行这个任务——相当于 Tomcat 线程被"征用"了，在它执行完之前，它无法处理下一个 HTTP 请求。这就自然地减缓了任务提交的速度，形成了一种负反馈机制：<strong>下游处理不过来 → 上游自动减速</strong>。这比直接抛异常然后返回 500 优雅得多。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试答题模板</span>
+    <p>"生产环境一般用 CallerRunsPolicy 做反压。如果任务不能丢且不能阻塞调用者，我会自定义 RejectedExecutionHandler，把被拒绝的任务持久化到数据库或 MQ，事后补偿。"</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — 生产环境参数调优
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>生产环境参数调优：公式 + 实战</h2>
+  </div>
+
+  <p>面试中被问"线程池参数怎么设"，回答"看情况"是不够的。你需要给出公式、给出数字、给出监控手段。</p>
+
+  <div class="formula">
+    <p><strong>CPU 密集型</strong>（纯计算、加密、序列化）：</p>
+    <p style="text-align:center;font-size:1.1em;margin:12px 0"><code>corePoolSize = N_CPU + 1</code></p>
+    <p>多一个线程是为了某个线程偶尔因缺页中断等暂停时，额外的线程能顶上。</p>
+  </div>
+
+  <div class="formula">
+    <p><strong>IO 密集型</strong>（RPC 调用、数据库查询、HTTP 请求）：</p>
+    <p style="text-align:center;font-size:1.1em;margin:12px 0"><code>corePoolSize = N_CPU &times; (1 + W / C)</code></p>
+    <p>其中 <code>W</code> = 线程等待时间（等 IO），<code>C</code> = 线程计算时间（CPU 运算）。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">实战案例：8 核机器，IO 密集型服务</div>
+    <pre class="srcbox-file"><span class="c">/*
+ * 场景：订单查询服务，每次请求要调 3 个 RPC + 2 次 DB 查询
+ * 机器：8 核
+ * 观测：单次请求中 CPU 计算约 10ms，IO 等待约 40ms
+ *       → W/C = 40/10 = 4
+ *
+ * 套用公式：corePoolSize = 8 × (1 + 4) = 40
+ */</span>
+
+<span class="k">int</span> cpuCores  = <span class="t">Runtime</span>.getRuntime().availableProcessors();  <span class="c">// 8</span>
+<span class="k">double</span> wcRatio = <span class="n">4.0</span>;  <span class="c">// 等待时间 / 计算时间</span>
+<span class="k">int</span> coreSize  = (<span class="k">int</span>) (cpuCores * (<span class="n">1</span> + wcRatio));            <span class="c">// 40</span>
+<span class="k">int</span> maxSize   = coreSize * <span class="n">2</span>;                                 <span class="c">// 80，留弹性空间</span>
+
+<span class="t">ThreadPoolExecutor</span> pool = <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>(
+    coreSize,
+    maxSize,
+    <span class="n">60L</span>, <span class="t">TimeUnit</span>.SECONDS,
+    <span class="k">new</span> <span class="t">ArrayBlockingQueue</span>&lt;&gt;(<span class="n">2000</span>),
+    <span class="k">new</span> <span class="t">ThreadFactoryBuilder</span>().setNameFormat(<span class="t">"order-q-%d"</span>).build(),
+    <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>.<span class="t">CallerRunsPolicy</span>()
+);</pre>
+  </div>
+
+  <p>公式只是起点，真正上线后必须配合监控数据持续调优：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">线程池监控三件套</div>
+    <pre class="srcbox-file"><span class="c">// 定时采集，上报到 Prometheus / Grafana</span>
+<span class="t">ScheduledExecutorService</span> monitor = ...;
+monitor.scheduleAtFixedRate(() -&gt; {
+    log.info(<span class="t">"[pool-monitor] active={}, poolSize={}, queue={}, completed={}"</span>,
+        pool.<span class="n">getActiveCount</span>(),         <span class="c">// 正在执行任务的线程数</span>
+        pool.<span class="n">getPoolSize</span>(),             <span class="c">// 当前池中线程总数</span>
+        pool.<span class="n">getQueue</span>().size(),          <span class="c">// 队列中待执行的任务数</span>
+        pool.<span class="n">getCompletedTaskCount</span>()    <span class="c">// 已完成的任务总数</span>
+    );
+}, <span class="n">0</span>, <span class="n">10</span>, <span class="t">TimeUnit</span>.SECONDS);</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>监控指标</th><th>告警阈值</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>getActiveCount() / getPoolSize()</code></td><td>&gt; 80%</td><td>线程利用率过高，考虑扩容</td></tr>
+      <tr><td><code>getQueue().size() / capacity</code></td><td>&gt; 70%</td><td>队列堆积，有拒绝风险</td></tr>
+      <tr><td><code>getRejectedExecutionCount()</code></td><td>&gt; 0</td><td>出现拒绝，必须立即处理</td></tr>
+      <tr><td><code>getCompletedTaskCount()</code> 增量</td><td>突降</td><td>吞吐量下降，可能有死锁或下游故障</td></tr>
+    </tbody>
+  </table>
+
+  <div class="think">
+    <p class="think-q">真实调优经历：公式算出 40，实际只用了 25</p>
+    <p>某服务按公式设了 corePoolSize=40，但上线后发现线程切换开销明显——CPU 利用率只有 60% 但 load average 很高。原因：下游 RPC 超时设得很短（200ms），大多数 IO 等待时间其实没有 40ms 那么长。调低到 25 后，吞吐量反而提升了 15%。结论：公式给起点，监控给方向，压测给答案。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 7 站 — Executors 工厂方法的陷阱
+     ================================================================ -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>Executors 工厂方法的陷阱：为什么阿里规约禁止使用</h2>
+  </div>
+
+  <p>JDK 的 <code>Executors</code> 工具类提供了几个便捷的工厂方法，但它们每一个都藏着生产级的坑。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Executors 源码中的危险配置</div>
+    <pre class="srcbox-file"><span class="c">// 陷阱 1：newFixedThreadPool —— 无界队列 → OOM</span>
+<span class="k">public static</span> <span class="t">ExecutorService</span> <span class="n">newFixedThreadPool</span>(<span class="k">int</span> nThreads) {
+    <span class="k">return new</span> <span class="t">ThreadPoolExecutor</span>(
+        nThreads, nThreads,
+        <span class="n">0L</span>, <span class="t">TimeUnit</span>.MILLISECONDS,
+        <span class="k">new</span> <span class="t">LinkedBlockingQueue</span>&lt;&gt;()   <span class="c">// ← 无界！任务堆积 → OOM</span>
+    );
+}
+
+<span class="c">// 陷阱 2：newSingleThreadExecutor —— 同样的无界队列</span>
+<span class="k">public static</span> <span class="t">ExecutorService</span> <span class="n">newSingleThreadExecutor</span>() {
+    <span class="k">return new</span> <span class="t">ThreadPoolExecutor</span>(
+        <span class="n">1</span>, <span class="n">1</span>,
+        <span class="n">0L</span>, <span class="t">TimeUnit</span>.MILLISECONDS,
+        <span class="k">new</span> <span class="t">LinkedBlockingQueue</span>&lt;&gt;()   <span class="c">// ← 无界！</span>
+    );
+}
+
+<span class="c">// 陷阱 3：newCachedThreadPool —— 无限线程 → 线程爆炸</span>
+<span class="k">public static</span> <span class="t">ExecutorService</span> <span class="n">newCachedThreadPool</span>() {
+    <span class="k">return new</span> <span class="t">ThreadPoolExecutor</span>(
+        <span class="n">0</span>, <span class="t">Integer</span>.MAX_VALUE,             <span class="c">// ← 最大线程数 21 亿！</span>
+        <span class="n">60L</span>, <span class="t">TimeUnit</span>.SECONDS,
+        <span class="k">new</span> <span class="t">SynchronousQueue</span>&lt;&gt;()         <span class="c">// 没有缓冲，每个任务必须分配线程</span>
+    );
+}</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>工厂方法</th><th>核心问题</th><th>后果</th><th>替代方案</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>newFixedThreadPool</code></td>
+        <td>LinkedBlockingQueue 无界</td>
+        <td>任务堆积 → OutOfMemoryError</td>
+        <td>手动 new + ArrayBlockingQueue</td>
+      </tr>
+      <tr>
+        <td><code>newSingleThreadExecutor</code></td>
+        <td>LinkedBlockingQueue 无界</td>
+        <td>同上</td>
+        <td>手动 new，core=1 + 有界队列</td>
+      </tr>
+      <tr>
+        <td><code>newCachedThreadPool</code></td>
+        <td>maxPoolSize = Integer.MAX_VALUE</td>
+        <td>流量尖刺 → 创建大量线程 → OOM 或 CPU 100%</td>
+        <td>手动 new + 合理 maxPoolSize</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">阿里巴巴 Java 开发手册明确规定</span>
+    <p><strong>【强制】</strong>线程池不允许使用 Executors 去创建，而是通过 ThreadPoolExecutor 的方式。这样的处理方式让写的同学更加明确线程池的运行规则，规避资源耗尽的风险。</p>
+  </div>
+
+  <div class="think">
+    <p class="think-q">真实踩坑：newFixedThreadPool 导致 Full GC 不停</p>
+    <p>某团队用 <code>Executors.newFixedThreadPool(20)</code> 做异步日志写入。上线初期一切正常，直到某天日志量大增，队列堆积了 200 万个任务对象，每个任务持有请求上下文约 2KB，总计占用约 4GB 堆内存。JVM 进入 Full GC 循环，服务假死。换成 <code>ArrayBlockingQueue(5000)</code> + <code>CallerRunsPolicy</code> 后问题解决。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 8 站 — 总结与速查
+     ================================================================ -->
+<section class="station reveal" id="s8">
+  <div class="station-head">
+    <span class="station-no">第 8 站</span>
+    <h2>总结：参数速查表 + 优雅关闭</h2>
+  </div>
+
+  <div class="recap">
+    <h3>7 大参数速查</h3>
+    <table class="nb-table">
+      <thead>
+        <tr><th>参数</th><th>一句话</th><th>生产建议</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>corePoolSize</td><td>常驻线程数</td><td>CPU 密集: N+1 / IO 密集: N*(1+W/C)</td></tr>
+        <tr><td>maximumPoolSize</td><td>线程上限</td><td>core 的 1.5~2 倍，留弹性</td></tr>
+        <tr><td>keepAliveTime</td><td>非核心线程空闲存活时间</td><td>60s，高波动场景可设 30s</td></tr>
+        <tr><td>unit</td><td>时间单位</td><td>SECONDS</td></tr>
+        <tr><td>workQueue</td><td>任务等待队列</td><td>ArrayBlockingQueue + 合理容量</td></tr>
+        <tr><td>threadFactory</td><td>线程工厂</td><td>必须设置有意义的线程名</td></tr>
+        <tr><td>rejectedHandler</td><td>拒绝策略</td><td>CallerRunsPolicy 或自定义持久化</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">优雅关闭：shutdown vs shutdownNow</div>
+    <pre class="srcbox-file"><span class="c">// shutdown() —— 温和关闭</span>
+<span class="c">// 1. 不再接受新任务</span>
+<span class="c">// 2. 已提交的任务（队列中 + 执行中）继续执行完毕</span>
+<span class="c">// 3. 所有任务完成后，线程自然退出</span>
+pool.shutdown();
+<span class="k">if</span> (!pool.awaitTermination(<span class="n">30</span>, <span class="t">TimeUnit</span>.SECONDS)) {
+    pool.shutdownNow();  <span class="c">// 30s 还没关完 → 强制中断</span>
+}
+
+<span class="c">// shutdownNow() —— 暴力关闭</span>
+<span class="c">// 1. 不再接受新任务</span>
+<span class="c">// 2. 尝试中断所有正在执行的线程（Thread.interrupt()）</span>
+<span class="c">// 3. 返回队列中尚未执行的任务列表</span>
+<span class="t">List</span>&lt;<span class="t">Runnable</span>&gt; pending = pool.shutdownNow();</pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">优雅关闭的最佳实践</span>
+    <p>生产环境推荐使用"两阶段关闭"：先调 <code>shutdown()</code> 给线程池一个处理剩余任务的机会，然后通过 <code>awaitTermination()</code> 等待一段时间。如果超时仍未关闭，再调 <code>shutdownNow()</code> 强制中断。在 Spring 环境中，可以通过 <code>@PreDestroy</code> 或 <code>DisposableBean</code> 实现这一逻辑。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">生产级线程池模板（可直接复制使用）</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">ThreadPoolTemplate</span> {
+
+    <span class="k">private static final int</span> CPU_COUNT = <span class="t">Runtime</span>.getRuntime().availableProcessors();
+
+    <span class="k">public static</span> <span class="t">ThreadPoolExecutor</span> <span class="n">create</span>(<span class="t">String</span> name, <span class="k">boolean</span> ioBound) {
+        <span class="k">int</span> core = ioBound
+            ? (<span class="k">int</span>) (CPU_COUNT * (<span class="n">1</span> + <span class="n">4.0</span>))   <span class="c">// IO 密集，假设 W/C = 4</span>
+            : CPU_COUNT + <span class="n">1</span>;                    <span class="c">// CPU 密集</span>
+        <span class="k">int</span> max  = core * <span class="n">2</span>;
+        <span class="k">int</span> queueCap = ioBound ? <span class="n">2000</span> : <span class="n">500</span>;
+
+        <span class="k">return new</span> <span class="t">ThreadPoolExecutor</span>(
+            core, max,
+            <span class="n">60L</span>, <span class="t">TimeUnit</span>.SECONDS,
+            <span class="k">new</span> <span class="t">ArrayBlockingQueue</span>&lt;&gt;(queueCap),
+            <span class="k">new</span> <span class="t">ThreadFactoryBuilder</span>()
+                .setNameFormat(name + <span class="t">"-%d"</span>)
+                .setUncaughtExceptionHandler((t, e) -&gt;
+                    log.error(<span class="t">"Thread {} threw exception"</span>, t.getName(), e))
+                .build(),
+            <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>.<span class="t">CallerRunsPolicy</span>()
+        );
+    }
+}</pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试 30 秒总结</span>
+    <p>"线程池有 7 大参数，execute() 流程是先看核心线程、再看队列、再看最大线程、最后拒绝。生产环境禁止使用 Executors 工厂方法，因为 newFixedThreadPool 和 newSingleThreadExecutor 的无界队列会导致 OOM，newCachedThreadPool 的无限线程会导致线程爆炸。推荐直接 new ThreadPoolExecutor，配合有界队列和 CallerRunsPolicy，根据 CPU/IO 密集型选择合理的核心线程数，并通过 getActiveCount、getQueue().size() 等指标做持续监控。"</p>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

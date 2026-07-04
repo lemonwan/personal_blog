@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spring 事务传播机制</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：@Transactional 在什么情况下会失效？</h2></div>
+<div class="think"><div class="think-q">"你项目里用了 @Transactional 吧？那你说说，它有哪些失效的场景？" —— 这道题几乎出现在所有 Spring 面试中，不是因为面试官刁钻，而是因为踩坑的人太多了。</div></div>
+<p>Spring 的事务管理是日常开发中最常用的基础设施之一。只需在方法上加一个 <code>@Transactional</code>，Spring 就帮我们搞定事务的开启、提交和回滚。但"简单"背后藏着大量陷阱：</p>
+<ul>
+  <li><strong>自调用失效</strong>：同类中 A 方法调用 B 方法，B 上的 @Transactional 不生效</li>
+  <li><strong>异常类型不匹配</strong>：默认只回滚 RuntimeException，Checked Exception 不回滚</li>
+  <li><strong>private 方法</strong>：Spring AOP 基于代理，无法拦截 private 方法</li>
+  <li><strong>异常被吞掉</strong>：方法内部 catch 了异常没抛出，Spring 感知不到</li>
+</ul>
+<p>更让人困惑的是<strong>事务传播行为</strong>——REQUIRED、REQUIRES_NEW、NESTED 到底有什么区别？什么时候该用哪种？理解这些需要从事务的底层机制出发，而非死记硬背。</p>
+<div class="formula"><strong>Spring 事务核心公式</strong><br/>@EnableTransactionManagement → TransactionInterceptor（AOP 代理）→ PlatformTransactionManager → JDBC Connection 管理（setAutoCommit / commit / rollback）</div>
+<p>本文以面试高频问题为主线，系统拆解 7 种传播行为、8 种失效场景、事务实现原理，让你面对事务问题时有底层支撑。</p>
+</section>
+
+<!-- ═══════════════ 第2站：7种传播行为 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>7 种事务传播行为：一图看懂</h2></div>
+<p>事务传播行为（Propagation）定义了当一个事务方法被另一个事务方法调用时，事务应该如何传播。Spring 定义了 7 种，全部在 <code>Propagation</code> 枚举中：</p>
+<figure class="fig">
+<svg viewBox="0 0 760 420" role="img" aria-label="事务传播行为决策图">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+    <marker id="arr3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#57544E"/></marker>
+  </defs>
+  <text x="380" y="22" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">事务传播行为决策流程</text>
+  <rect x="260" y="42" width="240" height="44" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="380" y="62" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">调用 @Transactional 方法</text>
+  <text x="380" y="78" text-anchor="middle" font-size="10" fill="#57544E">传播行为 = ？</text>
+  <line x1="280" y1="86" x2="140" y2="120" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="380" y1="86" x2="380" y2="120" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="480" y1="86" x2="620" y2="120" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr)"/>
+  <rect x="40" y="122" width="200" height="34" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="140" y="143" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">当前已有事务？</text>
+  <rect x="280" y="122" width="200" height="34" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="380" y="143" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">不管有没有事务</text>
+  <rect x="520" y="122" width="200" height="34" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="620" y="143" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">当前必须无事务</text>
+  <line x1="80" y1="156" x2="80" y2="190" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="190" y1="156" x2="190" y2="190" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="380" y1="156" x2="380" y2="190" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="620" y1="156" x2="620" y2="190" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+  <text x="60" y="175" font-size="9" fill="#3E6B8F">有</text>
+  <text x="200" y="175" font-size="9" fill="#3E6B8F">无</text>
+  <rect x="20" y="192" width="120" height="80" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="80" y="210" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">REQUIRED</text>
+  <text x="80" y="226" text-anchor="middle" font-size="9" fill="#57544E">加入已有事务</text>
+  <text x="80" y="240" text-anchor="middle" font-size="9" fill="#57544E">无则新建</text>
+  <text x="80" y="258" text-anchor="middle" font-size="9" fill="#8C8676">默认值</text>
+  <rect x="150" y="192" width="120" height="80" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="210" y="210" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">MANDATORY</text>
+  <text x="210" y="226" text-anchor="middle" font-size="9" fill="#57544E">必须加入已有</text>
+  <text x="210" y="240" text-anchor="middle" font-size="9" fill="#57544E">无则抛异常</text>
+  <rect x="320" y="192" width="120" height="80" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="380" y="210" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">REQUIRES_NEW</text>
+  <text x="380" y="226" text-anchor="middle" font-size="9" fill="#57544E">总是新建事务</text>
+  <text x="380" y="240" text-anchor="middle" font-size="9" fill="#57544E">挂起已有事务</text>
+  <rect x="560" y="192" width="120" height="80" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="620" y="210" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">NEVER</text>
+  <text x="620" y="226" text-anchor="middle" font-size="9" fill="#57544E">必须无事务</text>
+  <text x="620" y="240" text-anchor="middle" font-size="9" fill="#57544E">有则抛异常</text>
+  <line x1="80" y1="272" x2="80" y2="300" stroke="#57544E" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr3)"/>
+  <line x1="210" y1="272" x2="210" y2="300" stroke="#57544E" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr3)"/>
+  <rect x="20" y="302" width="120" height="36" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="80" y="318" text-anchor="middle" font-size="9" fill="#57544E">SUPPORTS: 有则加入</text>
+  <text x="80" y="332" text-anchor="middle" font-size="9" fill="#57544E">无则非事务执行</text>
+  <rect x="150" y="302" width="120" height="36" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="210" y="318" text-anchor="middle" font-size="9" fill="#57544E">NOT_SUPPORTED:</text>
+  <text x="210" y="332" text-anchor="middle" font-size="9" fill="#57544E">挂起事务，非事务执行</text>
+  <rect x="320" y="302" width="120" height="36" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="380" y="318" text-anchor="middle" font-size="9" fill="#57544E">NESTED: 在已有事务中</text>
+  <text x="380" y="332" text-anchor="middle" font-size="9" fill="#57544E">创建 Savepoint</text>
+  <rect x="60" y="360" width="640" height="48" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="380" y="380" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">面试重点：REQUIRED vs REQUIRES_NEW vs NESTED</text>
+  <text x="380" y="398" text-anchor="middle" font-size="10" fill="#57544E">共享事务 vs 独立事务 vs 保存点事务 —— 回滚边界完全不同</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>事务传播行为决策图：根据"当前是否存在事务"选择不同传播策略</figcaption>
+</figure>
+<table class="nb-table">
+  <thead><tr><th>传播行为</th><th>有事务时</th><th>无事务时</th><th>使用频率</th></tr></thead>
+  <tbody>
+    <tr><td><strong>REQUIRED</strong>（默认）</td><td>加入当前事务</td><td>创建新事务</td><td>90% 场景</td></tr>
+    <tr><td><strong>SUPPORTS</strong></td><td>加入当前事务</td><td>非事务执行</td><td>读操作优化</td></tr>
+    <tr><td><strong>MANDATORY</strong></td><td>加入当前事务</td><td>抛 IllegalTransactionStateException</td><td>强制调用方开事务</td></tr>
+    <tr><td><strong>REQUIRES_NEW</strong></td><td>挂起当前事务，创建新事务</td><td>创建新事务</td><td>日志、审计</td></tr>
+    <tr><td><strong>NOT_SUPPORTED</strong></td><td>挂起当前事务，非事务执行</td><td>非事务执行</td><td>极少使用</td></tr>
+    <tr><td><strong>NEVER</strong></td><td>抛 IllegalTransactionStateException</td><td>非事务执行</td><td>极少使用</td></tr>
+    <tr><td><strong>NESTED</strong></td><td>在当前事务中创建 Savepoint</td><td>等同于 REQUIRED</td><td>部分回滚</td></tr>
+  </tbody>
+</table>
+<div class="crack"><div class="crack-label">"挂起事务"是怎么实现的？</div>
+<p>REQUIRES_NEW 和 NOT_SUPPORTED 需要"挂起"当前事务。Spring 通过 <code>TransactionSynchronizationManager</code> 保存当前线程绑定的 ConnectionHolder，然后将其从 ThreadLocal 中移除，待内层事务结束后再恢复。挂起本质是<strong>解绑当前线程与数据库连接的关联</strong>。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：三大传播行为对比 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>REQUIRED vs REQUIRES_NEW vs NESTED：回滚边界</h2></div>
+<p>面试中最高频的追问就是这三者的区别。核心差异在于<strong>回滚边界</strong>：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>OrderService.java</b> · REQUIRED — 共享事务</span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">@Autowired</span> <span class="k">private</span> <span class="t">InventoryService</span> inventoryService;
+
+    <span class="k">@Transactional</span>  <span class="c">// 默认 REQUIRED</span>
+    <span class="k">public void</span> createOrder(<span class="t">Order</span> order) {
+        orderDao.insert(order);             <span class="c">// ① 插入订单</span>
+        inventoryService.deduct(order);     <span class="c">// ② 扣减库存</span>
+    }
+}
+
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">InventoryService</span> {
+    <span class="k">@Transactional</span>  <span class="c">// REQUIRED：加入 createOrder 的事务</span>
+    <span class="k">public void</span> deduct(<span class="t">Order</span> order) {
+        stockDao.deduct(order.getSkuId());
+        <span class="k">if</span> (stock &lt; <span class="n">0</span>) <span class="k">throw new</span> <span class="t">RuntimeException</span>(<span class="n">"库存不足"</span>);
+        <span class="c">// ★ 抛异常后，createOrder 的 ① 也会回滚！</span>
+        <span class="c">// 因为它们在同一个事务中</span>
+    }
+}</code></pre>
+</div>
+<p><strong>REQUIRED 的关键</strong>：内层方法加入外层事务，任何一层抛异常，<strong>整个事务一起回滚</strong>。适用于大多数业务场景——订单和库存要么都成功，要么都失败。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AuditService.java</b> · REQUIRES_NEW — 独立事务</span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">@Autowired</span> <span class="k">private</span> <span class="t">AuditService</span> auditService;
+
+    <span class="k">@Transactional</span>
+    <span class="k">public void</span> createOrder(<span class="t">Order</span> order) {
+        orderDao.insert(order);
+        auditService.log(<span class="n">"创建订单: "</span> + order.getId());  <span class="c">// 记录审计日志</span>
+        <span class="k">throw new</span> <span class="t">RuntimeException</span>(<span class="n">"业务失败"</span>);
+        <span class="c">// ★ 外层回滚不影响 auditService.log()</span>
+        <span class="c">// REQUIRES_NEW 是独立事务，已提交就提交了</span>
+    }
+}
+
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">AuditService</span> {
+    <span class="k">@Transactional</span>(propagation = <span class="t">Propagation</span>.REQUIRES_NEW)
+    <span class="k">public void</span> log(<span class="t">String</span> message) {
+        auditDao.insert(<span class="k">new</span> <span class="t">AuditLog</span>(message));
+        <span class="c">// ★ 独立事务，外层回滚不影响这里</span>
+    }
+}</code></pre>
+</div>
+<p><strong>REQUIRES_NEW 的关键</strong>：挂起外层事务，开启全新事务。内层提交后即使外层回滚，<strong>内层数据依然持久化</strong>。典型场景：审计日志、操作记录——业务失败也要留痕。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BatchService.java</b> · NESTED — 保存点事务</span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">BatchService</span> {
+    <span class="k">@Autowired</span> <span class="k">private</span> <span class="t">ItemService</span> itemService;
+
+    <span class="k">@Transactional</span>
+    <span class="k">public void</span> batchProcess(<span class="t">List</span>&lt;<span class="t">Item</span>&gt; items) {
+        <span class="k">for</span> (<span class="t">Item</span> item : items) {
+            <span class="k">try</span> {
+                itemService.processItem(item);  <span class="c">// NESTED</span>
+            } <span class="k">catch</span> (<span class="t">Exception</span> e) {
+                <span class="c">// ★ 只回滚当前 item 的处理</span>
+                <span class="c">// 其他已成功的 item 不受影响</span>
+                log.warn(<span class="n">"item "</span> + item.getId() + <span class="n">" 处理失败，跳过"</span>);
+            }
+        }
+    }
+}
+
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">ItemService</span> {
+    <span class="k">@Transactional</span>(propagation = <span class="t">Propagation</span>.NESTED)
+    <span class="k">public void</span> processItem(<span class="t">Item</span> item) {
+        itemDao.update(item);
+        <span class="c">// ★ 在 Savepoint 上执行，失败只回滚到 Savepoint</span>
+        <span class="c">// 不回滚外层事务中已成功的操作</span>
+    }
+}</code></pre>
+</div>
+<p><strong>NESTED 的关键</strong>：在同一个物理事务中通过 JDBC Savepoint 实现<strong>逻辑上的子事务</strong>。内层失败可以只回滚到 Savepoint，外层 catch 后继续。但外层整体回滚时，内层也会一起回滚（因为是同一个 Connection）。</p>
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>REQUIRED</th><th>REQUIRES_NEW</th><th>NESTED</th></tr></thead>
+  <tbody>
+    <tr><td><strong>物理事务</strong></td><td>同一个</td><td>两个独立事务</td><td>同一个</td></tr>
+    <tr><td><strong>Connection</strong></td><td>共享</td><td>各用各的</td><td>共享</td></tr>
+    <tr><td><strong>内层失败</strong></td><td>整个事务回滚</td><td>只回滚内层</td><td>回滚到 Savepoint</td></tr>
+    <tr><td><strong>外层失败</strong></td><td>全部回滚</td><td>内层不受影响</td><td>全部回滚</td></tr>
+    <tr><td><strong>典型场景</strong></td><td>订单+库存</td><td>审计日志</td><td>批量处理（部分失败不阻断）</td></tr>
+    <tr><td><strong>JDBC 依赖</strong></td><td>无特殊要求</td><td>需要多连接池</td><td>需要驱动支持 Savepoint</td></tr>
+  </tbody>
+</table>
+<div class="takeaway"><div class="takeaway-label">面试回答要点</div>
+<p>"REQUIRED 共享同一个事务，一起提交一起回滚。REQUIRES_NEW 是两个独立事务，内层提交后不受外层影响。NESTED 在同一个事务中通过 Savepoint 实现部分回滚，外层失败时内层也会回滚。选哪种取决于业务对回滚边界的要求。"</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：8种失效场景 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>@Transactional 失效的 8 种场景</h2></div>
+<p>理解失效场景的前提是理解 @Transactional 的<strong>生效条件</strong>：方法必须通过 Spring 代理对象调用，代理拦截方法后由 TransactionInterceptor 管理事务。一旦绕过代理或代理无法控制事务边界，就会失效。</p>
+
+<p><strong>场景 1：自调用（Self-invocation）—— 最高频踩坑</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>OrderService.java</b> · 自调用失效</span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">public void</span> methodA() {
+        <span class="c">// ★ 这里调用 methodB() 等于 this.methodB()</span>
+        <span class="c">// 不经过代理，@Transactional 不生效！</span>
+        methodB();
+    }
+
+    <span class="k">@Transactional</span>
+    <span class="k">public void</span> methodB() {
+        orderDao.insert(<span class="k">new</span> <span class="t">Order</span>());
+        <span class="k">throw new</span> <span class="t">RuntimeException</span>();
+        <span class="c">// 不会回滚！因为没有事务</span>
+    }
+}</code></pre>
+</div>
+<p>原因：Spring 默认用 JDK 动态代理或 CGLIB 代理。外部调用 <code>orderService.methodB()</code> 时走的是代理对象，但 <code>methodA()</code> 内部 <code>this.methodB()</code> 走的是原始对象，绕过了代理。</p>
+<p><strong>解决方案</strong>：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>解决方案对比</b></span></div>
+<pre><code><span class="c">// 方案 1：注入自身（推荐）</span>
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">@Autowired</span> <span class="k">private</span> <span class="t">OrderService</span> self;  <span class="c">// 注入代理对象</span>
+    <span class="k">public void</span> methodA() { self.methodB(); }
+}
+<span class="c">// 方案 2：从 ApplicationContext 获取代理</span>
+<span class="t">OrderService</span> proxy = context.getBean(<span class="t">OrderService</span>.<span class="k">class</span>);
+proxy.methodB();
+<span class="c">// 方案 3：启用 AspectJ 织入（非代理模式）</span>
+<span class="k">@EnableTransactionManagement</span>(mode = AdviceMode.ASPECTJ)</code></pre>
+</div>
+
+<p><strong>场景 2：private 方法</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>失效示例</b></span></div>
+<pre><code><span class="k">@Transactional</span>
+<span class="k">private void</span> insertOrder(<span class="t">Order</span> order) {  <span class="c">// ★ private：事务不生效</span>
+    orderDao.insert(order);
+}</code></pre>
+</div>
+<p>CGLIB 代理通过生成子类重写方法来拦截。private 方法无法被重写，代理拦截不到。Spring 在创建代理时会检测并打印 WARN 日志。</p>
+
+<p><strong>场景 3：非 public 方法（Spring Boot 3.x 之前）</strong></p>
+<p>Spring Framework 5.x 及以前，<code>@Transactional</code> 只能加在 public 方法上。protected / package-private 方法上的注解会被静默忽略。Spring Boot 3.x（Spring 6）放宽了限制，但仍推荐统一使用 public。</p>
+
+<p><strong>场景 4：异常类型不匹配</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>默认回滚规则</b></span></div>
+<pre><code><span class="k">@Transactional</span>  <span class="c">// 默认 rollbackFor = { RuntimeException, Error }</span>
+<span class="k">public void</span> process() <span class="k">throws</span> <span class="t">IOException</span> {
+    fileDao.insert(record);
+    <span class="k">throw new</span> <span class="t">IOException</span>(<span class="n">"文件读写失败"</span>);
+    <span class="c">// ★ 不回滚！IOException 是 Checked Exception</span>
+}
+
+<span class="c">// 正确写法：显式指定 rollbackFor</span>
+<span class="k">@Transactional</span>(rollbackFor = <span class="t">Exception</span>.<span class="k">class</span>)
+<span class="k">public void</span> process() <span class="k">throws</span> <span class="t">IOException</span> { ... }</code></pre>
+</div>
+<p>Spring 默认只对 <code>RuntimeException</code> 和 <code>Error</code> 回滚。Checked Exception（如 IOException、SQLException）需要显式声明 <code>rollbackFor</code>。</p>
+
+<p><strong>场景 5：异常被方法内部 catch</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>异常被吞</b></span></div>
+<pre><code><span class="k">@Transactional</span>
+<span class="k">public void</span> transfer() {
+    <span class="k">try</span> {
+        accountDao.deduct(from, amount);
+        accountDao.add(to, amount);
+        <span class="k">if</span> (balance &lt; <span class="n">0</span>) <span class="k">throw new</span> <span class="t">RuntimeException</span>(<span class="n">"余额不足"</span>);
+    } <span class="k">catch</span> (<span class="t">Exception</span> e) {
+        log.error(<span class="n">"转账失败"</span>, e);
+        <span class="c">// ★ 异常没抛出去！Spring 感知不到，不会回滚</span>
+    }
+}
+<span class="c">// 正确：catch 后重新抛出</span>
+<span class="k">catch</span> (<span class="t">Exception</span> e) { log.error(...); <span class="k">throw</span> e; }</code></pre>
+</div>
+
+<p><strong>场景 6：数据库引擎不支持事务</strong></p>
+<p>MySQL 的 MyISAM 引擎不支持事务。即使 Spring 正确配置了事务管理器，底层 JDBC 的 <code>connection.commit()</code> 和 <code>connection.rollback()</code> 也不起作用。InnoDB 才支持事务。这是<strong>基础设施层面</strong>的问题，Spring 无法修复。</p>
+
+<p><strong>场景 7：Bean 未被 Spring 管理</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>未托管的 Bean</b></span></div>
+<pre><code><span class="c">// ★ 没有 @Service / @Component，Spring 不管理这个 Bean</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">@Transactional</span>
+    <span class="k">public void</span> createOrder() { ... }
+}
+<span class="c">// 手动 new 出来的对象也不行</span>
+<span class="t">OrderService</span> svc = <span class="k">new</span> <span class="t">OrderService</span>();  <span class="c">// 无代理，事务无效</span>
+svc.createOrder();</code></pre>
+</div>
+
+<p><strong>场景 8：传播行为设置错误</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>传播行为误用</b></span></div>
+<pre><code><span class="k">@Transactional</span>(propagation = <span class="t">Propagation</span>.NOT_SUPPORTED)
+<span class="k">public void</span> createOrder() {
+    <span class="c">// ★ NOT_SUPPORTED：以非事务方式执行</span>
+    <span class="c">// 即使方法里有数据库操作，也不在事务中</span>
+    orderDao.insert(order);
+    <span class="k">throw new</span> <span class="t">RuntimeException</span>();  <span class="c">// 不回滚</span>
+}</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">8 种失效场景速查</div>
+<p>1. 自调用（this 绕过代理） 2. private 方法（无法被代理） 3. 非 public 方法（旧版本限制） 4. 异常类型不匹配（默认只回滚 RuntimeException） 5. 异常被 catch 吞掉 6. 数据库引擎不支持（MyISAM） 7. Bean 未被 Spring 管理 8. 传播行为配置错误（如 NOT_SUPPORTED）</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：事务实现原理 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>事务实现原理：从注解到 Connection</h2></div>
+<p>@Transactional 的生效链路可以拆解为四个层次：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>① 启用事务管理</b> · @EnableTransactionManagement</span></div>
+<pre><code><span class="k">@Configuration</span>
+<span class="k">@EnableTransactionManagement</span>  <span class="c">// 导入 TransactionManagementConfigurationSelector</span>
+<span class="k">public class</span> <span class="t">AppConfig</span> {
+    <span class="k">@Bean</span>
+    <span class="k">public</span> <span class="t">PlatformTransactionManager</span> transactionManager(<span class="t">DataSource</span> ds) {
+        <span class="k">return new</span> <span class="t">DataSourceTransactionManager</span>(ds);
+    }
+}</code></pre>
+</div>
+<p><code>@EnableTransactionManagement</code> 通过 <code>@Import</code> 注册 <code>AutoProxyRegistrar</code> 和 <code>ProxyTransactionManagementConfiguration</code>。前者负责注册 <code>InfrastructureAdvisorAutoProxyCreator</code>（AOP 自动代理创建器），后者注册 <code>BeanFactoryTransactionAttributeSourceAdvisor</code>（事务切面）。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>② AOP 拦截</b> · TransactionInterceptor</span></div>
+<pre><code><span class="k">public class</span> <span class="t">TransactionInterceptor</span> <span class="k">extends</span> <span class="t">TransactionAspectSupport</span>
+        <span class="k">implements</span> <span class="t">MethodInterceptor</span> {
+    <span class="k">public</span> <span class="t">Object</span> invoke(<span class="t">MethodInvocation</span> invocation) {
+        <span class="c">// 获取目标类和方法</span>
+        <span class="t">Class</span>&lt;?&gt; targetClass = getTargetClass(invocation.getThis());
+        <span class="c">// 解析 @Transactional 属性（传播行为、隔离级别、超时、rollbackFor...）</span>
+        <span class="t">TransactionAttribute</span> txAttr = getTransactionAttributeSource()
+                .getTransactionAttribute(method, targetClass);
+        <span class="c">// 获取事务管理器</span>
+        <span class="t">PlatformTransactionManager</span> tm = determineTransactionManager(txAttr);
+        <span class="c">// 创建事务（核心！）</span>
+        <span class="k">return</span> invokeWithinTransaction(method, targetClass, invocation::proceed);
+    }
+}</code></pre>
+</div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>③ 事务管理核心</b> · TransactionAspectSupport</span></div>
+<pre><code><span class="k">protected</span> <span class="t">Object</span> invokeWithinTransaction(<span class="t">Method</span> method, <span class="t">Class</span>&lt;?&gt; targetClass,
+        <span class="t">InvocationCallback</span> invocation) {
+    <span class="c">// 1. 获取事务定义</span>
+    <span class="t">TransactionAttribute</span> txAttr = getTransactionAttribute(method, targetClass);
+    <span class="t">PlatformTransactionManager</span> tm = determineTransactionManager(txAttr);
+
+    <span class="c">// 2. 创建事务（根据传播行为决定是新建还是加入）</span>
+    <span class="t">TransactionInfo</span> txInfo = createTransactionIfNecessary(tm, txAttr, joinpointId);
+
+    <span class="t">Object</span> retVal;
+    <span class="k">try</span> {
+        <span class="c">// 3. 执行目标方法</span>
+        retVal = invocation.proceedWithInvocation();
+    } <span class="k">catch</span> (<span class="t">Throwable</span> ex) {
+        <span class="c">// 4a. 异常 → 判断是否回滚</span>
+        completeTransactionAfterThrowing(txInfo, ex);
+        <span class="k">throw</span> ex;
+    }
+    <span class="c">// 4b. 正常 → 提交事务</span>
+    commitTransactionAfterReturning(txInfo);
+    <span class="k">return</span> retVal;
+}</code></pre>
+</div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>④ 底层 Connection 管理</b> · DataSourceTransactionManager</span></div>
+<pre><code><span class="k">protected void</span> doBegin(<span class="t">Object</span> transaction, <span class="t">TransactionDefinition</span> def) {
+    <span class="t">DataSourceTransactionObject</span> txObject = (<span class="t">DataSourceTransactionObject</span>) transaction;
+    <span class="c">// 从连接池获取新 Connection</span>
+    <span class="t">Connection</span> con = obtainDataSource().getConnection();
+    <span class="c">// ★ 关闭自动提交 —— 事务的起点</span>
+    con.setAutoCommit(<span class="k">false</span>);
+    <span class="c">// 绑定到 ThreadLocal</span>
+    <span class="t">TransactionSynchronizationManager</span>.bindResource(dataSource,
+            <span class="k">new</span> <span class="t">ConnectionHolder</span>(con));
+}
+<span class="k">protected void</span> doCommit(<span class="t">DefaultTransactionStatus</span> status) {
+    <span class="t">Connection</span> con = txObject.getConnectionHolder().getConnection();
+    con.commit();  <span class="c">// 提交</span>
+}
+<span class="k">protected void</span> doRollback(<span class="t">DefaultTransactionStatus</span> status) {
+    <span class="t">Connection</span> con = txObject.getConnectionHolder().getConnection();
+    con.rollback();  <span class="c">// 回滚</span>
+}</code></pre>
+</div>
+<figure class="fig">
+<svg viewBox="0 0 740 260" role="img" aria-label="事务实现链路">
+  <defs><marker id="arr4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="370" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">@Transactional 完整生效链路</text>
+  <rect x="20" y="50" width="140" height="56" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="90" y="72" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">@EnableTransaction</text>
+  <text x="90" y="88" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">Management</text>
+  <text x="90" y="100" text-anchor="middle" font-size="8" fill="#57544E">注册 Advisor</text>
+  <line x1="160" y1="78" x2="188" y2="78" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr4)"/>
+  <rect x="190" y="50" width="130" height="56" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="255" y="72" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">CGLIB Proxy</text>
+  <text x="255" y="88" text-anchor="middle" font-size="9" fill="#3E6B8F">生成代理子类</text>
+  <text x="255" y="100" text-anchor="middle" font-size="8" fill="#57544E">拦截方法调用</text>
+  <line x1="320" y1="78" x2="348" y2="78" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr4)"/>
+  <rect x="350" y="50" width="130" height="56" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="415" y="72" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">Transaction</text>
+  <text x="415" y="88" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">Interceptor</text>
+  <text x="415" y="100" text-anchor="middle" font-size="8" fill="#57544E">解析注解属性</text>
+  <line x1="480" y1="78" x2="508" y2="78" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr4)"/>
+  <rect x="510" y="50" width="210" height="56" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="615" y="72" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">PlatformTransactionManager</text>
+  <text x="615" y="88" text-anchor="middle" font-size="9" fill="#3E6B8F">doBegin / doCommit / doRollback</text>
+  <text x="615" y="100" text-anchor="middle" font-size="8" fill="#57544E">Connection 管理</text>
+  <line x1="90" y1="106" x2="90" y2="140" stroke="#C2410C" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="255" y1="106" x2="255" y2="140" stroke="#C2410C" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="415" y1="106" x2="415" y2="140" stroke="#C2410C" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="615" y1="106" x2="615" y2="140" stroke="#C2410C" stroke-width="1" stroke-dasharray="4,3"/>
+  <rect x="30" y="145" width="680" height="40" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="370" y="163" text-anchor="middle" font-size="11" fill="#57544E">ThreadLocal（TransactionSynchronizationManager）保存 ConnectionHolder → 同一线程复用同一 Connection</text>
+  <text x="370" y="178" text-anchor="middle" font-size="9" fill="#8C8676">保证事务内所有 DAO 操作使用同一个数据库连接</text>
+  <rect x="200" y="205" width="340" height="42" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="370" y="224" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">JDBC Connection</text>
+  <text x="370" y="240" text-anchor="middle" font-size="10" fill="#57544E">setAutoCommit(false) → SQL → commit() / rollback()</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>@Transactional 完整生效链路：注解 → AOP 代理 → 拦截器 → 事务管理器 → JDBC Connection</figcaption>
+</figure>
+<div class="crack"><div class="crack-label">为什么事务内所有 DAO 必须用同一个 Connection？</div>
+<p>事务的 ACID 特性依赖于同一个数据库会话（Session）。如果 DAO-A 用 Connection-1、DAO-B 用 Connection-2，它们是两个独立事务，无法做到原子提交。Spring 通过 <code>TransactionSynchronizationManager</code>（基于 ThreadLocal）将 Connection 绑定到当前线程，确保同一事务内所有 <code>JdbcTemplate</code> / MyBatis 操作拿到同一个连接。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：编程式 vs 声明式 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>编程式事务 vs 声明式事务</h2></div>
+<p>Spring 提供两种事务管理方式：</p>
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>声明式（@Transactional）</th><th>编程式（TransactionTemplate）</th></tr></thead>
+  <tbody>
+    <tr><td><strong>实现方式</strong></td><td>注解 + AOP 代理</td><td>代码显式调用</td></tr>
+    <tr><td><strong>侵入性</strong></td><td>零侵入（注解即可）</td><td>业务代码中嵌入事务逻辑</td></tr>
+    <tr><td><strong>粒度</strong></td><td>方法级别</td><td>代码块级别（任意范围）</td></tr>
+    <tr><td><strong>适用场景</strong></td><td>绝大多数业务方法</td><td>需要精确控制事务边界</td></tr>
+    <tr><td><strong>可读性</strong></td><td>高（意图清晰）</td><td>较低（模板代码多）</td></tr>
+  </tbody>
+</table>
+<p><strong>编程式事务的两种用法</strong>：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TransactionTemplate</b> · 推荐用法</span></div>
+<pre><code><span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">PaymentService</span> {
+    <span class="k">@Autowired</span> <span class="k">private</span> <span class="t">TransactionTemplate</span> txTemplate;
+
+    <span class="k">public void</span> pay(<span class="t">Order</span> order) {
+        <span class="c">// 外层：非事务逻辑</span>
+        validateOrder(order);
+
+        <span class="c">// 内层：精确控制事务范围</span>
+        <span class="t">String</span> result = txTemplate.execute(status -&gt; {
+            <span class="k">try</span> {
+                accountDao.deduct(order.getUserId(), order.getAmount());
+                paymentDao.insert(<span class="k">new</span> <span class="t">Payment</span>(order));
+                <span class="k">return</span> <span class="n">"SUCCESS"</span>;
+            } <span class="k">catch</span> (<span class="t">Exception</span> e) {
+                status.setRollbackOnly();  <span class="c">// 手动标记回滚</span>
+                <span class="k">return</span> <span class="n">"FAILED: "</span> + e.getMessage();
+            }
+        });
+        <span class="c">// 事务已结束，继续非事务逻辑</span>
+        notifyUser(order, result);
+    }
+}</code></pre>
+</div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>PlatformTransactionManager</b> · 底层用法</span></div>
+<pre><code><span class="k">@Autowired</span> <span class="k">private</span> <span class="t">PlatformTransactionManager</span> txManager;
+
+<span class="k">public void</span> manualTx() {
+    <span class="t">DefaultTransactionDefinition</span> def = <span class="k">new</span> <span class="t">DefaultTransactionDefinition</span>();
+    def.setPropagationBehavior(<span class="t">TransactionDefinition</span>.PROPAGATION_REQUIRES_NEW);
+    def.setIsolationLevel(<span class="t">TransactionDefinition</span>.ISOLATION_READ_COMMITTED);
+
+    <span class="t">TransactionStatus</span> status = txManager.getTransaction(def);
+    <span class="k">try</span> {
+        <span class="c">// 业务 SQL</span>
+        orderDao.insert(order);
+        txManager.commit(status);
+    } <span class="k">catch</span> (<span class="t">Exception</span> e) {
+        txManager.rollback(status);
+        <span class="k">throw</span> e;
+    }
+}</code></pre>
+</div>
+<p><strong>什么时候用编程式事务？</strong></p>
+<ul>
+  <li>事务边界不在方法级别——比如循环中每条记录独立事务</li>
+  <li>需要根据运行时条件动态决定事务策略</li>
+  <li>只需要对方法中的一小段代码加事务，避免整个方法都在事务中（长事务问题）</li>
+  <li>避免自调用失效——编程式事务不依赖代理</li>
+</ul>
+<div class="takeaway"><div class="takeaway-label">选型建议</div>
+<p>"日常开发 95% 用 @Transactional 声明式即可。需要精确控制事务边界、避免长事务、或在循环中管理事务时，用 TransactionTemplate。底层 PlatformTransactionManager 直接操作适合框架开发，业务代码中很少使用。"</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：事务面试全景图</h2></div>
+<p>事务是 Spring 面试的"必争之地"，因为它是<strong>最容易踩坑的基础设施</strong>。掌握以下内容足以应对绝大多数面试追问：</p>
+<div class="formula"><strong>事务有效性 = 代理生效 + 异常传播 + 引擎支持</strong><br/>三者缺一，@Transactional 就是摆设</div>
+<table class="nb-table">
+  <thead><tr><th>失效场景</th><th>根因</th><th>解决方案</th></tr></thead>
+  <tbody>
+    <tr><td>自调用</td><td>this 绕过代理</td><td>注入自身 / AopContext.currentProxy()</td></tr>
+    <tr><td>private 方法</td><td>CGLIB 无法重写</td><td>改为 public</td></tr>
+    <tr><td>非 public（旧版本）</td><td>Spring 5.x 仅支持 public</td><td>升级到 Spring 6 / 改为 public</td></tr>
+    <tr><td>异常类型不匹配</td><td>默认只回滚 RuntimeException</td><td>rollbackFor = Exception.class</td></tr>
+    <tr><td>异常被 catch 吞掉</td><td>Spring 感知不到异常</td><td>catch 后重新 throw</td></tr>
+    <tr><td>数据库引擎不支持</td><td>MyISAM 无事务</td><td>改用 InnoDB</td></tr>
+    <tr><td>Bean 未被 Spring 管理</td><td>无代理对象</td><td>加 @Service / @Component</td></tr>
+    <tr><td>传播行为设置错误</td><td>NOT_SUPPORTED / NEVER</td><td>检查 propagation 配置</td></tr>
+  </tbody>
+</table>
+<p><strong>最佳实践清单</strong>：</p>
+<ul>
+  <li>统一使用 <code>rollbackFor = Exception.class</code>，避免 Checked Exception 不回滚</li>
+  <li>事务方法只做数据库操作，避免 RPC、文件 IO 等耗时操作（防止长事务）</li>
+  <li>REQUIRES_NEW 用于审计日志等"必须持久化"的场景，不要滥用</li>
+  <li>NESTED 依赖 JDBC Savepoint，确认数据库驱动支持后再用</li>
+  <li>同类方法调用必须通过代理对象，不要 <code>this.xxx()</code></li>
+  <li>事务粒度尽量小——方法越短，锁持有时间越短，并发性能越好</li>
+</ul>
+<div class="recap">
+<h3>面试回答模板</h3>
+<p><strong>Q：@Transactional 在哪些情况下会失效？</strong></p>
+<p>"@Transactional 基于 AOP 代理实现，失效场景主要有八类：一、自调用——this.method() 绕过代理对象；二、private 方法——CGLIB 无法拦截；三、非 public 方法（Spring 5.x 限制）；四、异常类型不匹配，默认只回滚 RuntimeException；五、异常被 catch 吞掉；六、数据库引擎不支持事务如 MyISAM；七、Bean 未被 Spring 容器管理；八、传播行为配置错误如 NOT_SUPPORTED。根因可以归结为：代理未生效、异常未传播、引擎不支持。"</p>
+<p><strong>Q：REQUIRED、REQUIRES_NEW、NESTED 有什么区别？</strong></p>
+<p>"REQUIRED 是默认行为，有事务就加入，没有就新建，内外层共享同一个物理事务，一起回滚。REQUIRES_NEW 总是创建独立的新事务，挂起外层事务，内层提交后不受外层回滚影响，适合审计日志。NESTED 在同一个物理事务中通过 Savepoint 实现逻辑子事务，内层失败只回滚到 Savepoint，但外层失败时内层也会一起回滚。三者核心区别在于回滚边界不同。"</p>
+<p><strong>Q：编程式事务和声明式事务怎么选？</strong></p>
+<p>"声明式事务 @Transactional 适合绝大多数场景，零侵入、意图清晰。编程式事务用 TransactionTemplate，适合需要精确控制事务边界的情况，比如循环中每条记录独立事务、方法中只有一小段需要事务、或者避免自调用失效。底层 PlatformTransactionManager 直接操作一般只在框架开发中使用。"</p>
+</div>
+</section>
+
+</main>
+</body>
+</html>

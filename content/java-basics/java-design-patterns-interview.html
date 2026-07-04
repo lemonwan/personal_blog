@@ -1,0 +1,624 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>面试必会设计模式</title></head><body><main class="lesson-body">
+
+<!-- metadata
+title: 面试必会设计模式：单例、工厂、策略、观察者、模板方法
+difficulty: 中级
+interviewFreq: 必问
+desc: 5 种最高频面试设计模式，每种给出 JDK/Spring 中的真实应用案例。
+-->
+
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>开场：面试官到底想听什么</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"请说说你熟悉的设计模式"——这道题考的不是定义，而是你有没有在真实项目中用过。</p>
+    <p>面试官真正在意的是三件事：</p>
+    <ol>
+      <li><strong>识别能力</strong>——你能在 JDK / Spring 源码里找到模式的影子；</li>
+      <li><strong>决策能力</strong>——你知道什么时候该用、什么时候不该用；</li>
+      <li><strong>表达精度</strong>——用最短的语言把结构、角色、优缺点讲清楚。</li>
+    </ol>
+  </div>
+
+  <p>本文挑选面试中出现频率最高的 <strong>5 种模式</strong>，每种都会给出：核心结构 → 代码实现 → JDK/Spring 中的真实应用。背完这篇，设计模式题基本不会翻车。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试核心</span>
+    <p>模式 ≠ 背定义。面试官要的是"我在源码里见过它"+"我知道为什么这么设计"。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>单例模式 (Singleton)</h2>
+  </div>
+
+  <p>保证一个类只有一个实例，并提供全局访问点。面试必问"5 种写法"和"Spring 单例与 GoF 单例的区别"。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 520 200" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="10" width="500" height="180" rx="12" fill="#f8f9fa" stroke="#dee2e6"/>
+      <text x="260" y="40" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">单例模式 5 种写法对比</text>
+      <rect x="30" y="60" width="88" height="50" rx="6" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="74" y="82" text-anchor="middle" font-size="11" fill="#1976d2">饿汉式</text>
+      <text x="74" y="98" text-anchor="middle" font-size="9" fill="#555">线程安全</text>
+      <rect x="128" y="60" width="88" height="50" rx="6" fill="#fff3e0" stroke="#f57c00"/>
+      <text x="172" y="82" text-anchor="middle" font-size="11" fill="#f57c00">懒汉式</text>
+      <text x="172" y="98" text-anchor="middle" font-size="9" fill="#555">需 synchronized</text>
+      <rect x="226" y="60" width="88" height="50" rx="6" fill="#e8f5e9" stroke="#388e3c"/>
+      <text x="270" y="82" text-anchor="middle" font-size="11" fill="#388e3c">DCL</text>
+      <text x="270" y="98" text-anchor="middle" font-size="9" fill="#555">双重检查锁定</text>
+      <rect x="324" y="60" width="88" height="50" rx="6" fill="#fce4ec" stroke="#c62828"/>
+      <text x="368" y="82" text-anchor="middle" font-size="11" fill="#c62828">静态内部类</text>
+      <text x="368" y="98" text-anchor="middle" font-size="9" fill="#555">延迟+安全</text>
+      <rect x="30" y="130" width="88" height="50" rx="6" fill="#f3e5f5" stroke="#7b1fa2"/>
+      <text x="74" y="152" text-anchor="middle" font-size="11" fill="#7b1fa2">枚举</text>
+      <text x="74" y="168" text-anchor="middle" font-size="9" fill="#555">防反射+序列化</text>
+      <rect x="128" y="130" width="384" height="50" rx="6" fill="#f5f5f5" stroke="#9e9e9e"/>
+      <text x="320" y="152" text-anchor="middle" font-size="12" fill="#616161">推荐：静态内部类（通用）/ 枚举（需防反射）</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> 单例模式 5 种实现方式速览</figcaption>
+  </figure>
+
+  <h3>1. 饿汉式</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">类加载时初始化，天然线程安全</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">EagerSingleton</span> {
+    <span class="k">private static final</span> <span class="t">EagerSingleton</span> <span class="n">INSTANCE</span> = <span class="k">new</span> <span class="t">EagerSingleton</span>();
+    <span class="k">private</span> <span class="t">EagerSingleton</span>() {}
+    <span class="k">public static</span> <span class="t">EagerSingleton</span> <span class="n">getInstance</span>() {
+        <span class="k">return</span> <span class="n">INSTANCE</span>;
+    }
+}</pre>
+  </div>
+
+  <h3>2. 懒汉式（synchronized）</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">简单但性能差，每次获取都加锁</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">LazySingleton</span> {
+    <span class="k">private static</span> <span class="t">LazySingleton</span> <span class="n">instance</span>;
+    <span class="k">private</span> <span class="t">LazySingleton</span>() {}
+    <span class="k">public static synchronized</span> <span class="t">LazySingleton</span> <span class="n">getInstance</span>() {
+        <span class="k">if</span> (<span class="n">instance</span> == <span class="k">null</span>) <span class="n">instance</span> = <span class="k">new</span> <span class="t">LazySingleton</span>();
+        <span class="k">return</span> <span class="n">instance</span>;
+    }
+}</pre>
+  </div>
+
+  <h3>3. 双重检查锁定（DCL）</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">volatile + 双重 null 检查，面试高频写法</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">DCLSingleton</span> {
+    <span class="k">private static volatile</span> <span class="t">DCLSingleton</span> <span class="n">instance</span>;  <span class="c">// volatile 禁止指令重排</span>
+    <span class="k">private</span> <span class="t">DCLSingleton</span>() {}
+    <span class="k">public static</span> <span class="t">DCLSingleton</span> <span class="n">getInstance</span>() {
+        <span class="k">if</span> (<span class="n">instance</span> == <span class="k">null</span>) {
+            <span class="k">synchronized</span> (<span class="t">DCLSingleton</span>.<span class="k">class</span>) {
+                <span class="k">if</span> (<span class="n">instance</span> == <span class="k">null</span>)
+                    <span class="n">instance</span> = <span class="k">new</span> <span class="t">DCLSingleton</span>();
+            }
+        }
+        <span class="k">return</span> <span class="n">instance</span>;
+    }
+}</pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试追问</span>
+    <p><strong>"为什么 volatile 不能省？"</strong>—— <code>new</code> 操作分三步：分配内存 → 初始化对象 → 引用赋值。没有 volatile，第 2、3 步可能重排，导致其他线程拿到半初始化对象。</p>
+  </div>
+
+  <h3>4. 静态内部类</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">利用类加载机制保证线程安全，延迟加载</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">StaticInnerSingleton</span> {
+    <span class="k">private</span> <span class="t">StaticInnerSingleton</span>() {}
+    <span class="k">private static class</span> <span class="t">Holder</span> {
+        <span class="k">static final</span> <span class="t">StaticInnerSingleton</span> <span class="n">INSTANCE</span> = <span class="k">new</span> <span class="t">StaticInnerSingleton</span>();
+    }
+    <span class="k">public static</span> <span class="t">StaticInnerSingleton</span> <span class="n">getInstance</span>() {
+        <span class="k">return</span> <span class="t">Holder</span>.<span class="n">INSTANCE</span>;
+    }
+}</pre>
+  </div>
+
+  <h3>5. 枚举</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">Effective Java 推荐，天然防反射和反序列化攻击</div>
+    <pre class="srcbox-file"><span class="k">public enum</span> <span class="t">EnumSingleton</span> {
+    <span class="n">INSTANCE</span>;
+    <span class="k">public void</span> <span class="n">doSomething</span>() { <span class="c">/* 业务逻辑 */</span> }
+}</pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">Spring 的 singleton scope 和 GoF 单例是一回事吗？</p>
+    <p><strong>不是。</strong>GoF 单例是 JVM 层面保证一个类只有一个对象；Spring singleton scope 是 IoC 容器层面，保证同一个 <code>BeanDefinition</code> 只创建一个 Bean 实例。同一个类注册两个不同 id 的 Bean，会得到两个不同的对象。</p>
+  </div>
+
+  <table class="nb-table">
+    <thead><tr><th>对比项</th><th>GoF 单例</th><th>Spring Singleton Scope</th></tr></thead>
+    <tbody>
+      <tr><td>作用范围</td><td>JVM 级别</td><td>ApplicationContext 级别</td></tr>
+      <tr><td>实现方式</td><td>private 构造 + static 字段</td><td>ConcurrentHashMap 缓存</td></tr>
+      <tr><td>同类多实例</td><td>不可能</td><td>注册不同 Bean name 即可</td></tr>
+      <tr><td>线程安全</td><td>需要自己保证</td><td>Spring 只保证唯一性，不保证状态安全</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试答案模板</span>
+    <p>"单例有 5 种写法——饿汉、懒汉、DCL、静态内部类、枚举。生产环境推荐静态内部类或枚举。Spring 的 singleton scope 是容器级别的单例，跟 GoF 单例不是一个概念。Spring 内部用 ConcurrentHashMap 缓存 Bean，<code>DefaultSingletonBeanRegistry.getSingleton()</code> 就是它的实现。"</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>工厂模式 (Factory)</h2>
+  </div>
+
+  <p>工厂模式有三个层次：简单工厂 → 工厂方法 → 抽象工厂，面试中经常要求"用 JDK 或 Spring 的例子说明区别"。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 560 220" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="10" width="540" height="200" rx="12" fill="#f8f9fa" stroke="#dee2e6"/>
+      <text x="280" y="38" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">工厂模式三阶段演进</text>
+      <rect x="30" y="55" width="150" height="65" rx="8" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="105" y="78" text-anchor="middle" font-size="13" font-weight="bold" fill="#1976d2">简单工厂</text>
+      <text x="105" y="96" text-anchor="middle" font-size="10" fill="#555">一个工厂，switch 决定</text>
+      <text x="105" y="110" text-anchor="middle" font-size="10" fill="#555">违反 OCP</text>
+      <line x1="180" y1="87" x2="205" y2="87" stroke="#999" stroke-width="2" marker-end="url(#arrow)"/>
+      <rect x="205" y="55" width="150" height="65" rx="8" fill="#e8f5e9" stroke="#388e3c"/>
+      <text x="280" y="78" text-anchor="middle" font-size="13" font-weight="bold" fill="#388e3c">工厂方法</text>
+      <text x="280" y="96" text-anchor="middle" font-size="10" fill="#555">每个产品一个工厂类</text>
+      <text x="280" y="110" text-anchor="middle" font-size="10" fill="#555">符合 OCP</text>
+      <line x1="355" y1="87" x2="380" y2="87" stroke="#999" stroke-width="2"/>
+      <rect x="380" y="55" width="150" height="65" rx="8" fill="#fce4ec" stroke="#c62828"/>
+      <text x="455" y="78" text-anchor="middle" font-size="13" font-weight="bold" fill="#c62828">抽象工厂</text>
+      <text x="455" y="96" text-anchor="middle" font-size="10" fill="#555">产品族，多产品等级</text>
+      <text x="455" y="110" text-anchor="middle" font-size="10" fill="#555">JDBC / GUI 工具包</text>
+      <rect x="30" y="145" width="500" height="50" rx="6" fill="#f5f5f5" stroke="#9e9e9e"/>
+      <text x="280" y="167" text-anchor="middle" font-size="12" fill="#616161">JDK: Calendar.getInstance() / Spring: BeanFactory / Logger.getLogger()</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> 工厂模式的三个层次</figcaption>
+  </figure>
+
+  <h3>简单工厂</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">一个工厂类根据参数创建不同产品</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">PaymentFactory</span> {
+    <span class="k">public static</span> <span class="t">Payment</span> <span class="n">create</span>(<span class="t">String</span> <span class="n">type</span>) {
+        <span class="k">switch</span> (<span class="n">type</span>) {
+            <span class="k">case</span> <span class="s">"alipay"</span>:  <span class="k">return new</span> <span class="t">AlipayPayment</span>();
+            <span class="k">case</span> <span class="s">"wechat"</span>:  <span class="k">return new</span> <span class="t">WechatPayment</span>();
+            <span class="k">default</span>: <span class="k">throw new</span> <span class="t">IllegalArgumentException</span>(<span class="n">type</span>);
+        }
+    }
+}</pre>
+  </div>
+
+  <p><strong>JDK 真实案例：</strong><code>java.util.Calendar.getInstance()</code>——根据 Locale 和 TimeZone 返回不同的 Calendar 子类（<code>GregorianCalendar</code>、<code>BuddhistCalendar</code> 等），是经典的简单工厂。</p>
+
+  <h3>工厂方法</h3>
+  <p>为每个产品定义独立的工厂类，符合开闭原则。新增产品只需新增工厂，不用改已有代码。</p>
+  <p><strong>JDK 真实案例：</strong></p>
+  <ul>
+    <li><code>java.util.logging.Logger.getLogger(name)</code>——工厂方法，子类可以覆盖创建逻辑</li>
+    <li><code>java.net.URLStreamHandlerFactory</code>——接口 + 工厂方法，URL 根据协议找到对应 Handler</li>
+  </ul>
+
+  <h3>抽象工厂</h3>
+  <p>创建一系列相关对象（产品族）。JDBC 就是经典案例：<code>Connection</code>、<code>Statement</code>、<code>ResultSet</code> 都由对应数据库厂商的工厂统一创建。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Spring BeanFactory 的工厂方法模式</div>
+    <pre class="srcbox-file"><span class="c">// Spring IoC 容器本身就是最大的工厂</span>
+<span class="t">ApplicationContext</span> <span class="n">ctx</span> = <span class="k">new</span> <span class="t">AnnotationConfigApplicationContext</span>(<span class="t">AppConfig</span>.<span class="k">class</span>);
+<span class="t">UserService</span> <span class="n">userService</span> = <span class="n">ctx</span>.<span class="n">getBean</span>(<span class="t">UserService</span>.<span class="k">class</span>);
+
+<span class="c">// BeanFactory 接口定义了工厂方法的抽象</span>
+<span class="k">public interface</span> <span class="t">BeanFactory</span> {
+    <span class="t">Object</span> <span class="n">getBean</span>(<span class="t">String</span> <span class="n">name</span>);       <span class="c">// 按名称获取</span>
+    &lt;T&gt; <span class="t">T</span> <span class="n">getBean</span>(<span class="t">Class</span>&lt;<span class="t">T</span>&gt; <span class="n">type</span>);    <span class="c">// 按类型获取</span>
+}</pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试追问</span>
+    <p><strong>"Spring 的 FactoryBean 和 BeanFactory 有什么区别？"</strong>—— <code>BeanFactory</code> 是 IoC 容器本身，管理所有 Bean 的生命周期；<code>FactoryBean</code> 是一个特殊 Bean，通过 <code>getObject()</code> 方法自定义创建逻辑，常用于代理对象（如 <code>MyBatis</code> 的 Mapper 接口就是通过 FactoryBean 创建的）。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试答案模板</span>
+    <p>"工厂模式分三层——简单工厂用 switch 分发，违反 OCP；工厂方法为每个产品定义独立工厂；抽象工厂创建产品族。JDK 的 Calendar.getInstance() 是简单工厂，Logger.getLogger() 是工厂方法，JDBC 是抽象工厂。Spring 的 BeanFactory 是工厂方法模式的极致应用，整个 IoC 容器就是一个大工厂。"</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>策略模式 (Strategy)</h2>
+  </div>
+
+  <p>定义一系列算法，把它们封装起来并使它们可互换。消除大量的 if-else / switch，是重构面试中最常被提到的模式。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 520 200" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="10" width="500" height="180" rx="12" fill="#f8f9fa" stroke="#dee2e6"/>
+      <text x="260" y="38" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">策略模式结构</text>
+      <rect x="40" y="55" width="120" height="55" rx="8" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="100" y="78" text-anchor="middle" font-size="12" font-weight="bold" fill="#1976d2">Context</text>
+      <text x="100" y="95" text-anchor="middle" font-size="10" fill="#555">持有策略引用</text>
+      <line x1="160" y1="82" x2="200" y2="82" stroke="#999" stroke-width="2" stroke-dasharray="6,3"/>
+      <text x="180" y="72" text-anchor="middle" font-size="9" fill="#999">uses</text>
+      <rect x="200" y="55" width="120" height="55" rx="8" fill="#fff3e0" stroke="#f57c00"/>
+      <text x="260" y="78" text-anchor="middle" font-size="12" font-weight="bold" fill="#f57c00">Strategy</text>
+      <text x="260" y="95" text-anchor="middle" font-size="10" fill="#555">接口/抽象类</text>
+      <line x1="230" y1="110" x2="230" y2="130" stroke="#999" stroke-width="1.5"/>
+      <line x1="260" y1="110" x2="260" y2="130" stroke="#999" stroke-width="1.5"/>
+      <line x1="290" y1="110" x2="290" y2="130" stroke="#999" stroke-width="1.5"/>
+      <rect x="195" y="130" width="45" height="35" rx="5" fill="#e8f5e9" stroke="#388e3c"/>
+      <text x="218" y="152" text-anchor="middle" font-size="9" fill="#388e3c">策略 A</text>
+      <rect x="245" y="130" width="45" height="35" rx="5" fill="#e8f5e9" stroke="#388e3c"/>
+      <text x="268" y="152" text-anchor="middle" font-size="9" fill="#388e3c">策略 B</text>
+      <rect x="295" y="130" width="45" height="35" rx="5" fill="#e8f5e9" stroke="#388e3c"/>
+      <text x="318" y="152" text-anchor="middle" font-size="9" fill="#388e3c">策略 C</text>
+      <rect x="370" y="55" width="130" height="110" rx="6" fill="#f5f5f5" stroke="#9e9e9e"/>
+      <text x="435" y="78" text-anchor="middle" font-size="11" font-weight="bold" fill="#555">JDK / Spring</text>
+      <text x="435" y="98" text-anchor="middle" font-size="10" fill="#666">Comparator</text>
+      <text x="435" y="115" text-anchor="middle" font-size="10" fill="#666">ThreadPoolExecutor</text>
+      <text x="435" y="132" text-anchor="middle" font-size="10" fill="#666">RejectedExecution</text>
+      <text x="435" y="149" text-anchor="middle" font-size="10" fill="#666">HandlerMapping</text>
+    </svg>
+    <figcaption><span class="fig-no">图 3</span> 策略模式结构与 JDK/Spring 应用</figcaption>
+  </figure>
+
+  <div class="srcbox">
+    <div class="srcbox-head">JDK Comparator —— 最经典的策略模式</div>
+    <pre class="srcbox-file"><span class="c">// Comparator 就是策略接口，不同排序规则就是不同策略实现</span>
+<span class="t">List</span>&lt;<span class="t">Student</span>&gt; <span class="n">students</span> = <span class="n">getStudents</span>();
+
+<span class="c">// 策略 A：按成绩排序</span>
+<span class="n">students</span>.<span class="n">sort</span>(<span class="t">Comparator</span>.<span class="n">comparing</span>(<span class="t">Student</span>::<span class="n">getScore</span>).<span class="n">reversed</span>());
+
+<span class="c">// 策略 B：按年龄排序</span>
+<span class="n">students</span>.<span class="n">sort</span>(<span class="t">Comparator</span>.<span class="n">comparingInt</span>(<span class="t">Student</span>::<span class="n">getAge</span>));
+
+<span class="c">// Collections.sort(list, comparator) 中，Context 是 sort 方法</span>
+<span class="c">// comparator 参数就是可替换的策略</span></pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">ThreadPoolExecutor 的拒绝策略</div>
+    <pre class="srcbox-file"><span class="c">// RejectedExecutionHandler 是策略接口</span>
+<span class="k">new</span> <span class="t">ThreadPoolExecutor</span>(<span class="n">coreSize</span>, <span class="n">maxSize</span>, <span class="n">keepAlive</span>, <span class="t">TimeUnit</span>.<span class="n">SECONDS</span>,
+    <span class="n">queue</span>,
+    <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>.<span class="t">CallerRunsPolicy</span>()  <span class="c">// 可换成 4 种内置策略</span>
+);
+<span class="c">// 内置策略：AbortPolicy | CallerRunsPolicy | DiscardPolicy | DiscardOldestPolicy</span></pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Spring HandlerMapping —— MVC 请求分发的策略模式</div>
+    <pre class="srcbox-file"><span class="c">// Spring MVC 中 DispatcherServlet 持有多个 HandlerMapping 实现</span>
+<span class="c">// 每个 HandlerMapping 就是一种"找到 Handler"的策略：</span>
+<span class="c">//   RequestMappingHandlerMapping  → @RequestMapping 注解</span>
+<span class="c">//   BeanNameUrlHandlerMapping    → Bean 名称以 / 开头</span>
+<span class="c">//   SimpleUrlHandlerMapping      → 显式 URL → Handler 映射</span>
+<span class="c">// DispatcherServlet 遍历所有 HandlerMapping，第一个匹配的就处理请求</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试追问</span>
+    <p><strong>"策略模式怎么消除 if-else？"</strong>——用 <code>Map&lt;String, Strategy&gt;</code> 或者 Spring 的 <code>@Autowired List&lt;Strategy&gt;</code> 注入所有实现，通过标识匹配。配合 Spring 使用时，策略 Bean 自动注册，新增策略只需加一个类，完全符合 OCP。</p>
+  </div>
+
+  <div class="formula">
+    策略模式 = 接口 + N 个实现 + Context 持有引用 → 运行时切换算法
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试答案模板</span>
+    <p>"策略模式定义一系列可互换的算法。JDK 的 Comparator 是最经典的例子，Collections.sort() 是 Context，不同 Comparator 实现就是不同策略。线程池的 RejectedExecutionHandler 也是策略模式。Spring MVC 的 HandlerMapping 用策略模式实现请求路由，DispatcherServlet 遍历所有 HandlerMapping 找到匹配的 Handler。"</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>观察者模式 (Observer)</h2>
+  </div>
+
+  <p>定义对象间一对多的依赖关系：当一个对象状态改变时，所有依赖者都会收到通知。也叫发布-订阅模式。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 520 210" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="10" width="500" height="190" rx="12" fill="#f8f9fa" stroke="#dee2e6"/>
+      <text x="260" y="38" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">观察者模式流程</text>
+      <rect x="30" y="65" width="100" height="50" rx="8" fill="#fff3e0" stroke="#f57c00"/>
+      <text x="80" y="87" text-anchor="middle" font-size="12" font-weight="bold" fill="#f57c00">Subject</text>
+      <text x="80" y="103" text-anchor="middle" font-size="10" fill="#555">状态变更</text>
+      <line x1="130" y1="90" x2="175" y2="70" stroke="#1976d2" stroke-width="2"/>
+      <line x1="130" y1="90" x2="175" y2="90" stroke="#1976d2" stroke-width="2"/>
+      <line x1="130" y1="90" x2="175" y2="110" stroke="#1976d2" stroke-width="2"/>
+      <text x="152" y="60" font-size="9" fill="#1976d2">notify</text>
+      <rect x="175" y="55" width="90" height="30" rx="5" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="220" y="75" text-anchor="middle" font-size="11" fill="#1976d2">Observer A</text>
+      <rect x="175" y="80" width="90" height="30" rx="5" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="220" y="100" text-anchor="middle" font-size="11" fill="#1976d2">Observer B</text>
+      <rect x="175" y="105" width="90" height="30" rx="5" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="220" y="125" text-anchor="middle" font-size="11" fill="#1976d2">Observer C</text>
+      <rect x="300" y="55" width="190" height="85" rx="6" fill="#f5f5f5" stroke="#9e9e9e"/>
+      <text x="395" y="75" text-anchor="middle" font-size="11" font-weight="bold" fill="#555">真实应用</text>
+      <text x="395" y="95" text-anchor="middle" font-size="10" fill="#666">JDK: Observer / Observable</text>
+      <text x="395" y="112" text-anchor="middle" font-size="10" fill="#666">Spring: ApplicationEvent</text>
+      <text x="395" y="129" text-anchor="middle" font-size="10" fill="#666">Guava: EventBus</text>
+      <rect x="30" y="155" width="460" height="30" rx="5" fill="#fce4ec" stroke="#c62828"/>
+      <text x="260" y="175" text-anchor="middle" font-size="11" fill="#c62828">JDK Observer 已废弃(Java 9+)，推荐 Flow API / Spring Event</text>
+    </svg>
+    <figcaption><span class="fig-no">图 4</span> 观察者模式与主流框架应用</figcaption>
+  </figure>
+
+  <h3>JDK 内置（已废弃）→ Spring 事件机制</h3>
+  <p>JDK 的 <code>java.util.Observer</code> 和 <code>Observable</code> 在 Java 9 被标记为 <code>@Deprecated</code>，原因是 Observable 的方法不是线程安全的，且它继承方式限制了灵活性。现代 Java 推荐 Spring 事件机制。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Spring ApplicationEvent 完整示例</div>
+    <pre class="srcbox-file"><span class="c">// 1. 定义事件</span>
+<span class="k">public class</span> <span class="t">OrderCreatedEvent</span> <span class="k">extends</span> <span class="t">ApplicationEvent</span> {
+    <span class="k">private final</span> <span class="t">String</span> <span class="n">orderId</span>;
+    <span class="k">public</span> <span class="t">OrderCreatedEvent</span>(<span class="t">Object</span> <span class="n">source</span>, <span class="t">String</span> <span class="n">orderId</span>) {
+        <span class="k">super</span>(<span class="n">source</span>);
+        <span class="k">this</span>.<span class="n">orderId</span> = <span class="n">orderId</span>;
+    }
+    <span class="k">public</span> <span class="t">String</span> <span class="n">getOrderId</span>() { <span class="k">return</span> <span class="n">orderId</span>; }
+}
+
+<span class="c">// 2. 发布者——注入 ApplicationEventPublisher</span>
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">@Autowired</span> <span class="k">private</span> <span class="t">ApplicationEventPublisher</span> <span class="n">publisher</span>;
+
+    <span class="k">public void</span> <span class="n">createOrder</span>(<span class="t">String</span> <span class="n">orderId</span>) {
+        <span class="c">// ... 业务逻辑</span>
+        <span class="n">publisher</span>.<span class="n">publishEvent</span>(<span class="k">new</span> <span class="t">OrderCreatedEvent</span>(<span class="k">this</span>, <span class="n">orderId</span>));
+    }
+}
+
+<span class="c">// 3. 监听者</span>
+<span class="k">@Component</span>
+<span class="k">public class</span> <span class="t">InventoryListener</span> {
+    <span class="k">@EventListener</span>
+    <span class="k">public void</span> <span class="n">onOrderCreated</span>(<span class="t">OrderCreatedEvent</span> <span class="n">event</span>) {
+        <span class="c">// 扣减库存</span>
+        <span class="n">log</span>.<span class="n">info</span>(<span class="s">"扣减库存: {}"</span>, <span class="n">event</span>.<span class="n">getOrderId</span>());
+    }
+}
+
+<span class="c">// 4. 异步监听（新线程执行）</span>
+<span class="k">@Component</span>
+<span class="k">public class</span> <span class="t">NotifyListener</span> {
+    <span class="k">@Async</span>
+    <span class="k">@EventListener</span>
+    <span class="k">public void</span> <span class="n">sendNotification</span>(<span class="t">OrderCreatedEvent</span> <span class="n">event</span>) {
+        <span class="c">// 发送通知，不影响主流程</span>
+    }
+}</pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Guava EventBus 示例</div>
+    <pre class="srcbox-file"><span class="t">EventBus</span> <span class="n">bus</span> = <span class="k">new</span> <span class="t">EventBus</span>(<span class="s">"order-bus"</span>);
+
+<span class="c">// 注册监听者</span>
+<span class="n">bus</span>.<span class="n">register</span>(<span class="k">new</span> <span class="t">Object</span>() {
+    <span class="k">@Subscribe</span>
+    <span class="k">public void</span> <span class="n">onOrder</span>(<span class="t">OrderCreatedEvent</span> <span class="n">event</span>) {
+        <span class="c">// 处理事件</span>
+    }
+});
+
+<span class="c">// 发布事件</span>
+<span class="n">bus</span>.<span class="n">post</span>(<span class="k">new</span> <span class="t">OrderCreatedEvent</span>(<span class="s">"ORD-001"</span>));</pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">Spring 事件默认是同步还是异步？</p>
+    <p><strong>默认同步。</strong>监听者和发布者在同一个线程执行。要异步需要加 <code>@Async</code> 注解并启用 <code>@EnableAsync</code>。同步事件适合事务内操作（监听者共享事务），异步事件适合发通知、写日志等不影响主流程的操作。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试答案模板</span>
+    <p>"观察者模式定义一对多依赖，Subject 状态变化时通知所有 Observer。JDK 的 Observer 在 Java 9 废弃了，现在主流用 Spring 的 ApplicationEvent 机制：定义事件类继承 ApplicationEvent，用 ApplicationEventPublisher 发布，用 @EventListener 监听。加 @Async 可以异步处理。Guava 的 EventBus 是轻量替代方案。"</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>模板方法模式 (Template Method)</h2>
+  </div>
+
+  <p>在父类中定义算法骨架，将某些步骤延迟到子类实现。子类可以在不改变算法结构的情况下重新定义某些步骤。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 520 230" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="10" width="500" height="210" rx="12" fill="#f8f9fa" stroke="#dee2e6"/>
+      <text x="260" y="38" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">模板方法：Spring JdbcTemplate 执行流程</text>
+      <rect x="30" y="55" width="130" height="45" rx="8" fill="#e3f2fd" stroke="#1976d2"/>
+      <text x="95" y="73" text-anchor="middle" font-size="11" font-weight="bold" fill="#1976d2">1. 获取连接</text>
+      <text x="95" y="90" text-anchor="middle" font-size="9" fill="#555">DataSourceUtils</text>
+      <line x1="95" y1="100" x2="95" y2="115" stroke="#999" stroke-width="1.5"/>
+      <rect x="30" y="115" width="130" height="45" rx="8" fill="#fff3e0" stroke="#f57c00"/>
+      <text x="95" y="133" text-anchor="middle" font-size="11" font-weight="bold" fill="#f57c00">2. 创建语句</text>
+      <text x="95" y="150" text-anchor="middle" font-size="9" fill="#555">PreparedStatement</text>
+      <line x1="95" y1="160" x2="95" y2="175" stroke="#999" stroke-width="1.5"/>
+      <rect x="30" y="175" width="130" height="35" rx="8" fill="#fce4ec" stroke="#c62828"/>
+      <text x="95" y="198" text-anchor="middle" font-size="11" font-weight="bold" fill="#c62828">3. 执行回调</text>
+      <rect x="190" y="55" width="140" height="155" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-dasharray="5,3"/>
+      <text x="260" y="78" text-anchor="middle" font-size="12" font-weight="bold" fill="#388e3c">4. 处理结果</text>
+      <text x="260" y="98" text-anchor="middle" font-size="10" fill="#555">ResultSetExtractor</text>
+      <text x="260" y="115" text-anchor="middle" font-size="10" fill="#555">RowMapper</text>
+      <text x="260" y="135" text-anchor="middle" font-size="10" fill="#388e3c">（用户自定义部分）</text>
+      <text x="260" y="155" text-anchor="middle" font-size="9" fill="#555">步骤 1~3, 5~6 是固定模板</text>
+      <text x="260" y="170" text-anchor="middle" font-size="9" fill="#555">步骤 4 是用户扩展点</text>
+      <line x1="160" y1="192" x2="190" y2="130" stroke="#999" stroke-width="1.5"/>
+      <rect x="360" y="55" width="140" height="155" rx="6" fill="#f5f5f5" stroke="#9e9e9e"/>
+      <text x="430" y="78" text-anchor="middle" font-size="11" font-weight="bold" fill="#555">模板方法应用</text>
+      <text x="430" y="100" text-anchor="middle" font-size="10" fill="#666">JdbcTemplate</text>
+      <text x="430" y="118" text-anchor="middle" font-size="10" fill="#666">RestTemplate</text>
+      <text x="430" y="136" text-anchor="middle" font-size="10" fill="#666">HttpServlet</text>
+      <text x="430" y="154" text-anchor="middle" font-size="10" fill="#666">AbstractList</text>
+      <text x="430" y="172" text-anchor="middle" font-size="10" fill="#666">JUnit setUp/tearDown</text>
+      <text x="430" y="190" text-anchor="middle" font-size="10" fill="#666">Spring Bean 生命周期</text>
+    </svg>
+    <figcaption><span class="fig-no">图 5</span> 模板方法模式与 JdbcTemplate 执行流程</figcaption>
+  </figure>
+
+  <h3>JDK 经典案例：HttpServlet</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">HttpServlet.service() 是模板方法</div>
+    <pre class="srcbox-file"><span class="c">// HttpServlet.service() 定义了算法骨架</span>
+<span class="k">protected void</span> <span class="n">service</span>(<span class="t">HttpServletRequest</span> <span class="n">req</span>, <span class="t">HttpServletResponse</span> <span class="n">resp</span>) {
+    <span class="t">String</span> <span class="n">method</span> = <span class="n">req</span>.<span class="n">getMethod</span>();
+    <span class="k">if</span> (<span class="n">method</span>.<span class="n">equals</span>(<span class="s">"GET"</span>))  <span class="n">doGet</span>(<span class="n">req</span>, <span class="n">resp</span>);      <span class="c">// ← 子类实现</span>
+    <span class="k">if</span> (<span class="n">method</span>.<span class="n">equals</span>(<span class="s">"POST"</span>)) <span class="n">doPost</span>(<span class="n">req</span>, <span class="n">resp</span>);     <span class="c">// ← 子类实现</span>
+    <span class="c">// ... PUT, DELETE, etc.</span>
+}
+<span class="c">// doGet() / doPost() 默认返回 405，子类覆盖即可</span></pre>
+  </div>
+
+  <h3>Spring JdbcTemplate</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">JdbcTemplate.query() 封装了 JDBC 全部样板代码</div>
+    <pre class="srcbox-file"><span class="c">// JdbcTemplate 内部 execute() 的简化逻辑（模板方法）</span>
+<span class="k">public</span> &lt;<span class="t">T</span>&gt; <span class="t">T</span> <span class="n">execute</span>(<span class="t">ConnectionCallback</span>&lt;<span class="t">T</span>&gt; <span class="n">action</span>) {
+    <span class="t">Connection</span> <span class="n">con</span> = <span class="t">DataSourceUtils</span>.<span class="n">getConnection</span>(<span class="n">dataSource</span>);  <span class="c">// 步骤 1</span>
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="n">action</span>.<span class="n">doInConnection</span>(<span class="n">con</span>);  <span class="c">// 步骤 2：回调（用户代码）</span>
+    }
+    <span class="k">catch</span> (<span class="t">SQLException</span> <span class="n">ex</span>) {
+        <span class="c">// 步骤 3：异常转换</span>
+        <span class="k">throw</span> <span class="n">getExceptionTranslator</span>().<span class="n">translate</span>(<span class="n">ex</span>);
+    }
+    <span class="k">finally</span> {
+        <span class="t">DataSourceUtils</span>.<span class="n">releaseConnection</span>(<span class="n">con</span>, <span class="n">dataSource</span>);  <span class="c">// 步骤 4</span>
+    }
+}
+
+<span class="c">// 用户只需关心业务逻辑</span>
+<span class="t">List</span>&lt;<span class="t">User</span>&gt; <span class="n">users</span> = <span class="n">jdbcTemplate</span>.<span class="n">query</span>(
+    <span class="s">"SELECT * FROM user WHERE age > ?"</span>,
+    <span class="k">new</span> <span class="t">Object</span>[]{<span class="n">18</span>},
+    <span class="k">new</span> <span class="t">BeanPropertyRowMapper</span>&lt;&gt;(<span class="t">User</span>.<span class="k">class</span>)
+);</pre>
+  </div>
+
+  <h3>Spring RestTemplate</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">RestTemplate 同样是模板方法</div>
+    <pre class="srcbox-file"><span class="c">// RestTemplate.execute() 封装了 HTTP 调用全流程</span>
+<span class="c">// 1. 创建 ClientHttpRequest（选择底层 HttpClient）</span>
+<span class="c">// 2. 设置请求头、请求体（HttpMessageConverter）</span>
+<span class="c">// 3. 执行请求</span>
+<span class="c">// 4. ResponseExtractor 处理响应（用户自定义）</span>
+<span class="c">// 5. 关闭连接、错误处理</span>
+
+<span class="c">// 用户只需关注结果处理</span>
+<span class="t">User</span> <span class="n">user</span> = <span class="n">restTemplate</span>.<span class="n">getForObject</span>(
+    <span class="s">"http://api/users/{id}"</span>, <span class="t">User</span>.<span class="k">class</span>, <span class="n">123</span>
+);</pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">模板方法和策略模式有什么区别？</p>
+    <p><strong>模板方法用继承</strong>，子类重写父类的某些步骤，算法骨架在父类中固定；<strong>策略模式用组合</strong>，通过持有不同的策略对象在运行时切换算法。模板方法是"白箱复用"（子类知道父类结构），策略模式是"黑箱复用"（只依赖接口）。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试追问</span>
+    <p><strong>"Spring Bean 生命周期中哪些是模板方法？"</strong>—— <code>AbstractApplicationContext.refresh()</code> 就是模板方法。它定义了 12 步标准流程（prepareRefresh → obtainFreshBeanFactory → invokeBeanFactoryPostProcessors → ... → finishRefresh），每个子类（如 AnnotationConfigApplicationContext）只需实现个别步骤。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试答案模板</span>
+    <p>"模板方法在父类定义算法骨架，子类实现具体步骤。HttpServlet.service() 是经典 JDK 案例。Spring 的 JdbcTemplate 封装了获取连接、创建语句、异常转换、关闭连接的全部样板代码，用户只需提供 SQL 和结果映射。RestTemplate、AbstractApplicationContext.refresh() 也是模板方法。它和策略模式的区别：模板方法用继承固定骨架，策略模式用组合在运行时切换。"</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>总结：速查表与面试锦囊</h2>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr>
+        <th>模式</th>
+        <th>一句话</th>
+        <th>JDK 实例</th>
+        <th>Spring 实例</th>
+        <th>面试高频追问</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>单例</strong></td>
+        <td>全局唯一实例</td>
+        <td>Runtime</td>
+        <td>DefaultSingletonBeanRegistry</td>
+        <td>DCL 为何要 volatile？Spring 单例 vs GoF 单例？</td>
+      </tr>
+      <tr>
+        <td><strong>工厂</strong></td>
+        <td>封装对象创建</td>
+        <td>Calendar.getInstance()</td>
+        <td>BeanFactory / FactoryBean</td>
+        <td>简单工厂 vs 工厂方法？FactoryBean 用途？</td>
+      </tr>
+      <tr>
+        <td><strong>策略</strong></td>
+        <td>算法可替换</td>
+        <td>Comparator</td>
+        <td>HandlerMapping</td>
+        <td>如何消除 if-else？策略模式 vs 状态模式？</td>
+      </tr>
+      <tr>
+        <td><strong>观察者</strong></td>
+        <td>一对多通知</td>
+        <td>Observer（已废弃）</td>
+        <td>ApplicationEvent + @EventListener</td>
+        <td>同步 vs 异步？事件传播机制？</td>
+      </tr>
+      <tr>
+        <td><strong>模板方法</strong></td>
+        <td>算法骨架+子类扩展</td>
+        <td>HttpServlet</td>
+        <td>JdbcTemplate / RestTemplate</td>
+        <td>模板方法 vs 策略模式？Bean 生命周期中的模板方法？</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="recap">
+    <h3>面试回答三板斧</h3>
+    <ol>
+      <li><strong>说结构</strong>：用一句话概括模式的角色和关系（"策略 = 接口 + N 实现 + Context"）</li>
+      <li><strong>举例子</strong>：至少给一个 JDK 或 Spring 的真实案例（"JDK 的 Comparator 就是策略模式"）</li>
+      <li><strong>讲细节</strong>：补充实现细节或源码分析（"DCL 必须用 volatile 防止指令重排"）</li>
+    </ol>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">最后提醒</span>
+    <p>面试中不需要把 5 种模式全讲一遍。面试官说"挑一个你熟悉的"，就选一个讲透：结构 → 代码 → 框架应用 → 优缺点。如果面试官问"还有别的吗"，再简短补充第二个。深度比广度重要。</p>
+  </div>
+</section>
+
+</main></body></html>

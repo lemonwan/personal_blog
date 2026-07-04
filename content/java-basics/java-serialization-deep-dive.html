@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>序列化机制：Serializable、transient 与 serialVersionUID</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：Serializable 接口 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>Serializable 接口：一个空标记接口背后的魔法</h2></div>
+
+<p>Java 序列化是指将对象转换为字节流（序列化）和从字节流恢复对象（反序列化）的过程。核心接口是 <code>java.io.Serializable</code>——一个没有任何方法的<strong>标记接口</strong>（Marker Interface）。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SerializeDemo.java</b> · 序列化与反序列化基础</span></div>
+<pre><code><span class="k">public class</span> <span class="t">User</span> <span class="k">implements</span> <span class="t">Serializable</span> {
+    <span class="k">private</span> <span class="t">String</span> name;
+    <span class="k">private int</span> age;
+    <span class="k">private transient</span> <span class="t">String</span> password;  <span class="c">// ★ transient 字段不参与序列化</span>
+}
+
+<span class="c">// 序列化：对象 → 字节流</span>
+<span class="t">User</span> user = <span class="k">new</span> <span class="t">User</span>(<span class="s">"张三"</span>, <span class="n">28</span>, <span class="s">"secret"</span>);
+<span class="k">try</span> (<span class="t">ObjectOutputStream</span> oos = <span class="k">new</span> <span class="t">ObjectOutputStream</span>(
+        <span class="k">new</span> <span class="t">FileOutputStream</span>(<span class="s">"user.dat"</span>))) {
+    oos.writeObject(user);
+}
+
+<span class="c">// 反序列化：字节流 → 对象</span>
+<span class="k">try</span> (<span class="t">ObjectInputStream</span> ois = <span class="k">new</span> <span class="t">ObjectInputStream</span>(
+        <span class="k">new</span> <span class="t">FileInputStream</span>(<span class="s">"user.dat"</span>))) {
+    <span class="t">User</span> restored = (<span class="t">User</span>) ois.readObject();
+    System.out.println(restored.name);      <span class="c">// 张三</span>
+    System.out.println(restored.age);       <span class="c">// 28</span>
+    System.out.println(restored.password);  <span class="c">// null ★ transient 字段丢失</span>
+}
+
+<span class="c">/*
+ * 为什么 Serializable 是空接口？
+ * 它只是一个"标记"，告诉 JVM：这个类允许被序列化。
+ * 实际的序列化逻辑在 ObjectOutputStream 内部实现。
+ * 如果一个类没有 implements Serializable，序列化时会抛出 NotSerializableException。
+ */</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">反序列化时构造函数会被调用吗？</div>
+<p><strong>不会</strong>。反序列化通过 <code>Unsafe.allocateInstance()</code> 直接分配内存，跳过构造函数。但会调用最近的非 Serializable 父类的无参构造函数。所以：</p>
+<p>- 如果父类没有实现 Serializable，父类字段会被初始化为默认值（不是反序列化的值）<br/>
+- 如果父类也实现了 Serializable，父类字段正常恢复</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：serialVersionUID ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>serialVersionUID：版本兼容的"通行证"</h2></div>
+
+<p><code>serialVersionUID</code> 是序列化流的版本号。反序列化时，JVM 会比较字节流中的 UID 和当前类的 UID，如果不一致就抛出 <code>InvalidClassException</code>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SerialVersionUIDDemo.java</b> · UID 不匹配的灾难</span></div>
+<pre><code><span class="c">// ═══ 版本 1：原始类 ═══</span>
+<span class="k">public class</span> <span class="t">Order</span> <span class="k">implements</span> <span class="t">Serializable</span> {
+    <span class="c">// 没有显式声明 serialVersionUID</span>
+    <span class="k">private</span> <span class="t">String</span> orderId;
+    <span class="k">private</span> <span class="k">double</span> amount;
+}
+
+<span class="c">// 序列化一个 Order 对象，保存到文件/Redis/数据库</span>
+
+<span class="c">// ═══ 版本 2：新增字段 ═══</span>
+<span class="k">public class</span> <span class="t">Order</span> <span class="k">implements</span> <span class="t">Serializable</span> {
+    <span class="c">// JVM 自动生成的 UID 变了！（因为类结构变了）</span>
+    <span class="k">private</span> <span class="t">String</span> orderId;
+    <span class="k">private</span> <span class="k">double</span> amount;
+    <span class="k">private</span> <span class="t">String</span> status;  <span class="c">// 新增字段</span>
+}
+
+<span class="c">// 反序列化之前保存的 Order 对象：</span>
+<span class="c">// ❌ InvalidClassException: Order;</span>
+<span class="c">//    local class incompatible:</span>
+<span class="c">//    stream classdesc serialVersionUID = -3287764903...</span>
+<span class="c">//    local class serialVersionUID   =  4829105732...</span>
+
+<span class="c">/*
+ * 正确做法：显式声明 serialVersionUID
+ */</span>
+<span class="k">public class</span> <span class="t">Order</span> <span class="k">implements</span> <span class="t">Serializable</span> {
+    <span class="k">private static final long</span> serialVersionUID = <span class="n">1L</span>;  <span class="c">// ★ 显式声明！</span>
+    <span class="k">private</span> <span class="t">String</span> orderId;
+    <span class="k">private</span> <span class="k">double</span> amount;
+    <span class="k">private</span> <span class="t">String</span> status;  <span class="c">// 新增字段，反序列化时为 null（默认值）</span>
+}</code></pre>
+</div>
+
+<div class="formula">
+<strong>serialVersionUID 的两种来源：</strong><br/><br/>
+1. <strong>显式声明</strong>：<code>private static final long serialVersionUID = 1L;</code>——开发者控制，类结构变化不影响<br/>
+2. <strong>JVM 自动生成</strong>：根据类名、字段、方法签名等计算一个 hash 值。只要类结构有任何变化（增删字段、修改方法），UID 就变<br/><br/>
+<strong>规则：永远显式声明 serialVersionUID。</strong>这是 Java 编码规范的铁律。
+</div>
+
+<table class="nb-table">
+<thead><tr><th>类结构变更</th><th>有显式 UID</th><th>无显式 UID（自动生成）</th></tr></thead>
+<tbody>
+  <tr><td><strong>新增字段</strong></td><td>反序列化成功，新字段为默认值</td><td>UID 变化 → 反序列化失败</td></tr>
+  <tr><td><strong>删除字段</strong></td><td>反序列化成功，旧数据丢弃</td><td>UID 变化 → 反序列化失败</td></tr>
+  <tr><td><strong>修改字段类型</strong></td><td>可能 ClassCastException</td><td>UID 变化 → 反序列化失败</td></tr>
+  <tr><td><strong>新增方法</strong></td><td>无影响</td><td>UID 可能变化 → 反序列化可能失败</td></tr>
+</tbody>
+</table>
+
+<div class="think"><div class="think-q">分布式系统中，serialVersionUID 的问题会更严重吗？<br/><br/>
+<b>非常严重</b>。假设 Redis 中缓存了序列化后的 Order 对象，新版本上线后 Order 类增加了字段。如果没显式声明 UID：<br/>
+① 灰度发布期间，新旧版本的 UID 不同 → 反序列化报错<br/>
+② 回滚版本后，之前新版本写入的数据也无法反序列化<br/>
+③ 不同服务用不同版本的类 → 互相通信失败<br/><br/>
+这就是为什么生产环境不推荐 Java 原生序列化的原因之一。</div></div>
+</section>
+
+<!-- ═══════════════ 第3站：transient 关键字 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>transient 关键字：哪些字段不该序列化？</h2></div>
+
+<p><code>transient</code> 修饰的字段不参与序列化。反序列化时，transient 字段被初始化为默认值（null / 0 / false）。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TransientDemo.java</b> · transient 的使用场景</span></div>
+<pre><code><span class="k">public class</span> <span class="t">UserSession</span> <span class="k">implements</span> <span class="t">Serializable</span> {
+    <span class="k">private static final long</span> serialVersionUID = <span class="n">1L</span>;
+
+    <span class="k">private</span> <span class="t">String</span> userId;
+    <span class="k">private</span> <span class="t">String</span> username;
+
+    <span class="c">// ★ 场景 1：敏感数据不应序列化（安全）</span>
+    <span class="k">private transient</span> <span class="t">String</span> password;
+    <span class="k">private transient</span> <span class="t">String</span> token;
+
+    <span class="c">// ★ 场景 2：可以重新计算的派生字段</span>
+    <span class="k">private transient</span> <span class="k">int</span> age;  <span class="c">// 可以从 birthday 重新算</span>
+
+    <span class="c">// ★ 场景 3：非序列化类型的字段（Thread、Socket 等）</span>
+    <span class="k">private transient</span> <span class="t">Thread</span> worker;
+    <span class="k">private transient</span> <span class="t">Socket</span> connection;
+
+    <span class="c">// ★ 场景 4：static 字段天然不参与序列化</span>
+    <span class="c">// （static 属于类，不属于对象实例，不需要 transient）</span>
+    <span class="k">private static</span> <span class="t">String</span> appName = <span class="s">"MyApp"</span>;
+}</code></pre>
+</div>
+
+<p>如果 transient 字段需要在反序列化后恢复值怎么办？JDK 提供了两个"钩子方法"：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CustomSerialize.java</b> · writeObject / readObject 钩子</span></div>
+<pre><code><span class="k">public class</span> <span class="t">SensitiveData</span> <span class="k">implements</span> <span class="t">Serializable</span> {
+    <span class="k">private static final long</span> serialVersionUID = <span class="n">1L</span>;
+
+    <span class="k">private</span> <span class="t">String</span> name;
+    <span class="k">private transient</span> <span class="t">String</span> secret;  <span class="c">// 不直接序列化</span>
+
+    <span class="c">// ★ 自定义序列化：加密后写入</span>
+    <span class="k">private void</span> writeObject(<span class="t">ObjectOutputStream</span> oos) <span class="k">throws</span> <span class="t">Exception</span> {
+        oos.defaultWriteObject();  <span class="c">// 先序列化非 transient 字段</span>
+        oos.writeUTF(encrypt(secret));  <span class="c">// 再手动序列化 transient 字段（加密后）</span>
+    }
+
+    <span class="c">// ★ 自定义反序列化：读取后解密</span>
+    <span class="k">private void</span> readObject(<span class="t">ObjectInputStream</span> ois) <span class="k">throws</span> <span class="t">Exception</span> {
+        ois.defaultReadObject();  <span class="c">// 先反序列化非 transient 字段</span>
+        <span class="k">this</span>.secret = decrypt(ois.readUTF());  <span class="c">// 再手动恢复 transient 字段</span>
+    }
+
+    <span class="c">// ★ 另一个钩子：readResolve()——控制反序列化返回的对象</span>
+    <span class="c">// 常用于实现序列化安全的单例</span>
+    <span class="k">private</span> <span class="t">Object</span> readResolve() {
+        <span class="k">return</span> <span class="t">Singleton</span>.INSTANCE;  <span class="c">// 反序列化时返回已有单例，而非新建对象</span>
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">writeObject/readObject 为什么是 private 的却能被调用？</div>
+<p>ObjectOutputStream 在序列化时，会通过<strong>反射</strong>查找类中是否有 <code>private void writeObject(ObjectOutputStream)</code> 方法。如果有，就调用它而不是默认的序列化逻辑。这是一种"约定优于配置"的设计——虽然没有接口约束，但方法签名必须严格匹配。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：Externalizable ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>Externalizable：完全自定义的序列化控制</h2></div>
+
+<p><code>Externalizable</code> 是 Serializable 的子接口，提供了两个必须实现的抽象方法：<code>writeExternal()</code> 和 <code>readExternal()</code>。与 writeObject/readObject 钩子不同，Externalizable 要求你<strong>完全控制</strong>序列化过程。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ExternalizableDemo.java</b> · Externalizable 的使用</span></div>
+<pre><code><span class="k">public class</span> <span class="t">Config</span> <span class="k">implements</span> <span class="t">Externalizable</span> {
+    <span class="c">// ★ Externalizable 反序列化时会调用无参构造函数！</span>
+    <span class="c">// 所以必须提供 public 无参构造（Serializable 不需要）</span>
+    <span class="k">public</span> <span class="t">Config</span>() { }
+
+    <span class="k">public</span> <span class="t">Config</span>(<span class="t">String</span> key, <span class="t">String</span> value) {
+        <span class="k">this</span>.key = key;
+        <span class="k">this</span>.value = value;
+    }
+
+    <span class="k">private</span> <span class="t">String</span> key;
+    <span class="k">private</span> <span class="t">String</span> value;
+
+    <span class="k">@Override</span>
+    <span class="k">public void</span> writeExternal(<span class="t">ObjectOutput</span> out) <span class="k">throws</span> <span class="t">IOException</span> {
+        <span class="c">// ★ 完全由你控制写什么、怎么写</span>
+        out.writeUTF(key);
+        out.writeUTF(encrypt(value));  <span class="c">// 可以加密</span>
+        out.writeInt(<span class="n">1</span>);              <span class="c">// 可以写版本号</span>
+    }
+
+    <span class="k">@Override</span>
+    <span class="k">public void</span> readExternal(<span class="t">ObjectInput</span> in) <span class="k">throws</span> <span class="t">IOException</span> {
+        <span class="c">// ★ 读取顺序必须和写入顺序完全一致</span>
+        <span class="k">this</span>.key = in.readUTF();
+        <span class="k">this</span>.value = decrypt(in.readUTF());
+        <span class="k">int</span> version = in.readInt();
+        <span class="c">// 可以根据 version 做兼容性处理</span>
+    }
+}</code></pre>
+</div>
+
+<table class="nb-table">
+<thead><tr><th>特性</th><th>Serializable</th><th>Externalizable</th></tr></thead>
+<tbody>
+  <tr><td><strong>接口方法</strong></td><td>无（标记接口）</td><td>writeExternal() / readExternal()</td></tr>
+  <tr><td><strong>序列化控制</strong></td><td>自动 + 可选钩子</td><td>完全手动</td></tr>
+  <tr><td><strong>无参构造</strong></td><td>不需要</td><td><strong>必须提供 public 无参构造</strong></td></tr>
+  <tr><td><strong>transient 有效？</strong></td><td>有效</td><td>无效（你自己控制写什么）</td></tr>
+  <tr><td><strong>serialVersionUID</strong></td><td>需要</td><td>需要</td></tr>
+  <tr><td><strong>性能</strong></td><td>较慢（反射探测）</td><td>较快（直接调用）</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第5站：安全问题 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>安全隐患：Java 反序列化漏洞</h2></div>
+
+<p>Java 原生序列化有一个著名的安全问题：<strong>反序列化可以执行任意代码</strong>。攻击者构造恶意字节流，在 readObject() 过程中触发危险操作。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DeserializationAttack.java</b> · 反序列化攻击原理（简化）</span></div>
+<pre><code><span class="c">/*
+ * 攻击原理（以 Apache Commons Collections 为例）：
+ *
+ * 1. 攻击者构造一个特殊的 HashMap：
+ *    HashMap → TiedMapEntry → LazyMap → ChainedTransformer
+ *      → InvokerTransformer → Runtime.exec("rm -rf /")
+ *
+ * 2. HashMap 的 readObject() 会调用 hash() → hashCode()
+ *    触发 TiedMapEntry.hashCode() → LazyMap.get()
+ *    → ChainedTransformer.transform() → Runtime.exec()
+ *
+ * 3. 只要服务端对输入的字节流执行 readObject()，就会触发命令执行
+ *
+ * 这是 2015 年 Gabriel Lawrence 发现的经典攻击链
+ * 影响了大量使用 Commons Collections 3.x 的系统
+ */</span>
+
+<span class="c">// 防御措施：</span>
+<span class="c">// ① 使用 ObjectInputFilter（JDK 9+）限制可反序列化的类</span>
+<span class="t">ObjectInputStream</span> ois = <span class="k">new</span> <span class="t">ObjectInputStream</span>(in);
+ois.setObjectInputFilter(filterInfo -&gt; {
+    <span class="k">if</span> (filterInfo.serialClass() != <span class="k">null</span>) {
+        <span class="t">String</span> name = filterInfo.serialClass().getName();
+        <span class="c">// 只允许特定类被反序列化</span>
+        <span class="k">if</span> (name.startsWith(<span class="s">"com.myapp.model."</span>))
+            <span class="k">return</span> <span class="t">ObjectInputFilter.Status</span>.ALLOWED;
+        <span class="k">return</span> <span class="t">ObjectInputFilter.Status</span>.REJECTED;
+    }
+    <span class="k">return</span> <span class="t">ObjectInputFilter.Status</span>.UNDECIDED;
+});</code></pre>
+</div>
+
+<div class="formula">
+<strong>反序列化安全规则：</strong><br/><br/>
+1. <strong>不要反序列化不可信的数据</strong>——来自网络的字节流、用户提交的数据都不应使用 Java 原生反序列化<br/>
+2. <strong>升级依赖</strong>——Commons Collections 3.x 已修复，升级到 4.x+<br/>
+3. <strong>使用白名单</strong>——JDK 9+ 的 ObjectInputFilter 限制可反序列化的类<br/>
+4. <strong>根本方案</strong>——使用 JSON/Protobuf 等不包含"执行逻辑"的序列化格式
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：现代替代方案与总结 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>现代替代方案与总结</h2></div>
+
+<p>Java 原生序列化在性能、安全性、跨语言兼容性上都有明显不足。生产环境中几乎不会直接使用，而是采用以下替代方案：</p>
+
+<table class="nb-table">
+<thead><tr><th>方案</th><th>格式</th><th>跨语言</th><th>性能</th><th>Schema 演进</th><th>典型场景</th></tr></thead>
+<tbody>
+  <tr><td><strong>Java 原生</strong></td><td>二进制</td><td>否</td><td>差</td><td>差</td><td>不推荐</td></tr>
+  <tr><td><strong>Protobuf</strong></td><td>二进制</td><td>是</td><td>极好</td><td>好（字段编号）</td><td>gRPC、微服务通信</td></tr>
+  <tr><td><strong>Hessian</strong></td><td>二进制</td><td>是</td><td>好</td><td>中</td><td>Dubbo RPC</td></tr>
+  <tr><td><strong>Jackson JSON</strong></td><td>文本</td><td>是</td><td>中</td><td>好</td><td>REST API、配置</td></tr>
+  <tr><td><strong>Kryo</strong></td><td>二进制</td><td>否</td><td>极好</td><td>差</td><td>Spark、Flink 内部</td></tr>
+  <tr><td><strong>MessagePack</strong></td><td>二进制</td><td>是</td><td>好</td><td>中</td><td>Redis 缓存</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Alternatives.java</b> · 各方案使用示例</span></div>
+<pre><code><span class="c">/* ═══ Protobuf（需要定义 .proto 文件）═══ */</span>
+<span class="c">// user.proto:</span>
+<span class="c">// message User { string name = 1; int32 age = 2; }</span>
+<span class="c">//</span>
+<span class="c">// protoc --java_out=. user.proto  生成 Java 类</span>
+<span class="t">User</span> user = <span class="t">User</span>.newBuilder().setName(<span class="s">"张三"</span>).setAge(<span class="n">28</span>).build();
+<span class="k">byte</span>[] data = user.toByteArray();           <span class="c">// 序列化（极小体积）</span>
+<span class="t">User</span> restored = <span class="t">User</span>.parseFrom(data);       <span class="c">// 反序列化</span>
+
+<span class="c">/* ═══ Hessian（Dubbo 默认序列化）═══ */</span>
+<span class="t">Hessian2Output</span> ho = <span class="k">new</span> <span class="t">Hessian2Output</span>(outputStream);
+ho.writeObject(user);  <span class="c">// 不需要 implements Serializable！</span>
+ho.flush();
+
+<span class="t">Hessian2Input</span> hi = <span class="k">new</span> <span class="t">Hessian2Input</span>(inputStream);
+<span class="t">User</span> u = (<span class="t">User</span>) hi.readObject();
+
+<span class="c">/* ═══ Jackson JSON ═══ */</span>
+<span class="t">ObjectMapper</span> mapper = <span class="k">new</span> <span class="t">ObjectMapper</span>();
+<span class="t">String</span> json = mapper.writeValueAsString(user);    <span class="c">// {"name":"张三","age":28}</span>
+<span class="t">User</span> u2 = mapper.readValue(json, <span class="t">User</span>.<span class="k">class</span>);
+
+<span class="c">/* ═══ Kryo（高性能，但不跨语言）═══ */</span>
+<span class="t">Kryo</span> kryo = <span class="k">new</span> <span class="t">Kryo</span>();
+kryo.register(<span class="t">User</span>.<span class="k">class</span>);
+kryo.writeObject(output, user);    <span class="c">// 序列化（速度极快）</span>
+<span class="t">User</span> u3 = kryo.readObject(input, <span class="t">User</span>.<span class="k">class</span>);</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么 Protobuf 的 Schema 演进能力最强？</div>
+<p>Protobuf 使用字段编号（而非字段名）来标识字段。新增字段只需分配新编号，旧数据反序列化时忽略未知字段。删除字段只需标记为 reserved，不会冲突。这使得不同版本的服务可以同时运行，非常适合微服务的灰度发布。</p>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">序列化面试要点速记</div>
+<ul>
+  <li><strong>"为什么要显式声明 serialVersionUID？"</strong>——不声明时 JVM 会根据类结构自动生成，任何类结构变化都会导致 UID 变化，反序列化旧数据时抛出 InvalidClassException</li>
+  <li><strong>"transient 有什么用？"</strong>——标记不参与序列化的字段。反序列化时为默认值。可以配合 writeObject/readObject 自定义序列化逻辑</li>
+  <li><strong>"Serializable 和 Externalizable 的区别？"</strong>——Serializable 是自动序列化 + 可选钩子，Externalizable 是完全手动控制。Externalizable 必须有无参构造函数</li>
+  <li><strong>"为什么生产不推荐 Java 原生序列化？"</strong>——性能差（反射+冗余信息）、安全漏洞（反序列化执行任意代码）、不跨语言、版本兼容性差</li>
+  <li><strong>"生产用什么替代？"</strong>——RPC 用 Protobuf/Hessian，HTTP API 用 Jackson JSON，内部框架用 Kryo</li>
+</ul>
+</div>
+
+<div class="recap">
+<p><strong>面试回答模板：</strong></p>
+<p>"Java 序列化通过 Serializable 标记接口启用，ObjectOutputStream/ObjectInputStream 执行序列化/反序列化。serialVersionUID 用于版本兼容——不显式声明时 JVM 自动生成，类结构变化会导致 UID 不匹配而反序列化失败。transient 字段不参与序列化，适合标记敏感数据和非序列化资源。Java 原生序列化存在安全漏洞（反序列化可执行任意代码），性能也较差，生产环境推荐 Protobuf（gRPC 场景）、Hessian（Dubbo 场景）或 Jackson（REST API 场景）。"</p>
+</div>
+
+</section>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spring MVC 请求处理全流程：DispatcherServlet 到 View</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：DispatcherServlet 的角色 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：一次 HTTP 请求在 Spring 内部经历了哪些组件？</h2></div>
+<div class="think"><div class="think-q">"从 Tomcat 把请求交给 Spring，到最终返回 JSON 响应，中间经过了哪些类？每个组件的职责是什么？如果某个环节抛异常了怎么处理？" —— 这道题考的是你对 Spring MVC 整体架构的宏观理解。</div></div>
+
+<p>Spring MVC 的核心设计模式是 <strong>前端控制器（Front Controller）</strong>，所有请求统一由 <code>DispatcherServlet</code> 接收，再分发给各个组件处理。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 750 310" role="img" aria-label="Spring MVC 请求处理全流程">
+  <defs><marker id="m1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="375" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Spring MVC 请求处理全流程</text>
+  <!-- 客户端 -->
+  <rect x="20" y="130" width="80" height="50" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="60" y="160" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">Client</text>
+  <path d="M100,155 L130,155" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m1)"/>
+  <!-- DispatcherServlet -->
+  <rect x="135" y="115" width="130" height="80" rx="8" fill="#D4EDBC" stroke="#2E7D32" stroke-width="2"/>
+  <text x="200" y="148" text-anchor="middle" font-family="monospace" font-size="10" fill="#2E7D32" font-weight="700">DispatcherServlet</text>
+  <text x="200" y="165" text-anchor="middle" font-size="9" fill="#8C8676">前端控制器</text>
+  <text x="200" y="180" text-anchor="middle" font-size="9" fill="#8C8676">总调度中心</text>
+  <!-- HandlerMapping -->
+  <path d="M265,140 L310,80" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m1)"/>
+  <rect x="315" y="50" width="130" height="55" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="380" y="73" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C" font-weight="600">HandlerMapping</text>
+  <text x="380" y="92" text-anchor="middle" font-size="9" fill="#8C8676">URL → Handler 映射</text>
+  <!-- HandlerAdapter -->
+  <path d="M265,165 L310,165" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m1)"/>
+  <rect x="315" y="138" width="130" height="55" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="380" y="161" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C" font-weight="600">HandlerAdapter</text>
+  <text x="380" y="180" text-anchor="middle" font-size="9" fill="#8C8676">调用 Handler</text>
+  <!-- Controller -->
+  <path d="M445,165 L490,165" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m1)"/>
+  <rect x="495" y="138" width="110" height="55" rx="6" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="550" y="161" text-anchor="middle" font-family="monospace" font-size="10" fill="#7B1FA2" font-weight="600">Controller</text>
+  <text x="550" y="180" text-anchor="middle" font-size="9" fill="#8C8676">业务逻辑</text>
+  <!-- ViewResolver / HttpMessageConverter -->
+  <path d="M550,193 L550,230" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m1)"/>
+  <rect x="470" y="235" width="160" height="50" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="550" y="256" text-anchor="middle" font-family="monospace" font-size="9" fill="#C2410C" font-weight="600">HttpMessageConverter</text>
+  <text x="550" y="273" text-anchor="middle" font-size="9" fill="#8C8676">/ ViewResolver</text>
+  <!-- 返回 -->
+  <path d="M470,260 L200,260 L200,195" fill="none" stroke="#2E7D32" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#m1)"/>
+  <text x="340" y="278" text-anchor="middle" font-size="10" fill="#2E7D32">响应返回</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> Spring MVC 请求处理核心组件与调用链</figcaption>
+</figure>
+
+<p><code>DispatcherServlet</code> 继承自 <code>HttpServlet</code>，是整个 Spring MVC 的入口。它的核心方法是 <code>doDispatch()</code>，负责协调所有组件：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DispatcherServlet.java</b> · doDispatch 核心流程</span></div>
+<pre><code><span class="k">protected void</span> doDispatch(<span class="t">HttpServletRequest</span> request,
+                          <span class="t">HttpServletResponse</span> response) <span class="k">throws</span> <span class="t">Exception</span> {
+
+    <span class="t">HandlerExecutionChain</span> mappedHandler = <span class="k">null</span>;
+    <span class="t">ModelAndView</span> mv = <span class="k">null</span>;
+    <span class="t">Exception</span> dispatchException = <span class="k">null</span>;
+
+    <span class="k">try</span> {
+        <span class="c">// ① 通过 HandlerMapping 找到处理器</span>
+        mappedHandler = getHandler(request);
+
+        <span class="c">// ② 通过 HandlerAdapter 调用处理器</span>
+        <span class="t">HandlerAdapter</span> ha = getHandlerAdapter(mappedHandler.getHandler());
+
+        <span class="c">// ③ 执行拦截器 preHandle</span>
+        <span class="k">if</span> (!mappedHandler.applyPreHandle(request, response)) { <span class="k">return</span>; }
+
+        <span class="c">// ④ 真正调用 Controller 方法</span>
+        mv = ha.handle(request, response, mappedHandler.getHandler());
+
+        <span class="c">// ⑤ 执行拦截器 postHandle</span>
+        mappedHandler.applyPostHandle(request, response, mv);
+    } <span class="k">catch</span> (<span class="t">Exception</span> ex) {
+        dispatchException = ex;
+    }
+
+    <span class="c">// ⑥ 处理结果（渲染视图 / 写 JSON / 处理异常）</span>
+    processDispatchResult(request, response, mappedHandler, mv, dispatchException);
+}</code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：HandlerMapping ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>HandlerMapping：URL 到处理器的映射</h2></div>
+
+<p><code>HandlerMapping</code> 的职责是根据请求 URL 找到对应的处理器（Handler），并组装成 <code>HandlerExecutionChain</code>（包含处理器 + 拦截器链）。</p>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>实现类</th><th>映射方式</th><th>使用场景</th></tr></thead>
+<tbody>
+<tr><td><code>RequestMappingHandlerMapping</code></td><td>@RequestMapping 注解</td><td>最常用，注解驱动</td></tr>
+<tr><td><code>BeanNameUrlHandlerMapping</code></td><td>Bean 名称以 "/" 开头</td><td>XML 配置时代遗留</td></tr>
+<tr><td><code>SimpleUrlHandlerMapping</code></td><td>显式配置 URL 映射</td><td>简单静态映射</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>RequestMappingHandlerMapping</b> · 映射查找过程</span></div>
+<pre><code><span class="c">// Spring 启动时扫描所有 @Controller / @RestController</span>
+<span class="c">// 解析 @RequestMapping，注册到内部映射表：</span>
+
+<span class="c">// 映射表结构（简化）</span>
+<span class="t">Map</span>&lt;<span class="t">RequestMappingInfo</span>, <span class="t">HandlerMethod</span>&gt;
+
+<span class="c">// RequestMappingInfo 包含：</span>
+<span class="c">//   - URL patterns:    ["/api/users/{id}"]</span>
+<span class="c">//   - HTTP methods:    [GET]</span>
+<span class="c">//   - headers:         ["Accept=application/json"]</span>
+<span class="c">//   - params:          ["type=admin"]</span>
+<span class="c">//   - consumes:        ["application/json"]</span>
+<span class="c">//   - produces:        ["application/json"]</span>
+
+<span class="c">// HandlerMethod 包含：</span>
+<span class="c">//   - bean:            UserController 实例</span>
+<span class="c">//   - method:          getUserById() 方法对象</span></code></pre>
+</div>
+
+<p>查找过程的返回值是 <code>HandlerExecutionChain</code>，它不仅包含 Handler 本身，还包含匹配到的拦截器：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HandlerExecutionChain.java</b></span></div>
+<pre><code><span class="k">public class</span> <span class="t">HandlerExecutionChain</span> {
+    <span class="k">private final</span> <span class="t">Object</span> handler;             <span class="c">// 处理器（HandlerMethod）</span>
+    <span class="k">private</span> <span class="t">HandlerInterceptor</span>[] interceptors; <span class="c">// 匹配的拦截器数组</span>
+}</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">关键点</div>HandlerMapping 返回的不只是一个 Handler，而是一个"执行链"——Handler + 拦截器列表。拦截器的 preHandle / postHandle / afterCompletion 会围绕 Handler 的执行形成一个"洋葱模型"。</div>
+</section>
+
+<!-- ═══════════════ 第3站：HandlerAdapter ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>HandlerAdapter：统一调用不同 Handler</h2></div>
+
+<div class="think"><div class="think-q">"为什么不直接调用 Controller 方法，中间还要加一层 HandlerAdapter？" —— 适配器模式的经典应用：Handler 可以是任意类型（注解方法、简单 Controller、HttpRequestHandler），HandlerAdapter 将它们统一适配。</div></div>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>HandlerAdapter</th><th>适配的 Handler 类型</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>RequestMappingHandlerAdapter</code></td><td><code>HandlerMethod</code></td><td>处理 @RequestMapping 注解方法（最常用）</td></tr>
+<tr><td><code>HttpRequestHandlerAdapter</code></td><td><code>HttpRequestHandler</code></td><td>处理静态资源等低级请求</td></tr>
+<tr><td><code>SimpleControllerHandlerAdapter</code></td><td><code>Controller</code> 接口</td><td>老式 Controller 接口实现</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>RequestMappingHandlerAdapter</code> 是日常使用最多的适配器，它的 <code>handle()</code> 方法内部做了大量工作：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>RequestMappingHandlerAdapter</b> · handle 内部流程</span></div>
+<pre><code><span class="k">protected</span> <span class="t">ModelAndView</span> handleInternal(...) {
+    <span class="c">// ① 解析方法参数</span>
+    <span class="c">//    @RequestParam → 从 query string / form 取值</span>
+    <span class="c">//    @PathVariable → 从 URL 模板变量取值</span>
+    <span class="c">//    @RequestBody  → 用 HttpMessageConverter 反序列化</span>
+    <span class="c">//    @RequestHeader → 从请求头取值</span>
+
+    <span class="c">// ② 反射调用 Controller 方法</span>
+    <span class="t">Object</span> returnValue = method.invoke(bean, args);
+
+    <span class="c">// ③ 处理返回值</span>
+    <span class="c">//    @ResponseBody → 用 HttpMessageConverter 序列化为 JSON</span>
+    <span class="c">//    String       → 当作视图名交给 ViewResolver</span>
+    <span class="c">//    ModelAndView → 包含模型数据和视图名</span>
+}</code></pre>
+</div>
+
+<p>参数解析器和返回值处理器各自维护一个列表，Spring 按顺序匹配第一个支持当前参数/返回类型的处理器：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>参数解析器链</b> · HandlerMethodArgumentResolver</span></div>
+<pre><code><span class="c">// 常见的参数解析器（按优先级排列）</span>
+<span class="n">1.</span> <span class="t">RequestParamMethodArgumentResolver</span>    <span class="c">// @RequestParam</span>
+<span class="n">2.</span> <span class="t">PathVariableMethodArgumentResolver</span>    <span class="c">// @PathVariable</span>
+<span class="n">3.</span> <span class="t">RequestResponseBodyMethodProcessor</span>    <span class="c">// @RequestBody（兼做返回值）</span>
+<span class="n">4.</span> <span class="t">RequestHeaderMethodArgumentResolver</span>   <span class="c">// @RequestHeader</span>
+<span class="n">5.</span> <span class="t">ServletRequestMethodArgumentResolver</span>  <span class="c">// HttpServletRequest</span>
+<span class="n">6.</span> <span class="t">ModelAttributeMethodProcessor</span>         <span class="c">// @ModelAttribute</span></code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：Controller 处理与 REST 返回 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>Controller 处理与 REST 响应（@ResponseBody）</h2></div>
+
+<p>在现代 REST API 开发中，Controller 方法通常标注 <code>@ResponseBody</code>（或类级别 <code>@RestController</code>），返回值直接写入 HTTP 响应体，不经过视图解析。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>UserController.java</b> · REST 风格 Controller</span></div>
+<pre><code><span class="k">@RestController</span>            <span class="c">// = @Controller + @ResponseBody</span>
+<span class="k">@RequestMapping</span>(<span class="t">"/api/users"</span>)
+<span class="k">public class</span> <span class="t">UserController</span> {
+
+    <span class="k">@Autowired</span>
+    <span class="k">private</span> <span class="t">UserService</span> userService;
+
+    <span class="k">@GetMapping</span>(<span class="t">"/{id}"</span>)
+    <span class="k">public</span> <span class="t">User</span> getUser(<span class="k">@PathVariable</span> <span class="t">Long</span> id) {
+        <span class="k">return</span> userService.findById(id);
+    }
+
+    <span class="k">@PostMapping</span>
+    <span class="k">public</span> <span class="t">User</span> createUser(<span class="k">@RequestBody</span> <span class="t">User</span> user) {
+        <span class="k">return</span> userService.save(user);
+    }
+}</code></pre>
+</div>
+
+<p><strong>@ResponseBody 的序列化流程</strong>由 <code>HttpMessageConverter</code> 完成：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 220" role="img" aria-label="HttpMessageConverter 序列化流程">
+  <defs><marker id="m2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">@ResponseBody 返回值 → HTTP 响应体</text>
+  <!-- Controller 返回 -->
+  <rect x="30" y="60" width="120" height="50" rx="6" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="90" y="83" text-anchor="middle" font-size="10" fill="#7B1FA2" font-weight="600">Controller</text>
+  <text x="90" y="98" text-anchor="middle" font-size="9" fill="#555">return User对象</text>
+  <path d="M150,85 L185,85" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m2)"/>
+  <!-- 内容协商 -->
+  <rect x="190" y="55" width="140" height="60" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="260" y="78" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">内容协商</text>
+  <text x="260" y="95" text-anchor="middle" font-size="9" fill="#555">Accept: application/json</text>
+  <text x="260" y="108" text-anchor="middle" font-size="9" fill="#8C8676">选择 Converter</text>
+  <path d="M330,85 L365,85" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m2)"/>
+  <!-- Converter -->
+  <rect x="370" y="55" width="150" height="60" rx="6" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1"/>
+  <text x="445" y="74" text-anchor="middle" font-family="monospace" font-size="9" fill="#2E7D32" font-weight="600">MappingJackson2</text>
+  <text x="445" y="90" text-anchor="middle" font-family="monospace" font-size="9" fill="#2E7D32" font-weight="600">HttpMessageConverter</text>
+  <text x="445" y="108" text-anchor="middle" font-size="9" fill="#8C8676">Object → JSON 字符串</text>
+  <path d="M520,85 L555,85" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#m2)"/>
+  <!-- 响应 -->
+  <rect x="560" y="60" width="120" height="50" rx="6" fill="#EDE3C4" stroke="#C2410C" stroke-width="1"/>
+  <text x="620" y="83" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">HTTP Response</text>
+  <text x="620" y="98" text-anchor="middle" font-size="9" fill="#555">{"id":1,"name":".."}</text>
+  <!-- 常见 Converter -->
+  <text x="350" y="150" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">常见 HttpMessageConverter</text>
+  <text x="100" y="175" text-anchor="middle" font-size="10" fill="#555">MappingJackson2</text>
+  <text x="100" y="190" text-anchor="middle" font-size="9" fill="#8C8676">→ JSON</text>
+  <text x="280" y="175" text-anchor="middle" font-size="10" fill="#555">StringHttpMessage</text>
+  <text x="280" y="190" text-anchor="middle" font-size="9" fill="#8C8676">→ 纯文本</text>
+  <text x="440" y="175" text-anchor="middle" font-size="10" fill="#555">Jaxb2RootElement</text>
+  <text x="440" y="190" text-anchor="middle" font-size="9" fill="#8C8676">→ XML</text>
+  <text x="590" y="175" text-anchor="middle" font-size="10" fill="#555">ByteArray</text>
+  <text x="590" y="190" text-anchor="middle" font-size="9" fill="#8C8676">→ 二进制流</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> @ResponseBody 通过 HttpMessageConverter 序列化返回值</figcaption>
+</figure>
+
+<div class="takeaway"><div class="takeaway-label">REST API 关键点</div>在 @RestController 中，返回值不走 ViewResolver，而是通过 HttpMessageConverter 直接序列化写入响应体。Spring Boot 默认使用 Jackson（MappingJackson2HttpMessageConverter）处理 JSON。</div>
+</section>
+
+<!-- ═══════════════ 第5站：ViewResolver（传统视图） ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>ViewResolver：传统视图解析（非 REST 场景）</h2></div>
+
+<p>如果 Controller 返回一个<strong>视图名</strong>（String 类型，没有 @ResponseBody），Spring 会通过 ViewResolver 将其解析为具体的 View 对象：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>传统视图解析流程</b></span></div>
+<pre><code><span class="k">@Controller</span>  <span class="c">// 注意：不是 @RestController</span>
+<span class="k">public class</span> <span class="t">PageController</span> {
+
+    <span class="k">@GetMapping</span>(<span class="t">"/dashboard"</span>)
+    <span class="k">public</span> <span class="t">String</span> dashboard(<span class="t">Model</span> model) {
+        model.addAttribute(<span class="t">"user"</span>, currentUser);
+        <span class="k">return</span> <span class="t">"dashboard"</span>;  <span class="c">// 返回视图名</span>
+    }
+}
+
+<span class="c">// ViewResolver 解析过程：</span>
+<span class="c">// "dashboard" → InternalResourceViewResolver</span>
+<span class="c">//             → prefix + "dashboard" + suffix</span>
+<span class="c">//             → "/WEB-INF/views/dashboard.html"</span>
+<span class="c">//             → 渲染 HTML 写入响应体</span></code></pre>
+</div>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>ViewResolver</th><th>视图技术</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>InternalResourceViewResolver</code></td><td>JSP</td><td>前缀 + 视图名 + 后缀</td></tr>
+<tr><td><code>ThymeleafViewResolver</code></td><td>Thymeleaf</td><td>Spring Boot 推荐模板</td></tr>
+<tr><td><code>FreeMarkerViewResolver</code></td><td>FreeMarker</td><td>老牌模板引擎</td></tr>
+<tr><td><code>ContentNegotiatingViewResolver</code></td><td>多格式</td><td>根据 Accept 头选择视图</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>application.yml</b> · Thymeleaf 配置</span></div>
+<pre><code><span class="k">spring</span>:
+  <span class="k">thymeleaf</span>:
+    <span class="n">prefix</span>: classpath:/templates/
+    <span class="n">suffix</span>: .html
+    <span class="n">cache</span>: <span class="k">false</span>  <span class="c"># 开发时关闭缓存</span></code></pre>
+</div>
+
+<div class="think"><div class="think-q">REST API 场景下（@ResponseBody / @RestController），ViewResolver 完全不参与。返回值由 HttpMessageConverter 直接写入响应体。现代微服务架构中，ViewResolver 的使用已经越来越少。</div></div>
+</section>
+
+<!-- ═══════════════ 第6站：异常处理与拦截器 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>异常处理与拦截器</h2></div>
+
+<p>Spring MVC 提供了多层异常处理机制：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>异常处理优先级</b> · 从局部到全局</span></div>
+<pre><code><span class="c">// 优先级 1：Controller 内的 @ExceptionHandler</span>
+<span class="k">@RestController</span>
+<span class="k">public class</span> <span class="t">UserController</span> {
+    <span class="k">@ExceptionHandler</span>(<span class="t">UserNotFoundException</span>.<span class="k">class</span>)
+    <span class="k">public</span> <span class="t">ResponseEntity</span>&lt;<span class="t">String</span>&gt; handleUserNotFound(<span class="t">UserNotFoundException</span> ex) {
+        <span class="k">return</span> <span class="t">ResponseEntity</span>.status(<span class="n">404</span>).body(ex.getMessage());
+    }
+}
+
+<span class="c">// 优先级 2：@ControllerAdvice 全局异常处理</span>
+<span class="k">@RestControllerAdvice</span>
+<span class="k">public class</span> <span class="t">GlobalExceptionHandler</span> {
+    <span class="k">@ExceptionHandler</span>(<span class="t">Exception</span>.<span class="k">class</span>)
+    <span class="k">public</span> <span class="t">ResponseEntity</span>&lt;<span class="t">ErrorResponse</span>&gt; handleAll(<span class="t">Exception</span> ex) {
+        <span class="k">return</span> <span class="t">ResponseEntity</span>.status(<span class="n">500</span>).body(<span class="k">new</span> <span class="t">ErrorResponse</span>(ex));
+    }
+}
+
+<span class="c">// 优先级 3：HandlerExceptionResolver（框架级别）</span>
+<span class="c">// - DefaultHandlerExceptionResolver → 处理 Spring 内部异常</span>
+<span class="c">// - ResponseStatusExceptionResolver → 处理 @ResponseStatus</span></code></pre>
+</div>
+
+<p><strong>拦截器（HandlerInterceptor）</strong>在请求处理的前后执行，形成"洋葱模型"：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LoggingInterceptor.java</b> · 拦截器实现</span></div>
+<pre><code><span class="k">public class</span> <span class="t">LoggingInterceptor</span> <span class="k">implements</span> <span class="t">HandlerInterceptor</span> {
+
+    <span class="k">@Override</span>
+    <span class="k">public boolean</span> preHandle(<span class="t">HttpServletRequest</span> req,
+                               <span class="t">HttpServletResponse</span> res,
+                               <span class="t">Object</span> handler) {
+        <span class="c">// Controller 方法执行前调用</span>
+        <span class="c">// 返回 false → 终止请求，不再往下执行</span>
+        <span class="c">// 返回 true  → 继续执行下一个拦截器或 Handler</span>
+        log.info(<span class="t">"Request: {} {}"</span>, req.getMethod(), req.getRequestURI());
+        <span class="k">return true</span>;
+    }
+
+    <span class="k">@Override</span>
+    <span class="k">public void</span> postHandle(<span class="t">HttpServletRequest</span> req,
+                             <span class="t">HttpServletResponse</span> res,
+                             <span class="t">Object</span> handler, <span class="t">ModelAndView</span> mv) {
+        <span class="c">// Controller 方法执行后、视图渲染前调用</span>
+        <span class="c">// 注意：@ResponseBody 场景下 mv 为 null</span>
+    }
+
+    <span class="k">@Override</span>
+    <span class="k">public void</span> afterCompletion(<span class="t">HttpServletRequest</span> req,
+                                  <span class="t">HttpServletResponse</span> res,
+                                  <span class="t">Object</span> handler, <span class="t">Exception</span> ex) {
+        <span class="c">// 请求完成后调用（包括异常情况）</span>
+        <span class="c">// 适合做资源清理、日志记录</span>
+    }
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 660 200" role="img" aria-label="拦截器洋葱模型">
+  <defs><marker id="m3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="330" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">拦截器洋葱模型</text>
+  <rect x="30" y="50" width="600" height="130" rx="12" fill="#FBE6C7" stroke="#C2410C" stroke-width="1" opacity="0.4"/>
+  <text x="60" y="68" font-size="10" fill="#C2410C">Interceptor A — preHandle</text>
+  <rect x="80" y="75" width="500" height="90" rx="10" fill="#E8DAEF" stroke="#7B1FA2" stroke-width="1" opacity="0.4"/>
+  <text x="110" y="93" font-size="10" fill="#7B1FA2">Interceptor B — preHandle</text>
+  <rect x="130" y="100" width="400" height="50" rx="8" fill="#D4EDBC" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="330" y="130" text-anchor="middle" font-size="12" fill="#2E7D32" font-weight="700">Controller Handler</text>
+  <text x="530" y="93" text-anchor="end" font-size="10" fill="#7B1FA2">Interceptor B — postHandle</text>
+  <text x="580" y="68" text-anchor="end" font-size="10" fill="#C2410C">Interceptor A — postHandle</text>
+  <text x="330" y="195" text-anchor="middle" font-size="10" fill="#8C8676">preHandle 由外到内，postHandle 由内到外；afterCompletion 在所有情况下都会执行</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span> 拦截器的洋葱模型：preHandle 由外到内，postHandle 由内到外</figcaption>
+</figure>
+
+<div class="recap">
+<strong>面试回答模板</strong>
+<ul>
+  <li><strong>总入口</strong>：DispatcherServlet.doDispatch() 是所有请求的调度中心</li>
+  <li><strong>查找处理器</strong>：HandlerMapping 根据 URL 匹配 HandlerMethod，返回 HandlerExecutionChain（含拦截器）</li>
+  <li><strong>调用处理器</strong>：HandlerAdapter 适配不同类型的 Handler，解析参数、反射调用、处理返回值</li>
+  <li><strong>REST 响应</strong>：@ResponseBody 通过 HttpMessageConverter 将返回值序列化写入响应体，不走 ViewResolver</li>
+  <li><strong>异常处理</strong>：@ExceptionHandler（局部）→ @ControllerAdvice（全局）→ HandlerExceptionResolver（框架）</li>
+  <li><strong>拦截器</strong>：HandlerInterceptor 的 preHandle / postHandle / afterCompletion 形成洋葱模型</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

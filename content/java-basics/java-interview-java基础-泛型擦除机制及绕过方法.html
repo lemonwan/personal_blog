@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>泛型深入</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：List&lt;String&gt; 和 List&lt;Integer&gt; 是同一个类型吗？</h2></div>
+
+<p>面试官微笑着问了一个看起来很简单的问题：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>InterviewQuestion.java</b></span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; strList = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+<span class="t">List</span>&lt;<span class="t">Integer</span>&gt; intList = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+
+<span class="c">// 问：下面这行代码能编译通过吗？</span>
+<span class="t">boolean</span> same = strList.getClass() == intList.getClass();</code></pre>
+</div>
+
+<p>答案是：<strong>能编译通过，而且结果是 <code>true</code></strong>。</p>
+
+<p>大多数人第一次看到这个结论会愣住——<code>List&lt;String&gt;</code> 和 <code>List&lt;Integer&gt;</code> 在编译器眼里是两个截然不同的类型，但在 JVM 眼里，它们都是 <code>java.util.ArrayList</code>，没有任何区别。</p>
+
+<div class="think"><div class="think-q">你在项目中用过多少次泛型？你是否真的理解编译器在背后做了什么？这篇文章将带你穿透泛型的表象，理解擦除、通配符、桥方法的本质——这些是高级 Java 面试中最有区分度的考点。</div></div>
+
+<p>读完这篇你会明白：为什么 Java 选择了"擦除"而不是"具体化"泛型，<code>? extends</code> 和 <code>? super</code> 到底怎么选，以及编译器偷偷生成的桥方法长什么样。</p>
+</section>
+
+<!-- ═══════════════ 第2站：泛型基础 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>泛型基础：类型参数、有界类型与多重约束</h2></div>
+
+<p>泛型的核心思想很简单：<strong>把类型当作参数</strong>，让代码在编译期就获得类型安全检查。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>GenericBasics.java</b> · 三种泛型写法</span></div>
+<pre><code><span class="c">// ① 无界类型参数 —— T 可以是任何引用类型</span>
+<span class="k">public class</span> <span class="t">Box</span>&lt;T&gt; {
+    <span class="k">private</span> T value;
+    <span class="k">public</span> T get() { <span class="k">return</span> value; }
+    <span class="k">public void</span> set(T value) { <span class="k">this</span>.value = value; }
+}
+
+<span class="c">// ② 有界类型参数 —— T 必须是 Comparable 的子类型</span>
+<span class="k">public class</span> <span class="t">SortedBox</span>&lt;T <span class="k">extends</span> <span class="t">Comparable</span>&lt;T&gt;&gt; {
+    <span class="k">private</span> T value;
+    <span class="k">public int</span> compare(T other) {
+        <span class="k">return</span> value.compareTo(other); <span class="c">// 编译器确认 compareTo 存在</span>
+    }
+}
+
+<span class="c">// ③ 多重约束 —— T 必须同时满足多个条件（最多一个类 + 多个接口）</span>
+<span class="k">public class</span> <span class="t">Tagged</span>&lt;T <span class="k">extends</span> <span class="t">Number</span> &amp; <span class="t">Comparable</span>&lt;T&gt; &amp; <span class="t">Serializable</span>&gt; {
+    <span class="k">private</span> T value;
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 200" role="img" aria-label="泛型类型约束层级">
+  <text x="350" y="20" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">泛型约束层级：从无界到多重约束</text>
+
+  <rect x="30" y="45" width="190" height="50" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="125" y="65" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">&lt;T&gt;</text>
+  <text x="125" y="82" text-anchor="middle" font-size="10" fill="#8C8676">无界 · 等价于 Object</text>
+
+  <rect x="255" y="45" width="190" height="50" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="350" y="65" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">&lt;T extends Comparable&lt;T&gt;&gt;</text>
+  <text x="350" y="82" text-anchor="middle" font-size="10" fill="#8C8676">有界 · 单接口约束</text>
+
+  <rect x="480" y="45" width="190" height="50" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="575" y="65" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">&lt;T extends Number &amp; ...&gt;</text>
+  <text x="575" y="82" text-anchor="middle" font-size="10" fill="#8C8676">多重约束 · 类 + 接口</text>
+
+  <line x1="220" y1="70" x2="255" y2="70" stroke="#8C8676" stroke-width="1" marker-end="url(#arr)"/>
+  <line x1="445" y1="70" x2="480" y2="70" stroke="#8C8676" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="237" y="62" text-anchor="middle" font-size="9" fill="#8C8676">更强</text>
+  <text x="462" y="62" text-anchor="middle" font-size="9" fill="#8C8676">更强</text>
+
+  <rect x="100" y="120" width="500" height="60" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="142" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">约束越强 → 擦除后的上界越具体 → 生成的代码越高效</text>
+  <text x="350" y="162" text-anchor="middle" font-size="11" fill="#C2410C">例：&lt;T extends Number&gt; 擦除后 T → Number（而非 Object），避免了多余的强制转型</text>
+  <defs><marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#8C8676"/></marker></defs>
+</svg>
+<figcaption><span class="fig-no">图 1</span>泛型约束从无界到多重约束，编译期检查逐渐增强</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">面试加分点</div>
+<p>多重约束中，<strong>类必须写在第一个</strong>，接口写在后面。因为 Java 只支持单继承，所以类最多一个。如果你写了 <code>&lt;T extends Comparable &amp; Number&gt;</code>（接口在前，类在后），编译器会报错。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：擦除机制 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>擦除机制：泛型信息的"消失术"</h2></div>
+
+<p>Java 泛型是<strong>编译期机制</strong>。编译器在生成字节码时会把所有泛型信息擦掉，替换为原始类型（Raw Type）。这就是所谓的<strong>类型擦除（Type Erasure）</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Erasure.java</b> · 擦除前后对比</span></div>
+<pre><code><span class="c">// ──── 你写的代码 ────</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+list.add(<span class="n">"hello"</span>);
+<span class="t">String</span> s = list.get(<span class="n">0</span>);
+
+<span class="c">// ──── 编译器生成的字节码（擦除后） ────</span>
+<span class="t">List</span> list = <span class="k">new</span> <span class="t">ArrayList</span>();       <span class="c">// &lt;String&gt; 被擦掉了</span>
+list.add(<span class="n">"hello"</span>);
+<span class="t">String</span> s = (<span class="t">String</span>) list.get(<span class="n">0</span>);  <span class="c">// 编译器自动插入强制转型</span></code></pre>
+</div>
+
+<p>擦除的规则很简单：</p>
+
+<div class="formula">
+<strong>擦除规则</strong>：<br/>
+&bull; 无界类型参数 <code>&lt;T&gt;</code> → 擦除为 <code>Object</code><br/>
+&bull; 有界类型参数 <code>&lt;T extends Foo&gt;</code> → 擦除为 <code>Foo</code>（第一个边界）<br/>
+&bull; 多重约束 <code>&lt;T extends Foo &amp; Bar&gt;</code> → 擦除为 <code>Foo</code>（第一个边界，所以类要写在前面）
+</div>
+
+<p>擦除带来了一系列<strong>限制</strong>，这些是面试高频考点：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ErasureLimits.java</b> · 擦除的五大限制</span></div>
+<pre><code><span class="c">// ❌ 限制1：不能创建泛型类型的数组</span>
+<span class="t">T</span>[] arr = <span class="k">new</span> <span class="t">T</span>[<span class="n">10</span>];          <span class="c">// 编译错误！T 已被擦除，JVM 不知道数组元素类型</span>
+
+<span class="c">// ❌ 限制2：不能对泛型类型使用 instanceof</span>
+<span class="k">if</span> (obj <span class="k">instanceof</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt;) <span class="c">// 编译错误！运行时 List&lt;String&gt; 和 List&lt;Integer&gt; 无法区分</span>
+
+<span class="c">// ❌ 限制3：不能使用基本类型作为类型参数</span>
+<span class="t">List</span>&lt;<span class="t">int</span>&gt; nums;                 <span class="c">// 编译错误！只能用 List&lt;Integer&gt;（自动装箱）</span>
+
+<span class="c">// ❌ 限制4：不能创建泛型类型的实例</span>
+<span class="t">T</span> obj = <span class="k">new</span> <span class="t">T</span>();              <span class="c">// 编译错误！不知道 T 的无参构造器是否存在</span>
+
+<span class="c">// ❌ 限制5：泛型类的静态成员不能使用类的类型参数</span>
+<span class="k">public class</span> <span class="t">Box</span>&lt;T&gt; {
+    <span class="k">static</span> T sharedValue;         <span class="c">// 编译错误！静态成员属于类本身，不属于某个实例化的 T</span>
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 220" role="img" aria-label="类型擦除过程">
+  <text x="350" y="20" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">编译期 vs 运行期：泛型信息的生命周期</text>
+
+  <rect x="40" y="45" width="280" height="70" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="180" y="65" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">编译期（源码）</text>
+  <text x="180" y="85" text-anchor="middle" font-size="12" fill="#1C1C1C" font-family="monospace">List&lt;String&gt; list</text>
+  <text x="180" y="103" text-anchor="middle" font-size="10" fill="#C2410C">类型安全 · 编译检查</text>
+
+  <rect x="380" y="45" width="280" height="70" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="520" y="65" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">运行期（字节码）</text>
+  <text x="520" y="85" text-anchor="middle" font-size="12" fill="#1C1C1C" font-family="monospace">List list</text>
+  <text x="520" y="103" text-anchor="middle" font-size="10" fill="#8C8676">擦除为原始类型 · 自动转型</text>
+
+  <path d="M320,80 L380,80" stroke="#C2410C" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="350" y="72" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">擦除</text>
+
+  <rect x="80" y="140" width="540" height="60" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="162" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">为什么 Java 选择擦除？—— 向后兼容</text>
+  <text x="350" y="182" text-anchor="middle" font-size="11" fill="#C2410C">Java 5 引入泛型时，必须保证旧代码（无泛型）和新代码（有泛型）能互相调用</text>
+  <defs><marker id="arr2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#C2410C"/></marker></defs>
+</svg>
+<figcaption><span class="fig-no">图 2</span>泛型信息在编译后被完全擦除，运行时只保留原始类型</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">绕过擦除：Super Type Token</div>
+<p>虽然擦除让运行时丢失了泛型信息，但 Guava 的 <code>TypeToken</code> 利用匿名子类保留了具体类型——第 6 站会详细讲解。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：通配符 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>通配符：? extends vs ? super 与 PECS 原则</h2></div>
+
+<p>泛型最让人困惑的部分不是擦除，而是<strong>通配符</strong>。面试中 80% 的泛型问题都围绕 <code>? extends</code> 和 <code>? super</code> 展开。</p>
+
+<p>先看一个直觉陷阱：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>WildcardTrap.java</b> · 泛型不是协变的</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">Integer</span>&gt; intList = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+<span class="t">List</span>&lt;<span class="t">Number</span>&gt; numList = intList;  <span class="c">// ❌ 编译错误！</span>
+<span class="c">// Integer 是 Number 的子类，但 List&lt;Integer&gt; 不是 List&lt;Number&gt; 的子类</span>
+<span class="c">// 如果允许赋值，下面这行就会破坏类型安全：</span>
+numList.add(<span class="n">3.14</span>);               <span class="c">// 往 Integer 列表里塞了 Double！</span></code></pre>
+</div>
+
+<p>Java 的泛型是<strong>不变的（invariant）</strong>：<code>List&lt;Integer&gt;</code> 和 <code>List&lt;Number&gt;</code> 之间没有继承关系。为了让泛型在一定条件下具备灵活性，Java 引入了通配符：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Wildcard.java</b> · 上界通配符 vs 下界通配符</span></div>
+<pre><code><span class="c">// ═══ ? extends T（上界通配符）═══  "Producer Extends"</span>
+<span class="c">// 含义：列表里装的是 T 或 T 的某个子类 → 只能读，不能写</span>
+<span class="k">public static double</span> sum(<span class="t">List</span>&lt;? <span class="k">extends</span> <span class="t">Number</span>&gt; list) {
+    <span class="k">double</span> total = <span class="n">0</span>;
+    <span class="k">for</span> (<span class="t">Number</span> n : list) {        <span class="c">// ✅ 读出来一定是 Number 或其子类，安全</span>
+        total += n.doubleValue();
+    }
+    <span class="c">// list.add(42);                // ❌ 编译错误！不知道具体是 Integer 还是 Double</span>
+    <span class="k">return</span> total;
+}
+
+<span class="c">// ═══ ? super T（下界通配符）═══  "Consumer Super"</span>
+<span class="c">// 含义：列表里装的是 T 或 T 的某个父类 → 只能写，读出来是 Object</span>
+<span class="k">public static void</span> addNumbers(<span class="t">List</span>&lt;? <span class="k">super</span> <span class="t">Integer</span>&gt; list) {
+    list.add(<span class="n">1</span>);                    <span class="c">// ✅ 写入 Integer 一定安全（父类都能装 Integer）</span>
+    list.add(<span class="n">2</span>);
+    <span class="c">// Integer val = list.get(0);   // ❌ 编译错误！读出来可能是 Number 或 Object</span>
+    <span class="t">Object</span> obj = list.get(<span class="n">0</span>);     <span class="c">// ✅ 只能当 Object 用</span>
+}</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">PECS 原则</div>
+<table class="nb-table">
+  <thead><tr><th>通配符</th><th>角色</th><th>能读？</th><th>能写？</th><th>口诀</th></tr></thead>
+  <tbody>
+    <tr><td><code>? extends T</code></td><td>生产者（Producer）</td><td>读为 T</td><td>不能写</td><td>Producer Extends</td></tr>
+    <tr><td><code>? super T</code></td><td>消费者（Consumer）</td><td>读为 Object</td><td>写 T 或其子类</td><td>Consumer Super</td></tr>
+    <tr><td>无通配符 <code>&lt;T&gt;</code></td><td>既读又写</td><td>读为 T</td><td>写 T</td><td>精确类型</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 200" role="img" aria-label="PECS 原则图解">
+  <text x="350" y="20" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">PECS：Producer Extends · Consumer Super</text>
+
+  <!-- extends 区域 -->
+  <rect x="40" y="45" width="290" height="130" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="185" y="68" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">? extends Number</text>
+  <text x="185" y="90" text-anchor="middle" font-size="11" fill="#1C1C1C">可能是 List&lt;Integer&gt;</text>
+  <text x="185" y="108" text-anchor="middle" font-size="11" fill="#1C1C1C">可能是 List&lt;Double&gt;</text>
+  <text x="185" y="126" text-anchor="middle" font-size="11" fill="#1C1C1C">可能是 List&lt;Number&gt;</text>
+  <text x="185" y="155" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">→ 只读，生产数据</text>
+
+  <!-- super 区域 -->
+  <rect x="370" y="45" width="290" height="130" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="515" y="68" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">? super Integer</text>
+  <text x="515" y="90" text-anchor="middle" font-size="11" fill="#1C1C1C">可能是 List&lt;Integer&gt;</text>
+  <text x="515" y="108" text-anchor="middle" font-size="11" fill="#1C1C1C">可能是 List&lt;Number&gt;</text>
+  <text x="515" y="126" text-anchor="middle" font-size="11" fill="#1C1C1C">可能是 List&lt;Object&gt;</text>
+  <text x="515" y="155" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">→ 只写，消费数据</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>上界通配符限制写入（生产者），下界通配符限制读取（消费者）</figcaption>
+</figure>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Collections.java</b> · JDK 源码中的 PECS 经典 —— copy 方法</span></div>
+<pre><code><span class="k">public static</span> &lt;T&gt; <span class="k">void</span> copy(<span class="t">List</span>&lt;? <span class="k">super</span> T&gt; dest, <span class="t">List</span>&lt;? <span class="k">extends</span> T&gt; src) {
+    <span class="c">// src 是生产者（extends）：只读取</span>
+    <span class="c">// dest 是消费者（super）：只写入</span>
+    <span class="t">ListIterator</span>&lt;? <span class="k">super</span> T&gt; di = dest.listIterator();
+    <span class="t">ListIterator</span>&lt;? <span class="k">extends</span> T&gt; si = src.listIterator();
+    <span class="k">while</span> (si.hasNext()) {
+        di.next();
+        di.set(si.next());  <span class="c">// 从 src 读，往 dest 写</span>
+    }
+}</code></pre>
+</div>
+
+<div class="think"><div class="think-q">记住 PECS 口诀："Producer Extends, Consumer Super"。如果你发现自己记不住——就想想 Collections.copy：src 只读用 extends，dest 只写用 super。</div></div>
+</section>
+
+<!-- ═══════════════ 第5站：桥方法 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>桥方法：编译器偷偷生成的"替身"</h2></div>
+
+<p>擦除会破坏多态。考虑下面这个场景：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BridgeMethod.java</b> · 桥方法的产生</span></div>
+<pre><code><span class="k">public class</span> <span class="t">Node</span>&lt;T&gt; {
+    <span class="k">public</span> T data;
+    <span class="k">public void</span> setData(T data) { <span class="k">this</span>.data = data; }
+}
+
+<span class="k">public class</span> <span class="t">StringNode</span> <span class="k">extends</span> <span class="t">Node</span>&lt;<span class="t">String</span>&gt; {
+    <span class="k">@Override</span>
+    <span class="k">public void</span> setData(<span class="t">String</span> data) { <span class="k">this</span>.data = data; }
+}</code></pre>
+</div>
+
+<p>你写了 <code>@Override</code>，意思是"覆盖父类的 <code>setData</code>"。但问题来了：</p>
+
+<div class="formula">
+<strong>擦除后的签名冲突</strong>：<br/>
+&bull; 父类 <code>Node</code> 的 <code>setData</code> 擦除后 → <code>setData(Object)</code><br/>
+&bull; 子类 <code>StringNode</code> 的 <code>setData</code> 擦除后 → <code>setData(String)</code><br/>
+&bull; 参数类型不同 → <strong>这不是覆盖，而是重载！</strong>
+</div>
+
+<p>如果不做任何处理，多态就坏了：<code>Node&lt;String&gt; node = new StringNode(); node.setData("hi");</code> 调用的会是父类的 <code>setData(Object)</code>，而不是子类的 <code>setData(String)</code>。</p>
+
+<p>编译器的解决方案是生成一个<strong>桥方法（Bridge Method）</strong>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>javap 反编译输出</b> · StringNode.class</span></div>
+<pre><code><span class="c">// 你写的 setData(String) —— 真正的方法</span>
+<span class="k">public void</span> setData(<span class="t">java.lang.String</span>);
+  Code:
+    <span class="n">0</span>: aload_0
+    <span class="n">1</span>: aload_1
+    <span class="n">2</span>: putfield      #2  <span class="c">// Field data:Ljava/lang/String;</span>
+    <span class="n">5</span>: <span class="k">return</span>
+
+<span class="c">// 编译器生成的桥方法 setData(Object) —— 用于保持多态</span>
+<span class="k">public void</span> setData(<span class="t">java.lang.Object</span>);   <span class="c">// ← 参数类型匹配父类</span>
+  Code:
+    <span class="n">0</span>: aload_0
+    <span class="n">1</span>: aload_1
+    <span class="n">2</span>: checkcast     #3  <span class="c">// class java/lang/String  ← 强制转型</span>
+    <span class="n">5</span>: invokevirtual #4  <span class="c">// Method setData(String)  ← 转调真正的方法</span>
+    <span class="n">8</span>: <span class="k">return</span></code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 210" role="img" aria-label="桥方法调用链">
+  <text x="350" y="20" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">桥方法的调用链：保持多态不被擦除破坏</text>
+
+  <rect x="40" y="50" width="180" height="40" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="130" y="75" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">node.setData("hi")</text>
+
+  <rect x="260" y="50" width="180" height="40" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="350" y="68" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">桥方法</text>
+  <text x="350" y="82" text-anchor="middle" font-size="10" fill="#1C1C1C">setData(Object)</text>
+
+  <rect x="480" y="50" width="180" height="40" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="570" y="68" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">真正的方法</text>
+  <text x="570" y="82" text-anchor="middle" font-size="10" fill="#1C1C1C">setData(String)</text>
+
+  <path d="M220,70 L260,70" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <path d="M440,70 L480,70" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="240" y="62" text-anchor="middle" font-size="9" fill="#8C8676">虚调用</text>
+  <text x="460" y="62" text-anchor="middle" font-size="9" fill="#8C8676">checkcast</text>
+  <text x="460" y="98" text-anchor="middle" font-size="9" fill="#8C8676">+ 转调</text>
+
+  <rect x="100" y="120" width="500" height="70" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="142" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">桥方法的特征（javap 中可见）</text>
+  <text x="350" y="162" text-anchor="middle" font-size="11" fill="#1C1C1C">ACC_BRIDGE + ACC_SYNTHETIC 标志</text>
+  <text x="350" y="178" text-anchor="middle" font-size="11" fill="#C2410C">反射中 Method.isBridge() 可以判断是否为桥方法</text>
+  <defs><marker id="arr3" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#C2410C"/></marker></defs>
+</svg>
+<figcaption><span class="fig-no">图 4</span>桥方法充当"中转站"，保证擦除后多态仍然正确</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">面试追问：桥方法与反射</div>
+<p>在反射中，<code>Class.getDeclaredMethods()</code> 会返回桥方法。如果你在做反射框架（如 Spring），必须用 <code>method.isBridge()</code> 过滤掉桥方法，否则会把同一个方法处理两次，导致参数类型不匹配。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：高级用法 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>高级用法：TypeToken、自限定类型与捕获转换</h2></div>
+
+<h3>一、TypeToken —— 绕过擦除获取运行时类型</h3>
+
+<p>擦除让 <code>List&lt;String&gt;.class</code> 不合法，但有一个技巧可以保留运行时泛型信息：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TypeTokenDemo.java</b> · Guava TypeToken 原理</span></div>
+<pre><code><span class="c">// Guava 的 TypeToken（或 Gson 的 TypeToken）</span>
+<span class="t">TypeToken</span>&lt;<span class="t">List</span>&lt;<span class="t">String</span>&gt;&gt; token = <span class="k">new</span> <span class="t">TypeToken</span>&lt;<span class="t">List</span>&lt;<span class="t">String</span>&gt;&gt;() {};
+<span class="c">//                                          匿名子类 ↑↑↑</span>
+
+<span class="t">Type</span> type = token.getType();
+<span class="c">// → java.util.List&lt;java.lang.String&gt;  泛型信息完整保留！</span></code></pre>
+</div>
+
+<p>原理：当你创建匿名子类 <code>new TypeToken&lt;List&lt;String&gt;&gt;() {}</code> 时，父类的泛型参数会被记录在字节码的 <code>Signature</code> 属性中（不受擦除影响），运行时可以通过反射的 <code>getGenericSuperclass()</code> 读取。</p>
+
+<div class="formula">
+<strong>TypeToken 本质</strong>：<br/>
+匿名子类 → 泛型参数成为<strong>超类签名</strong>的一部分 → 字节码 Signature 属性保留完整类型信息 → 运行时反射读取
+</div>
+
+<h3>二、自限定类型（Self-Bounded Types）</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SelfBounded.java</b> · Comparable 的递归约束</span></div>
+<pre><code><span class="c">// 经典的自限定类型：Comparable&lt;T&gt; 要求 T 能与自身比较</span>
+<span class="k">public class</span> <span class="t">Student</span> <span class="k">implements</span> <span class="t">Comparable</span>&lt;<span class="t">Student</span>&gt; {
+    <span class="k">private int</span> score;
+    <span class="k">@Override</span>
+    <span class="k">public int</span> compareTo(<span class="t">Student</span> other) {
+        <span class="k">return</span> <span class="t">Integer</span>.compare(<span class="k">this</span>.score, other.score);
+    }
+}
+
+<span class="c">// 泛型工具方法 —— 要求 T 能与自身比较</span>
+<span class="k">public static</span> &lt;T <span class="k">extends</span> <span class="t">Comparable</span>&lt;T&gt;&gt; T max(T a, T b) {
+    <span class="k">return</span> a.compareTo(b) &gt;= <span class="n">0</span> ? a : b;
+}
+
+<span class="c">// 调用</span>
+<span class="t">Student</span> winner = max(student1, student2); <span class="c">// 编译期就保证类型安全</span></code></pre>
+</div>
+
+<h3>三、捕获转换（Capture Conversion）</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CaptureConversion.java</b></span></div>
+<pre><code><span class="c">// 通配符不能直接修改元素——但可以用捕获转换"捕获"通配符类型</span>
+<span class="k">public static void</span> swap(<span class="t">List</span>&lt;?&gt; list, <span class="t">int</span> i, <span class="t">int</span> j) {
+    <span class="c">// list.set(i, list.set(j, list.get(i)));  // ❌ 通配符不允许 set</span>
+    swapHelper(list, i, j);                     <span class="c">// 通过泛型方法捕获类型</span>
+}
+
+<span class="k">private static</span> &lt;T&gt; <span class="k">void</span> swapHelper(<span class="t">List</span>&lt;T&gt; list, <span class="t">int</span> i, <span class="t">int</span> j) {
+    list.set(i, list.set(j, list.get(i)));      <span class="c">// ✅ T 是确定类型，可以读写</span>
+}</code></pre>
+</div>
+
+<p>捕获转换的本质：把通配符 <code>?</code> 转化为一个具体的类型参数 <code>T</code>，让编译器能进行类型推断。这是 <strong>Effective Java</strong> 中推荐的处理通配符限制的标准技巧。</p>
+</section>
+
+<!-- ═══════════════ 第7站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：泛型核心规则与常见错误</h2></div>
+
+<div class="takeaway"><div class="takeaway-label">核心规则速查表</div>
+<table class="nb-table">
+  <thead><tr><th>主题</th><th>规则</th><th>面试关键词</th></tr></thead>
+  <tbody>
+    <tr><td>擦除</td><td>泛型信息编译后擦除为原始类型，<code>List&lt;String&gt;</code> 和 <code>List&lt;Integer&gt;</code> 运行时是同一个类</td><td>Type Erasure</td></tr>
+    <tr><td>擦除边界</td><td>无界 <code>&lt;T&gt;</code> → Object；有界 <code>&lt;T extends Foo&gt;</code> → Foo</td><td>Bound</td></tr>
+    <tr><td>通配符 extends</td><td><code>? extends T</code>：只读不写（Producer Extends）</td><td>上界通配符</td></tr>
+    <tr><td>通配符 super</td><td><code>? super T</code>：只写，读出 Object（Consumer Super）</td><td>下界通配符</td></tr>
+    <tr><td>桥方法</td><td>编译器自动生成的方法，保持擦除后的多态性，带 ACC_BRIDGE 标志</td><td>Bridge Method</td></tr>
+    <tr><td>TypeToken</td><td>利用匿名子类 + Signature 属性绕过擦除，获取运行时泛型信息</td><td>Super Type Token</td></tr>
+    <tr><td>自限定类型</td><td><code>&lt;T extends Comparable&lt;T&gt;&gt;</code> 保证类型能与自身比较</td><td>Self-Bounded</td></tr>
+    <tr><td>捕获转换</td><td>把通配符 <code>?</code> 转化为类型参数 <code>T</code>，解决通配符不能写入的限制</td><td>Capture Conversion</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>常见错误清单</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CommonMistakes.java</b> · 面试中最容易犯的错误</span></div>
+<pre><code><span class="c">// ❌ 错误1：把泛型集合赋值给更宽泛的泛型集合</span>
+<span class="t">List</span>&lt;<span class="t">Integer</span>&gt; ints = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+<span class="t">List</span>&lt;<span class="t">Number</span>&gt; nums = ints;      <span class="c">// 编译错误！用 List&lt;? extends Number&gt;</span>
+
+<span class="c">// ❌ 错误2：在 ? extends 通配符集合上调用 add</span>
+<span class="t">List</span>&lt;? <span class="k">extends</span> <span class="t">Number</span>&gt; list = ...;
+list.add(<span class="n">42</span>);                    <span class="c">// 编译错误！extends 只读</span>
+
+<span class="c">// ❌ 错误3：对泛型类型使用 instanceof</span>
+<span class="k">if</span> (obj <span class="k">instanceof</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt;) <span class="c">// 编译错误！运行时无法区分</span>
+
+<span class="c">// ❌ 错误4：创建泛型数组</span>
+<span class="t">T</span>[] arr = <span class="k">new</span> <span class="t">T</span>[<span class="n">10</span>];          <span class="c">// 编译错误！用 Object[] 或 Array.newInstance</span>
+
+<span class="c">// ❌ 错误5：反射时忘记过滤桥方法</span>
+<span class="k">for</span> (<span class="t">Method</span> m : clazz.getDeclaredMethods()) {
+    <span class="k">if</span> (!m.isBridge()) { ... }  <span class="c">// 必须排除桥方法</span>
+}</code></pre>
+</div>
+
+<div class="recap"><h3>本篇核心知识点回顾</h3>
+<ul>
+  <li><strong>类型擦除</strong>：泛型是编译期机制，运行时 <code>List&lt;String&gt;</code> 和 <code>List&lt;Integer&gt;</code> 是同一个类</li>
+  <li><strong>擦除后果</strong>：不能创建泛型数组、不能用 instanceof、不能用基本类型、不能 new T()</li>
+  <li><strong>PECS 原则</strong>：<code>? extends T</code> 只读（生产者），<code>? super T</code> 只写（消费者）</li>
+  <li><strong>桥方法</strong>：编译器自动生成的 synthetic 方法，用 checkcast + invokevirtual 保持多态</li>
+  <li><strong>TypeToken</strong>：利用匿名子类 + Signature 属性绕过擦除，Gson/Jackson 反序列化的核心原理</li>
+  <li><strong>自限定类型</strong>：<code>&lt;T extends Comparable&lt;T&gt;&gt;</code> 是递归泛型约束的经典模式</li>
+  <li><strong>捕获转换</strong>：通过泛型方法把通配符 <code>?</code> 转化为具体类型参数 <code>T</code></li>
+</ul>
+</div>
+
+<div class="formula">
+<strong>"泛型擦除机制" —— 面试标准回答框架</strong>：<br/><br/>
+1. <strong>擦除本质</strong>：Java 泛型是编译期检查，运行时泛型信息被擦除为原始类型，<code>List&lt;String&gt;</code> 和 <code>List&lt;Integer&gt;</code> 运行时 getClass() 相同<br/>
+2. <strong>设计原因</strong>：Java 5 引入泛型时要向后兼容，擦除方案让新旧代码互操作<br/>
+3. <strong>通配符 PECS</strong>：? extends 只读（生产者），? super 只写（消费者），JDK 的 Collections.copy 是经典用例<br/>
+4. <strong>桥方法</strong>：编译器生成桥方法保持擦除后的多态，javap 可见 ACC_BRIDGE 标志<br/>
+5. <strong>绕过擦除</strong>：TypeToken 利用匿名子类的 Signature 属性保留运行时泛型信息
+</div>
+</section>
+
+</main>
+
+</body>
+</html>
