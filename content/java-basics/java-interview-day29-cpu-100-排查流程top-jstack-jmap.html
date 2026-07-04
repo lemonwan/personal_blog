@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CPU 100% 排查</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "CPU 100% 排查：top → jstack → 代码定位五步法"
+  difficulty: 高级
+  interviewFreq: 极高
+  desc: "线上 CPU 飙高怎么办？top 找进程 → top -Hp 找线程 → jstack 抓栈 → printf 转 16 进制 → 定位代码行。完整 SOP。"
+-->
+
+<!-- ================================================================
+     第 1 站 — 开场：凌晨三点的告警
+     ================================================================ -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>凌晨三点，CPU 100%，服务即将崩溃</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"线上服务 CPU 打满了，你怎么排查？"</p>
+    <p>这是 Java 后端面试中出现频率最高的实战题之一。面试官不是在考你会不会背命令——他要看你有没有真正处理过线上故障。</p>
+  </div>
+
+  <p>凌晨三点，手机震动。监控系统弹出告警：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>alert.log</b></span></div>
+    <pre><code><span class="n">[2024-03-15 03:12:07]</span> <span class="k">CRITICAL</span>  host: prod-order-03
+CPU usage: <span class="t">98.7%</span> (sustained 5 min)
+Service: order-service  Status: <span class="k">DEGRADED</span>
+Active threads: 342   Response P99: <span class="t">12,400ms</span></code></pre>
+  </div>
+
+  <p>服务降级、用户投诉、老板在群里 @你——你现在有 <strong>10 分钟</strong>定位问题。慌吗？如果你有一套标准 SOP，就不会慌。</p>
+
+  <p>CPU 100% 是线上最常见的故障类型之一，典型诱因包括：</p>
+  <ul>
+    <li><strong>死循环</strong>：HashMap 并发扩容导致的环形链表（JDK 7）或业务逻辑 bug</li>
+    <li><strong>正则灾难</strong>：catastrophic backtracking，一个复杂正则让线程卡死</li>
+    <li><strong>GC 抖动</strong>：内存不足 → 频繁 Full GC → CPU 全花在垃圾回收上</li>
+    <li><strong>自旋锁 / 忙等</strong>：CAS 竞争激烈，线程反复空转</li>
+    <li><strong>序列化 / 计算密集</strong>：大 JSON 解析、复杂报表计算未做限流</li>
+  </ul>
+
+  <p>不管根因是什么，排查路径永远是一样的——<strong>五步法</strong>：</p>
+
+  <div class="formula">
+    <strong>top</strong>（找进程）→ <strong>top -Hp</strong>（找线程）→ <strong>printf '%x'</strong>（转十六进制）→ <strong>jstack</strong>（抓线程栈）→ <strong>定位代码行</strong>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心原则</span>
+    <p>CPU 问题的排查思路是"从大到小"：进程 → 线程 → 栈帧 → 代码行。每一步都在缩小范围，直到精确定位。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 2 站 — Step 1：top 找进程
+     ================================================================ -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>Step 1：top 命令 — 谁在吃 CPU？</h2>
+  </div>
+
+  <p>SSH 登录服务器，敲下第一个命令：<code>top</code>。这一步的目标很简单——<strong>找到 CPU 占用最高的进程</strong>。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>terminal — top</b></span></div>
+    <pre><code>$ top
+
+top - 03:14:22 up 127 days,  4:32,  1 user,
+load average: <span class="t">12.43</span>, 10.87, 8.21
+Tasks: 218 total,   3 running, 215 sleeping,   0 stopped
+
+<span class="n">  PID  USER    PR  NI   VIRT    RES    SHR S  %CPU %MEM  COMMAND</span>
+<span class="k"> 8842  admin   20   0  8.2g   3.1g   18m S  <span class="t">387.2</span>  19.8  java</span>
+ 1024  root    20   0  412m   82m   12m S    2.1   0.5  nginx
+ 1536  mysql   20   0  2.1g   1.4g   48m S    1.3   8.7  mysqld
+    1  root    20   0   52m    4m    3m S    0.0   0.0  systemd</code></pre>
+  </div>
+
+  <p>关键信息一目了然：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>字段</th><th>值</th><th>含义</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>PID</td><td>8842</td><td>CPU 最高的进程 ID</td></tr>
+      <tr><td>%CPU</td><td>387.2</td><td>占用了 387% CPU（4 核机器上约等于打满）</td></tr>
+      <tr><td>COMMAND</td><td>java</td><td>确认是 Java 进程</td></tr>
+      <tr><td>load average</td><td>12.43</td><td>系统负载远超 CPU 核数（4 核），排队严重</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">注意 %CPU 的含义</span>
+    <p><code>%CPU</code> 是按单核 100% 计算的。一台 8 核机器上，%CPU 最大值是 800%。所以 387% 意味着大约 4 个核被完全占满。如果 load average 远超 CPU 核数，说明有大量线程在排队等 CPU。</p>
+  </div>
+
+  <p>确认 PID = <strong>8842</strong> 是肇事进程。如有多个 Java 进程，用 <code>ps -ef | grep java</code> 确认是哪个应用。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">Step 1 产出</span>
+    <p>锁定 Java 进程 PID = <strong>8842</strong>，确认应用为 order-service。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 3 站 — Step 2：top -Hp 找线程
+     ================================================================ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>Step 2：top -Hp PID — 哪个线程在飙？</h2>
+  </div>
+
+  <p>进程找到了，但一个 Java 进程里可能有几百个线程。我们需要知道<strong>具体是哪些线程在消耗 CPU</strong>。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>terminal — top -Hp</b></span></div>
+    <pre><code>$ top -Hp 8842
+
+top - 03:15:47 up 127 days,  4:33,  1 user,
+Threads: 342 total,   4 running, 338 sleeping
+
+<span class="n">  PID  USER    PR  NI   VIRT    RES    SHR S  %CPU %MEM  COMMAND</span>
+<span class="k"> 9127  admin   20   0  8.2g   3.1g   18m R  <span class="t">99.3</span>  19.8  java</span>
+<span class="k"> 9128  admin   20   0  8.2g   3.1g   18m R  <span class="t">98.7</span>  19.8  java</span>
+<span class="k"> 9131  admin   20   0  8.2g   3.1g   18m R  <span class="t">96.1</span>  19.8  java</span>
+ 9004  admin   20   0  8.2g   3.1g   18m S    2.3  19.8  java
+ 8923  admin   20   0  8.2g   3.1g   18m S    1.1  19.8  java
+ 8844  admin   20   0  8.2g   3.1g   18m S    0.7  19.8  java</code></pre>
+  </div>
+
+  <p>三个线程几乎各占一个核：</p>
+  <ul>
+    <li>TID <strong>9127</strong> — CPU 99.3%</li>
+    <li>TID <strong>9128</strong> — CPU 98.7%</li>
+    <li>TID <strong>9131</strong> — CPU 96.1%</li>
+  </ul>
+
+  <div class="crack">
+    <span class="crack-label">PID vs TID</span>
+    <p>在 <code>top -Hp</code> 的输出中，<code>PID</code> 列显示的实际上是<strong>线程 ID（TID）</strong>，也叫 LWP（Light Weight Process）。这是 Linux 的一个"历史遗留"——内核把线程视为轻量级进程。</p>
+  </div>
+
+  <p>三个线程都在飙，说明可能是同一类请求触发了相同的问题代码。先抓一个 TID = <strong>9127</strong> 来分析。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">Step 2 产出</span>
+    <p>锁定高 CPU 线程 TID = <strong>9127</strong>（占用 99.3% 单核 CPU）。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 4 站 — Step 3：printf 转十六进制
+     ================================================================ -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>Step 3：printf '%x' — 十进制转十六进制</h2>
+  </div>
+
+  <p>拿到 TID 之后，有一个关键步骤很多人会忘记——<strong>把十进制的 TID 转成十六进制</strong>。因为 <code>jstack</code> 输出中的线程 ID（nid）用的是十六进制。</p>
+
+  <div class="think">
+    <p class="think-q">"为什么 jstack 要用十六进制？"</p>
+    <p>因为 JVM 内部使用 native thread ID，也就是操作系统分配的 LWP ID，在 jstack 中以 <code>0x</code> 开头的十六进制形式展示。而 <code>top</code> 显示的是十进制。不转换就对不上号。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>terminal — printf 转换</b></span></div>
+    <pre><code><span class="c"># TID = 9127，转为十六进制</span>
+$ printf <span class="t">'%x\n'</span> 9127
+<span class="k">23a7</span>
+
+<span class="c"># 验证另外两个线程</span>
+$ printf <span class="t">'%x\n'</span> 9128
+<span class="k">23a8</span>
+$ printf <span class="t">'%x\n'</span> 9131
+<span class="k">23ab</span></code></pre>
+  </div>
+
+  <p>记住我们要找的 nid：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>TID（十进制）</th><th>nid（十六进制）</th><th>CPU 占用</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>9127</td><td><strong>0x23a7</strong></td><td>99.3%</td></tr>
+      <tr><td>9128</td><td><strong>0x23a8</strong></td><td>98.7%</td></tr>
+      <tr><td>9131</td><td><strong>0x23ab</strong></td><td>96.1%</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">面试加分项</span>
+    <p>很多候选人在面试时直接说"用 jstack 看线程"，但说不出十进制转十六进制这一步。这个细节是区分"背过八股文"和"真正排查过问题"的分水岭。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">Step 3 产出</span>
+    <p>TID 9127 → nid = <strong>0x23a7</strong>，下一步用它去 jstack 里搜索。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 5 站 — Step 4：jstack 抓线程栈
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>Step 4：jstack PID — 抓线程快照</h2>
+  </div>
+
+  <p>现在用 <code>jstack</code> 导出整个 JVM 的线程栈快照，然后在里面搜索 nid = <code>0x23a7</code>。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>terminal — jstack 抓栈 + 搜索</b></span></div>
+    <pre><code>$ jstack <span class="k">8842</span> > /tmp/jstack.log       <span class="c"># 无响应时加 -F 强制 dump</span>
+$ grep -A 30 <span class="k">'nid=0x23a7'</span> /tmp/jstack.log</code></pre>
+  </div>
+
+  <p>搜到了！线程栈信息如下：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>jstack output — nid=0x23a7</b></span></div>
+    <pre><code>"http-nio-8080-exec-127" <span class="c">#3842</span> daemon prio=5 os_prio=0
+  <span class="n">java.lang.Thread.State: <span class="k">RUNNABLE</span></span>
+    at java.util.HashMap.resize(<span class="t">HashMap.java:715</span>)
+    at java.util.HashMap.putVal(<span class="t">HashMap.java:641</span>)
+    at java.util.HashMap.put(<span class="t">HashMap.java:612</span>)
+    at com.example.order.service.CacheManager.refreshCache(<span class="t">CacheManager.java:87</span>)
+    at com.example.order.service.OrderService.queryOrder(<span class="t">OrderService.java:142</span>)
+    at com.example.order.controller.OrderController.getOrder(<span class="t">OrderController.java:56</span>)
+    ...</code></pre>
+  </div>
+
+  <p>关键信息解读：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>字段</th><th>值</th><th>含义</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>线程名</td><td>http-nio-8080-exec-127</td><td>Tomcat 工作线程，正在处理 HTTP 请求</td></tr>
+      <tr><td>State</td><td><strong>RUNNABLE</strong></td><td>线程正在执行（不是 BLOCKED / WAITING）</td></tr>
+      <tr><td>栈顶</td><td>HashMap.resize()</td><td>正在做 HashMap 的扩容操作</td></tr>
+      <tr><td>业务代码</td><td>CacheManager.java:87</td><td>第 87 行，刷新缓存时往 HashMap 里 put 数据</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">多抓几次对比</span>
+    <p>建议间隔 5-10 秒抓 3 次 jstack，然后 <code>diff</code> 对比。如果同一个线程每次都停在相同位置，基本可以确认是死循环或计算密集操作。如果每次位置不同，可能是大量短请求导致的 CPU 累积。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>terminal — 多次采样对比</b></span></div>
+    <pre><code><span class="c"># 间隔 10 秒抓 3 次，对比是否同一位置</span>
+$ jstack 8842 > j1.log; sleep 10; jstack 8842 > j2.log; sleep 10; jstack 8842 > j3.log
+
+$ grep -c <span class="t">'HashMap.resize'</span> j1.log j2.log j3.log
+j1.log:<span class="k">3</span>   j2.log:<span class="k">3</span>   j3.log:<span class="k">3</span>   <span class="c"># 三次都在 resize → 100% 死循环</span></code></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">Step 4 产出</span>
+    <p>线程 <code>0x23a7</code> 持续停在 <code>HashMap.resize()</code>，状态 RUNNABLE，三次采样不变——<strong>确认死循环</strong>。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — Step 5：定位代码
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>Step 5：定位代码行 — 根因分析</h2>
+  </div>
+
+  <p>栈帧已经告诉我们问题在 <code>CacheManager.java:87</code>。打开代码看看：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>CacheManager.java</b></span></div>
+    <pre><code><span class="k">public class</span> CacheManager {
+
+    <span class="c">// 共享缓存，多个 Tomcat 线程并发读写</span>
+    <span class="k">private</span> Map&lt;String, OrderDTO&gt; cache = <span class="k">new</span> HashMap&lt;&gt;();
+
+    <span class="k">public void</span> refreshCache(String orderId) {
+        OrderDTO dto = orderDao.findById(orderId);
+        <span class="c">// 第 87 行：并发 put → HashMap 内部链表成环 → 死循环！</span>
+        cache.put(orderId, dto);  <span class="c">// ← 问题在这里</span>
+    }
+}</code></pre>
+  </div>
+
+  <p><strong>经典 bug</strong>：在多线程环境下使用 <code>HashMap</code>。JDK 7 的 <code>HashMap</code> 在并发扩容时会形成环形链表，导致 <code>resize()</code> 死循环。JDK 8 虽然修复了环形链表问题，但并发 put 仍然会导致数据丢失和 <code>size</code> 不一致，触发无限扩容。</p>
+
+  <p><strong>修复方案</strong>：把 <code>HashMap</code> 换成 <code>ConcurrentHashMap</code>——一行改动，解决线程安全问题。</p>
+
+  <p>除了 HashMap 死循环，还有其他几种常见根因（第 7 站有完整速查表），先看两个高频案例：</p>
+
+  <div class="crack">
+    <span class="crack-label">正则灾难案例</span>
+    <p>某团队用正则 <code>^([a-zA-Z0-9_.-]+)@([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}$</code> 校验邮箱，遇到超长输入时触发 catastrophic backtracking，CPU 直接打满。修复：简化正则 + 限制输入长度。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">GC 导致的 CPU 飙高</span>
+    <p>jstack 里看到大量 <code>"GC task thread#N"</code> 处于 RUNNABLE，说明 CPU 都花在了垃圾回收上。此时应转向 GC 日志分析，检查 Full GC 频率和堆内存趋势。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">Step 5 产出</span>
+    <p>确认根因：<code>CacheManager.java:87</code> 多线程并发写 <code>HashMap</code>，触发扩容死循环。修复为 <code>ConcurrentHashMap</code> 后问题解决。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 7 站 — 总结：完整 SOP + 自动化
+     ================================================================ -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>完整 SOP 流程 + 自动化监控</h2>
+  </div>
+
+  <p>把五步法画成流程图，这是你面试时应该能在白板上 30 秒画出来的图：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 440" xmlns="http://www.w3.org/2000/svg" style="max-width:720px;width:100%;">
+      <defs>
+        <marker id="ah" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#475569"/></marker>
+        <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#2563eb"/></linearGradient>
+        <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+      </defs>
+      <!-- Steps 1-4 -->
+      <rect x="20" y="20" width="200" height="68" rx="10" fill="url(#g1)"/>
+      <text x="120" y="46" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">Step 1: top</text>
+      <text x="120" y="66" text-anchor="middle" fill="#dbeafe" font-size="11">找到高 CPU 进程 PID</text>
+      <line x1="120" y1="88" x2="120" y2="118" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="20" y="120" width="200" height="68" rx="10" fill="url(#g1)"/>
+      <text x="120" y="146" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">Step 2: top -Hp PID</text>
+      <text x="120" y="166" text-anchor="middle" fill="#dbeafe" font-size="11">锁定高 CPU 线程 TID</text>
+      <line x1="120" y1="188" x2="120" y2="218" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="20" y="220" width="200" height="68" rx="10" fill="url(#g1)"/>
+      <text x="120" y="246" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">Step 3: printf '%x' TID</text>
+      <text x="120" y="266" text-anchor="middle" fill="#dbeafe" font-size="11">十进制 → 十六进制 nid</text>
+      <line x1="120" y1="288" x2="120" y2="318" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="20" y="320" width="200" height="68" rx="10" fill="url(#g1)"/>
+      <text x="120" y="346" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">Step 4: jstack PID</text>
+      <text x="120" y="366" text-anchor="middle" fill="#dbeafe" font-size="11">搜索 nid，获取线程栈</text>
+      <!-- Step 5 -->
+      <line x1="220" y1="354" x2="278" y2="354" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="280" y="320" width="200" height="68" rx="10" fill="url(#g2)"/>
+      <text x="380" y="346" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">Step 5: 定位代码行</text>
+      <text x="380" y="366" text-anchor="middle" fill="#d1fae5" font-size="11">栈帧 → 源码 → 修复</text>
+      <!-- Right panel: common causes -->
+      <rect x="500" y="20" width="200" height="368" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+      <text x="600" y="48" text-anchor="middle" fill="#1e293b" font-size="13" font-weight="bold">常见根因</text>
+      <line x1="520" y1="58" x2="680" y2="58" stroke="#e2e8f0" stroke-width="1"/>
+      <circle cx="524" cy="88" r="4" fill="#ef4444"/><text x="538" y="92" fill="#334155" font-size="11">HashMap 并发死循环</text>
+      <circle cx="524" cy="128" r="4" fill="#f59e0b"/><text x="538" y="132" fill="#334155" font-size="11">正则回溯灾难</text>
+      <circle cx="524" cy="168" r="4" fill="#3b82f6"/><text x="538" y="172" fill="#334155" font-size="11">GC 抖动（频繁 Full GC）</text>
+      <circle cx="524" cy="208" r="4" fill="#8b5cf6"/><text x="538" y="212" fill="#334155" font-size="11">自旋锁 / CAS 竞争激烈</text>
+      <circle cx="524" cy="248" r="4" fill="#10b981"/><text x="538" y="252" fill="#334155" font-size="11">大对象序列化 / 计算密集</text>
+      <line x1="520" y1="278" x2="680" y2="278" stroke="#e2e8f0" stroke-width="1"/>
+      <text x="600" y="306" text-anchor="middle" fill="#1e293b" font-size="13" font-weight="bold">快捷工具</text>
+      <text x="524" y="336" fill="#334155" font-size="11">arthas &gt; thread -n 3</text>
+      <text x="524" y="366" fill="#334155" font-size="11">一步完成 5 步法！</text>
+      <line x1="480" y1="354" x2="498" y2="354" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+      <!-- Bottom -->
+      <rect x="20" y="406" width="680" height="28" rx="6" fill="#fef3c7"/>
+      <text x="360" y="424" text-anchor="middle" fill="#92400e" font-size="12" font-weight="bold">排查原则：从大到小，逐步缩小范围——进程 → 线程 → 栈帧 → 代码行</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> CPU 100% 排查五步法完整流程</figcaption>
+  </div>
+
+  <h3>常见根因速查表</h3>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>根因</th><th>jstack 栈帧特征</th><th>触发条件</th><th>修复方案</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>HashMap 死循环</td>
+        <td>HashMap.resize / putVal</td>
+        <td>多线程并发读写 HashMap</td>
+        <td>换 ConcurrentHashMap</td>
+      </tr>
+      <tr>
+        <td>正则回溯</td>
+        <td>Pattern$NFA / Matcher.find 深层递归</td>
+        <td>嵌套量词 + 长输入</td>
+        <td>简化正则 / 限制输入长度</td>
+      </tr>
+      <tr>
+        <td>GC 抖动</td>
+        <td>GC task thread#N RUNNABLE</td>
+        <td>堆内存不足 / 内存泄漏</td>
+        <td>调大堆 / 排查泄漏</td>
+      </tr>
+      <tr>
+        <td>自旋锁竞争</td>
+        <td>AbstractQueuedSynchronizer CAS 循环</td>
+        <td>锁持有时间过长</td>
+        <td>减小临界区 / 读写锁</td>
+      </tr>
+      <tr>
+        <td>大 JSON 序列化</td>
+        <td>Jackson serialize 深调用栈</td>
+        <td>返回超大对象</td>
+        <td>分页 / DTO 裁剪 / 异步</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Arthas 一键搞定</h3>
+
+  <p>如果你觉得五步法太麻烦，<strong>Arthas</strong> 提供了 <code>thread</code> 命令，一条命令完成全部工作：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>terminal — arthas thread</b></span></div>
+    <pre><code>$ java -jar arthas-boot.jar   <span class="c"># 选择 8842</span>
+
+<span class="c"># 一条命令 = top + top -Hp + printf + jstack</span>
+[arthas@8842]$ thread <span class="t">-n 3</span>
+<span class="n">ID    NAME                        CPU%  STATE</span>
+<span class="k">9127</span>  http-nio-8080-exec-127      <span class="t">99.3</span>  RUNNABLE
+<span class="k">9128</span>  http-nio-8080-exec-128      <span class="t">98.7</span>  RUNNABLE
+<span class="k">9131</span>  http-nio-8080-exec-131      <span class="t">96.1</span>  RUNNABLE
+
+<span class="c"># 查看线程完整栈</span>
+[arthas@8842]$ thread <span class="t">9127</span>
+<span class="n">"http-nio-8080-exec-127"</span> Id=9127 RUNNABLE
+    at java.util.HashMap.resize(HashMap.java:715)
+    at com.example.order.service.CacheManager.refreshCache(<span class="k">CacheManager.java:87</span>)
+    ...</code></pre>
+  </div>
+  <p>Arthas 的 <code>thread -n 3</code> 直接帮你做了 top → top -Hp → 转十六进制 → jstack 四步，省去了手动转换的麻烦。<strong>强烈建议线上排查优先使用 Arthas</strong>。</p>
+
+  <div class="crack">
+    <span class="crack-label">Arthas 进阶命令</span>
+    <p><code>thread -b</code>：找出阻塞其他线程的线程（排查死锁）。<code>thread --state WAITING</code>：过滤特定状态的线程。<code>profiler start</code>：启动 CPU 火焰图采样，直观看到哪些方法最耗时。</p>
+  </div>
+
+  <h3>自动化监控预警</h3>
+
+  <p>排查是事后补救，监控才是事前防御。建议配置以下自动化措施：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>cpu-monitor.sh — 自动采集脚本（crontab 每分钟执行）</b></span></div>
+    <pre><code><span class="c">#!/bin/bash</span>
+JAVA_PID=$(pgrep -f <span class="t">"order-service"</span>)
+CPU_USAGE=$(top -bn1 -p $JAVA_PID | tail -1 | awk <span class="t">'{print $9}'</span>)
+
+<span class="k">if</span> (( $(echo "$CPU_USAGE > 80" | bc -l) )); <span class="k">then</span>
+    TS=$(date +%Y%m%d_%H%M%S)
+    <span class="k">for</span> i <span class="k">in</span> 1 2 3; <span class="k">do</span>
+        jstack $JAVA_PID > /var/log/cpu-dumps/jstack_${TS}_${i}.log
+        sleep 5
+    <span class="k">done</span>
+    top -bn1 -Hp $JAVA_PID | head -12 > /var/log/cpu-dumps/top_${TS}.log
+<span class="k">fi</span></code></pre>
+  </div>
+
+  <p>CPU 飙高时自动留证，再也不用担心"事发突然没抓到现场"。</p>
+
+  <div class="recap">
+    <h3>全站回顾</h3>
+    <ol>
+      <li><strong>top</strong> — 找到 CPU 最高的 Java 进程（PID）</li>
+      <li><strong>top -Hp PID</strong> — 找到进程内 CPU 最高的线程（TID）</li>
+      <li><strong>printf '%x' TID</strong> — 十进制转十六进制（得到 nid）</li>
+      <li><strong>jstack PID</strong> — 导出线程栈，用 nid 搜索目标线程</li>
+      <li><strong>定位代码行</strong> — 根据栈帧定位到具体 Java 文件和行号，分析根因</li>
+    </ol>
+    <p>Arthas 的 <code>thread -n 3</code> 一条命令可以替代前四步。面试时五步法要能脱口而出，实操时优先用 Arthas 提效。</p>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

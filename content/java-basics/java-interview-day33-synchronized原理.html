@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>synchronized 锁升级</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道面试题开始</h2></div>
+
+<p>面试官微微一笑，抛出了这个经典问题：</p>
+
+<div class="think"><div class="think-q">"synchronized 和 ReentrantLock 有什么区别？"</div></div>
+
+<p>90% 的候选人会脱口而出：<strong>"synchronized 是重量级锁，ReentrantLock 是轻量级锁"</strong>。面试官心里已经给你打了标签——停留在 JDK 5 的认知。</p>
+
+<p>事实上，从 <strong>JDK 6 开始</strong>，JVM 团队对 synchronized 做了翻天覆地的优化。引入了<strong>偏向锁、轻量级锁、锁膨胀</strong>等机制，让 synchronized 在大多数场景下的性能已经不输甚至优于 ReentrantLock。HotSpot 虚拟机甚至为此重写了大半个 monitor 模块。</p>
+
+<p>这篇文章，我们就来拆解 synchronized 背后的 <strong>锁升级</strong> 机制——从一把"笨锁"进化成"智能锁"的全过程。读完之后，你会理解：</p>
+
+<ul>
+  <li>对象头里到底藏了什么？</li>
+  <li>为什么同一个 synchronized 关键字，性能差异可以高达 10 倍？</li>
+  <li>偏向锁为什么在 JDK 15 被废弃、JDK 18 被彻底移除？</li>
+</ul>
+
+<p>发车之前，先问自己三个问题：</p>
+
+<ul>
+  <li>Mark Word 有多少位？偏向锁时里面存的是什么？</li>
+  <li>锁能升级，能降级吗？</li>
+  <li>ObjectMonitor 的 EntryList 和 WaitSet 有什么区别？</li>
+</ul>
+
+<p>带着这些问题，我们从最底层的对象头开始。</p>
+</section>
+
+<!-- ═══════════════ 第2站：对象头结构 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>对象头结构：锁信息藏在哪里？</h2></div>
+
+<p>在 HotSpot 虚拟机中，每一个 Java 对象在内存中都由三部分组成：<strong>对象头（Object Header）</strong>、实例数据（Instance Data）和对齐填充（Padding）。锁的所有状态信息，都存储在对象头的 <strong>Mark Word</strong> 里。</p>
+
+<p>对象头的组成：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>对象头组成</b></span></div>
+<pre><code><span class="c">// 64 位 JVM 下的对象头结构</span>
+<span class="k">┌─────────────────────────────────────┐</span>
+<span class="k">│</span> <span class="t">Mark Word</span>（8 字节 = 64 位）        <span class="k">│</span>  <span class="c">← 锁状态、哈希码、GC 分代年龄</span>
+<span class="k">├─────────────────────────────────────┤</span>
+<span class="k">│</span> <span class="t">Klass Pointer</span>（4/8 字节）           <span class="k">│</span>  <span class="c">← 指向类元数据（开启压缩后 4 字节）</span>
+<span class="k">├─────────────────────────────────────┤</span>
+<span class="k">│</span> <span class="t">数组长度</span>（仅数组对象，4 字节）      <span class="k">│</span>  <span class="c">← 如果是普通对象则没有这部分</span>
+<span class="k">└─────────────────────────────────────┘</span></code></pre>
+</div>
+
+<p>重点在 <strong>Mark Word</strong>。它是一个 64 位的位图，不同锁状态下存储的内容完全不同：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 360" role="img" aria-label="64位 JVM Mark Word 结构图">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="390" y="24" text-anchor="middle" font-family="monospace" font-size="14" fill="#1C1C1C" font-weight="700">64 位 JVM Mark Word 结构（8 字节 = 64 bits）</text>
+
+  <!-- 无锁态 -->
+  <text x="15" y="60" font-size="11" fill="#57544E">无锁态:</text>
+  <rect x="80" y="45" width="440" height="26" rx="3" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="300" y="63" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">unused (25 bits) + hashCode (31 bits)</text>
+  <rect x="525" y="45" width="60" height="26" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.2"/>
+  <text x="555" y="63" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">age(4)</text>
+  <rect x="590" y="45" width="20" height="26" rx="3" fill="#FFF0E0" stroke="#E8A87C" stroke-width="1.2"/>
+  <text x="600" y="63" text-anchor="middle" font-family="monospace" font-size="9" fill="#C2410C">0</text>
+  <rect x="615" y="45" width="30" height="26" rx="3" fill="#FFF0E0" stroke="#E8A87C" stroke-width="1.2"/>
+  <text x="630" y="63" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">01</text>
+  <text x="660" y="63" font-size="10" fill="#8C8676">← 锁标志位</text>
+
+  <!-- 偏向锁态 -->
+  <text x="15" y="105" font-size="11" fill="#57544E">偏向锁:</text>
+  <rect x="80" y="90" width="440" height="26" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <text x="300" y="108" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C">Thread ID (54 bits) —— 持有偏向的线程</text>
+  <rect x="525" y="90" width="60" height="26" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.2"/>
+  <text x="555" y="108" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">age(4)</text>
+  <rect x="590" y="90" width="20" height="26" rx="3" fill="#FFF0E0" stroke="#E8A87C" stroke-width="1.2"/>
+  <text x="600" y="108" text-anchor="middle" font-family="monospace" font-size="9" fill="#C2410C">1</text>
+  <rect x="615" y="90" width="30" height="26" rx="3" fill="#FFF0E0" stroke="#E8A87C" stroke-width="1.2"/>
+  <text x="630" y="108" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">01</text>
+
+  <!-- 轻量级锁态 -->
+  <text x="15" y="150" font-size="11" fill="#57544E">轻量级锁:</text>
+  <rect x="80" y="135" width="505" height="26" rx="3" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.2"/>
+  <text x="332" y="153" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F">指向 Lock Record 的指针 (62 bits)</text>
+  <rect x="590" y="135" width="55" height="26" rx="3" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.2"/>
+  <text x="617" y="153" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">00</text>
+
+  <!-- 重量级锁态 -->
+  <text x="15" y="195" font-size="11" fill="#57544E">重量级锁:</text>
+  <rect x="80" y="180" width="505" height="26" rx="3" fill="#F5D5D5" stroke="#B85450" stroke-width="1.2"/>
+  <text x="332" y="198" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450">指向 ObjectMonitor 的指针 (62 bits)</text>
+  <rect x="590" y="180" width="55" height="26" rx="3" fill="#F5D5D5" stroke="#B85450" stroke-width="1.2"/>
+  <text x="617" y="198" text-anchor="middle" font-family="monospace" font-size="10" fill="#B85450">10</text>
+
+  <!-- GC 标记 -->
+  <text x="15" y="240" font-size="11" fill="#57544E">GC 标记:</text>
+  <rect x="80" y="225" width="505" height="26" rx="3" fill="#E8E8E8" stroke="#999" stroke-width="1.2"/>
+  <text x="332" y="243" text-anchor="middle" font-family="monospace" font-size="11" fill="#666">forwarding pointer (62 bits)</text>
+  <rect x="590" y="225" width="55" height="26" rx="3" fill="#E8E8E8" stroke="#999" stroke-width="1.2"/>
+  <text x="617" y="243" text-anchor="middle" font-family="monospace" font-size="10" fill="#666">11</text>
+
+  <!-- 图例 -->
+  <rect x="80" y="275" width="640" height="70" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="400" y="298" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">面试关键点</text>
+  <text x="400" y="318" text-anchor="middle" font-size="11" fill="#57544E">最低 2 位是「锁标志位」：01 = 无锁/偏向、00 = 轻量级、10 = 重量级、11 = GC 标记</text>
+  <text x="400" y="336" text-anchor="middle" font-size="11" fill="#C2410C">偏向锁与无锁共用标志位 01，通过第 3 低位（biased_lock = 1/0）区分</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>64 位 JVM 的 Mark Word 在不同锁状态下存储不同内容，最低 2 位是锁标志位</figcaption>
+</figure>
+
+<p>注意一个细节：偏向锁和无锁的标志位都是 <code>01</code>，它们的区分靠<strong>第 3 低位</strong>（biased_lock 标志）。这个设计节省了标志位的空间。</p>
+</section>
+
+<!-- ═══════════════ 第3站：偏向锁 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>偏向锁 (Biased Locking)：一个人的独角戏</h2></div>
+
+<p>HotSpot 团队在大量真实应用中发现了一个关键观察：<strong>大多数锁在整个生命周期中只被同一个线程访问</strong>。比如一个 <code>StringBuffer</code> 对象几乎总是在同一个线程里被 append，一个连接池的内部状态通常由单个管理线程操作。</p>
+
+<p>基于这个观察，偏向锁的设计思路非常直接：<strong>既然只有一个线程来，那就把锁"偏向"给它，后续访问连 CAS 都不需要做。</strong></p>
+
+<div class="think"><div class="think-q">偏向锁的核心：第一次加锁用 CAS 把线程 ID 写入 Mark Word，后续同一线程再次进入同步块时，只需要比较 Mark Word 中的线程 ID 是否是自己——如果是，直接放行，零开销。</div></div>
+
+<p>偏向锁的获取流程：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>偏向锁获取</b> · 伪代码</span></div>
+<pre><code><span class="c">// 第一次进入 synchronized 块</span>
+<span class="k">if</span> (markWord.bias_pattern == <span class="n">1</span> &amp;&amp; markWord.threadId == <span class="n">0</span>) {
+    <span class="c">// 对象可偏向，且还没有偏向任何线程</span>
+    <span class="t">CAS</span>(markWord.threadId, <span class="n">0</span>, currentThreadId);  <span class="c">// CAS 写入当前线程 ID</span>
+    <span class="k">return</span>; <span class="c">// 加锁成功，几乎无开销</span>
+}
+
+<span class="c">// 后续进入 synchronized 块</span>
+<span class="k">if</span> (markWord.threadId == currentThreadId) {
+    <span class="k">return</span>; <span class="c">// 直接放行！不需要任何原子操作</span>
+}
+
+<span class="c">// 其他线程来竞争 → 偏向锁撤销 → 升级为轻量级锁</span>
+revokeBias();</code></pre>
+</div>
+
+<p>关键优势在于 <strong>零 CAS 开销</strong>。传统加锁每次进入同步块都需要 CAS 操作，偏向锁只需要第一次 CAS，之后就是普通的内存读比较——这比 CAS 快一个数量级。</p>
+
+<div class="crack"><div class="crack-label">JDK 15 废弃、JDK 18 移除偏向锁</div>
+<p>偏向锁的设计初衷是好的，但它带来了巨大的<strong>代码复杂度</strong>。HotSpot 中与偏向锁相关的代码超过 2 万行，涉及 GC、类加载、锁撤销等多个子系统的协调。</p>
+<p>JEP 374（JDK 15）正式废弃了偏向锁，默认关闭（<code>-XX:-UseBiasedLocking</code>）。JDK 18 之后彻底移除。原因是：</p>
+<ul>
+  <li>现代应用更多是多线程并发，"只有一个线程访问"的场景变少</li>
+  <li>偏向锁撤销涉及 SafePoint，可能导致 STW 暂停</li>
+  <li>维护成本高，收益递减——轻量级锁本身已经很快了</li>
+</ul>
+<p>面试时要说：<strong>偏向锁在 JDK 15+ 已被废弃，JDK 18 彻底移除，现代 JVM 从轻量级锁起步。</strong></p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：轻量级锁 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>轻量级锁 (Lightweight Lock)：短暂竞争的最优解</h2></div>
+
+<p>当偏向锁遇到竞争（另一个线程也来加锁），或者 JDK 15+ 直接跳过偏向锁阶段，锁就会进入<strong>轻量级锁</strong>状态。</p>
+
+<p>轻量级锁的设计假设是：<strong>锁的竞争是短暂的</strong>——线程 A 马上就会释放，线程 B 只需要稍微"自旋"等一下就拿到了。这种情况下，不值得动用操作系统级别的线程挂起（这涉及用户态到内核态的切换，代价高昂）。</p>
+
+<p>核心机制是 <strong>Lock Record</strong>（锁记录），它位于线程栈帧中：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BasicLock</b> · 栈帧中的锁记录</span></div>
+<pre><code><span class="c">// 每个线程栈帧中都有若干 Lock Record</span>
+<span class="c">// 用于在轻量级锁阶段保存 Mark Word 的备份</span>
+<span class="k">struct</span> <span class="t">BasicLock</span> {
+    <span class="t">volatile markOop</span> displaced_header;  <span class="c">// 保存对象原始的 Mark Word</span>
+};
+
+<span class="c">// 加锁流程：</span>
+<span class="c">// 1. 在当前线程栈帧中创建一个 Lock Record</span>
+<span class="c">// 2. 把对象的 Mark Word 复制到 Lock Record 的 displaced_header</span>
+<span class="c">// 3. CAS 尝试将 Mark Word 替换为指向 Lock Record 的指针</span>
+<span class="c">// 4. CAS 成功 → 拿到锁（锁标志位变为 00）</span>
+<span class="c">// 5. CAS 失败 → 存在竞争 → 可能膨胀为重量级锁</span></code></pre>
+</div>
+
+<p>轻量级锁的完整获取与释放序列：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 740 280" role="img" aria-label="轻量级锁获取释放流程">
+  <defs>
+    <marker id="arrow3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <!-- 线程栈帧 -->
+  <rect x="30" y="20" width="160" height="240" rx="6" fill="#F5F5F5" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="110" y="42" text-anchor="middle" font-size="12" fill="#57544E" font-weight="700">线程栈帧</text>
+
+  <rect x="45" y="55" width="130" height="35" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="110" y="77" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">方法调用帧</text>
+
+  <rect x="45" y="100" width="130" height="50" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="110" y="120" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">Lock Record</text>
+  <text x="110" y="137" text-anchor="middle" font-family="monospace" font-size="9" fill="#3E6B8F">displaced_header</text>
+
+  <rect x="45" y="160" width="130" height="35" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="110" y="182" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">局部变量</text>
+
+  <!-- 箭头：复制 Mark Word -->
+  <line x1="195" y1="125" x2="270" y2="125" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arrow3)"/>
+  <text x="232" y="115" text-anchor="middle" font-size="9" fill="#3E6B8F">① 复制</text>
+  <text x="232" y="135" text-anchor="middle" font-size="9" fill="#3E6B8F">Mark Word</text>
+
+  <!-- 对象头 -->
+  <rect x="275" y="30" width="200" height="230" rx="6" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="375" y="52" text-anchor="middle" font-size="12" fill="#57544E" font-weight="700">对象（堆上）</text>
+
+  <rect x="290" y="65" width="170" height="40" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="375" y="82" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">Mark Word (64 bits)</text>
+  <text x="375" y="97" text-anchor="middle" font-family="monospace" font-size="9" fill="#2D5F2D">原始值: hashCode|age|01</text>
+
+  <rect x="290" y="115" width="170" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="375" y="135" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">Klass Pointer</text>
+
+  <rect x="290" y="155" width="170" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="375" y="175" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">实例数据</text>
+
+  <!-- CAS 箭头 -->
+  <line x1="195" y1="125" x2="195" y2="85" stroke="#C2410C" stroke-width="1.2"/>
+  <line x1="195" y1="85" x2="285" y2="85" stroke="#C2410C" stroke-width="1.2" marker-end="url(#arrow3)"/>
+  <text x="250" y="75" font-size="9" fill="#C2410C">② CAS 替换</text>
+  <text x="250" y="95" font-size="9" fill="#C2410C">Mark Word → 锁记录指针</text>
+
+  <!-- 右侧流程说明 -->
+  <rect x="510" y="30" width="210" height="230" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="615" y="55" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">加锁序列</text>
+  <text x="525" y="78" font-size="10" fill="#57544E">① 复制 Mark Word 到 Lock Record</text>
+  <text x="525" y="100" font-size="10" fill="#57544E">② CAS(MarkWord, 原始值, LockRecordPtr)</text>
+  <text x="525" y="122" font-size="10" fill="#3E6B8F" font-weight="700">CAS 成功 → 标志位变 00，拿到锁</text>
+  <text x="525" y="144" font-size="10" fill="#B85450" font-weight="700">CAS 失败 → 竞争，膨胀为重量级锁</text>
+  <text x="615" y="175" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">解锁序列</text>
+  <text x="525" y="198" font-size="10" fill="#57544E">③ CAS(MarkWord, LockRecordPtr, 原始值)</text>
+  <text x="525" y="220" font-size="10" fill="#3E6B8F" font-weight="700">CAS 成功 → 释放锁，恢复 Mark Word</text>
+  <text x="525" y="242" font-size="10" fill="#B85450" font-weight="700">CAS 失败 → 有线程在等，唤醒它们</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>轻量级锁通过 CAS 操作在线程栈帧和对象头之间交换 Mark Word，避免了操作系统级别的线程挂起</figcaption>
+</figure>
+
+<div class="formula">
+<strong>轻量级锁适用场景</strong><br/>
+线程交替执行（竞争短暂），同步块执行时间短。<br/>
+性能比重量级锁高约 <strong>5 倍</strong>（无用户态/内核态切换）。
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：锁膨胀 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>锁膨胀 (Lock Inflation)：从轻到重的临界点</h2></div>
+
+<p>当轻量级锁的 CAS 操作失败——意味着有另一个线程也在尝试获取同一把锁，竞争已经从"短暂"变成了"持续"。此时 JVM 会执行<strong>锁膨胀</strong>，将轻量级锁升级为<strong>重量级锁</strong>。</p>
+
+<p>膨胀过程不可逆（在绝大多数 JDK 版本中），这就是"锁升级"中"升级"的含义——一旦变重，就回不去了。</p>
+
+<p>膨胀的核心步骤：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>inflate()</b> · 锁膨胀伪代码</span></div>
+<pre><code><span class="t">ObjectMonitor</span>* inflate(<span class="t">Thread</span>* self, <span class="t">oop</span> obj) {
+    <span class="c">// 1. 为对象创建一个 ObjectMonitor（如果不存在）</span>
+    <span class="t">ObjectMonitor</span>* monitor = <span class="k">new</span> <span class="t">ObjectMonitor</span>();
+
+    <span class="c">// 2. 将对象的 Mark Word 从"指向 Lock Record"改为"指向 ObjectMonitor"</span>
+    <span class="c">//    锁标志位从 00 变为 10</span>
+    obj-&gt;set_mark(<span class="t">markOop</span>::encode(monitor));
+
+    <span class="c">// 3. 将之前持有轻量级锁的线程放入 ObjectMonitor 的 Owner 字段</span>
+    monitor-&gt;set_owner(lockRecordOwner);
+
+    <span class="c">// 4. 将当前竞争失败的线程放入 EntryList（阻塞队列）</span>
+    monitor-&gt;enter(self);  <span class="c">// 线程被 park()，进入内核态阻塞</span>
+
+    <span class="k">return</span> monitor;
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么锁不能降级？</div>
+<p>理论上，当竞争消失后，重量级锁可以"降级"回轻量级锁以恢复性能。但实际上，HotSpot 的实现中<strong>锁降级非常有限</strong>。原因：</p>
+<ul>
+  <li>降级逻辑复杂——需要确认 EntryList 为空、没有线程在 wait() 等</li>
+  <li>降级本身有开销——CAS 修改 Mark Word、清理 ObjectMonitor</li>
+  <li>经验数据表明：竞争激烈过的锁，未来大概率还会竞争</li>
+</ul>
+<p>JDK 8u20 之后引入了有限的锁降级，但只在安全点（SafePoint）批量进行，不是实时降级。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：重量级锁 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>重量级锁 (Heavyweight Lock)：ObjectMonitor 全解析</h2></div>
+
+<p>重量级锁的底层实现是 HotSpot 的 <code>ObjectMonitor</code> 对象。它管理着三组线程队列，并通过操作系统的 Mutex 和 Condition Variable 来实现线程的阻塞与唤醒。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 760 400" role="img" aria-label="ObjectMonitor 结构图">
+  <defs>
+    <marker id="arrow4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="arrow4r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+  </defs>
+
+  <text x="380" y="24" text-anchor="middle" font-family="monospace" font-size="14" fill="#1C1C1C" font-weight="700">ObjectMonitor 内部结构</text>
+
+  <!-- 对象头 -->
+  <rect x="280" y="40" width="200" height="35" rx="4" fill="#F5D5D5" stroke="#B85450" stroke-width="1.5"/>
+  <text x="380" y="62" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450">Mark Word → 指向 ObjectMonitor</text>
+
+  <!-- ObjectMonitor 主体 -->
+  <rect x="200" y="95" width="360" height="280" rx="8" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="2"/>
+  <text x="380" y="118" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">ObjectMonitor</text>
+
+  <!-- Owner -->
+  <rect x="225" y="130" width="310" height="32" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.2"/>
+  <text x="380" y="150" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F">_owner: Thread* (当前持有锁的线程)</text>
+
+  <!-- count -->
+  <rect x="225" y="170" width="310" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="380" y="188" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">_count: int (重入计数器)</text>
+
+  <!-- cxq -->
+  <rect x="225" y="206" width="310" height="28" rx="4" fill="#E8E8E8" stroke="#999" stroke-width="1"/>
+  <text x="380" y="224" text-anchor="middle" font-family="monospace" font-size="10" fill="#666">_cxq: ObjectWaiter* (竞争链表，新来线程先入此)</text>
+
+  <!-- EntryList -->
+  <rect x="225" y="242" width="310" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <text x="380" y="260" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">_EntryList: ObjectWaiter* (阻塞队列，等待获取锁)</text>
+
+  <!-- WaitSet -->
+  <rect x="225" y="278" width="310" height="28" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="380" y="296" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">_WaitSet: ObjectWaiter* (已获取锁但调用了 wait() 的线程)</text>
+
+  <!-- recursions -->
+  <rect x="225" y="314" width="310" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="380" y="332" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">_recursions: int (递归/重入次数)</text>
+
+  <!-- 线程示意 -->
+  <rect x="15" y="235" width="100" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="65" y="253" text-anchor="middle" font-size="9" fill="#C2410C">Thread-B</text>
+  <line x1="115" y1="249" x2="220" y2="256" stroke="#C2410C" stroke-width="1" marker-end="url(#arrow4)"/>
+
+  <rect x="15" y="271" width="100" height="28" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1"/>
+  <text x="65" y="289" text-anchor="middle" font-size="9" fill="#2D5F2D">Thread-C</text>
+  <text x="65" y="300" text-anchor="middle" font-size="8" fill="#2D5F2D">(已 wait())</text>
+  <line x1="115" y1="285" x2="220" y2="292" stroke="#7BA87B" stroke-width="1" marker-end="url(#arrow4)"/>
+
+  <!-- 说明 -->
+  <rect x="575" y="130" width="170" height="135" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="660" y="150" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="700">三个队列的区别</text>
+  <text x="585" y="170" font-size="9" fill="#C2410C">cxq: 刚被 park 的线程</text>
+  <text x="585" y="187" font-size="9" fill="#C2410C">  (FIFO 入队，性能优化)</text>
+  <text x="585" y="207" font-size="9" fill="#C2410C">EntryList: 从 cxq 转移</text>
+  <text x="585" y="224" font-size="9" fill="#C2410C">  等待被 unpark 竞争锁</text>
+  <text x="585" y="244" font-size="9" fill="#2D5F2D">WaitSet: 持有锁后调了</text>
+  <text x="585" y="261" font-size="9" fill="#2D5F2D">  wait()，等 notify() 唤醒</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>ObjectMonitor 管理三个队列：cxq 接收新阻塞线程、EntryList 排队竞争、WaitSet 存放 wait() 线程</figcaption>
+</figure>
+
+<p>来看 synchronized 编译后的字节码——每个 synchronized 块会被翻译为 <code>monitorenter</code> 和 <code>monitorexit</code> 指令：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>字节码</b> · synchronized 编译结果</span></div>
+<pre><code><span class="c">// Java 源码</span>
+<span class="k">synchronized</span> (obj) {
+    count++;
+}
+
+<span class="c">// 编译后的字节码（javap -c 输出）</span>
+  <span class="n">0</span>: aload_1           <span class="c">// 加载 obj 到操作数栈</span>
+  <span class="n">1</span>: dup               <span class="c">// 复制一份引用（用于 finally 中的 monitorexit）</span>
+  <span class="n">2</span>: <span class="k">monitorenter</span>     <span class="c">// 尝试获取 monitor 锁</span>
+  <span class="n">3</span>: aload_0
+  <span class="n">4</span>: dup
+  <span class="n">5</span>: getfield #2      <span class="c">// 读取 count</span>
+  <span class="n">8</span>: iconst_1
+  <span class="n">9</span>: iadd
+ <span class="n">10</span>: putfield #2      <span class="c">// 写回 count++</span>
+ <span class="n">13</span>: aload_1
+ <span class="n">14</span>: <span class="k">monitorexit</span>      <span class="c">// 正常退出，释放 monitor 锁</span>
+ <span class="n">15</span>: goto <span class="n">23</span>
+ <span class="n">18</span>: astore_2          <span class="c">// 异常处理入口</span>
+ <span class="n">19</span>: aload_1
+ <span class="n">20</span>: <span class="k">monitorexit</span>      <span class="c">// 异常退出，也要释放锁！</span>
+ <span class="n">21</span>: athrow            <span class="c">// 重新抛出异常</span>
+ <span class="n">23</span>: <span class="k">return</span></code></pre>
+</div>
+
+<p>注意字节码里有<strong>两个 monitorexit</strong>：一个是正常路径（第 14 行），一个是异常路径（第 20 行，由编译器自动生成的 finally 块）。这就是为什么 synchronized 能保证即使抛出异常，锁也一定会被释放。</p>
+
+<div class="takeaway"><div class="takeaway-label">ObjectMonitor 关键行为</div>
+<table class="nb-table">
+<thead><tr><th>操作</th><th>行为</th><th>涉及队列</th></tr></thead>
+<tbody>
+<tr><td>加锁（monitorenter）</td><td>如果 _owner 为空则获取；否则 park 线程</td><td>cxq → EntryList</td></tr>
+<tr><td>解锁（monitorexit）</td><td>释放 _owner，从 EntryList 唤醒一个线程</td><td>EntryList 出队</td></tr>
+<tr><td>wait()</td><td>释放 _owner，当前线程进入 WaitSet</td><td>→ WaitSet</td></tr>
+<tr><td>notify()</td><td>从 WaitSet 移一个线程到 EntryList</td><td>WaitSet → EntryList</td></tr>
+<tr><td>notifyAll()</td><td>将 WaitSet 所有线程移到 EntryList</td><td>WaitSet → EntryList</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：锁升级全景图 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>锁升级全景图：状态机总览</h2></div>
+
+<p>现在把前几站的内容串联起来，看完整的锁升级状态机：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 380" role="img" aria-label="synchronized 锁升级状态机全景图">
+  <defs>
+    <marker id="arrow5" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="arrow5g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#7BA87B"/></marker>
+  </defs>
+
+  <!-- 无锁 -->
+  <rect x="20" y="140" width="130" height="70" rx="10" fill="#E8F4E8" stroke="#7BA87B" stroke-width="2"/>
+  <text x="85" y="170" text-anchor="middle" font-size="14" fill="#2D5F2D" font-weight="700">无锁</text>
+  <text x="85" y="190" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">标志位: 01</text>
+
+  <!-- 偏向锁 -->
+  <rect x="210" y="140" width="130" height="70" rx="10" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/>
+  <text x="275" y="165" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">偏向锁</text>
+  <text x="275" y="185" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">标志位: 01</text>
+  <text x="275" y="200" text-anchor="middle" font-family="monospace" font-size="9" fill="#C2410C">biased=1</text>
+
+  <!-- 轻量级锁 -->
+  <rect x="400" y="140" width="130" height="70" rx="10" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="2"/>
+  <text x="465" y="165" text-anchor="middle" font-size="14" fill="#3E6B8F" font-weight="700">轻量级锁</text>
+  <text x="465" y="185" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">标志位: 00</text>
+
+  <!-- 重量级锁 -->
+  <rect x="590" y="140" width="150" height="70" rx="10" fill="#F5D5D5" stroke="#B85450" stroke-width="2"/>
+  <text x="665" y="165" text-anchor="middle" font-size="14" fill="#B85450" font-weight="700">重量级锁</text>
+  <text x="665" y="185" text-anchor="middle" font-family="monospace" font-size="10" fill="#B85450">标志位: 10</text>
+
+  <!-- 箭头：无锁 → 偏向锁 -->
+  <line x1="150" y1="175" x2="205" y2="175" stroke="#7BA87B" stroke-width="1.8" marker-end="url(#arrow5g)"/>
+  <text x="178" y="165" text-anchor="middle" font-size="8" fill="#7BA87B">首次加锁</text>
+
+  <!-- 箭头：偏向锁 → 轻量级锁 -->
+  <line x1="340" y1="175" x2="395" y2="175" stroke="#3E6B8F" stroke-width="1.8" marker-end="url(#arrow5)"/>
+  <text x="368" y="158" text-anchor="middle" font-size="8" fill="#3E6B8F">另一线程</text>
+  <text x="368" y="170" text-anchor="middle" font-size="8" fill="#3E6B8F">竞争</text>
+
+  <!-- 箭头：无锁 → 轻量级锁（JDK 15+） -->
+  <path d="M85,140 Q85,80 275,80 Q465,80 465,135" fill="none" stroke="#3E6B8F" stroke-width="1.5" stroke-dasharray="6 3" marker-end="url(#arrow5)"/>
+  <text x="275" y="68" text-anchor="middle" font-size="9" fill="#3E6B8F">JDK 15+ 跳过偏向锁，直接轻量级</text>
+
+  <!-- 箭头：轻量级锁 → 重量级锁 -->
+  <line x1="530" y1="175" x2="585" y2="175" stroke="#B85450" stroke-width="1.8" marker-end="url(#arrow5)"/>
+  <text x="558" y="158" text-anchor="middle" font-size="8" fill="#B85450">CAS 失败</text>
+  <text x="558" y="170" text-anchor="middle" font-size="8" fill="#B85450">（膨胀）</text>
+
+  <!-- 不可逆标注 -->
+  <rect x="200" y="230" width="540" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="470" y="250" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">锁升级是单向的 —— 膨胀不可逆（绝大多数 JDK 版本）</text>
+
+  <!-- 性能标注 -->
+  <rect x="20" y="280" width="740" height="85" rx="6" fill="#F5F5F5" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="390" y="302" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">各级锁的相对性能（单线程基准 ≈ 100%）</text>
+  <text x="85" y="325" text-anchor="middle" font-size="10" fill="#2D5F2D">无锁: ~100%</text>
+  <text x="275" y="325" text-anchor="middle" font-size="10" fill="#C2410C">偏向锁: ~97%</text>
+  <text x="465" y="325" text-anchor="middle" font-size="10" fill="#3E6B8F">轻量级锁: ~85%</text>
+  <text x="665" y="325" text-anchor="middle" font-size="10" fill="#B85450">重量级锁: ~55%</text>
+  <text x="390" y="352" text-anchor="middle" font-size="10" fill="#8C8676">* 以上为典型场景近似值，具体取决于 JVM 版本和竞争模式</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>锁升级状态机：从无锁到重量级锁的完整升级路径，膨胀不可逆</figcaption>
+</figure>
+
+<div class="formula">
+<strong>锁升级触发条件</strong><br/>
+无锁 → 偏向锁：第一次加锁，CAS 写入线程 ID<br/>
+偏向锁 → 轻量级锁：另一个线程尝试加锁（撤销偏向）<br/>
+轻量级锁 → 重量级锁：CAS 替换 Mark Word 失败（检测到真实竞争）
+</div>
+</section>
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结与面试应对</h2></div>
+
+<p>最后，把 synchronized 和 ReentrantLock 做一个全面对比——这是面试中的高频追问：</p>
+
+<div class="takeaway"><div class="takeaway-label">synchronized vs ReentrantLock</div>
+<table class="nb-table">
+<thead><tr><th>特性</th><th>synchronized</th><th>ReentrantLock</th></tr></thead>
+<tbody>
+<tr><td>实现层面</td><td>JVM 内置（字节码指令）</td><td>JDK 层面（java.util.concurrent）</td></tr>
+<tr><td>锁释放</td><td>自动释放（字节码保证）</td><td>必须手动 unlock()（通常在 finally 中）</td></tr>
+<tr><td>可中断</td><td>不可中断</td><td>lockInterruptibly() 支持中断</td></tr>
+<tr><td>超时获取</td><td>不支持</td><td>tryLock(timeout) 支持</td></tr>
+<tr><td>公平锁</td><td>不支持（非公平）</td><td>new ReentrantLock(true) 支持</td></tr>
+<tr><td>条件变量</td><td>一个（Object.wait/notify）</td><td>多个（Condition.await/signal）</td></tr>
+<tr><td>JDK 6+ 性能</td><td>锁升级后接近 ReentrantLock</td><td>基于 AQS + CAS</td></tr>
+<tr><td>可读性</td><td>简洁，关键字语法</td><td>稍复杂，需要 try-finally</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="crack"><div class="crack-label">面试标准回答模板</div>
+<p><strong>面试官问：</strong>"synchronized 和 ReentrantLock 有什么区别？"</p>
+<p><strong>建议回答结构：</strong></p>
+<ul>
+  <li><strong>先纠正误区</strong>：JDK 6 之后 synchronized 不再是重量级锁，引入了偏向锁、轻量级锁、锁膨胀机制</li>
+  <li><strong>讲锁升级</strong>：无锁 → 偏向锁 → 轻量级锁 → 重量级锁，升级不可逆</li>
+  <li><strong>讲功能差异</strong>：ReentrantLock 提供可中断、超时、公平锁、多条件变量等高级功能</li>
+  <li><strong>讲使用建议</strong>：优先用 synchronized（简洁 + 自动释放 + JVM 持续优化）；需要高级功能时用 ReentrantLock</li>
+  <li><strong>加分项</strong>：提到 JDK 15 废弃偏向锁（JEP 374），说明你关注技术演进</li>
+</ul>
+</div>
+
+<p>JDK 15+ 移除偏向锁后的影响：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>JDK 版本演进</b> · 偏向锁的终结</span></div>
+<pre><code><span class="c">// JDK 6 ~ 14：完整的锁升级链路</span>
+<span class="c">// 无锁 → 偏向锁 → 轻量级锁 → 重量级锁</span>
+
+<span class="c">// JDK 15（JEP 374）：偏向锁默认关闭</span>
+<span class="c">// -XX:-UseBiasedLocking 成为默认值</span>
+<span class="c">// 实际升级链路变为：无锁 → 轻量级锁 → 重量级锁</span>
+
+<span class="c">// JDK 18+：偏向锁代码彻底移除</span>
+<span class="c">// 不再支持 -XX:+UseBiasedLocking</span>
+<span class="c">// 如果仍在使用偏向锁优化，需要评估是否迁移到 ReentrantLock</span>
+
+<span class="c">// 实践建议：</span>
+<span class="c">// ① 新项目直接用 JDK 17+，不需要关心偏向锁</span>
+<span class="c">// ② 老项目升级到 JDK 17 时，跑一遍 JMH 基准测试</span>
+<span class="c">// ③ 如果发现锁竞争密集型代码性能下降，考虑换成 ReentrantLock</span></code></pre>
+</div>
+
+<div class="recap"><h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>Mark Word</strong>：64 位位图，根据锁状态存储不同内容（hashCode / 线程 ID / Lock Record 指针 / ObjectMonitor 指针）</li>
+  <li><strong>偏向锁</strong>：将线程 ID 写入 Mark Word，后续零开销进入；JDK 15 废弃，JDK 18 移除</li>
+  <li><strong>轻量级锁</strong>：Lock Record + CAS，适用于短暂竞争；比重量级锁快约 5 倍</li>
+  <li><strong>锁膨胀</strong>：CAS 失败触发，轻量级锁升级为重量级锁，创建 ObjectMonitor</li>
+  <li><strong>ObjectMonitor</strong>：Owner + EntryList + WaitSet + cxq，管理阻塞和等待线程</li>
+  <li><strong>锁升级单向</strong>：绝大多数 JDK 版本中膨胀不可逆</li>
+  <li><strong>选型建议</strong>：优先 synchronized；需要可中断/超时/公平/多条件时用 ReentrantLock</li>
+</ul>
+</div>
+
+</section>
+
+</main>
+</body>
+</html>

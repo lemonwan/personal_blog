@@ -3,127 +3,416 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Java 中高级面试 - Day 9 | 受检异常 vs 非受检异常的设计哲学</title>
-<style>
-:root {
-  --header-bg: #1a1a2e;
-  --accent-blue: #0ea5e9;
-  --accent-green: #22c55e;
-  --accent-purple: #a855f7;
-  --accent-orange: #f97316;
-  --accent-pink: #ec4899;
-  --accent-red: #ef4444;
-  --accent-cyan: #06b6d4;
-  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  --dot-blue: #3b82f6;
-  --dot-green: #10b981;
-  --dot-purple: #8b5cf6;
-  --dot-orange: #f59e0b;
-  --dot-pink: #ec4899;
-  --dot-red: #ef4444;
-  --dot-cyan: #06b6d4;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
-.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
-.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
-.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
-.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
-.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
-.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
-.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
-.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
-.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
-.module-card .card-body { padding: 20px; }
-.section { margin-bottom: 20px; }
-.section:last-child { margin-bottom: 0; }
-.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
-.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
-.section .content { padding-left: 32px; }
-.section .content p { margin-bottom: 6px; }
-.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
-.section .content li { margin-bottom: 4px; }
-.section .content strong { color: #0f172a; }
-.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
-.bullet-list { list-style: none; padding-left: 0; }
-.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
-.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
-.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
-.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-.code-block .comment { color: #64748b; }
-.code-block .keyword { color: #c084fc; }
-.code-block .string { color: #86efac; }
-.code-block .method { color: #67e8f9; }
-.code-block .number { color: #fbbf24; }
-.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
-.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
-.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
-.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
-.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
-.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
-.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-.comparison-table tr:nth-child(even) td { background: #f8fafc; }
-.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
-.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
-.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
-.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
-.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
-.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
-.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
-.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
-.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-.next-preview .next-content p { font-size: 13px; color: #475569; }
-@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
-@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
-</style>
-    <link rel="stylesheet" href="/assets/reading-theme.css">
-    <script defer src="/assets/theme.js"></script>
+<title>受检 vs 非受检异常：设计哲学与选型</title>
 </head>
 <body>
-<div class="header">
-  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
-  <h1>Day 9 — 受检异常 vs 非受检异常的设计哲学</h1>
-  <div class="tag">模块：Java基础 · 异常与断言</div>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：异常体系全景 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>Java 异常体系：一张图看懂受检与非受检</h2></div>
+
+<p>面试被问到异常，很多人只能说出 <code>try-catch</code> 的语法，却说不清 <strong>Throwable 家族的继承关系</strong>。而这恰恰是理解受检异常与非受检异常分歧的起点。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 360" role="img" aria-label="Java 异常继承体系">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">Java 异常继承体系</text>
+
+  <!-- Throwable -->
+  <rect x="260" y="40" width="180" height="36" rx="8" fill="#1C1C1C" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="350" y="63" text-anchor="middle" font-size="13" fill="#FAC94A" font-weight="700">Throwable</text>
+
+  <!-- 连线 Throwable -> Error / Exception -->
+  <line x1="300" y1="76" x2="170" y2="106" stroke="#57544E" stroke-width="1.5"/>
+  <line x1="400" y1="76" x2="530" y2="106" stroke="#57544E" stroke-width="1.5"/>
+
+  <!-- Error -->
+  <rect x="80" y="106" width="180" height="36" rx="8" fill="#C2410C" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="170" y="129" text-anchor="middle" font-size="13" fill="#fff" font-weight="700">Error</text>
+  <text x="170" y="160" text-anchor="middle" font-size="10" fill="#8C8676">OutOfMemoryError</text>
+  <text x="170" y="176" text-anchor="middle" font-size="10" fill="#8C8676">StackOverflowError</text>
+  <rect x="80" y="186" width="180" height="24" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="170" y="203" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">非受检 - JVM 级故障</text>
+
+  <!-- Exception -->
+  <rect x="440" y="106" width="180" height="36" rx="8" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="530" y="129" text-anchor="middle" font-size="13" fill="#fff" font-weight="700">Exception</text>
+
+  <!-- 连线 Exception -> RuntimeException / Checked -->
+  <line x1="490" y1="142" x2="380" y2="172" stroke="#57544E" stroke-width="1.5"/>
+  <line x1="570" y1="142" x2="620" y2="172" stroke="#57544E" stroke-width="1.5"/>
+
+  <!-- RuntimeException -->
+  <rect x="280" y="172" width="200" height="36" rx="8" fill="#C2410C" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="380" y="195" text-anchor="middle" font-size="13" fill="#fff" font-weight="700">RuntimeException</text>
+
+  <text x="380" y="226" text-anchor="middle" font-size="10" fill="#8C8676">NullPointerException</text>
+  <text x="380" y="242" text-anchor="middle" font-size="10" fill="#8C8676">IllegalArgumentException</text>
+  <text x="380" y="258" text-anchor="middle" font-size="10" fill="#8C8676">IndexOutOfBoundsException</text>
+
+  <rect x="280" y="268" width="200" height="24" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="380" y="285" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">非受检 - 编程错误</text>
+
+  <!-- Checked Exceptions -->
+  <rect x="530" y="172" width="150" height="36" rx="8" fill="#3E6B8F" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="605" y="195" text-anchor="middle" font-size="12" fill="#fff" font-weight="700">其他 Exception</text>
+
+  <text x="605" y="226" text-anchor="middle" font-size="10" fill="#8C8676">IOException</text>
+  <text x="605" y="242" text-anchor="middle" font-size="10" fill="#8C8676">SQLException</text>
+  <text x="605" y="258" text-anchor="middle" font-size="10" fill="#8C8676">ClassNotFoundException</text>
+
+  <rect x="530" y="268" width="150" height="24" rx="4" fill="#EDE3C4" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="605" y="285" text-anchor="middle" font-size="10" fill="#3E6B8F" font-weight="700">受检 - 编译器强制处理</text>
+
+  <!-- 总结 -->
+  <rect x="120" y="310" width="460" height="36" rx="8" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="350" y="333" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">受检 = Exception 减去 RuntimeException 及其子类</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>Java 异常体系：Error 和 RuntimeException 是非受检异常，其余 Exception 子类都是受检异常</figcaption>
+</figure>
+
+<div class="formula">
+<strong>核心判断公式：</strong><br/>
+受检异常 = <code>Exception</code> 的子类 - <code>RuntimeException</code> 及其子类<br/>
+非受检异常 = <code>Error</code> + <code>RuntimeException</code> 及其子类<br/><br/>
+编译器对受检异常 <strong>强制要求</strong> try-catch 或 throws 声明；对非受检异常不做任何要求。
 </div>
-<div class="container">
-<div class="module-card">
-  <div class="card-header">
-    <span class="card-number">09</span>
-    <span class="card-title">受检异常 vs 非受检异常的设计哲学</span>
-  </div>
-  <div class="card-body">
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>受检异常与非受检异常的区别</h3>
-      <div class="content"><p>Java 的异常体系分为两大类：</p><ul class="bullet-list"><li><span class="highlight">受检异常（Checked Exception）</span>：编译器强制要求处理，必须 try-catch 或 throws 声明。继承自 Exception 但排除 RuntimeException 及其子类。代表外部环境问题，<strong>客户端可以合理恢复</strong>，如 IOException、SQLException。</li><li><span class="highlight">非受检异常（Unchecked Exception）</span>：编译器不强制处理，继承自 RuntimeException。代表编程错误，<strong>客户端无法合理恢复</strong>，如 NullPointerException、IllegalArgumentException。</li></ul><div class="note-box"><div class="note-title">核心判断标准</div>客户端能否从异常中恢复？能 → 受检异常；不能 → 非受检异常。</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>设计哲学争议</h3>
-      <div class="content"><p>Java 引入受检异常是语言设计中最具争议的决定之一：</p><ul class="bullet-list"><li><span class="highlight">支持者观点</span>：强制处理让异常不可忽略，提高代码健壮性；调用方 API 签名明确暴露了可能出现的异常；推动开发者编写更可靠的错误处理代码。</li><li><span class="highlight">反对者观点</span>：样板代码泛滥（大量 try-catch-throw 向上传递）；破坏封装性——底层实现的异常被迫暴露在 API 中；Java 标准库设计不一致（如 I/O 用受检，集合用非受检）；Martin Fowler 称其为 "千亿美元的重大错误"。</li><li><span class="highlight">替代方案</span>：C#、Go 等语言完全摒弃受检异常；Kotlin 采用非受检异常 + 结果类型（Result/Optional）模式。</li></ul></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>Java 设计者的考量</h3>
-      <div class="content"><p>Java 的受检异常设计基于以下理念：</p><ul class="bullet-list"><li><span class="highlight">"失败必须被处理"</span>：调用者不能假装方法调用成功，必须面对失败的可能性</li><li><span class="highlight">类型系统保障</span>：方法签名包含异常信息，API 文档更完整</li><li><span class="highlight">可恢复性假设</span>：对于文件、网络等资源操作，调用方应有策略处理失败（重试、降级、fallback）</li></ul><p>但实际应用中，这个假设常常不成立。很多企业级应用中，异常只是简单地向上传播到顶层统一处理。</p><div class="note-box warning"><div class="note-title">面试陷阱</div>面试官可能问："你觉得受检异常好不好？" 最佳回答：承认设计初衷是好的，但承认实际使用中存在问题，并说明现代 Java 开发中更倾向于非受检异常 + 统一异常处理的模式。</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>实战最佳实践</h3>
-      <div class="content"><p>现代 Java 开发中的推荐做法：</p><ul class="bullet-list"><li><span class="highlight">应用层</span>：自定义非受检异常（如 BusinessException），统一捕获并转换为 HTTP 响应</li><li><span class="highlight">边界层</span>：在 I/O、DB 等边界处，将受检异常包装为非受检异常抛出</li><li><span class="highlight">框架层</span>：Spring 的 RuntimeException 传播机制是主流模式</li><li><span class="highlight">@ExceptionHandler</span>：Spring Boot 中用全局异常处理器统一响应格式</li></ul><pre class="code-block"><span class="keyword">public</span> User getUser(<span class="keyword">Long</span> id) {
-    <span class="keyword">try</span> {
-        <span class="keyword">return</span> userRepository.findById(id).orElse(<span class="keyword">null</span>);
-    } <span class="keyword">catch</span> (DataAccessException e) {
-        <span class="comment">// 将受检异常包装为非受检异常</span>
-        <span class="keyword">throw new</span> UserServiceException(<span class="string">"获取用户失败"</span>, e);
+
+<p>两类异常的设计初衷截然不同：</p>
+
+<table>
+  <thead><tr><th>维度</th><th>受检异常 (Checked)</th><th>非受检异常 (Unchecked)</th></tr></thead>
+  <tbody>
+    <tr><td><strong>继承</strong></td><td>Exception（排除 RuntimeException）</td><td>RuntimeException / Error</td></tr>
+    <tr><td><strong>编译器</strong></td><td>强制处理（catch 或 throws）</td><td>不强制</td></tr>
+    <tr><td><strong>语义</strong></td><td>外部环境问题，调用方可以合理恢复</td><td>编程错误 / JVM 故障，无法恢复</td></tr>
+    <tr><td><strong>典型例子</strong></td><td>IOException, SQLException</td><td>NullPointerException, OOM</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第2站：受检异常的设计哲学 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>受检异常的设计哲学："失败不可忽略"</h2></div>
+
+<p>Java 是主流语言中<strong>唯一</strong>在语言层面实现受检异常的。James Gosling 在设计 Java 时，有一个核心信念：</p>
+
+<div class="think"><div class="think-q">"如果一次方法调用可能失败，调用者就不该假装它一定会成功。"</div>
+<p>这个理念在 1995 年是超前的——C/C++ 的返回值错误码经常被忽略，Java 设计者希望通过<strong>编译器</strong>来强制开发者面对失败。</p></div>
+
+<p>受检异常的设计优势可以从三个角度理解：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CheckedExceptionDemo.java</b> - 受检异常如何保障调用链完整性</span></div>
+<pre><code><span class="c">// 底层方法：明确声明"我可能抛出 IOException"</span>
+<span class="k">public</span> <span class="t">String</span> readConfig(<span class="t">String</span> path) <span class="k">throws</span> <span class="t">IOException</span> {
+    <span class="k">return</span> <span class="k">new</span> <span class="t">String</span>(Files.readAllBytes(Paths.get(path)));
+}
+
+<span class="c">// 中层调用者：必须面对 IOException，不能假装成功</span>
+<span class="k">public</span> <span class="t">AppConfig</span> loadConfig() <span class="k">throws</span> <span class="t">IOException</span> {
+    <span class="t">String</span> raw = readConfig(<span class="s">"/etc/app.conf"</span>);
+    <span class="k">return</span> <span class="t">AppConfig</span>.parse(raw);
+}
+
+<span class="c">// 顶层调用者：最终必须处理（try-catch）或继续声明</span>
+<span class="k">public void</span> startup() {
+    <span class="k">try</span> {
+        <span class="t">AppConfig</span> config = loadConfig();
+        <span class="c">// 安全地使用 config...</span>
+    } <span class="k">catch</span> (<span class="t">IOException</span> e) {
+        logger.error(<span class="s">"配置加载失败，使用默认配置"</span>, e);
+        config = <span class="t">AppConfig</span>.defaults();
     }
-}</pre></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试高频问题</h3>
-      <div class="content"><ul class="bullet-list"><li><span class="highlight">"请说明受检异常和非受检异常的区别？"</span>：从继承关系、编译器处理、使用场景三个维度回答</li><li><span class="highlight">"Java 为什么设计受检异常？"</span>：强调 "强制处理" 的设计哲学和可恢复性假设</li><li><span class="highlight">"你项目中如何处理异常？"</span>：推荐回答：自定义非受检异常 + 全局异常处理器 + 统一响应格式</li><li><span class="highlight">"@Transactional 回滚默认对哪些异常生效？"</span>：默认只对 RuntimeException 和 Error 回滚，受检异常不会触发回滚（除非显式配置）——这是非常经典的面试陷阱题！</li></ul><div class="note-box danger"><div class="note-title">重要陷阱</div>Spring 事务默认只对非受检异常回滚！如果抛出了受检异常，事务不会回滚，这是一个极其常见且致命的 Bug 来源。</div></div></div>
-  </div>
+}</code></pre>
 </div>
-<div class="footer">
-  <h4>📊 今日总结</h4>
-  <div class="progress-bar"><div class="progress-fill" style="width: 13.6%"></div></div>
-  <div class="progress-text">9 / 66 知识点</div>
-  <div class="next-preview">
-    <div class="next-icon">👉</div>
-    <div class="next-content">
-      <h5>明日预告</h5>
-      <p>try-with-resources 原理</p>
-    </div>
-  </div>
+
+<p>受检异常的三个设计优势：</p>
+<ul>
+  <li><strong>不可忽略</strong>：编译器强制每一层调用者都"表态"——要么处理，要么声明向上传播</li>
+  <li><strong>API 文档化</strong>：方法的 throws 子句就是 API 契约的一部分，调用方无需看文档就知道可能出什么错</li>
+  <li><strong>可恢复性假设</strong>：对于文件不存在、网络超时等问题，调用方确实有合理的恢复策略（重试、降级、fallback）</li>
+</ul>
+
+<div class="crack"><div class="crack-label">受检异常的理想 vs 现实</div>
+<p>设计者假设调用方有合理的恢复策略。但现实是：大部分受检异常被<strong>原封不动地 throws 到顶层</strong>，中间层只是机械地传递异常声明。这导致大量无意义的样板代码，而且异常的真正处理逻辑全部堆积在顶层——和"不强制处理"的效果几乎一样。</p>
 </div>
+</section>
+
+<!-- ═══════════════ 第3站：非受检异常的崛起 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>非受检异常的崛起：Spring 为什么全面拥抱 RuntimeException</h2></div>
+
+<p>2003 年 Spring 框架诞生时，Rod Johnson 做了一个在当时看来<strong>离经叛道</strong>的决定：Spring 的所有异常都继承自 <code>RuntimeException</code>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="Spring 异常体系 vs 传统 EJB 异常">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">Spring vs 传统 EJB：异常设计对比</text>
+
+  <!-- 左：传统 EJB -->
+  <rect x="30" y="44" width="310" height="240" rx="10" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="185" y="68" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">传统 EJB 模式</text>
+
+  <rect x="50" y="82" width="270" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="185" y="101" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">每个 DAO 方法都 throws 受检异常</text>
+
+  <text x="185" y="128" text-anchor="middle" font-size="11" fill="#57544E">findUser() throws FinderException</text>
+  <text x="185" y="148" text-anchor="middle" font-size="11" fill="#57544E">saveOrder() throws CreateException</text>
+  <text x="185" y="168" text-anchor="middle" font-size="11" fill="#57544E">deleteItem() throws RemoveException</text>
+
+  <text x="185" y="198" text-anchor="middle" font-size="11" fill="#8C8676">每一层都要 try-catch 或 throws</text>
+  <text x="185" y="218" text-anchor="middle" font-size="11" fill="#8C8676">样板代码泛滥、异常被吞掉</text>
+
+  <rect x="50" y="234" width="270" height="36" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="185" y="257" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">结果：代码臃肿、错误处理形式化</text>
+
+  <!-- 右：Spring -->
+  <rect x="360" y="44" width="310" height="240" rx="10" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="515" y="68" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Spring 模式</text>
+
+  <rect x="380" y="82" width="270" height="28" rx="4" fill="#EDE3C4" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="515" y="101" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="700">所有异常继承 RuntimeException</text>
+
+  <text x="515" y="128" text-anchor="middle" font-size="11" fill="#57544E">DataAccessException (RuntimeException)</text>
+  <text x="515" y="148" text-anchor="middle" font-size="11" fill="#57544E">TransactionException (RuntimeException)</text>
+  <text x="515" y="168" text-anchor="middle" font-size="11" fill="#57544E">BeanCreationException (RuntimeException)</text>
+
+  <text x="515" y="198" text-anchor="middle" font-size="11" fill="#8C8676">业务层无需声明异常</text>
+  <text x="515" y="218" text-anchor="middle" font-size="11" fill="#8C8676">全局异常处理器统一捕获</text>
+
+  <rect x="380" y="234" width="270" height="36" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="515" y="257" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">结果：代码简洁、错误处理集中</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>Spring 全面拥抱 RuntimeException：从"每层 throws"到"全局统一处理"</figcaption>
+</figure>
+
+<p>Spring 的选择并非偶然，背后有清晰的逻辑：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SpringExceptionPattern.java</b> - Spring 的异常处理模式</span></div>
+<pre><code><span class="c">// DAO 层：不再声明受检异常</span>
+<span class="k">@Repository</span>
+<span class="k">public class</span> <span class="t">UserDao</span> {
+    <span class="k">public</span> <span class="t">User</span> findById(<span class="t">Long</span> id) {
+        <span class="c">// Spring 自动把 SQLException 转换为 DataAccessException（非受检）</span>
+        <span class="k">return</span> jdbcTemplate.queryForObject(
+            <span class="s">"SELECT * FROM users WHERE id = ?"</span>,
+            <span class="k">new</span> <span class="t">UserRowMapper</span>(), id);
+    }
+}
+
+<span class="c">// Service 层：不需要 throws 声明，代码干净</span>
+<span class="k">@Service</span>
+<span class="k">public class</span> <span class="t">UserService</span> {
+    <span class="k">public</span> <span class="t">User</span> getUser(<span class="t">Long</span> id) {
+        <span class="k">return</span> userDao.findById(id);  <span class="c">// 异常自动向上传播</span>
+    }
+}
+
+<span class="c">// Controller 层：全局异常处理器统一兜底</span>
+<span class="k">@RestControllerAdvice</span>
+<span class="k">public class</span> <span class="t">GlobalExceptionHandler</span> {
+    <span class="k">@ExceptionHandler</span>(<span class="t">DataAccessException</span>.<span class="k">class</span>)
+    <span class="k">public</span> <span class="t">ApiResponse</span> handleDbError(<span class="t">DataAccessException</span> e) {
+        <span class="k">return</span> <span class="t">ApiResponse</span>.error(<span class="s">"数据库操作失败"</span>, e.getMessage());
+    }
+}</code></pre>
 </div>
-<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 9/66</div>
+
+<p>Spring 选择 RuntimeException 的三个核心理由：</p>
+<ul>
+  <li><strong>消除样板代码</strong>：业务方法不再被 throws 子句污染，方法签名只反映业务语义</li>
+  <li><strong>集中处理</strong>：通过 <code>@ExceptionHandler</code> / <code>@ControllerAdvice</code> 在统一位置处理所有异常</li>
+  <li><strong>事务兼容</strong>：<code>@Transactional</code> 默认只对 RuntimeException 回滚——如果用受检异常，事务不回滚，这是一个极其致命的陷阱</li>
+</ul>
+
+<div class="think"><div class="think-q">@Transactional 回滚规则——面试必考陷阱</div>
+<p>Spring 事务<strong>默认只对 RuntimeException 和 Error 回滚</strong>。如果你的方法抛出了受检异常（如 IOException），事务<strong>不会回滚</strong>，数据可能被部分提交——这是生产环境中最常见的 Bug 来源之一。</p>
+<p>解决方案：要么用 <code>@Transactional(rollbackFor = Exception.class)</code> 显式指定回滚条件，要么统一使用非受检异常。</p></div>
+</section>
+
+<!-- ═══════════════ 第4站：实战选型指南 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>新项目该怎么选？一份实战选型指南</h2></div>
+
+<p>争论"受检好还是非受检好"没有意义。真正的问题是：<strong>在你的项目中，异常应该怎样分层处理？</strong></p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="企业项目异常处理分层架构">
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">企业级项目异常处理分层架构</text>
+
+  <!-- 边界层 -->
+  <rect x="50" y="44" width="600" height="56" rx="8" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="80" y="66" font-size="12" fill="#C2410C" font-weight="700">边界层</text>
+  <text x="80" y="86" font-size="11" fill="#57544E">HTTP / RPC / MQ / 文件 I/O / 数据库  |  受检异常的来源</text>
+
+  <text x="350" y="115" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">将受检异常包装为非受检 BusinessException</text>
+  <line x1="350" y1="100" x2="350" y2="126" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arrow1)"/>
+  <defs><marker id="arrow1" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C2410C"/></marker></defs>
+
+  <!-- 业务层 -->
+  <rect x="50" y="130" width="600" height="56" rx="8" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="80" y="152" font-size="12" fill="#3E6B8F" font-weight="700">业务层</text>
+  <text x="80" y="172" font-size="11" fill="#57544E">Service / Domain  |  自定义非受检异常（BusinessException / ErrorCode）</text>
+
+  <text x="350" y="201" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">异常沿调用栈向上传播，直到被全局处理器捕获</text>
+  <line x1="350" y1="186" x2="350" y2="212" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <defs><marker id="arrow2" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3E6B8F"/></marker></defs>
+
+  <!-- 全局处理层 -->
+  <rect x="50" y="216" width="600" height="56" rx="8" fill="#fff" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="80" y="238" font-size="12" fill="#1C1C1C" font-weight="700">全局处理层</text>
+  <text x="80" y="258" font-size="11" fill="#57544E">@RestControllerAdvice / Filter  |  统一转换为 HTTP 响应 / JSON 错误格式</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>推荐架构：边界层包装受检异常，业务层用非受检异常，全局处理器统一兜底</figcaption>
+</figure>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ExceptionBestPractice.java</b> - 自定义业务异常体系</span></div>
+<pre><code><span class="c">/* ─── 第一步：定义错误码枚举 ─── */</span>
+<span class="k">public enum</span> <span class="t">ErrorCode</span> {
+    USER_NOT_FOUND(<span class="n">404</span>, <span class="s">"用户不存在"</span>),
+    DUPLICATE_EMAIL(<span class="n">409</span>, <span class="s">"邮箱已被注册"</span>),
+    DB_ERROR(<span class="n">500</span>, <span class="s">"数据库操作失败"</span>);
+
+    <span class="k">final int</span> httpStatus;
+    <span class="k">final</span> <span class="t">String</span> message;
+    <span class="t">ErrorCode</span>(<span class="k">int</span> s, <span class="t">String</span> m) { httpStatus = s; message = m; }
+}
+
+<span class="c">/* ─── 第二步：自定义非受检业务异常 ─── */</span>
+<span class="k">public class</span> <span class="t">BusinessException</span> <span class="k">extends</span> <span class="t">RuntimeException</span> {
+    <span class="k">private final</span> <span class="t">ErrorCode</span> code;
+
+    <span class="k">public</span> <span class="t">BusinessException</span>(<span class="t">ErrorCode</span> code) {
+        <span class="k">super</span>(code.message);
+        <span class="k">this</span>.code = code;
+    }
+
+    <span class="k">public</span> <span class="t">BusinessException</span>(<span class="t">ErrorCode</span> code, <span class="t">Throwable</span> cause) {
+        <span class="k">super</span>(code.message, cause);  <span class="c">// 保留原始异常链</span>
+        <span class="k">this</span>.code = code;
+    }
+}
+
+<span class="c">/* ─── 第三步：在边界处包装受检异常 ─── */</span>
+<span class="k">public</span> <span class="t">User</span> findUser(<span class="t">Long</span> id) {
+    <span class="k">try</span> {
+        <span class="k">return</span> userDao.findById(id)
+            .orElseThrow(() -&gt; <span class="k">new</span> <span class="t">BusinessException</span>(<span class="t">ErrorCode</span>.USER_NOT_FOUND));
+    } <span class="k">catch</span> (<span class="t">DataAccessException</span> e) {
+        <span class="c">// 受检异常 → 非受检异常，保留原始 cause</span>
+        <span class="k">throw new</span> <span class="t">BusinessException</span>(<span class="t">ErrorCode</span>.DB_ERROR, e);
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">什么时候可以保留受检异常？</div>
+<p>受检异常并非一无是处。在以下场景中，它仍然是合理的选择：</p>
+<ul>
+  <li><strong>SDK / 库开发</strong>：你无法控制调用方的代码风格，强制处理能保证安全性</li>
+  <li><strong>安全关键系统</strong>：金融、医疗等领域，编译器强制检查比"靠纪律"更可靠</li>
+  <li><strong>边界明确的 API</strong>：如 <code>Thread.sleep()</code> 的 InterruptedException，语义非常明确</li>
+</ul>
+<p>但在绝大多数企业级 Web 应用中，非受检异常 + 全局处理器是更实用的模式。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：现代 Java 的趋势 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>现代 Java 与其他语言的态度</h2></div>
+
+<p>受检异常的争议持续了 20 多年。看看主流语言和现代 Java 自身是怎么选择的：</p>
+
+<table>
+  <thead><tr><th>语言</th><th>受检异常？</th><th>替代方案</th></tr></thead>
+  <tbody>
+    <tr><td><strong>C#</strong></td><td>从第一天就拒绝受检异常</td><td>所有异常都是非受检 + try-catch</td></tr>
+    <tr><td><strong>Kotlin</strong></td><td>完全不支持受检异常</td><td>非受检异常 + <code>Result</code> 类型</td></tr>
+    <tr><td><strong>Go</strong></td><td>无异常机制</td><td>多返回值 <code>(result, error)</code></td></tr>
+    <tr><td><strong>Rust</strong></td><td>无异常机制</td><td><code>Result&lt;T, E&gt;</code> + <code>?</code> 运算符</td></tr>
+    <tr><td><strong>TypeScript</strong></td><td>无受检异常</td><td>非受检 + 可选的 Result 模式</td></tr>
+    <tr><td><strong>Java (现代)</strong></td><td>保留但实际弱化</td><td>Spring 生态全面拥抱 RuntimeException</td></tr>
+  </tbody>
+</table>
+
+<p>Java 自身也在演进。从 Java 8 开始，标准库越来越多地采用<strong>结果类型</strong>来替代异常：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ModernJavaPatterns.java</b> - 现代 Java 的错误处理趋势</span></div>
+<pre><code><span class="c">/* ─── 模式 1：Optional 替代"查不到就抛异常" ─── */</span>
+<span class="t">Optional</span>&lt;<span class="t">User</span>&gt; user = userRepository.findById(<span class="n">1L</span>);
+user.ifPresent(u -&gt; sendEmail(u));
+
+<span class="c">/* ─── 模式 2：CompletableFuture 的异常处理 ─── */</span>
+CompletableFuture.supplyAsync(() -&gt; fetchFromRemote())
+    .thenApply(data -&gt; process(data))
+    .exceptionally(ex -&gt; {           <span class="c">// 统一处理异步异常</span>
+        log.error(<span class="s">"异步任务失败"</span>, ex);
+        <span class="k">return</span> fallbackValue;
+    });
+
+<span class="c">/* ─── 模式 3：自定义 Result 类型（Kotlin 风格）─── */</span>
+<span class="k">public sealed interface</span> <span class="t">Result</span>&lt;<span class="t">T</span>&gt; {
+    <span class="k">record</span> <span class="t">Success</span>&lt;<span class="t">T</span>&gt;(<span class="t">T</span> value) <span class="k">implements</span> <span class="t">Result</span>&lt;<span class="t">T</span>&gt; {}
+    <span class="k">record</span> <span class="t">Failure</span>&lt;<span class="t">T</span>&gt;(<span class="t">Throwable</span> error) <span class="k">implements</span> <span class="t">Result</span>&lt;<span class="t">T</span>&gt; {}
+}
+
+<span class="c">// 使用：返回 Result 而不是抛异常</span>
+<span class="k">public</span> <span class="t">Result</span>&lt;<span class="t">User</span>&gt; findUser(<span class="t">Long</span> id) {
+    <span class="k">try</span> {
+        <span class="k">return new</span> <span class="t">Result.Success</span>&lt;&gt;(dao.findById(id));
+    } <span class="k">catch</span> (<span class="t">SQLException</span> e) {
+        <span class="k">return new</span> <span class="t">Result.Failure</span>&lt;&gt;(e);
+    }
+}</code></pre>
+</div>
+
+<div class="think"><div class="think-q">Martin Fowler 的评价："千亿美元的重大错误"</div>
+<p>Martin Fowler 曾公开表示受检异常是一个"千亿美元的重大错误"（A Thousand-Billion Dollar Mistake）。他的核心论点是：受检异常造成的<strong>样板代码成本</strong>远大于它带来的<strong>安全性收益</strong>。在实际项目中，大部分受检异常只是被 <code>catch (Exception e) { throw new RuntimeException(e); }</code> 机械地转换掉——编译器的强制变成了无意义的仪式。</p></div>
+</section>
+
+<!-- ═══════════════ 第6站：面试总结 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>面试高频问答与核心要点</h2></div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>InterviewQ.java</b> - 面试官常问的异常问题</span></div>
+<pre><code><span class="c">// Q1: 受检异常和非受检异常的区别？</span>
+<span class="c">// 答：继承关系 + 编译器是否强制处理 + 语义（外部问题 vs 编程错误）</span>
+
+<span class="c">// Q2: @Transactional 默认对哪些异常回滚？</span>
+<span class="c">// 答：只对 RuntimeException 和 Error 回滚</span>
+<span class="c">//     受检异常（IOException 等）不回滚 —— 这是经典陷阱</span>
+<span class="c">//     解决：@Transactional(rollbackFor = Exception.class)</span>
+
+<span class="c">// Q3: Spring 为什么用 RuntimeException？</span>
+<span class="c">// 答：消除样板代码 + 支持全局异常处理 + 兼容事务回滚</span>
+
+<span class="c">// Q4: 你项目中如何处理异常？</span>
+<span class="c">// 答：自定义非受检 BusinessException + ErrorCode 枚举</span>
+<span class="c">//     + @RestControllerAdvice 全局处理器 + 统一 JSON 响应格式</span>
+
+<span class="c">// Q5: 受检异常还有存在的意义吗？</span>
+<span class="c">// 答：有。SDK 开发、安全关键系统、边界明确的 API（如 InterruptedException）</span>
+<span class="c">//     承认设计初衷好，但指出在企业 Web 开发中非受检异常更实用</span></code></pre>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">本篇核心要点</div>
+<ul>
+  <li><strong>受检异常</strong>（Checked）= Exception 减去 RuntimeException 及其子类，编译器强制 try-catch 或 throws</li>
+  <li><strong>非受检异常</strong>（Unchecked）= RuntimeException + Error，编译器不做任何要求</li>
+  <li>受检异常的设计哲学是"失败不可忽略"，但实际使用中导致大量样板代码和异常吞没</li>
+  <li><strong>Spring 全面拥抱 RuntimeException</strong>：消除样板代码、全局异常处理、事务默认回滚</li>
+  <li><strong>@Transactional 陷阱</strong>：默认只对 RuntimeException 回滚，受检异常不回滚</li>
+  <li>推荐架构：边界层包装受检异常为非受检 BusinessException，业务层用非受检异常，全局处理器兜底</li>
+  <li>现代趋势：Kotlin / Go / Rust 都不用受检异常，Java 生态也在向 Result 类型演进</li>
+</ul>
+</div>
+</section>
+
+</main>
 </body>
 </html>

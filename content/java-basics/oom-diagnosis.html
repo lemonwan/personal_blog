@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OOM 排查实战</title>
+</head>
+<body>
+<main class="lesson-body">
+<!--
+  title: "OOM 排查实战：六种 OutOfMemoryError 全解"
+  difficulty: 高级
+  interviewFreq: 高频
+  desc: "Java heap space、Metaspace、Direct buffer、Unable to create new native thread、GC overhead limit——每种 OOM 的根因与解法。"
+-->
+<!-- 第 1 站 — 开场：凌晨 2 点的 OOM -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>凌晨 2 点的 PagerDuty：服务挂了，日志里全是 OOM</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"凌晨 2:14，PagerDuty 响了，订单服务 4 个 Pod 全部 OOMKilled。值班群里老板已经在了：'多久能恢复？'你打开终端，手心全是汗——这种时候该怎么排查？"</p>
+  </div>
+  <p>这不是假设题，是每个 Java 后端工程师迟早会遇到的真实场景。我经历过的最严重的一次：大促前夜，一个缓存预热任务把全量商品数据一次性塞进了内存，3000 万条记录，每个对象约 500 字节——算一下，15GB。而我们的堆只给了 8GB。服务启动 20 分钟后，OOM，Kubernetes 重启，再 OOM，再重启——死循环。</p>
+  <p><code>java.lang.OutOfMemoryError</code> 是 JVM 发出的最后一道求救信号。但 OOM 不止一种，不同后缀对应完全不同的根因和修复策略：</p>
+  <table class="nb-table">
+    <thead><tr><th>OOM 类型</th><th>内存区域</th><th>一句话根因</th></tr></thead>
+    <tbody>
+      <tr><td>Java heap space</td><td>堆</td><td>对象太多或太大，堆不够</td></tr>
+      <tr><td>Metaspace</td><td>元空间</td><td>加载的类太多，元空间不够</td></tr>
+      <tr><td>Direct buffer memory</td><td>堆外内存</td><td>NIO DirectByteBuffer 超上限</td></tr>
+      <tr><td>Unable to create new native thread</td><td>操作系统</td><td>线程数超过 OS 限制</td></tr>
+      <tr><td>GC overhead limit exceeded</td><td>堆</td><td>GC 忙死了但回收不了多少</td></tr>
+      <tr><td>Map/Array too large</td><td>堆</td><td>单个数组/集合超过 2GB 上限</td></tr>
+    </tbody>
+  </table>
+  <div class="crack">
+    <span class="crack-label">面试考什么？</span>
+    <p>面试官问 OOM，不是在考你能不能背出 6 种类型。他想知道：你有没有真的排查过？给你一个日志片段，你能不能 30 秒内定位方向？这篇文章把每种 OOM 的"案发现场→诊断手段→修复方案"全链路走一遍。</p>
+  </div>
+</section>
+<!-- 第 2 站 — Java heap space -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>Java heap space：最常见的 OOM，也最容易踩坑</h2>
+  </div>
+
+  <p>这是出现频率最高的 OOM，没有之一。日志里一行：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">OOM 现场</div>
+    <pre class="srcbox-file"><span class="k">java.lang.OutOfMemoryError</span>: Java heap space
+  at java.util.Arrays.copyOf(Arrays.java:<span class="n">3236</span>)
+  at java.util.ArrayList.grow(ArrayList.java:<span class="n">265</span>)
+  at com.example.OrderService.exportAllOrders(OrderService.java:<span class="n">142</span>)</pre>
+  </div>
+
+  <p><strong>根因只有两种</strong>：要么堆给小了（配置问题），要么对象太多了（内存泄漏）。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg" style="max-width:700px;width:100%">
+      <defs>
+        <linearGradient id="hg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
+        <linearGradient id="hg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+      </defs>
+      <rect x="30" y="20" width="300" height="220" rx="12" fill="#f0f9ff" stroke="#3b82f6" stroke-width="2"/>
+      <text x="180" y="50" text-anchor="middle" font-size="15" font-weight="bold" fill="#1d4ed8">正常堆内存使用</text>
+      <rect x="50" y="70" width="120" height="140" rx="6" fill="url(#hg1)" opacity="0.5"/>
+      <text x="110" y="150" text-anchor="middle" font-size="12" fill="#fff">已用 60%</text>
+      <rect x="190" y="70" width="120" height="140" rx="6" fill="#e0f2fe" stroke="#93c5fd" stroke-dasharray="4"/>
+      <text x="250" y="150" text-anchor="middle" font-size="12" fill="#3b82f6">空闲</text>
+      <text x="180" y="235" text-anchor="middle" font-size="11" fill="#6b7280">GC 正常回收，堆空间充裕</text>
+      <rect x="370" y="20" width="300" height="220" rx="12" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+      <text x="520" y="50" text-anchor="middle" font-size="15" font-weight="bold" fill="#dc2626">OOM: Java heap space</text>
+      <rect x="390" y="70" width="260" height="140" rx="6" fill="url(#hg2)" opacity="0.85"/>
+      <text x="520" y="135" text-anchor="middle" font-size="12" fill="#fff">已用 99%+</text>
+      <text x="520" y="155" text-anchor="middle" font-size="11" fill="#fecaca">无法分配新对象</text>
+      <text x="520" y="235" text-anchor="middle" font-size="11" fill="#6b7280">GC 频繁但回收极少 → 崩溃</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> 正常堆 vs OOM 堆对比：堆空间被占满，新对象无处安放</figcaption>
+  </div>
+
+  <p><strong>诊断四步法</strong>：生产环境一定要先加这两个 JVM 参数，OOM 时自动留"遗照"：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">JVM 启动参数（生产必备）</div>
+    <pre class="srcbox-file"><span class="c"># OOM 时自动 dump 堆 + 打印 GC 日志</span>
+<span class="k">-XX:+HeapDumpOnOutOfMemoryError</span>
+<span class="k">-XX:HeapDumpPath</span>=<span class="n">/data/logs/heapdump.hprof</span>
+<span class="k">-Xlog:gc*</span>=file=<span class="n">/data/logs/gc.log</span>:time,uptime,level,tags</pre>
+  </div>
+
+  <p>拿到 <code>.hprof</code> 文件后，用 <strong>Eclipse MAT</strong>（Memory Analyzer Tool）打开：</p>
+  <ol>
+    <li>点击 <strong>Leak Suspects Report</strong>——MAT 自动分析最大嫌疑对象</li>
+    <li>看 <strong>Dominator Tree</strong>——按 retained size 排序，找到占内存最大的对象</li>
+    <li>点 <strong>Path to GC Roots</strong>——看谁持有了这些对象，阻止了回收</li>
+  </ol>
+
+  <div class="srcbox">
+    <div class="srcbox-head">一次真实 MAT 分析结果</div>
+    <pre class="srcbox-file"><span class="c">// MAT Leak Suspects Report</span>
+<span class="k">Thread</span> <span class="t">"http-nio-8080-exec-12"</span> 占用 <span class="n">3.2GB</span>（总堆 <span class="n">4GB</span>）
+└── <span class="k">com.example.service.ExportTask</span>
+    └── <span class="t">ArrayList&lt;OrderDTO&gt;</span>  <span class="n">8,420,000</span> 个对象
+        └── 每个 <span class="t">OrderDTO</span> <span class="n">~380 bytes</span>
+        └── retained size = <span class="n">3.2GB</span>
+
+<span class="c">// 根因：导出接口一次性加载全量订单到内存</span>
+<span class="c">// 修复：改为分页导出 + 流式写入 CSV</span></pre>
+  </div>
+
+  <div class="formula">
+    <strong>修复策略</strong>：短期 → <code>-Xmx</code> 调大（治标）；长期 → 找到泄漏点或优化数据加载方式（治本）。
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">避坑指南</span>
+    <p>千万别只调大 <code>-Xmx</code> 就以为解决了。如果是内存泄漏，堆调到 32GB 也只是把崩溃时间推迟了几小时。正确的做法是先 dump、再分析、再修复，<code>-Xmx</code> 只是给你争取排查时间。</p>
+  </div>
+</section>
+<!-- 第 3 站 — Metaspace -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>Metaspace：类太多，元空间爆了</h2>
+  </div>
+
+  <p>Java 8 之后，PermGen 被 Metaspace 取代。Metaspace 存的是<strong>类的元数据</strong>（Class 对象、方法字节码、常量池），默认使用本地内存（Native Memory），不设上限——这意味着如果不设限制，它可以吃光你整台机器的内存。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Metaspace OOM 现场</div>
+    <pre class="srcbox-file"><span class="k">java.lang.OutOfMemoryError</span>: Metaspace
+  at java.lang.ClassLoader.defineClass(ClassLoader.java:<span class="n">763</span>)
+  at org.springframework.cglib.core.ReflectUtils.defineClass(ReflectUtils.java:<span class="n">571</span>)
+
+<span class="c">// jcmd 查看已加载类数量</span>
+$ jcmd <span class="n">12345</span> VM.classloader.stats
+ClassLoader            Parent               Classes  Classes
+                                          loaded  unloaded
+<span class="t">bootstrap</span>              -                     <span class="n">2,847</span>        <span class="n">0</span>
+<span class="t">platform</span>               bootstrap               <span class="n">12</span>        <span class="n">0</span>
+<span class="t">app</span>                    platform               <span class="n">456</span>        <span class="n">0</span>
+<span class="t">GroovyClassLoader</span>      app                <span class="n">48,320</span>       <span class="n">12</span>  <span class="c">← 问题在这！</span></pre>
+  </div>
+
+  <p><strong>三种典型场景</strong>：</p>
+  <ol>
+    <li><strong>动态代码生成</strong>：CGLIB、Javassist、Groovy 脚本引擎不断生成新类，旧类不被卸载</li>
+    <li><strong>ClassLoader 泄漏</strong>：热部署场景下，旧 ClassLoader 没有被 GC 回收，它加载的类一直留在 Metaspace</li>
+    <li><strong>超大项目 + 大量依赖</strong>：Spring Boot 大型项目启动时加载数千个类</li>
+  </ol>
+
+  <div class="think">
+    <p class="think-q">真实案例：我们的规则引擎使用 Groovy 脚本，每次规则变更都会编译出新的 Class。运行一周后，Metaspace 从 200MB 涨到 2GB，最终 OOM。修复方式：给 GroovyClassLoader 加 LRU 缓存，限制最大类数量，并显式调用 <code>groovyShell.getClassLoader().clearCache()</code>。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">修复方案</span>
+    <p>① 设置上限防止吃光内存：<code>-XX:MaxMetaspaceSize=512m</code><br>
+       ② 排查类加载泄漏：<code>jcmd &lt;pid&gt; VM.classloader.stats</code> 看哪个 ClassLoader 加载了异常多的类<br>
+       ③ 开启类卸载：<code>-XX:+ClassUnloading -XX:+UseG1GC</code>（G1 默认支持类卸载，CMS 需要显式开启）</p>
+  </div>
+</section>
+<!-- 第 4 站 — Direct buffer memory -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>Direct buffer memory：堆外内存的隐形杀手</h2>
+  </div>
+
+  <p>使用 NIO 的 <code>ByteBuffer.allocateDirect()</code> 分配的内存在堆外（Native Memory），不受 <code>-Xmx</code> 控制，而是由 <code>-XX:MaxDirectMemorySize</code> 限制（默认等于 <code>-Xmx</code> 的值）。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Netty 应用典型 OOM</div>
+    <pre class="srcbox-file"><span class="k">java.lang.OutOfMemoryError</span>: Direct buffer memory
+  at java.nio.Bits.reserveMemory(Bits.java:<span class="n">694</span>)
+  at java.nio.DirectByteBuffer.&lt;init&gt;(DirectByteBuffer.java:<span class="n">123</span>)
+  at io.netty.buffer.PoolArena$DirectArena.allocateDirect(PoolArena.java:<span class="n">764</span>)
+
+<span class="c">// 查看当前 DirectMemory 使用量</span>
+$ jcmd <span class="n">12345</span> VM.native_memory summary
+<span class="t">Internal</span>              <span class="n">48MB</span>
+<span class="t">Thread</span>                <span class="n">120MB</span>
+<span class="t">GC</span>                    <span class="n">32MB</span>
+<span class="t">Symbol</span>                <span class="n">16MB</span>
+<span class="t">Native Memory Tracking</span> <span class="n">2MB</span>
+                         ────
+Total                  <span class="n">218MB</span>   <span class="c">← 但 DirectByteBuffer 不在这里显示！</span></pre>
+  </div>
+
+  <p><strong>最容易踩坑的地方</strong>：DirectMemory 使用量在标准监控工具里几乎不可见。jmap 看的是堆，jstat 看的是 GC，top 看的是整进程——你需要用 <code>-XX:NativeMemoryTracking=summary</code> 配合 <code>jcmd VM.native_memory</code> 才能看到堆外内存的真实用量。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">用 JMX 监控 DirectMemory</div>
+    <pre class="srcbox-file"><span class="c">// 通过 JMX 获取 DirectMemory 使用量</span>
+<span class="k">MBeanServer</span> server = <span class="t">ManagementFactory</span>.getPlatformMBeanServer();
+<span class="k">ObjectName</span> name = <span class="k">new</span> <span class="t">ObjectName</span>(<span class="n">"java.nio:type=BufferPool,name=direct"</span>);
+<span class="k">long</span> used = (<span class="k">long</span>) server.getAttribute(name, <span class="n">"MemoryUsed"</span>);
+<span class="k">long</span> capacity = (<span class="k">long</span>) server.getAttribute(name, <span class="n">"TotalCapacity"</span>);
+<span class="t">System</span>.out.printf(<span class="n">"Direct Memory: %dMB / %dMB%n"</span>,
+    used / <span class="n">1024</span> / <span class="n">1024</span>, capacity / <span class="n">1024</span> / <span class="n">1024</span>);</pre>
+  </div>
+
+  <div class="formula">
+    <strong>修复策略</strong>：① <code>-XX:MaxDirectMemorySize=1g</code> 显式设限；② Netty 应用检查 ByteBuf 是否泄漏（<code>-Dio.netty.leakDetection.level=PARANOID</code>）；③ 非高性能场景改用 <code>allocate()</code>（堆内存）替代 <code>allocateDirect()</code>。
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">避坑指南</span>
+    <p>容器环境下尤其要注意：Docker 的 <code>--memory</code> 限制包含堆 + 堆外 + 线程栈 + JVM 内部。你给了 4GB 内存限制，<code>-Xmx</code> 设了 3GB，剩下 1GB 要分给 Metaspace、DirectMemory、线程栈——很可能不够。</p>
+  </div>
+</section>
+<!-- 第 5 站 — Unable to create new native thread -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>Unable to create new native thread：线程数爆了</h2>
+  </div>
+
+  <p>这个 OOM 和内存没有直接关系——它是<strong>操作系统级别的线程数限制</strong>。每创建一个 Java 线程，JVM 就要向 OS 申请一个原生线程，而 OS 对每个进程的线程数有上限。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">真实案例：消息消费者线程泄漏</div>
+    <pre class="srcbox-file"><span class="k">java.lang.OutOfMemoryError</span>: unable to create new native thread
+  at java.lang.Thread.start0(Native Method)
+  at java.lang.Thread.start(Thread.java:<span class="n">717</span>)
+  at com.example.mq.ConsumerManager.subscribe(ConsumerManager.java:<span class="n">88</span>)
+
+<span class="c">// 查看线程数</span>
+$ jcmd <span class="n">12345</span> Thread.print | grep -c <span class="n">"Thread"</span>
+<span class="n">32,768</span>  <span class="c">← 已经到 ulimit 上限了！</span>
+
+$ ulimit -u
+<span class="n">32768</span>   <span class="c">← 这就是天花板</span>
+
+<span class="c">// 线程分布</span>
+$ jstack <span class="n">12345</span> | grep <span class="n">"Thread.State"</span> | sort | uniq -c
+<span class="n">28,400</span>  WAITING (parking)   <span class="c">← 28000 个线程在等锁！</span>
+ <span class="n">2,100</span>  TIMED_WAITING
+ <span class="n">1,800</span>  RUNNABLE
+   <span class="n">468</span>  BLOCKED</pre>
+  </div>
+
+  <p>上面这个案例是真实遇到的：一个消息消费组件，每次收到消息就 <code>new Thread()</code> 去处理，没有用线程池。跑了 3 天，线程数悄悄涨到 3 万多。</p>
+
+  <div class="think">
+    <p class="think-q">线程数的天花板不只是 <code>ulimit -u</code>。还要考虑内存：每个线程默认栈大小 1MB（<code>-Xss</code>），3 万个线程 = 30GB 栈内存！这就是为什么有时候堆还没满，进程就被 OOM Killer 杀了。</p>
+  </div>
+
+  <div class="formula">
+    <strong>最大线程数估算公式</strong>：<br>
+    可创建线程数 ≈ (进程可用内存 − 堆 − Metaspace) / 线程栈大小<br>
+    例如：容器 8GB，堆 4GB，Metaspace 512MB，<code>-Xss=512k</code>，则最多 (8−4−0.5)×1024/0.5 ≈ 7168 个线程。
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">修复三板斧</span>
+    <p>① <strong>止血</strong>：<code>ulimit -u 65535</code>（临时提高上限）<br>
+       ② <strong>排查</strong>：<code>jstack</code> 导出线程快照，按线程名分组统计，找到泄漏源<br>
+       ③ <strong>根治</strong>：所有线程创建都走线程池，配置合理的 maximumPoolSize；减小 <code>-Xss</code>（如 512k）释放内存空间</p>
+  </div>
+</section>
+<!-- 第 6 站 — GC overhead limit exceeded -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>GC overhead limit exceeded：JVM 在喊"我快累死了"</h2>
+  </div>
+
+  <p>这个 OOM 比较特殊——它不是因为内存真的用光了，而是因为 <strong>JVM 花了超过 98% 的时间在做 GC，但每次只回收到不到 2% 的堆空间</strong>。换句话说，JVM 觉得自己已经"生不如死"了，选择自杀式退出。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">GC 日志里的蛛丝马迹</div>
+    <pre class="srcbox-file"><span class="c">// GC 日志（OOM 前 10 分钟）</span>
+[<span class="n">12.5s</span>] GC pause (G1 Evacuation Pause) <span class="n">45MB</span>→<span class="n">42MB</span>  <span class="n">12ms</span>
+[<span class="n">12.8s</span>] GC pause (G1 Evacuation Pause) <span class="n">44MB</span>→<span class="n">40MB</span>  <span class="n">28ms</span>
+[<span class="n">13.0s</span>] GC pause (G1 Evacuation Pause) <span class="n">43MB</span>→<span class="n">39MB</span>  <span class="n">85ms</span>    <span class="c">← GC 时间飙升</span>
+[<span class="n">13.1s</span>] GC pause (G1 Evacuation Pause) <span class="n">42MB</span>→<span class="n">38MB</span>  <span class="n">320ms</span>   <span class="c">← 回收越来越少</span>
+[<span class="n">13.2s</span>] GC pause (G1 Evacuation Pause) <span class="n">41MB</span>→<span class="n">39MB</span>  <span class="n">1200ms</span>  <span class="c">← 一次 GC 1.2 秒！</span>
+[<span class="n">13.3s</span>] GC pause (Full GC) <span class="n">40MB</span>→<span class="n">39MB</span>  <span class="n">4500ms</span>            <span class="c">← Full GC，几乎没回收</span>
+<span class="k">java.lang.OutOfMemoryError</span>: GC overhead limit exceeded</pre>
+  </div>
+
+  <p><strong>GC overhead limit exceeded 几乎总是意味着内存泄漏。</strong>它和 "Java heap space" 的区别在于：heap space 是"内存真的不够了"，而 GC overhead 是"内存虽然还有一点，但 JVM 已经没力气继续了"。</p>
+
+  <div class="think">
+    <p class="think-q">真实踩坑：一个定时任务每 5 分钟跑一次，每次都在一个 HashMap 里累加统计数据，但从来不删除过期数据。运行两周后，这个 Map 里有 2000 万条记录，GC 每次扫描它都要花好几秒，最终触发 GC overhead limit。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">修复策略</span>
+    <p>① <strong>不要禁用这个检查</strong>：<code>-XX:-UseGCOverheadLimit</code> 只是让 JVM 不再报错继续跑，但此时服务已经几乎无法响应请求了（98% 时间都在 GC）——这只是把"快速死亡"变成了"慢性死亡"。<br>
+       ② 正确做法：按照第 2 站的方法，dump 堆 → MAT 分析 → 找到内存泄漏 → 修复代码。<br>
+       ③ 监控前置：配置 GC 时间占比告警（如 Full GC 间隔 &lt; 30 秒就告警），不要等到 OOM 才发现。</p>
+  </div>
+</section>
+<!-- 第 7 站 — Map/List/Array too large -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>Requested array size exceeds VM limit：Java 的 2GB 天花板</h2>
+  </div>
+
+  <p>Java 中数组的最大长度受限于 <code>int</code> 的上限（<code>Integer.MAX_VALUE - 8 ≈ 21 亿</code>），但实际上受堆大小限制，通常远达不到这个理论值。当代码试图创建一个超大数组时，就会触发这个 OOM。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">典型触发场景</div>
+    <pre class="srcbox-file"><span class="c">// 场景 1：ArrayList 扩容溢出</span>
+<span class="k">ArrayList</span>&lt;<span class="t">byte</span>[]&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+<span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">100_000_000</span>; i++) {
+    list.add(<span class="k">new</span> <span class="k">byte</span>[<span class="n">1024</span>]); <span class="c">// 到后期 ArrayList 内部数组扩容时 OOM</span>
+}
+
+<span class="c">// 场景 2：大文件一次性读入</span>
+<span class="k">byte</span>[] data = <span class="t">Files</span>.readAllBytes(<span class="t">Paths</span>.get(<span class="n">"bigfile.dat"</span>));
+<span class="c">// 文件 3GB → byte[3221225472] → 超过 Integer.MAX_VALUE → 直接 OOM</span>
+
+<span class="c">// 场景 3：集合转数组</span>
+<span class="k">List</span>&lt;<span class="t">String</span>&gt; hugeList = ...; <span class="c">// 30 亿条数据</span>
+<span class="k">String</span>[] arr = hugeList.toArray(<span class="k">new</span> <span class="t">String</span>[<span class="n">0</span>]); <span class="c">// 内部 new String[size] 溢出</span></pre>
+  </div>
+
+  <div class="formula">
+    <strong>Java 数组上限</strong>：理论最大长度 = <code>Integer.MAX_VALUE - 8 = 2,147,483,639</code><br>
+    对于 <code>byte[]</code>：最大约 2GB。对于 <code>Object[]</code>（64 位引用）：最大约 16GB（但堆通常没这么大）。
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">修复方案</span>
+    <p>核心思路：<strong>分块处理，不要试图把大数据装进单个数组</strong>。<br>
+       ① 文件处理：用流式读取（<code>BufferedReader</code> / <code>FileChannel</code>），不要 <code>readAllBytes</code><br>
+       ② 集合处理：分批查询、分页处理，每批控制在合理大小<br>
+       ③ 大数据场景：使用内存映射文件（<code>MappedByteBuffer</code>）或外部排序</p>
+  </div>
+</section>
+<!-- 第 8 站 — 总结：OOM 诊断流程与速查表 -->
+<section class="station reveal" id="s8">
+  <div class="station-head">
+    <span class="station-no">第 8 站</span>
+    <h2>总结：OOM 诊断全流程图与速查手册</h2>
+  </div>
+
+  <p>下面这张流程图，建议打印出来贴在工位旁边：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 820 540" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
+      <defs>
+        <linearGradient id="fg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+        <linearGradient id="fg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+        <linearGradient id="fg3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
+        <linearGradient id="fg4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        <linearGradient id="fg5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient>
+        <linearGradient id="fg6" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ec4899"/><stop offset="100%" stop-color="#db2777"/></linearGradient>
+        <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="10" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,3 L0,6 Z" fill="#6b7280"/>
+        </marker>
+      </defs>
+
+      <!-- 起点 -->
+      <rect x="290" y="10" width="240" height="44" rx="22" fill="url(#fg1)"/>
+      <text x="410" y="38" text-anchor="middle" font-size="15" font-weight="bold" fill="#fff">OOM 发生！先看错误消息</text>
+
+      <!-- 箭头到判断 -->
+      <line x1="410" y1="54" x2="410" y2="80" stroke="#6b7280" stroke-width="2" marker-end="url(#arrow)"/>
+
+      <!-- 判断框 -->
+      <polygon points="410,82 530,122 410,162 290,122" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+      <text x="410" y="126" text-anchor="middle" font-size="13" font-weight="bold" fill="#92400e">错误后缀是什么？</text>
+
+      <!-- 6 个分支 -->
+      <line x1="310" y1="142" x2="80" y2="200" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="340" y1="152" x2="210" y2="200" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="380" y1="162" x2="340" y2="200" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="440" y1="162" x2="470" y2="200" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="480" y1="152" x2="600" y2="200" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="510" y1="142" x2="730" y2="200" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- 6 个 OOM 类型节点 -->
+      <rect x="10" y="200" width="140" height="50" rx="8" fill="url(#fg3)"/>
+      <text x="80" y="222" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">Java heap</text>
+      <text x="80" y="240" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">space</text>
+
+      <rect x="140" y="200" width="140" height="50" rx="8" fill="url(#fg5)"/>
+      <text x="210" y="222" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">Metaspace</text>
+      <text x="210" y="240" text-anchor="middle" font-size="11" fill="#ddd1ff">类加载过多</text>
+
+      <rect x="270" y="200" width="140" height="50" rx="8" fill="url(#fg2)"/>
+      <text x="340" y="222" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">Direct buffer</text>
+      <text x="340" y="240" text-anchor="middle" font-size="11" fill="#fef3c7">堆外内存超限</text>
+
+      <rect x="400" y="200" width="140" height="50" rx="8" fill="url(#fg6)"/>
+      <text x="470" y="222" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">native thread</text>
+      <text x="470" y="240" text-anchor="middle" font-size="11" fill="#fce7f3">线程数超限</text>
+
+      <rect x="530" y="200" width="140" height="50" rx="8" fill="url(#fg1)"/>
+      <text x="600" y="222" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">GC overhead</text>
+      <text x="600" y="240" text-anchor="middle" font-size="11" fill="#fecaca">GC 耗尽</text>
+
+      <rect x="660" y="200" width="150" height="50" rx="8" fill="url(#fg4)"/>
+      <text x="735" y="222" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">Array too large</text>
+      <text x="735" y="240" text-anchor="middle" font-size="11" fill="#d1fae5">数组 &gt; 2GB</text>
+
+      <!-- 诊断方法行 -->
+      <line x1="80" y1="250" x2="80" y2="290" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="210" y1="250" x2="210" y2="290" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="340" y1="250" x2="340" y2="290" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="470" y1="250" x2="470" y2="290" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="600" y1="250" x2="600" y2="290" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="735" y1="250" x2="735" y2="290" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="10" y="290" width="140" height="46" rx="6" fill="#dbeafe" stroke="#3b82f6"/>
+      <text x="80" y="310" text-anchor="middle" font-size="10" fill="#1e40af">jmap + MAT</text>
+      <text x="80" y="326" text-anchor="middle" font-size="10" fill="#1e40af">分析堆转储</text>
+
+      <rect x="140" y="290" width="140" height="46" rx="6" fill="#ede9fe" stroke="#8b5cf6"/>
+      <text x="210" y="310" text-anchor="middle" font-size="10" fill="#5b21b6">jcmd classloader</text>
+      <text x="210" y="326" text-anchor="middle" font-size="10" fill="#5b21b6">查类加载统计</text>
+
+      <rect x="270" y="290" width="140" height="46" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="340" y="310" text-anchor="middle" font-size="10" fill="#92400e">NMT + JMX</text>
+      <text x="340" y="326" text-anchor="middle" font-size="10" fill="#92400e">查堆外内存用量</text>
+
+      <rect x="400" y="290" width="140" height="46" rx="6" fill="#fce7f3" stroke="#ec4899"/>
+      <text x="470" y="310" text-anchor="middle" font-size="10" fill="#9d174d">jstack 统计线程</text>
+      <text x="470" y="326" text-anchor="middle" font-size="10" fill="#9d174d">查 ulimit -u</text>
+
+      <rect x="530" y="290" width="140" height="46" rx="6" fill="#fee2e2" stroke="#ef4444"/>
+      <text x="600" y="310" text-anchor="middle" font-size="10" fill="#991b1b">GC 日志分析</text>
+      <text x="600" y="326" text-anchor="middle" font-size="10" fill="#991b1b">本质是内存泄漏</text>
+
+      <rect x="660" y="290" width="150" height="46" rx="6" fill="#d1fae5" stroke="#10b981"/>
+      <text x="735" y="310" text-anchor="middle" font-size="10" fill="#065f46">改为流式/分块</text>
+      <text x="735" y="326" text-anchor="middle" font-size="10" fill="#065f46">处理大数据</text>
+
+      <!-- 修复方法行 -->
+      <line x1="80" y1="336" x2="80" y2="370" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="210" y1="336" x2="210" y2="370" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="340" y1="336" x2="340" y2="370" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="470" y1="336" x2="470" y2="370" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="600" y1="336" x2="600" y2="370" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <line x1="735" y1="336" x2="735" y2="370" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="10" y="370" width="140" height="46" rx="6" fill="#10b981"/>
+      <text x="80" y="390" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">调大 -Xmx</text>
+      <text x="80" y="406" text-anchor="middle" font-size="10" fill="#d1fae5">+ 修复内存泄漏</text>
+
+      <rect x="140" y="370" width="140" height="46" rx="6" fill="#10b981"/>
+      <text x="210" y="390" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">MaxMetaspaceSize</text>
+      <text x="210" y="406" text-anchor="middle" font-size="10" fill="#d1fae5">+ 修复类加载泄漏</text>
+
+      <rect x="270" y="370" width="140" height="46" rx="6" fill="#10b981"/>
+      <text x="340" y="390" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">MaxDirectMemory</text>
+      <text x="340" y="406" text-anchor="middle" font-size="10" fill="#d1fae5">+ 检查 ByteBuf 泄漏</text>
+
+      <rect x="400" y="370" width="140" height="46" rx="6" fill="#10b981"/>
+      <text x="470" y="390" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">减少线程数</text>
+      <text x="470" y="406" text-anchor="middle" font-size="10" fill="#d1fae5">+ 用线程池管理</text>
+
+      <rect x="530" y="370" width="140" height="46" rx="6" fill="#10b981"/>
+      <text x="600" y="390" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">修复内存泄漏</text>
+      <text x="600" y="406" text-anchor="middle" font-size="10" fill="#d1fae5">（同 heap space）</text>
+
+      <rect x="660" y="370" width="150" height="46" rx="6" fill="#10b981"/>
+      <text x="735" y="390" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">分块处理</text>
+      <text x="735" y="406" text-anchor="middle" font-size="10" fill="#d1fae5">避免单个大数组</text>
+
+      <!-- 底部通用建议 -->
+      <line x1="80" y1="416" x2="80" y2="450" stroke="#6b7280" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="210" y1="416" x2="210" y2="450" stroke="#6b7280" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="340" y1="416" x2="340" y2="450" stroke="#6b7280" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="470" y1="416" x2="470" y2="450" stroke="#6b7280" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="600" y1="416" x2="600" y2="450" stroke="#6b7280" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="735" y1="416" x2="735" y2="450" stroke="#6b7280" stroke-width="1" stroke-dasharray="4"/>
+
+      <rect x="10" y="450" width="800" height="76" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+      <text x="410" y="475" text-anchor="middle" font-size="14" font-weight="bold" fill="#1e293b">通用预防措施</text>
+      <text x="410" y="498" text-anchor="middle" font-size="12" fill="#475569">① 生产必加 -XX:+HeapDumpOnOutOfMemoryError    ② 配置 GC 日志 + 监控告警</text>
+      <text x="410" y="518" text-anchor="middle" font-size="12" fill="#475569">③ 容器环境预留堆外内存空间（容器内存 &gt; 堆 + Metaspace + 线程栈 + 堆外）   ④ 定期压测 + 内存基线</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> OOM 诊断全流程图：从错误消息到诊断工具到修复方案，一图搞定</figcaption>
+  </div>
+
+  <p>最后，把所有 OOM 类型汇总成速查表，面试前过一遍：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>OOM 类型</th><th>常见原因</th><th>诊断工具</th><th>修复方案</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Java heap space</td>
+        <td>内存泄漏、一次性加载太多数据</td>
+        <td>jmap + MAT</td>
+        <td>调大 -Xmx（临时）+ 修复泄漏</td>
+      </tr>
+      <tr>
+        <td>Metaspace</td>
+        <td>动态类生成、ClassLoader 泄漏</td>
+        <td>jcmd classloader.stats</td>
+        <td>MaxMetaspaceSize + 类卸载</td>
+      </tr>
+      <tr>
+        <td>Direct buffer</td>
+        <td>NIO/Netty 堆外内存超限</td>
+        <td>NMT + JMX BufferPool</td>
+        <td>MaxDirectMemorySize + 检查泄漏</td>
+      </tr>
+      <tr>
+        <td>native thread</td>
+        <td>线程数过多、线程泄漏</td>
+        <td>jstack + ulimit -u</td>
+        <td>线程池 + 减小 -Xss</td>
+      </tr>
+      <tr>
+        <td>GC overhead limit</td>
+        <td>内存泄漏导致 GC 无效循环</td>
+        <td>GC 日志 + MAT</td>
+        <td>修复泄漏（禁用检查只是临时）</td>
+      </tr>
+      <tr>
+        <td>Array too large</td>
+        <td>单数组超过 2GB 限制</td>
+        <td>堆栈信息定位</td>
+        <td>流式/分块处理</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试满分答案模板</span>
+    <p>面试官问"你怎么排查 OOM"时，用这个结构回答：<br>
+       ① 先看错误消息后缀，确定 OOM 类型<br>
+       ② 根据类型选择诊断工具（堆 → jmap/MAT，线程 → jstack，类 → jcmd classloader）<br>
+       ③ 找到根因：是配置问题（调参数）还是代码问题（改代码）<br>
+       ④ 预防措施：HeapDump、GC 日志、监控告警三板斧<br>
+       能举出自己排查过的真实案例，加分。</p>
+  </div>
+
+  <div class="recap">
+    <strong>核心记忆点</strong>：OOM 有 6 种，但排查套路只有 1 套——<strong>看错误消息 → 选诊断工具 → 找根因 → 修复 + 预防</strong>。生产环境永远加 <code>-XX:+HeapDumpOnOutOfMemoryError</code>，这是你在事故发生后唯一能依赖的"黑匣子"。
+  </div>
+</section>
+
+</main>
+</body>
+</html>

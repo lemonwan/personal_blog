@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>volatile 深入</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道面试题开始</h2></div>
+
+<p>面试官看着你的简历，不紧不慢地问了一句：</p>
+
+<div class="think"><div class="think-q">"volatile 能保证原子性吗？"</div></div>
+
+<p>"不能。"——如果你只回答这两个字，面试就到此为止了。</p>
+
+<p>面试官真正想听的是：<strong>volatile 保证可见性和有序性，但不保证原子性</strong>。紧接着，他会追问：</p>
+
+<ul>
+  <li>可见性是怎么实现的？缓存失效？内存屏障？</li>
+  <li>有序性是什么意思？指令重排为什么危险？</li>
+  <li>为什么 <code>i++</code> 用 volatile 不行？</li>
+  <li>DCL 单例为什么一定要加 volatile？</li>
+</ul>
+
+<p>这篇文章把 volatile 拆成 <strong>8 站</strong>，从可见性到内存屏障，从 happens-before 到 DCL 单例，一站一站把 volatile 讲透。</p>
+
+<p>发车之前，先问自己：</p>
+
+<ul>
+  <li>volatile 写操作后，CPU 缓存做了什么？</li>
+  <li>StoreStore 屏障和 StoreLoad 屏障分别插在哪里？</li>
+  <li>对象创建的 3 条指令为什么可能被重排？</li>
+</ul>
+
+<p>带着这些问题，我们开始。</p>
+</section>
+
+<!-- ═══════════════ 第2站：可见性 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>可见性：一个线程改了值，其他线程立刻能看到</h2></div>
+
+<p>现代 CPU 都有多级缓存（L1、L2、L3），每个核心有自己独立的 L1/L2 缓存。Java 线程运行在不同的 CPU 核心上时，对同一个变量的读写可能发生在各自的缓存里——<strong>线程 A 修改了变量，值还在 L1 缓存中，线程 B 根本看不到</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 420" role="img" aria-label="volatile 可见性与 CPU 缓存层次">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2D5F2D"/></marker>
+  </defs>
+
+  <!-- 主内存 -->
+  <rect x="260" y="10" width="260" height="50" rx="6" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="390" y="40" text-anchor="middle" font-family="monospace" font-size="13" fill="#3E6B8F" font-weight="700">主内存 (Main Memory)</text>
+  <text x="390" y="55" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F">volatile int flag = 0</text>
+
+  <!-- L3 缓存 -->
+  <rect x="200" y="90" width="380" height="40" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.2"/>
+  <text x="390" y="115" text-anchor="middle" font-family="monospace" font-size="12" fill="#57544E">L3 共享缓存（所有核心共享）</text>
+
+  <!-- 核心A -->
+  <rect x="40" y="170" width="300" height="230" rx="6" fill="#FAFAFA" stroke="#999" stroke-width="1.2"/>
+  <text x="190" y="195" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">CPU 核心 A（线程 1）</text>
+  <rect x="70" y="210" width="240" height="35" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="190" y="232" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">L1 缓存：flag = 0</text>
+  <rect x="70" y="255" width="240" height="35" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <text x="190" y="277" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C">volatile write: flag = 1</text>
+  <rect x="70" y="310" width="240" height="60" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="190" y="335" text-anchor="middle" font-size="10" fill="#3E6B8F">① 写操作 → 强制刷回主内存</text>
+  <text x="190" y="355" text-anchor="middle" font-size="10" fill="#3E6B8F">② 通知其他核心缓存失效</text>
+
+  <!-- 核心B -->
+  <rect x="440" y="170" width="300" height="230" rx="6" fill="#FAFAFA" stroke="#999" stroke-width="1.2"/>
+  <text x="590" y="195" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">CPU 核心 B（线程 2）</text>
+  <rect x="470" y="210" width="240" height="35" rx="4" fill="#F5D5D5" stroke="#B85450" stroke-width="1.2"/>
+  <text x="590" y="232" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450">L1 缓存：flag = 0（旧值）</text>
+  <rect x="470" y="255" width="240" height="35" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="590" y="277" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">volatile read → 缓存失效，重新读取</text>
+  <rect x="470" y="310" width="240" height="60" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="590" y="335" text-anchor="middle" font-size="10" fill="#3E6B8F">③ 收到失效通知 → 清除 L1 缓存行</text>
+  <text x="590" y="355" text-anchor="middle" font-size="10" fill="#3E6B8F">④ 从主内存读到 flag = 1（新值）</text>
+
+  <!-- 箭头 -->
+  <line x1="190" y1="60" x2="190" y2="88" stroke="#2D5F2D" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="590" y1="88" x2="590" y2="60" stroke="#B85450" stroke-width="1.5" marker-end="url(#arrow-red)"/>
+</svg>
+<figcaption><span class="fig-no">图 1</span>volatile 写操作会立即刷回主内存并通知其他核心缓存失效；volatile 读操作会先使缓存失效，再从主内存重新加载</figcaption>
+</figure>
+
+<p>volatile 保证可见性的机制可以概括为两条规则：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>volatile 可见性规则</b></span></div>
+<pre><code><span class="k">volatile write</span>（写操作）：
+  <span class="c">// 1. 将新值立即刷新到主内存</span>
+  <span class="c">// 2. 通过 MESI 协议通知其他 CPU 核心：这个缓存行无效</span>
+
+<span class="k">volatile read</span>（读操作）：
+  <span class="c">// 1. 使当前 CPU 缓存中该变量的缓存行失效</span>
+  <span class="c">// 2. 从主内存重新读取最新值</span></code></pre>
+</div>
+
+<p>底层实现依赖 CPU 的 <strong>缓存一致性协议</strong>（如 MESI）和 <strong>Lock 前缀指令</strong>。JVM 会在 volatile 操作时插入特定的 CPU 指令（如 <code>lock</code> 前缀），强制把缓存行刷回主内存。</p>
+
+<div class="takeaway"><span class="takeaway-label">记住</span>volatile 让每一次写都"广而告之"，每一次读都"眼见为实"——但这只对单个变量的单次读写有效。</div>
+</section>
+
+<!-- ═══════════════ 第3站：有序性 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>有序性：编译器、JVM、CPU 都在偷偷调顺序</h2></div>
+
+<p>为了提高性能，<strong>编译器和 CPU 会对指令进行重排序</strong>。只要最终结果在单线程中不变，重排就是合法的。但在多线程环境下，重排可能导致灾难。</p>
+
+<p>来看一个经典例子：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ReorderExample.java</b></span></div>
+<pre><code><span class="k">int</span> a = <span class="n">0</span>, b = <span class="n">0</span>;
+<span class="k">int</span> x = <span class="n">0</span>, y = <span class="n">0</span>;
+
+<span class="c">// 线程 1</span>
+a = <span class="n">1</span>;      <span class="c">// ①</span>
+x = b;      <span class="c">// ②</span>
+
+<span class="c">// 线程 2</span>
+b = <span class="n">1</span>;      <span class="c">// ③</span>
+y = a;      <span class="c">// ④</span>
+
+<span class="c">// 正常思维：x=0,y=0 或 x=1,y=1 或 x=1,y=0</span>
+<span class="c">// 但 ① ② 重排后变成 ② ① → 可能出现 x=0, y=0 且 a=1, b=1 的诡异结果</span></code></pre>
+</div>
+
+<p>为什么 ① 和 ② 可以重排？因为它们没有数据依赖——<code>a = 1</code> 和 <code>x = b</code> 之间不存在"先算 a 才能算 x"的关系，编译器/CPU 认为交换顺序不影响单线程结果。</p>
+
+<p><strong>volatile 通过建立 happens-before 关系来阻止特定的重排：</strong></p>
+
+<div class="formula">volatile write 之前的所有操作 → happens-before → volatile write → happens-before → volatile read → happens-before → volatile read 之后的所有操作</div>
+
+<p>具体来说：</p>
+
+<ul>
+  <li><strong>volatile write 之前的普通写不会被重排到 volatile write 之后</strong>——保证其他线程看到 volatile flag 时，也能看到 flag 之前的所有写入。</li>
+  <li><strong>volatile read 之后的普通读不会被重排到 volatile read 之前</strong>——保证读 volatile flag 之后，能读到 flag 之前的所有写入。</li>
+</ul>
+
+<div class="think"><div class="think-q">happens-before 关系的传递性：如果 A happens-before B，B happens-before C，那么 A happens-before C。volatile 就是那个"B"——一座桥梁。</div></div>
+</section>
+
+<!-- ═══════════════ 第4站：不保证原子性 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>不保证原子性：i++ 为什么用 volatile 还是不安全？</h2></div>
+
+<p>面试官最爱问的问题之一。先看代码：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>VolatileAtomicTest.java</b></span></div>
+<pre><code><span class="k">public class</span> <span class="t">VolatileAtomicTest</span> {
+    <span class="k">static volatile int</span> count = <span class="n">0</span>;
+
+    <span class="k">public static void</span> <span class="n">main</span>(String[] args) <span class="k">throws</span> Exception {
+        CountDownLatch latch = <span class="k">new</span> <span class="t">CountDownLatch</span>(<span class="n">100</span>);
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">100</span>; i++) {
+            <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+                <span class="k">for</span> (<span class="k">int</span> j = <span class="n">0</span>; j &lt; <span class="n">1000</span>; j++) {
+                    count++; <span class="c">// 看似简单的自增</span>
+                }
+                latch.countDown();
+            }).start();
+        }
+        latch.await();
+        System.out.println(<span class="n">"count = "</span> + count);
+        <span class="c">// 期望：100000，实际：往往 &lt; 100000</span>
+    }
+}</code></pre>
+</div>
+
+<p>问题出在 <code>count++</code> 这个操作。它不是原子的——实际上它由 3 条指令组成：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>count++ 的 3 步</b></span></div>
+<pre><code><span class="c">// 第 1 步：read —— 从内存读取 count 的值</span>
+<span class="k">int</span> temp = count;       <span class="c">// 比如读到 42</span>
+
+<span class="c">// 第 2 步：modify —— 在寄存器中加 1</span>
+temp = temp + <span class="n">1</span>;          <span class="c">// 变成 43</span>
+
+<span class="c">// 第 3 步：write —— 把新值写回内存</span>
+count = temp;            <span class="c">// 写入 43</span></code></pre>
+</div>
+
+<p>volatile 只保证<strong>第 1 步读到的是最新值</strong>，但<strong>第 1 步和第 3 步之间</strong>，其他线程完全可以插入进来修改 count：</p>
+
+<table class="nb-table">
+<thead><tr><th>时间线</th><th>线程 A</th><th>线程 B</th><th>count 值</th></tr></thead>
+<tbody>
+<tr><td>T1</td><td>read count → 42</td><td></td><td>42</td></tr>
+<tr><td>T2</td><td></td><td>read count → 42</td><td>42</td></tr>
+<tr><td>T3</td><td>modify: 42+1=43</td><td></td><td>42</td></tr>
+<tr><td>T4</td><td></td><td>modify: 42+1=43</td><td>42</td></tr>
+<tr><td>T5</td><td>write count = 43</td><td></td><td>43</td></tr>
+<tr><td>T6</td><td></td><td>write count = 43</td><td>43</td></tr>
+</tbody>
+</table>
+
+<p>两个线程各做了一次 <code>count++</code>，count 应该变成 44，结果却只变成了 43——<strong>丢失了一次更新</strong>。100 个线程各做 1000 次，丢失的更新越多，最终结果离 100000 就越远。</p>
+
+<div class="crack"><span class="crack-label">破解</span>volatile 保证的是"读到的值是对的"（可见性），但不保证"从读到写之间没人改过"（原子性）。复合操作必须用 synchronized 或 AtomicXxx。</div>
+</section>
+
+<!-- ═══════════════ 第5站：内存屏障 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>内存屏障：阻止指令重排的硬件机制</h2></div>
+
+<p>volatile 的可见性和有序性最终都要落到 CPU 指令层面。JVM 通过在 volatile 操作前后插入<strong>内存屏障（Memory Barrier）</strong>来实现这两大保证。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 460" role="img" aria-label="volatile 内存屏障放置位置">
+  <defs>
+    <marker id="barrier-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="390" y="24" text-anchor="middle" font-family="monospace" font-size="14" fill="#1C1C1C" font-weight="700">volatile 操作前后的内存屏障</text>
+
+  <!-- volatile write 部分 -->
+  <text x="190" y="55" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">volatile write 序列</text>
+
+  <rect x="60" y="70" width="260" height="30" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="190" y="90" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">普通 Store / Load 操作</text>
+
+  <rect x="60" y="110" width="260" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="190" y="130" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C" font-weight="700">StoreStore Barrier</text>
+  <text x="340" y="130" font-size="10" fill="#57544E">← 确保上面的写先于 volatile 写完成</text>
+
+  <rect x="60" y="150" width="260" height="30" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="190" y="170" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F" font-weight="700">volatile Store（写操作）</text>
+
+  <rect x="60" y="190" width="260" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="190" y="210" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C" font-weight="700">StoreLoad Barrier</text>
+  <text x="340" y="210" font-size="10" fill="#57544E">← 确保 volatile 写先于下面的读完成</text>
+
+  <rect x="60" y="230" width="260" height="30" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="190" y="250" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">普通 Store / Load 操作</text>
+
+  <!-- volatile read 部分 -->
+  <text x="590" y="55" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">volatile read 序列</text>
+
+  <rect x="460" y="70" width="260" height="30" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="590" y="90" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">普通 Store / Load 操作</text>
+
+  <rect x="460" y="110" width="260" height="30" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="590" y="130" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F" font-weight="700">volatile Load（读操作）</text>
+
+  <rect x="460" y="150" width="260" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="590" y="170" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C" font-weight="700">LoadLoad Barrier</text>
+  <text x="730" y="170" font-size="10" fill="#57544E">← 确保下面的读在 volatile 读之后</text>
+
+  <rect x="460" y="190" width="260" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="590" y="210" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C" font-weight="700">LoadStore Barrier</text>
+  <text x="730" y="210" font-size="10" fill="#57544E">← 确保下面的写在 volatile 读之后</text>
+
+  <rect x="460" y="230" width="260" height="30" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="590" y="250" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">普通 Store / Load 操作</text>
+
+  <!-- 说明区域 -->
+  <rect x="60" y="290" width="660" height="155" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="390" y="315" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">四种屏障的含义</text>
+  <text x="80" y="340" font-family="monospace" font-size="11" fill="#C2410C">StoreStore</text>
+  <text x="175" y="340" font-size="11" fill="#57544E">：屏障之前的 Store 不会被重排到屏障之后</text>
+  <text x="80" y="362" font-family="monospace" font-size="11" fill="#C2410C">StoreLoad</text>
+  <text x="175" y="362" font-size="11" fill="#57544E">：屏障之前的 Store 不会被重排到屏障之后的 Load 之前（万能屏障）</text>
+  <text x="80" y="384" font-family="monospace" font-size="11" fill="#C2410C">LoadLoad</text>
+  <text x="175" y="384" font-size="11" fill="#57544E">：屏障之后的 Load 不会被重排到屏障之前</text>
+  <text x="80" y="406" font-family="monospace" font-size="11" fill="#C2410C">LoadStore</text>
+  <text x="175" y="406" font-size="11" fill="#57544E">：屏障之后的 Store 不会被重排到屏障之前</text>
+  <text x="80" y="430" font-size="11" fill="#3E6B8F" font-weight="700">x86 只对 Store-Load 重排敏感，所以 JVM 在 x86 上只在 volatile write 后插入 lock 前缀指令（等效于 StoreLoad）</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>volatile write 前后插入 StoreStore + StoreLoad 屏障；volatile read 之后插入 LoadLoad + LoadStore 屏障</figcaption>
+</figure>
+
+<p>在 x86 架构上，CPU 本身不会对 Store-Store、Load-Load、Load-Store 进行重排，<strong>唯一会重排的是 Store-Load</strong>。所以 JVM 在 x86 上做了优化：volatile write 之后只需要插入一个 <code>lock</code> 前缀指令（等效于 StoreLoad 屏障），其他屏障实际上是空操作（no-op）。</p>
+
+<div class="think"><div class="think-q">为什么 StoreLoad 屏障最重要？因为"先写后读"是唯一会被 CPU 自由重排的组合——写操作还没刷到主内存，读操作就去读旧值，这是最常见的可见性问题。</div></div>
+</section>
+
+<!-- ═══════════════ 第6站：DCL 单例 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>DCL 单例为什么一定要加 volatile？</h2></div>
+
+<p>这是 Java 面试中最经典的问题之一。先看 Double-Checked Locking（DCL）的代码：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Singleton.java</b></span></div>
+<pre><code><span class="k">public class</span> <span class="t">Singleton</span> {
+    <span class="k">private static volatile</span> <span class="t">Singleton</span> instance; <span class="c">// 必须 volatile！</span>
+
+    <span class="k">public static</span> <span class="t">Singleton</span> <span class="n">getInstance</span>() {
+        <span class="k">if</span> (instance == <span class="k">null</span>) {                 <span class="c">// 第一次检查（无锁，快速路径）</span>
+            <span class="k">synchronized</span> (<span class="t">Singleton</span>.<span class="k">class</span>) {
+                <span class="k">if</span> (instance == <span class="k">null</span>) {           <span class="c">// 第二次检查（有锁，防止重复创建）</span>
+                    instance = <span class="k">new</span> <span class="t">Singleton</span>();    <span class="c">// ⚠️ 问题出在这里</span>
+                }
+            }
+        }
+        <span class="k">return</span> instance;
+    }
+}</code></pre>
+</div>
+
+<p>问题出在 <code>instance = new Singleton()</code> 这一行。它不是原子操作——字节码层面它包含 3 条指令：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>new Singleton() 的字节码</b></span></div>
+<pre><code><span class="n">new</span>        <span class="c">// ① 分配内存空间</span>
+<span class="n">dup</span>
+<span class="n">invokespecial</span> <span class="c">// ② 调用构造方法初始化对象</span>
+<span class="n">putstatic</span>   <span class="c">// ③ 把引用赋值给 instance 变量</span></code></pre>
+</div>
+
+<p>在正常顺序下，执行顺序是 ① → ② → ③。但编译器和 CPU 可能将 ② 和 ③ 重排为 ① → ③ → ②：</p>
+
+<table class="nb-table">
+<thead><tr><th>步骤</th><th>正常顺序</th><th>重排后的顺序</th></tr></thead>
+<tbody>
+<tr><td>①</td><td>分配内存</td><td>分配内存</td></tr>
+<tr><td>②</td><td>初始化对象</td><td><strong>把引用赋给 instance</strong>（对象还没初始化！）</td></tr>
+<tr><td>③</td><td>把引用赋给 instance</td><td><strong>初始化对象</strong></td></tr>
+</tbody>
+</table>
+
+<p>重排之后的灾难场景：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DCL 失败场景</b> · 时间线</span></div>
+<pre><code><span class="c">// 线程 A 执行 getInstance()</span>
+T1: 分配内存
+T2: instance = 引用          <span class="c">// 引用不为 null 了！但对象还没初始化</span>
+
+<span class="c">// 线程 B 执行 getInstance()</span>
+T3: <span class="k">if</span> (instance == <span class="k">null</span>)   <span class="c">// false！跳过 synchronized 块</span>
+T4: <span class="k">return</span> instance          <span class="c">// 返回了一个半初始化的对象 → NPE 或逻辑错误</span>
+
+<span class="c">// 线程 A 继续</span>
+T5: 初始化对象               <span class="c">// 但线程 B 已经拿到了未初始化的引用</span></code></pre>
+</div>
+
+<p><strong>volatile 如何解决这个问题？</strong> 加入 volatile 后，<code>putstatic</code>（volatile write）之前会插入 StoreStore 屏障，<strong>阻止 ② 和 ③ 重排</strong>。保证其他线程看到 instance != null 时，对象一定已经初始化完毕。</p>
+
+<div class="crack"><span class="crack-label">面试金句</span>DCL 不加 volatile 在 x86 上"可能"不会出问题（因为 x86 不做 Store-Store 重排），但在 ARM 等弱内存模型架构上必然出问题。面试时回答"必须加"，并解释指令重排的原因。</div>
+</section>
+
+<!-- ═══════════════ 第7站：适用场景 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>volatile 的适用场景与不适用场景</h2></div>
+
+<p>知道什么时候<strong>用</strong> volatile 是基本功，知道什么时候<strong>不用</strong> volatile 才是功力。</p>
+
+<p><strong>适合用 volatile 的场景：</strong></p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景 1：状态标志位</b></span></div>
+<pre><code><span class="k">volatile boolean</span> running = <span class="k">true</span>;
+
+<span class="c">// 工作线程</span>
+<span class="k">while</span> (running) {
+    <span class="c">// 干活...</span>
+}
+
+<span class="c">// 管理线程</span>
+running = <span class="k">false</span>; <span class="c">// 工作线程下次循环时一定能看到 false</span></code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景 2：一次性安全发布</b></span></div>
+<pre><code><span class="k">volatile</span> <span class="t">Config</span> config;
+
+<span class="c">// 初始化线程</span>
+<span class="t">Config</span> c = <span class="k">new</span> <span class="t">Config</span>(loadFromFile()); <span class="c">// 构造完成</span>
+config = c;  <span class="c">// volatile write：保证其他线程看到 config != null 时，Config 内部字段也已初始化</span>
+
+<span class="c">// 其他线程</span>
+<span class="k">if</span> (config != <span class="k">null</span>) {
+    config.getPort(); <span class="c">// 一定能读到正确的值</span>
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景 3：DCL 单例模式</b></span></div>
+<pre><code><span class="c">// 见第 6 站，volatile 防止指令重排导致半初始化对象</span></code></pre>
+</div>
+
+<p><strong>不适合用 volatile 的场景：</strong></p>
+
+<table class="nb-table">
+<thead><tr><th>场景</th><th>问题</th><th>正确方案</th></tr></thead>
+<tbody>
+<tr><td>计数器 count++</td><td>读-改-写不是原子的</td><td><code>AtomicInteger</code> 或 <code>synchronized</code></td></tr>
+<tr><td>条件检查后修改<br><code>if(!map.containsKey(k)) map.put(k,v)</code></td><td>检查和修改之间可能被其他线程插入</td><td><code>ConcurrentHashMap.putIfAbsent()</code></td></tr>
+<tr><td>多个变量的联合更新<br><code>x=1; y=2;</code></td><td>volatile 只保证单个变量的可见性</td><td><code>synchronized</code> 块</td></tr>
+</tbody>
+</table>
+
+<p><strong>volatile vs AtomicXxx：</strong></p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>对比</b></span></div>
+<pre><code><span class="c">// volatile：只保证可见性和有序性，适合简单的读写</span>
+<span class="k">volatile int</span> flag = <span class="n">0</span>;
+flag = <span class="n">1</span>;              <span class="c">// ✅ 单次写，安全</span>
+<span class="k">int</span> x = flag;          <span class="c">// ✅ 单次读，安全</span>
+flag++;                <span class="c">// ❌ 读-改-写，不安全</span>
+
+<span class="c">// AtomicInteger：基于 CAS，保证原子性 + 可见性</span>
+<span class="t">AtomicInteger</span> count = <span class="k">new</span> <span class="t">AtomicInteger</span>(<span class="n">0</span>);
+count.incrementAndGet(); <span class="c">// ✅ CAS 循环，原子操作</span>
+count.compareAndSet(<span class="n">0</span>, <span class="n">1</span>); <span class="c">// ✅ CAS，原子操作</span></code></pre>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">选择原则</span>单次读或单次写 → volatile。需要读-改-写（CAS）→ AtomicXxx。多个操作需要整体原子性 → synchronized。</div>
+</section>
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结：volatile 的完整画像</h2></div>
+
+<p>用一张表把 volatile 的所有特性收拢起来：</p>
+
+<table class="nb-table">
+<thead><tr><th>特性</th><th>是否保证</th><th>实现机制</th></tr></thead>
+<tbody>
+<tr><td>可见性</td><td><strong>是</strong></td><td>volatile write 刷回主内存 + 通知其他核心缓存失效；volatile read 使缓存失效 + 重新读取</td></tr>
+<tr><td>有序性</td><td><strong>是</strong></td><td>插入内存屏障（StoreStore、StoreLoad、LoadLoad、LoadStore），阻止屏障两侧的指令重排</td></tr>
+<tr><td>原子性</td><td><strong>否</strong></td><td>只对单次读/单次写保证原子性（32 位 JVM 上的 long/double 除外），复合操作不安全</td></tr>
+</tbody>
+</table>
+
+<p><strong>volatile 相关的 happens-before 规则：</strong></p>
+
+<div class="formula">
+规则 1：对同一个 volatile 变量，线程 A 的 write happens-before 线程 B 的 read<br>
+规则 2：volatile write 之前的所有操作 happens-before volatile write<br>
+规则 3：volatile read happens-before volatile read 之后的所有操作<br>
+规则 4（传递性）：由规则 1+2+3，A 写之前的操作 → 对 B 读之后可见
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>面试回答模板</b></span></div>
+<pre><code><span class="c">"volatile 保证可见性和有序性，不保证原子性。</span>
+
+<span class="c"> 可见性：volatile write 会立即刷回主内存，并让其他核心的缓存行失效；</span>
+<span class="c">         volatile read 会使本地缓存失效，从主内存重新加载。</span>
+
+<span class="c"> 有序性：通过在操作前后插入内存屏障，阻止编译器和 CPU 对屏障两侧的指令重排。</span>
+<span class="c">         例如 DCL 单例中，volatile 阻止了对象创建时 '赋值引用' 和 '初始化' 的重排。</span>
+
+<span class="c"> 不保证原子性：count++ 是读-改-写三步操作，volatile 只保证读到的值是最新的，</span>
+<span class="c">              但三步之间可能被其他线程干扰，导致更新丢失。应该用 AtomicInteger。"</span></code></pre>
+</div>
+
+<div class="recap">
+<strong>本路线回顾：</strong>
+<ul>
+  <li><strong>第 1 站</strong>——面试官的开场白：volatile 保证什么？不保证什么？</li>
+  <li><strong>第 2 站</strong>——可见性：缓存失效 + 主内存刷新</li>
+  <li><strong>第 3 站</strong>——有序性：happens-before 阻止指令重排</li>
+  <li><strong>第 4 站</strong>——不保证原子性：count++ 的 3 步可以被交错</li>
+  <li><strong>第 5 站</strong>——内存屏障：StoreStore / StoreLoad / LoadLoad / LoadStore</li>
+  <li><strong>第 6 站</strong>——DCL 单例：new 操作的 3 条指令可能被重排</li>
+  <li><strong>第 7 站</strong>——适用场景：标志位、安全发布、DCL；不适用：复合操作</li>
+  <li><strong>第 8 站</strong>——总结：特性表 + happens-before 规则 + 面试回答模板</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

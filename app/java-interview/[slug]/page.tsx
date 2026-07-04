@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getJavaContent, getJavaArticle, JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume } from "@/lib/content";
+import { getJavaContent, getJavaArticle, hasJavaContent, JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume } from "@/lib/content";
 
 type Props = { params: Promise<{ slug: string }> };
+
+const ZH = ["", "一", "二", "三", "四", "五", "六", "七"];
 
 export function generateStaticParams() {
   const seen = new Set<string>();
@@ -26,7 +28,7 @@ export default async function JavaArticlePage({ params }: Props) {
   if (!meta) notFound();
 
   const content = getJavaContent(decoded);
-  if (!content) notFound();
+  const ready = content !== null;
 
   const vol = JAVA_VOLUMES.find((v) => v.num === meta.volume);
   const idx = JAVA_ARTICLES.findIndex((a) => a.slug === decoded);
@@ -105,7 +107,7 @@ export default async function JavaArticlePage({ params }: Props) {
 
             <header style={{ marginBottom: "32px" }}>
               <p style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "6px", fontFamily: "var(--mono)", fontSize: "12px", fontWeight: 700, letterSpacing: "0.15em", color: "var(--accent)", marginBottom: "12px" }}>
-                JAVA · 卷{getZH(meta.volume)} · {vol?.title || ""}
+                JAVA · 卷{ZH[meta.volume]} · {vol?.title || ""}
               </p>
               <h1 style={{ fontFamily: "'AlimamaShuHeiTi', var(--sans)", fontSize: "clamp(24px, 6vw, 40px)", fontWeight: 900, color: "var(--ink)", lineHeight: 1.2, wordBreak: "break-word" }}>
                 {meta.title}
@@ -117,7 +119,51 @@ export default async function JavaArticlePage({ params }: Props) {
               </div>
             </header>
 
-            <div className="lesson-body" dangerouslySetInnerHTML={{ __html: content }} />
+            {ready ? (
+              /* ─── 正文内容 ─── */
+              <div className="lesson-body" dangerouslySetInnerHTML={{ __html: content }} />
+            ) : (
+              /* ─── 即将更新占位 ─── */
+              <div style={{
+                background: "var(--card-bg, #FFFDF7)",
+                border: "2px dashed var(--line, #E8E3D5)",
+                borderRadius: "16px",
+                padding: "48px 40px",
+                textAlign: "center",
+              }}>
+                <div style={{ fontSize: "48px", marginBottom: "16px" }}>📝</div>
+                <h2 style={{ fontSize: "20px", fontWeight: 800, color: "var(--ink, #1C1C1C)", marginBottom: "12px" }}>
+                  内容正在编写中
+                </h2>
+                <p style={{ fontSize: "15px", color: "var(--ink-soft, #1C1C1C)/0.6)", lineHeight: 1.7, maxWidth: "480px", margin: "0 auto 24px" }}>
+                  {meta.desc}
+                </p>
+                <div style={{ display: "inline-flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+                  <span style={{
+                    fontSize: "12px", fontWeight: 700, padding: "4px 12px", borderRadius: "999px",
+                    background: "#FAC94A20", color: "#B8860B",
+                  }}>
+                    面试频率：{meta.interviewFreq}
+                  </span>
+                  <span style={{
+                    fontSize: "12px", fontWeight: 700, padding: "4px 12px", borderRadius: "999px",
+                    background: "#1C1C1C08", color: "var(--ink-soft, #666)",
+                  }}>
+                    难度：{meta.difficulty}
+                  </span>
+                </div>
+                <div style={{ marginTop: "32px" }}>
+                  <Link href="/java-basics/" style={{
+                    display: "inline-flex", alignItems: "center", gap: "6px",
+                    padding: "10px 24px", borderRadius: "999px",
+                    border: "2px solid var(--line, #E8E3D5)",
+                    color: "var(--ink-soft)", fontWeight: 700, fontSize: "13px", textDecoration: "none",
+                  }}>
+                    ← 返回文章列表
+                  </Link>
+                </div>
+              </div>
+            )}
 
             <nav className="article-pager">
               {prev ? (
@@ -137,5 +183,3 @@ export default async function JavaArticlePage({ params }: Props) {
     </div>
   );
 }
-
-function getZH(n: number): string { return ["", "一", "二", "三", "四", "五"][n] || String(n); }

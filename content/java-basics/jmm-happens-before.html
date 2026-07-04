@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JMM 内存模型</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：你能解释一下为什么在多线程环境下，一个线程修改了变量，另一个线程可能看不到吗？</h2></div>
+<div class="think"><div class="think-q">"你写了 <code>flag = true</code>，另一个线程却一直读到 <code>false</code>——是 Bug 吗？不是。这是 Java 内存模型（JMM）在起作用。" —— 面试官想考察的不是你会不会用 synchronized，而是你是否真正理解并发编程的底层规则。</div></div>
+<p>在日常开发中，我们写多线程代码时往往依赖 <code>synchronized</code>、<code>volatile</code>、<code>ReentrantLock</code> 等工具。但如果追问"为什么加了 volatile 就能保证可见性？""为什么双重检查锁必须加 volatile？"——很多人就答不上来了。</p>
+<p>这些问题的根源都指向同一个东西：<strong>JMM（Java Memory Model，Java 内存模型）</strong>，即 JSR-133 规范。它定义了 Java 程序中各种内存操作之间的 <strong>happens-before</strong> 关系——这是理解一切并发问题的理论基础。</p>
+<p>本文将沿着以下路线，逐层深入：</p>
+<ul>
+  <li><strong>主内存与工作内存</strong> —— JMM 的抽象架构</li>
+  <li><strong>可见性、原子性、有序性</strong> —— 并发编程的三大问题</li>
+  <li><strong>happens-before 八条规则</strong> —— JMM 的核心法则</li>
+  <li><strong>内存屏障</strong> —— volatile 背后的硬件机制</li>
+  <li><strong>指令重排序</strong> —— 编译器和 CPU 的"自作主张"</li>
+  <li><strong>JMM vs JVM 内存模型</strong> —— 澄清最常见的概念混淆</li>
+</ul>
+<div class="takeaway"><div class="takeaway-label">核心观点</div>理解 JMM 不是为了应付面试——它是你写出正确并发程序的唯一理论基础。不懂 JMM，你写的多线程代码就是"碰巧能跑"。</div>
+</section>
+
+<!-- ═══════════════ 第2站：主内存与工作内存 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>主内存与工作内存</h2></div>
+<p>JMM 在逻辑上把内存划分为两个区域：<strong>主内存（Main Memory）</strong>和<strong>工作内存（Working Memory）</strong>。</p>
+<ul>
+  <li><strong>主内存</strong>：所有线程共享，存放所有变量（实例字段、静态字段、数组元素）</li>
+  <li><strong>工作内存</strong>：每个线程私有，是主内存中变量的<strong>本地副本</strong>（类比 CPU 缓存）</li>
+</ul>
+<p>线程对变量的所有操作（读/写）都必须在自己的工作内存中进行，不能直接操作主内存。这就意味着：</p>
+<ol>
+  <li>读变量：从主内存拷贝到工作内存 → 使用</li>
+  <li>写变量：在工作内存中修改 → 刷回主内存</li>
+</ol>
+<p>问题在于——<strong>刷回的时机不确定</strong>。如果一个线程修改了变量但没有及时刷回主内存，或者另一个线程没有从主内存重新加载，就会出现"看不到"的情况。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 720 340" role="img" aria-label="JMM 主内存与工作内存架构">
+  <text x="360" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">JMM 内存架构：主内存与工作内存</text>
+  <!-- 主内存 -->
+  <rect x="200" y="45" width="320" height="90" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="360" y="70" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">主内存 (Main Memory)</text>
+  <rect x="230" y="82" width="60" height="36" rx="4" fill="#fff" stroke="#C2410C" stroke-width="1"/>
+  <text x="260" y="105" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">x = 10</text>
+  <rect x="310" y="82" width="60" height="36" rx="4" fill="#fff" stroke="#C2410C" stroke-width="1"/>
+  <text x="340" y="105" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">flag=F</text>
+  <rect x="390" y="82" width="60" height="36" rx="4" fill="#fff" stroke="#C2410C" stroke-width="1"/>
+  <text x="420" y="105" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">cnt = 5</text>
+  <!-- Thread 1 -->
+  <rect x="30" y="200" width="200" height="120" rx="8" fill="#EDE3C4" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="130" y="225" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Thread-1 工作内存</text>
+  <rect x="55" y="240" width="60" height="32" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="85" y="261" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">x = 10</text>
+  <rect x="135" y="240" width="60" height="32" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="165" y="261" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C" font-weight="700">flag=T</text>
+  <text x="130" y="305" text-anchor="middle" font-size="10" fill="#8C8676">CPU Core 0 / L1 Cache</text>
+  <!-- Thread 2 -->
+  <rect x="490" y="200" width="200" height="120" rx="8" fill="#EDE3C4" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="590" y="225" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Thread-2 工作内存</text>
+  <rect x="515" y="240" width="60" height="32" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="545" y="261" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">x = 10</text>
+  <rect x="595" y="240" width="60" height="32" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="625" y="261" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F" font-weight="700">flag=F</text>
+  <text x="590" y="305" text-anchor="middle" font-size="10" fill="#8C8676">CPU Core 1 / L1 Cache</text>
+  <!-- 箭头 -->
+  <defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <line x1="130" y1="140" x2="130" y2="195" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="108" y="172" font-size="9" fill="#3E6B8F">load/store</text>
+  <line x1="590" y1="140" x2="590" y2="195" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="568" y="172" font-size="9" fill="#3E6B8F">load/store</text>
+  <!-- 不一致标注 -->
+  <line x1="200" y1="255" x2="490" y2="255" stroke="#C2410C" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="345" y="248" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">flag 不一致！Thread-2 看到旧值</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>Thread-1 将 flag 改为 true 并刷回工作内存，但 Thread-2 的工作内存仍是旧值 false——这就是可见性问题</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">面试追问</div>"工作内存"并不是真实的 JVM 内存区域，而是 JMM 的<strong>抽象概念</strong>。它的物理对应是 CPU 寄存器、L1/L2 缓存以及编译器优化产生的临时存储。</div>
+</section>
+
+<!-- ═══════════════ 第3站：三大问题 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>三大问题：可见性、原子性、有序性</h2></div>
+<p>JMM 的设计背景是：多线程环境下会出现三类问题。每一种都有经典的代码案例。</p>
+
+<h3>1. 可见性（Visibility）</h3>
+<p>一个线程的修改对另一个线程不可见。根源：工作内存未及时同步。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>VisibilityDemo.java</b> · 可见性问题</span></div>
+<pre><code><span class="k">class</span> <span class="t">VisibilityDemo</span> {
+    <span class="k">static boolean</span> flag = <span class="k">false</span>;
+    <span class="k">static int</span> number = <span class="n">0</span>;
+
+    <span class="c">// Thread-1</span>
+    <span class="k">static void</span> writer() {
+        number = <span class="n">42</span>;    <span class="c">// 写入</span>
+        flag = <span class="k">true</span>;    <span class="c">// 标志位</span>
+    }
+
+    <span class="c">// Thread-2</span>
+    <span class="k">static void</span> reader() {
+        <span class="k">if</span> (flag) {              <span class="c">// 看到了 flag=true</span>
+            System.out.println(number);  <span class="c">// 但 number 可能还是 0！</span>
+        }
+    }
+}</code></pre>
+</div>
+<p>没有 volatile 或锁的保护，即使 Thread-2 看到 <code>flag=true</code>，也可能看到 <code>number=0</code>——因为指令可能被重排序，或者 number 还没从工作内存刷回主内存。</p>
+<p>JMM 定义了 8 种内存操作指令来规范主内存和工作内存之间的交互：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>JMM 8 种内存操作</b> · 完整交互协议</span></div>
+<pre><code><span class="c">// 主内存操作：</span>
+<span class="k">lock</span>      <span class="c">→ 锁定主内存中的变量（标识为线程独占）</span>
+<span class="k">unlock</span>    <span class="c">→ 解锁主内存中的变量</span>
+<span class="k">read</span>      <span class="c">→ 从主内存读取变量值（传输到工作内存）</span>
+<span class="k">write</span>     <span class="c">→ 将工作内存的值写入主内存</span>
+
+<span class="c">// 工作内存操作：</span>
+<span class="k">load</span>      <span class="c">→ 将 read 得到的值放入工作内存副本</span>
+<span class="k">store</span>     <span class="c">→ 将工作内存的值传送到主内存（配合 write）</span>
+<span class="k">use</span>       <span class="c">→ 将工作内存的值传递给执行引擎</span>
+<span class="k">assign</span>    <span class="c">→ 将执行引擎的值赋给工作内存变量</span></code></pre>
+</div>
+<p>一次完整的变量读取：<code>read → load → use</code>；一次完整的变量写入：<code>assign → store → write</code>。问题就出在 assign 到 write 之间存在延迟。</p>
+
+<h3>2. 原子性（Atomicity）</h3>
+<p>复合操作不是原子的，中间可能被打断。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AtomicityDemo.java</b> · i++ 不是原子操作</span></div>
+<pre><code><span class="k">class</span> <span class="t">Counter</span> {
+    <span class="k">static int</span> count = <span class="n">0</span>;
+    <span class="c">// i++ 实际是三步：read → increment → write</span>
+    <span class="k">static void</span> increment() { count++; }
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">Thread</span>[] threads = <span class="k">new</span> <span class="t">Thread</span>[<span class="n">100</span>];
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">100</span>; i++) {
+            threads[i] = <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+                <span class="k">for</span> (<span class="k">int</span> j = <span class="n">0</span>; j &lt; <span class="n">1000</span>; j++) increment();
+            });
+            threads[i].start();
+        }
+        <span class="k">for</span> (<span class="t">Thread</span> t : threads) t.join();
+        System.out.println(count);  <span class="c">// 期望 100000，实际 &lt; 100000</span>
+    }
+}</code></pre>
+</div>
+
+<h3>3. 有序性（Ordering）</h3>
+<p>编译器和 CPU 可能对指令进行重排序，导致程序执行顺序与代码顺序不一致。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>OrderingDemo.java</b> · 指令重排序</span></div>
+<pre><code><span class="k">class</span> <span class="t">ReorderDemo</span> {
+    <span class="k">static int</span> a = <span class="n">0</span>, b = <span class="n">0</span>;
+    <span class="k">static int</span> x = <span class="n">0</span>, y = <span class="n">0</span>;
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">Thread</span> t1 = <span class="k">new</span> <span class="t">Thread</span>(() -&gt; { a = <span class="n">1</span>; x = b; });  <span class="c">// 可能被重排为 x=b; a=1;</span>
+        <span class="t">Thread</span> t2 = <span class="k">new</span> <span class="t">Thread</span>(() -&gt; { b = <span class="n">1</span>; y = a; });  <span class="c">// 可能被重排为 y=a; b=1;</span>
+        t1.start(); t2.start(); t1.join(); t2.join();
+        <span class="c">// 理论上 x=0, y=0 是可能出现的！</span>
+    }
+}</code></pre>
+</div>
+
+<table class="nb-table">
+  <thead><tr><th>问题</th><th>根源</th><th>解决方案</th></tr></thead>
+  <tbody>
+    <tr><td>可见性</td><td>工作内存未及时同步</td><td>volatile、synchronized、final</td></tr>
+    <tr><td>原子性</td><td>复合操作非原子</td><td>synchronized、AtomicInteger、Lock</td></tr>
+    <tr><td>有序性</td><td>编译器/CPU 重排序</td><td>volatile、happens-before 规则</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第4站：happens-before 八条规则 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>happens-before 八条规则</h2></div>
+<p><strong>happens-before</strong> 是 JMM 的核心概念。如果操作 A happens-before 操作 B，那么 A 的结果对 B <strong>可见</strong>。JMM 定义了八条规则：</p>
+
+<div class="formula"><strong>happens-before 定义</strong><br/>若 A happens-before B，则 A 产生的内存写入，在 B 执行时一定已经刷到主内存并对 B 可见。</div>
+
+<h3>规则 1：程序顺序规则（Program Order Rule）</h3>
+<p>同一个线程内，前面的操作 happens-before 后面的操作。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则1</b> · 程序顺序</span></div>
+<pre><code><span class="k">int</span> a = <span class="n">1</span>;   <span class="c">// A</span>
+<span class="k">int</span> b = <span class="n">2</span>;   <span class="c">// B</span>
+<span class="c">// 在单线程中：A happens-before B</span>
+<span class="c">// 编译器/CPU 可以重排序，但必须保证单线程结果一致（as-if-serial）</span></code></pre>
+</div>
+
+<h3>规则 2：监视器锁规则（Monitor Lock Rule）</h3>
+<p>对同一个锁的 unlock 操作 happens-before 后续的 lock 操作。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则2</b> · synchronized 保证可见性</span></div>
+<pre><code><span class="k">class</span> <span class="t">SyncExample</span> {
+    <span class="k">int</span> value = <span class="n">0</span>;
+    <span class="k">synchronized void</span> set(<span class="k">int</span> v) { value = v; }   <span class="c">// unlock happens-before...</span>
+    <span class="k">synchronized int</span> get() { <span class="k">return</span> value; }       <span class="c">// ...后续 lock</span>
+}
+<span class="c">// Thread-1 调用 set(42) → unlock</span>
+<span class="c">// Thread-2 调用 get()  → lock → 一定看到 42</span></code></pre>
+</div>
+
+<h3>规则 3：volatile 变量规则（Volatile Variable Rule）</h3>
+<p>对 volatile 变量的写操作 happens-before 后续对该变量的读操作。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则3</b> · volatile 保证可见性</span></div>
+<pre><code><span class="k">volatile boolean</span> ready = <span class="k">false</span>;
+<span class="k">int</span> data = <span class="n">0</span>;
+
+<span class="c">// Thread-1</span>
+data = <span class="n">42</span>;          <span class="c">// A</span>
+ready = <span class="k">true</span>;       <span class="c">// B (volatile write)</span>
+
+<span class="c">// Thread-2</span>
+<span class="k">if</span> (ready) {        <span class="c">// C (volatile read) → B happens-before C</span>
+    print(data);    <span class="c">// 一定看到 42（A→B→C 传递性）</span>
+}</code></pre>
+</div>
+
+<h3>规则 4：线程启动规则（Thread Start Rule）</h3>
+<p><code>Thread.start()</code> 调用 happens-before 被启动线程中的任何操作。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则4</b> · Thread.start()</span></div>
+<pre><code><span class="k">int</span> config = loadConfig();
+<span class="t">Thread</span> worker = <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+    <span class="c">// 这里一定能看到 config 的值</span>
+    <span class="c">// start() happens-before 此线程中的任何操作</span>
+    process(config);
+});
+worker.start();  <span class="c">// 这个调用 happens-before worker 线程内的所有代码</span></code></pre>
+</div>
+
+<h3>规则 5：线程终止规则（Thread Join Rule）</h3>
+<p>线程中的所有操作 happens-before 其他线程成功从该线程的 <code>join()</code> 返回。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则5</b> · Thread.join()</span></div>
+<pre><code><span class="t">Thread</span> worker = <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+    result = compute();  <span class="c">// 计算结果</span>
+});
+worker.start();
+worker.join();          <span class="c">// join 返回后</span>
+print(result);          <span class="c">// 一定能看到 worker 线程中写入的 result</span></code></pre>
+</div>
+
+<h3>规则 6：线程中断规则（Thread Interrupt Rule）</h3>
+<p>对线程 <code>interrupt()</code> 的调用 happens-before 被中断线程检测到中断事件。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则6</b> · interrupt()</span></div>
+<pre><code><span class="t">Thread</span> t = <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+    <span class="k">while</span> (!<span class="t">Thread</span>.currentThread().isInterrupted()) {
+        <span class="c">// 当 interrupt() 被调用，isInterrupted() 一定返回 true</span>
+        <span class="c">// interrupt() happens-before isInterrupted() 检测到中断</span>
+    }
+});
+t.start();
+t.interrupt();  <span class="c">// 中断信号一定对目标线程可见</span></code></pre>
+</div>
+
+<h3>规则 7：终结器规则（Finalizer Rule）</h3>
+<p>对象的构造函数 happens-before 该对象的 <code>finalize()</code> 方法。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则7</b> · Finalizer</span></div>
+<pre><code><span class="k">class</span> <span class="t">Resource</span> {
+    <span class="t">FileInputStream</span> stream;
+    <span class="t">Resource</span>() { stream = <span class="k">new</span> <span class="t">FileInputStream</span>(<span class="s">"data.bin"</span>); }  <span class="c">// 构造</span>
+    <span class="k">protected void</span> finalize() {
+        <span class="c">// 一定能看到构造函数中初始化的 stream</span>
+        <span class="c">// 构造 happens-before finalize</span>
+        stream.close();
+    }
+}
+<span class="c">// 注：Java 9+ 已弃用 finalize，推荐 Cleaner / try-with-resources</span></code></pre>
+</div>
+
+<h3>规则 8：传递性（Transitivity）</h3>
+<p>如果 A happens-before B，B happens-before C，那么 A happens-before C。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>规则8</b> · 传递性</span></div>
+<pre><code><span class="c">// 这是 happens-before 关系最重要的性质</span>
+<span class="c">// volatile 的经典用法就是利用传递性：</span>
+<span class="k">int</span> a = <span class="n">1</span>;            <span class="c">// A</span>
+<span class="k">int</span> b = <span class="n">2</span>;            <span class="c">// B</span>
+<span class="k">volatile boolean</span> flag = <span class="k">true</span>;  <span class="c">// C（volatile write）</span>
+
+<span class="c">// A → B → C (程序顺序) → volatile read → 后续操作</span>
+<span class="c">// 传递性保证：读到 flag=true 的线程，一定能看到 a=1, b=2</span></code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">关键</div>八条规则中，程序顺序规则、监视器锁规则、volatile 变量规则是日常用得最多的三条。传递性则是理解 volatile "piggyback" 效应的关键——volatile 写之前的所有写操作，对后续 volatile 读都可见。</div>
+</section>
+
+<!-- ═══════════════ 第5站：内存屏障 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>内存屏障（Memory Barriers）</h2></div>
+<p>happens-before 是规范层面的保证，而<strong>内存屏障</strong>是硬件层面的实现机制。JMM 通过四种内存屏障来控制指令顺序和内存可见性：</p>
+
+<table class="nb-table">
+  <thead><tr><th>屏障类型</th><th>作用</th><th>禁止的重排序</th></tr></thead>
+  <tbody>
+    <tr><td><strong>LoadLoad</strong></td><td>确保 Load1 在 Load2 之前完成</td><td>Load1 ↔ Load2</td></tr>
+    <tr><td><strong>LoadStore</strong></td><td>确保 Load 在 Store 之前完成</td><td>Load1 ↔ Store2</td></tr>
+    <tr><td><strong>StoreLoad</strong></td><td>确保 Store 在 Load 之前完成（万能屏障）</td><td>Store1 ↔ Load2</td></tr>
+    <tr><td><strong>StoreStore</strong></td><td>确保 Store1 在 Store2 之前完成</td><td>Store1 ↔ Store2</td></tr>
+  </tbody>
+</table>
+
+<p><strong>volatile 的底层实现就是内存屏障：</strong></p>
+<ul>
+  <li><strong>volatile 写</strong>之后插入 <code>StoreStore</code> + <code>StoreLoad</code> 屏障</li>
+  <li><strong>volatile 读</strong>之前插入 <code>LoadLoad</code> + <code>LoadStore</code> 屏障</li>
+</ul>
+
+<figure class="fig">
+<svg viewBox="0 0 720 400" role="img" aria-label="volatile 内存屏障位置">
+  <text x="360" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">volatile 读写与内存屏障位置</text>
+  <!-- volatile write 侧 -->
+  <text x="180" y="55" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">volatile 写操作</text>
+  <rect x="80" y="70" width="200" height="36" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="180" y="93" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">普通写操作 (Store)</text>
+  <rect x="80" y="116" width="200" height="36" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="180" y="139" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">普通写操作 (Store)</text>
+  <rect x="80" y="165" width="200" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="180" y="185" text-anchor="middle" font-size="11" fill="#92400E" font-weight="600">StoreStore 屏障</text>
+  <rect x="80" y="208" width="200" height="40" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/>
+  <text x="180" y="233" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C" font-weight="700">volatile 写</text>
+  <rect x="80" y="260" width="200" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="180" y="280" text-anchor="middle" font-size="11" fill="#92400E" font-weight="600">StoreLoad 屏障</text>
+  <rect x="80" y="303" width="200" height="36" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="180" y="326" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">普通读操作 (Load)</text>
+  <!-- volatile read 侧 -->
+  <text x="540" y="55" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">volatile 读操作</text>
+  <rect x="440" y="70" width="200" height="36" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="540" y="93" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">普通读操作 (Load)</text>
+  <rect x="440" y="118" width="200" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="540" y="138" text-anchor="middle" font-size="11" fill="#92400E" font-weight="600">LoadLoad 屏障</text>
+  <rect x="440" y="158" width="200" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="540" y="178" text-anchor="middle" font-size="11" fill="#92400E" font-weight="600">LoadStore 屏障</text>
+  <rect x="440" y="200" width="200" height="40" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/>
+  <text x="540" y="225" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C" font-weight="700">volatile 读</text>
+  <rect x="440" y="253" width="200" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="540" y="273" text-anchor="middle" font-size="11" fill="#92400E" font-weight="600">LoadLoad 屏障</text>
+  <rect x="440" y="293" width="200" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="540" y="313" text-anchor="middle" font-size="11" fill="#92400E" font-weight="600">LoadStore 屏障</text>
+  <rect x="440" y="336" width="200" height="36" rx="4" fill="#fff" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="540" y="359" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C1C1C">普通写操作 (Store)</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>volatile 写前后插入 StoreStore + StoreLoad 屏障；volatile 读后插入 LoadLoad + LoadStore 屏障——这就是 volatile 能保证可见性和禁止重排序的硬件实现</figcaption>
+</figure>
+
+<p>在 x86 架构上，<code>StoreLoad</code> 屏障通常由 <code>lock</code> 前缀指令实现（如 <code>lock addl $0, (%rsp)</code>），它会把当前处理器的写缓冲区（Store Buffer）全部刷新到缓存，从而保证可见性。</p>
+<p>值得注意的是，不同 CPU 架构的内存模型强弱不同：</p>
+<table class="nb-table">
+  <thead><tr><th>架构</th><th>内存模型</th><th>特点</th></tr></thead>
+  <tbody>
+    <tr><td><strong>x86/x64</strong></td><td>TSO（Total Store Order）</td><td>强内存模型，仅允许 Store→Load 重排</td></tr>
+    <tr><td><strong>ARM</strong></td><td>弱内存模型</td><td>几乎所有重排都可能，需要更多屏障</td></tr>
+    <tr><td><strong>POWER</strong></td><td>弱内存模型</td><td>比 ARM 更宽松</td></tr>
+  </tbody>
+</table>
+<p>这也是为什么 JMM 要在语言层面定义 happens-before——<strong>屏蔽底层硬件差异</strong>。Java 程序只要在 JMM 规则下编写，就能在 x86、ARM、RISC-V 上得到一致的行为。</p>
+<p><strong>volatile 读写性能差异：</strong>volatile 读在 x86 上几乎没有额外开销（因为 x86 本身就保证读可见性），但 volatile 写需要刷新 Store Buffer，开销与普通写相比高出一个数量级。在高频写场景下，应考虑用 <code>VarHandle</code> 的 opaque/acquire-release 模式代替。</p>
+
+<div class="crack"><div class="crack-label">深度追问</div>为什么 volatile 写之后需要 <code>StoreLoad</code> 屏障？因为写操作之后可能是读操作。如果不加这个屏障，写可能还在 Store Buffer 中没有刷出，后续的读就可能看到旧值。<code>StoreLoad</code> 是四种屏障中开销最大的，这也是 volatile 写比 volatile 读更昂贵的原因。</div>
+</section>
+
+<!-- ═══════════════ 第6站：指令重排序 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>指令重排序</h2></div>
+<p>指令重排序可能发生在三个层面：</p>
+
+<table class="nb-table">
+  <thead><tr><th>层面</th><th>执行者</th><th>示例</th></tr></thead>
+  <tbody>
+    <tr><td>编译器重排序</td><td>javac / JIT</td><td>在不改变单线程语义的前提下调整指令顺序</td></tr>
+    <tr><td>CPU 重排序</td><td>处理器</td><td>乱序执行（Out-of-order Execution）</td></tr>
+    <tr><td>内存系统重排序</td><td>缓存/写缓冲区</td><td>Store Buffer 导致写入延迟可见</td></tr>
+  </tbody>
+</table>
+
+<h3>as-if-serial 语义</h3>
+<p>不管怎么重排序，<strong>单线程</strong>程序的执行结果不能被改变。这叫 <strong>as-if-serial</strong> 语义——"好像"是按顺序执行的。编译器和 CPU 只对单线程负责，多线程的正确性需要程序员通过 happens-before 关系来保证。</p>
+
+<h3>经典案例 1：双重检查锁定（Double-Checked Locking）</h3>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DCL.java</b> · 必须用 volatile</span></div>
+<pre><code><span class="k">class</span> <span class="t">Singleton</span> {
+    <span class="k">private static volatile</span> <span class="t">Singleton</span> instance;  <span class="c">// 必须 volatile！</span>
+
+    <span class="k">public static</span> <span class="t">Singleton</span> getInstance() {
+        <span class="k">if</span> (instance == <span class="k">null</span>) {                  <span class="c">// 第一次检查（无锁）</span>
+            <span class="k">synchronized</span> (<span class="t">Singleton</span>.<span class="k">class</span>) {
+                <span class="k">if</span> (instance == <span class="k">null</span>) {              <span class="c">// 第二次检查（有锁）</span>
+                    instance = <span class="k">new</span> <span class="t">Singleton</span>();     <span class="c">// 问题在这里！</span>
+                }
+            }
+        }
+        <span class="k">return</span> instance;
+    }
+}</code></pre>
+</div>
+<p><strong>为什么必须加 volatile？</strong>因为 <code>new Singleton()</code> 在字节码层面是三步：</p>
+<ol>
+  <li>分配内存空间</li>
+  <li>调用构造函数初始化</li>
+  <li>将引用指向分配的内存</li>
+</ol>
+<p>如果没有 volatile，步骤 2 和 3 可能被重排序为 1→3→2。此时另一个线程检查到 <code>instance != null</code>，但对象还没有初始化完成——<strong>拿到的是半初始化对象</strong>。加了 volatile 后，<code>StoreStore</code> 屏障禁止步骤 2 和 3 重排。</p>
+
+<h3>经典案例 2：延迟初始化</h3>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LazyInit.java</b> · 不安全的延迟初始化</span></div>
+<pre><code><span class="k">class</span> <span class="t">LazyInit</span> {
+    <span class="k">static</span> <span class="t">Resource</span> resource;
+
+    <span class="k">static</span> <span class="t">Resource</span> get() {
+        <span class="k">if</span> (resource == <span class="k">null</span>) {
+            resource = <span class="k">new</span> <span class="t">Resource</span>();  <span class="c">// 非 volatile，可能拿到半初始化对象</span>
+        }
+        <span class="k">return</span> resource;
+    }
+}
+<span class="c">// 解决方案：用 volatile，或用 Holder 内部类（静态内部类延迟加载）</span></code></pre>
+</div>
+
+<div class="think"><div class="think-q">"如果我的对象是 immutable（不可变的），还需要 volatile 吗？" —— 需要。即使对象本身不可变，<strong>引用的赋值</strong>仍然可能被重排序。volatile 保护的是引用本身的可见性和有序性。</div></div>
+</section>
+
+<!-- ═══════════════ 第7站：JMM vs JVM 内存模型 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>JMM vs JVM 内存模型</h2></div>
+<p>这是面试中最容易混淆的概念。很多人把 JMM 和 JVM 内存模型混为一谈，其实它们解决的是完全不同的问题：</p>
+
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>JMM（Java 内存模型）</th><th>JVM 内存模型（运行时数据区）</th></tr></thead>
+  <tbody>
+    <tr><td><strong>规范来源</strong></td><td>JSR-133（JLS 第 17 章）</td><td>JVMS（JVM 规范）</td></tr>
+    <tr><td><strong>核心关注</strong></td><td>多线程间的内存可见性</td><td>JVM 运行时的内存布局</td></tr>
+    <tr><td><strong>关键概念</strong></td><td>happens-before、volatile、原子性</td><td>堆、栈、方法区、程序计数器</td></tr>
+    <tr><td><strong>解决的问题</strong></td><td>线程 A 的写入何时对线程 B 可见</td><td>对象在哪分配、栈帧如何组织</td></tr>
+    <tr><td><strong>类比</strong></td><td>交通规则（谁先走谁后走）</td><td>道路规划（车道、停车场、收费站）</td></tr>
+  </tbody>
+</table>
+
+<p>简单总结：</p>
+<div class="formula"><strong>一句话区分</strong><br/>JMM = 多线程并发的<strong>规则</strong>（什么时候能看到别人的修改）<br/>JVM 内存模型 = 程序运行的<strong>布局</strong>（堆在哪、栈在哪、方法区在哪）</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>面试回答模板</b></span></div>
+<pre><code><span class="c">// 面试官问："请解释一下 Java 的内存模型"</span>
+<span class="c">// 先确认他问的是哪个：</span>
+
+<span class="c">// 如果问的是 JMM（JSR-133）：</span>
+<span class="c">// → 聊 happens-before、volatile、可见性</span>
+
+<span class="c">// 如果问的是 JVM 运行时数据区：</span>
+<span class="c">// → 聊堆（新生代/老年代）、栈、方法区/元空间</span>
+
+<span class="c">// 如果不确定，可以主动区分：</span>
+<span class="c">// "Java 内存模型有两个层面，一个是 JSR-133 定义的</span>
+<span class="c">//  线程间可见性模型，另一个是 JVM 的运行时数据区划分，</span>
+<span class="c">//  您想了解哪方面？"</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">易错点</div>很多博客把"堆/栈/方法区"说成是 JMM 的内容，这是错误的。JMM 只关心主内存和工作内存之间的同步规则，跟堆栈布局完全无关。面试时能主动区分这两个概念，会让面试官对你刮目相看。</div>
+</section>
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结：happens-before 速查与实践指南</h2></div>
+
+<p>以下是 happens-before 八条规则的速查表：</p>
+
+<table class="nb-table">
+  <thead><tr><th>#</th><th>规则</th><th>含义</th><th>实践场景</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>程序顺序</td><td>同一线程内，前 → 后</td><td>单线程代码无需担心</td></tr>
+    <tr><td>2</td><td>监视器锁</td><td>unlock → 后续 lock</td><td>synchronized 保证可见性</td></tr>
+    <tr><td>3</td><td>volatile 变量</td><td>写 → 后续读</td><td>状态标志、双重检查锁</td></tr>
+    <tr><td>4</td><td>线程启动</td><td>start() → 新线程内操作</td><td>传递初始配置给子线程</td></tr>
+    <tr><td>5</td><td>线程终止</td><td>线程内操作 → join() 返回</td><td>获取子线程计算结果</td></tr>
+    <tr><td>6</td><td>线程中断</td><td>interrupt() → 检测中断</td><td>线程间协作停止</td></tr>
+    <tr><td>7</td><td>终结器</td><td>构造函数 → finalize()</td><td>资源清理（已废弃）</td></tr>
+    <tr><td>8</td><td>传递性</td><td>A→B, B→C ⟹ A→C</td><td>volatile piggyback 效应</td></tr>
+  </tbody>
+</table>
+
+<div class="recap"><strong>日常编码实践要点：</strong>
+<ul>
+  <li><strong>共享可变状态</strong>必须用同步机制保护——synchronized、volatile 或 JUC 工具类</li>
+  <li><strong>volatile</strong> 适合一写多读的状态标志，不适合 <code>count++</code> 这类复合操作</li>
+  <li><strong>双重检查锁</strong>（DCL）中的实例变量必须声明为 volatile</li>
+  <li><strong>优先使用不可变对象</strong>——final 字段在构造完成后天然对其他线程可见</li>
+  <li><strong>不要依赖"经验主义"</strong>——"我跑了 100 次都没出问题"不代表代码正确，并发 Bug 可能在生产环境潜伏数月</li>
+</ul>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">终极理解</div>JMM 的本质是一套<strong>契约</strong>：只要你遵守 happens-before 规则编写代码，Java 就保证你的程序在任何硬件、任何 JVM 实现上都能得到正确结果。反之，如果你绕过了这些规则（比如不使用 volatile 就共享可变变量），那你就是在赌——赌编译器不重排、赌 CPU 不乱序、赌缓存一致性协议刚好帮你同步。在复杂的现代硬件上，这个赌大概率会输。</div>
+
+<div class="think"><div class="think-q">面试加分项：能画出主内存/工作内存架构图，能说出 volatile 底层对应的内存屏障类型，能解释 DCL 为什么必须加 volatile，能区分 JMM 和 JVM 内存模型——这四样答出来，面试官基本会给你打高分。</div></div>
+</section>
+
+</main>
+</body>
+</html>

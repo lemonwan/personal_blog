@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JVM 运行时数据区全景</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场——面试官提问 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：JVM 运行时数据区有哪些部分？</h2></div>
+
+<p>几乎所有 JVM 相关的面试题，都会从这个问题开始。它看似简单，却能考察候选人对 Java 内存模型的<strong>全局理解深度</strong>——堆和栈的区别、线程共享与隔离、方法区的演进历史、溢出场景的差异，全都藏在这一个问题里。</p>
+
+<div class="think"><div class="think-q">如果你只能回答"堆、栈、方法区"三个，说明你对 JVM 的理解还停留在入门阶段。完整的运行时数据区包含<strong>六大区域</strong>，外加一块常被忽略的<strong>直接内存</strong>。能不能清晰地说出每个区域的职责、线程共享性、溢出表现，是区分初级和中高级候选人的关键分水岭。</div></div>
+
+<p>JVM 在执行 Java 程序时，会将内存划分成若干个不同的数据区域，每个区域有各自的用途和生命周期。根据 <strong>JVM 规范</strong>，运行时数据区包括：</p>
+
+<table class="nb-table">
+<thead><tr><th>区域</th><th>线程共享</th><th>核心职责</th><th>溢出异常</th></tr></thead>
+<tbody>
+  <tr><td><strong>程序计数器 (PC Register)</strong></td><td>私有</td><td>记录当前线程执行的字节码行号</td><td>唯一不会 OOM 的区域</td></tr>
+  <tr><td><strong>虚拟机栈 (VM Stack)</strong></td><td>私有</td><td>方法调用：局部变量、操作数、返回地址</td><td>StackOverflowError / OOM</td></tr>
+  <tr><td><strong>本地方法栈 (Native Method Stack)</strong></td><td>私有</td><td>Native 方法调用</td><td>StackOverflowError / OOM</td></tr>
+  <tr><td><strong>堆 (Heap)</strong></td><td>共享</td><td>对象实例、数组，GC 的主战场</td><td>OutOfMemoryError</td></tr>
+  <tr><td><strong>方法区 (Method Area)</strong></td><td>共享</td><td>类元信息、常量池、静态变量</td><td>OutOfMemoryError</td></tr>
+  <tr><td><strong>直接内存 (Direct Memory)</strong></td><td>共享</td><td>NIO 堆外内存，零拷贝 IO</td><td>OutOfMemoryError</td></tr>
+</tbody>
+</table>
+
+<p>接下来，我们将逐一深入每个区域，揭开它们的真面目。</p>
+</section>
+
+<!-- ═══════════════ 第2站：全景图 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>全景图：JVM 运行时数据区一览</h2></div>
+
+<p>在深入细节之前，先看一张完整的全景图。JVM 运行时数据区按<strong>线程共享性</strong>分为两大阵营：线程私有区域（每个线程独立拥有）和线程共享区域（所有线程共同访问）。</p>
+
+<div class="fig">
+<svg viewBox="0 0 900 620" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- Background -->
+  <rect width="900" height="620" rx="12" fill="#f8f9fb"/>
+
+  <!-- Title -->
+  <text x="450" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#1a1a2e">JVM 运行时数据区全景</text>
+
+  <!-- ═══ Thread-Private Region (Left) ═══ -->
+  <rect x="30" y="58" width="380" height="545" rx="10" fill="#e8f4f8" stroke="#90caf9" stroke-width="1.5"/>
+  <text x="220" y="84" text-anchor="middle" font-size="15" font-weight="700" fill="#1565c0">线程私有区域（Thread-Private）</text>
+
+  <!-- Thread 1 box -->
+  <rect x="50" y="100" width="155" height="485" rx="8" fill="#fff" stroke="#64b5f6" stroke-width="1.2"/>
+  <text x="127" y="122" text-anchor="middle" font-size="13" font-weight="600" fill="#1565c0">线程 A</text>
+
+  <!-- PC Register -->
+  <rect x="62" y="135" width="131" height="55" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1"/>
+  <text x="127" y="155" text-anchor="middle" font-size="11" font-weight="600" fill="#0d47a1">程序计数器</text>
+  <text x="127" y="172" text-anchor="middle" font-size="9" fill="#546e7a">PC Register</text>
+  <text x="127" y="185" text-anchor="middle" font-size="8" fill="#78909c">字节码行号指示器</text>
+
+  <!-- VM Stack -->
+  <rect x="62" y="200" width="131" height="200" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1"/>
+  <text x="127" y="218" text-anchor="middle" font-size="11" font-weight="600" fill="#0d47a1">虚拟机栈</text>
+  <text x="127" y="232" text-anchor="middle" font-size="9" fill="#546e7a">VM Stack</text>
+  <!-- Stack frames -->
+  <rect x="72" y="242" width="111" height="36" rx="4" fill="#bbdefb" stroke="#64b5f6" stroke-width="0.8"/>
+  <text x="127" y="257" text-anchor="middle" font-size="9" fill="#0d47a1">栈帧: methodC()</text>
+  <text x="127" y="270" text-anchor="middle" font-size="7" fill="#37474f">局部变量 | 操作数栈 | 返回地址</text>
+  <rect x="72" y="282" width="111" height="36" rx="4" fill="#bbdefb" stroke="#64b5f6" stroke-width="0.8"/>
+  <text x="127" y="297" text-anchor="middle" font-size="9" fill="#0d47a1">栈帧: methodB()</text>
+  <text x="127" y="310" text-anchor="middle" font-size="7" fill="#37474f">局部变量 | 操作数栈 | 返回地址</text>
+  <rect x="72" y="322" width="111" height="36" rx="4" fill="#bbdefb" stroke="#64b5f6" stroke-width="0.8"/>
+  <text x="127" y="337" text-anchor="middle" font-size="9" fill="#0d47a1">栈帧: methodA()</text>
+  <text x="127" y="350" text-anchor="middle" font-size="7" fill="#37474f">局部变量 | 操作数栈 | 返回地址</text>
+  <text x="127" y="385" text-anchor="middle" font-size="8" fill="#90a4ae">⋮ 更多栈帧</text>
+
+  <!-- Native Method Stack -->
+  <rect x="62" y="410" width="131" height="65" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1"/>
+  <text x="127" y="432" text-anchor="middle" font-size="11" font-weight="600" fill="#0d47a1">本地方法栈</text>
+  <text x="127" y="448" text-anchor="middle" font-size="9" fill="#546e7a">Native Method Stack</text>
+  <text x="127" y="465" text-anchor="middle" font-size="8" fill="#78909c">C/C++ 本地方法调用</text>
+
+  <!-- StackOverflow label -->
+  <rect x="62" y="485" width="131" height="28" rx="4" fill="#ffcdd2" stroke="#ef5350" stroke-width="0.8"/>
+  <text x="127" y="504" text-anchor="middle" font-size="9" font-weight="600" fill="#c62828">⚠ StackOverflowError</text>
+
+  <!-- Thread 2 box (simplified) -->
+  <rect x="230" y="100" width="155" height="485" rx="8" fill="#fff" stroke="#64b5f6" stroke-width="1.2"/>
+  <text x="307" y="122" text-anchor="middle" font-size="13" font-weight="600" fill="#1565c0">线程 B</text>
+
+  <rect x="242" y="135" width="131" height="55" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1"/>
+  <text x="307" y="155" text-anchor="middle" font-size="11" font-weight="600" fill="#0d47a1">程序计数器</text>
+  <text x="307" y="172" text-anchor="middle" font-size="9" fill="#546e7a">PC Register</text>
+
+  <rect x="242" y="200" width="131" height="200" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1"/>
+  <text x="307" y="218" text-anchor="middle" font-size="11" font-weight="600" fill="#0d47a1">虚拟机栈</text>
+  <text x="307" y="232" text-anchor="middle" font-size="9" fill="#546e7a">VM Stack</text>
+  <rect x="252" y="242" width="111" height="36" rx="4" fill="#bbdefb" stroke="#64b5f6" stroke-width="0.8"/>
+  <text x="307" y="264" text-anchor="middle" font-size="9" fill="#0d47a1">栈帧: run()</text>
+  <rect x="252" y="282" width="111" height="36" rx="4" fill="#bbdefb" stroke="#64b5f6" stroke-width="0.8"/>
+  <text x="307" y="304" text-anchor="middle" font-size="9" fill="#0d47a1">栈帧: main()</text>
+  <text x="307" y="370" text-anchor="middle" font-size="8" fill="#90a4ae">⋮ 更多栈帧</text>
+
+  <rect x="242" y="410" width="131" height="65" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1"/>
+  <text x="307" y="432" text-anchor="middle" font-size="11" font-weight="600" fill="#0d47a1">本地方法栈</text>
+  <text x="307" y="448" text-anchor="middle" font-size="9" fill="#546e7a">Native Method Stack</text>
+
+  <text x="220" y="575" text-anchor="middle" font-size="10" fill="#1565c0" font-style="italic">每个线程拥有独立的 PC + VM Stack + Native Stack</text>
+
+  <!-- ═══ Thread-Shared Region (Right) ═══ -->
+  <rect x="440" y="58" width="440" height="445" rx="10" fill="#fff3e0" stroke="#ffcc80" stroke-width="1.5"/>
+  <text x="660" y="84" text-anchor="middle" font-size="15" font-weight="700" fill="#e65100">线程共享区域（Thread-Shared）</text>
+
+  <!-- Heap -->
+  <rect x="460" y="100" width="400" height="200" rx="8" fill="#fff" stroke="#ffb74d" stroke-width="1.2"/>
+  <text x="660" y="122" text-anchor="middle" font-size="14" font-weight="700" fill="#e65100">堆 (Heap)</text>
+  <text x="660" y="140" text-anchor="middle" font-size="10" fill="#795548">对象实例 · 数组 · GC 的主战场</text>
+
+  <!-- Young Gen -->
+  <rect x="475" y="152" width="170" height="65" rx="6" fill="#c8e6c9" stroke="#66bb6a" stroke-width="0.8"/>
+  <text x="560" y="172" text-anchor="middle" font-size="11" font-weight="600" fill="#2e7d32">新生代 (Young Gen)</text>
+  <text x="520" y="192" text-anchor="middle" font-size="9" fill="#388e3c">Eden</text>
+  <text x="580" y="192" text-anchor="middle" font-size="9" fill="#388e3c">S0</text>
+  <text x="625" y="192" text-anchor="middle" font-size="9" fill="#388e3c">S1</text>
+  <text x="560" y="210" text-anchor="middle" font-size="8" fill="#4caf50">Minor GC 频繁回收</text>
+
+  <!-- Old Gen -->
+  <rect x="660" y="152" width="185" height="65" rx="6" fill="#ffe0b2" stroke="#ffa726" stroke-width="0.8"/>
+  <text x="752" y="172" text-anchor="middle" font-size="11" font-weight="600" fill="#e65100">老年代 (Old Gen)</text>
+  <text x="752" y="192" text-anchor="middle" font-size="9" fill="#ef6c00">长存活对象</text>
+  <text x="752" y="210" text-anchor="middle" font-size="8" fill="#f57c00">Full GC 回收</text>
+
+  <!-- Heap OOM -->
+  <rect x="475" y="230" width="370" height="24" rx="4" fill="#ffcdd2" stroke="#ef5350" stroke-width="0.8"/>
+  <text x="660" y="247" text-anchor="middle" font-size="9" font-weight="600" fill="#c62828">⚠ java.lang.OutOfMemoryError: Java heap space</text>
+  <text x="660" y="285" text-anchor="middle" font-size="9" fill="#795548">-Xms / -Xmx 控制堆大小</text>
+
+  <!-- Method Area -->
+  <rect x="460" y="310" width="400" height="175" rx="8" fill="#fff" stroke="#ffb74d" stroke-width="1.2"/>
+  <text x="660" y="332" text-anchor="middle" font-size="14" font-weight="700" fill="#e65100">方法区 (Method Area)</text>
+  <text x="660" y="350" text-anchor="middle" font-size="10" fill="#795548">类元信息 · 常量池 · 静态变量 · JIT 编译代码</text>
+
+  <!-- PermGen vs Metaspace -->
+  <rect x="475" y="362" width="170" height="55" rx="6" fill="#e1bee7" stroke="#ab47bc" stroke-width="0.8"/>
+  <text x="560" y="382" text-anchor="middle" font-size="10" font-weight="600" fill="#6a1b9a">永久代 PermGen</text>
+  <text x="560" y="396" text-anchor="middle" font-size="8" fill="#7b1fa2">JDK 5 / 6 / 7</text>
+  <text x="560" y="410" text-anchor="middle" font-size="8" fill="#8e24aa">-XX:MaxPermSize</text>
+
+  <!-- Arrow -->
+  <line x1="650" y1="389" x2="675" y2="389" stroke="#795548" stroke-width="1.5" marker-end="url(#arrowM)"/>
+  <text x="662" y="382" text-anchor="middle" font-size="8" fill="#795548">演进</text>
+  <defs><marker id="arrowM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#795548"/></marker></defs>
+
+  <rect x="680" y="362" width="170" height="55" rx="6" fill="#b2dfdb" stroke="#26a69a" stroke-width="0.8"/>
+  <text x="765" y="382" text-anchor="middle" font-size="10" font-weight="600" fill="#00695c">元空间 Metaspace</text>
+  <text x="765" y="396" text-anchor="middle" font-size="8" fill="#00796b">JDK 8+</text>
+  <text x="765" y="410" text-anchor="middle" font-size="8" fill="#00897b">使用本地内存 (Native Memory)</text>
+
+  <!-- Method Area OOM -->
+  <rect x="475" y="430" width="370" height="24" rx="4" fill="#ffcdd2" stroke="#ef5350" stroke-width="0.8"/>
+  <text x="660" y="447" text-anchor="middle" font-size="9" font-weight="600" fill="#c62828">⚠ OutOfMemoryError: Metaspace</text>
+  <text x="660" y="472" text-anchor="middle" font-size="9" fill="#795548">-XX:MaxMetaspaceSize 控制上限</text>
+
+  <!-- ═══ Direct Memory (Bottom Right) ═══ -->
+  <rect x="440" y="515" width="440" height="88" rx="10" fill="#e8eaf6" stroke="#9fa8da" stroke-width="1.5"/>
+  <text x="660" y="540" text-anchor="middle" font-size="14" font-weight="700" fill="#283593">直接内存 (Direct Memory)</text>
+  <text x="660" y="558" text-anchor="middle" font-size="10" fill="#3949ab">NIO DirectByteBuffer · 堆外分配 · 零拷贝 IO</text>
+  <text x="660" y="576" text-anchor="middle" font-size="9" fill="#5c6bc0">-XX:MaxDirectMemorySize 控制上限</text>
+  <rect x="530" y="582" width="260" height="18" rx="3" fill="#ffcdd2" stroke="#ef5350" stroke-width="0.7"/>
+  <text x="660" y="596" text-anchor="middle" font-size="9" font-weight="600" fill="#c62828">⚠ OutOfMemoryError: Direct buffer memory</text>
+
+  <!-- Legend -->
+  <rect x="30" y="608" width="14" height="8" rx="2" fill="#e3f2fd" stroke="#42a5f5" stroke-width="0.6"/>
+  <text x="50" y="616" font-size="8" fill="#546e7a">线程私有</text>
+  <rect x="110" y="608" width="14" height="8" rx="2" fill="#fff3e0" stroke="#ffcc80" stroke-width="0.6"/>
+  <text x="130" y="616" font-size="8" fill="#546e7a">线程共享</text>
+  <rect x="190" y="608" width="14" height="8" rx="2" fill="#e8eaf6" stroke="#9fa8da" stroke-width="0.6"/>
+  <text x="210" y="616" font-size="8" fill="#546e7a">非 JVM 规范区域</text>
+  <rect x="310" y="608" width="14" height="8" rx="2" fill="#ffcdd2" stroke="#ef5350" stroke-width="0.6"/>
+  <text x="330" y="616" font-size="8" fill="#546e7a">溢出风险</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> JVM 运行时数据区全景：线程私有区域（PC、虚拟机栈、本地方法栈）+ 线程共享区域（堆、方法区）+ 直接内存</figcaption>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">要点</span> JVM 规范定义的运行时数据区有 5 块：PC Register、VM Stack、Native Method Stack、Heap、Method Area。直接内存不在 JVM 规范中，但在实际开发中被广泛使用（NIO、Netty），且同样会导致 OOM。</div>
+</section>
+
+<!-- ═══════════════ 第3站：线程私有区域 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>线程私有区域：PC、虚拟机栈、本地方法栈</h2></div>
+
+<h3>3.1 程序计数器 (PC Register)</h3>
+
+<p>程序计数器是一块极小的内存空间，它是<strong>线程私有</strong>的。它的作用只有一个：记录当前线程正在执行的字节码指令的地址（行号）。字节码解释器工作时，就是通过改变这个计数器的值来选取下一条需要执行的字节码指令。</p>
+
+<div class="think"><div class="think-q">为什么程序计数器是线程私有的？<br/><br/>
+因为 CPU 会在多个线程之间快速切换，每次切换回来都需要恢复到上次的执行位置。如果 PC 是共享的，线程 A 刚执行到第 42 行就被切走，线程 B 把 PC 改成了第 100 行，那线程 A 回来后就找不到自己该从哪继续了。所以<strong>每个线程必须有自己的 PC</strong>。</div></div>
+
+<p>程序计数器是 JVM 规范中<strong>唯一没有规定 OutOfMemoryError</strong> 的区域——它的内存占用极小且固定，不需要动态扩展。</p>
+
+<h3>3.2 虚拟机栈 (VM Stack)</h3>
+
+<p>虚拟机栈描述的是 Java 方法执行的<strong>内存模型</strong>。每个方法在执行时都会创建一个<strong>栈帧 (Stack Frame)</strong>，用于存储以下信息：</p>
+
+<table class="nb-table">
+<thead><tr><th>组成部分</th><th>作用</th></tr></thead>
+<tbody>
+  <tr><td><strong>局部变量表</strong></td><td>存放方法参数和局部变量（基本类型的值 + 对象引用 reference）</td></tr>
+  <tr><td><strong>操作数栈</strong></td><td>字节码指令的工作空间，用于中间计算（如 <code>iadd</code> 弹出两个值，压入结果）</td></tr>
+  <tr><td><strong>动态链接</strong></td><td>指向运行时常量池中该方法的引用，支持多态调用（虚方法分派）</td></tr>
+  <tr><td><strong>方法返回地址</strong></td><td>方法结束后回到调用者的哪一行继续执行</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StackDemo.java</b> · 栈帧与局部变量</span></div>
+<pre><code><span class="k">public class</span> <span class="t">StackDemo</span> {
+    <span class="k">public static int</span> add(<span class="k">int</span> a, <span class="k">int</span> b) {
+        <span class="k">int</span> sum = a + b;  <span class="c">// a, b, sum 存在局部变量表</span>
+        <span class="k">return</span> sum;       <span class="c">// 操作数栈: iload a → iload b → iadd → istore sum</span>
+    }
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="k">int</span> result = add(<span class="n">3</span>, <span class="n">5</span>); <span class="c">// 调用 add → 压入新栈帧；返回 → 栈帧弹出</span>
+    }
+}</code></pre>
+</div>
+
+<p><strong>StackOverflowError</strong> 发生在栈的深度超出限制时——最典型的就是无限递归：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>InfiniteRecursion.java</b> · StackOverflowError 示例</span></div>
+<pre><code><span class="k">public class</span> <span class="t">InfiniteRecursion</span> {
+    <span class="k">public static void</span> stackOverflow() {
+        stackOverflow(); <span class="c">// 每次调用都压入一个新栈帧，永不停止</span>
+    }
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        stackOverflow();
+        <span class="c">// 抛出: java.lang.StackOverflowError</span>
+        <span class="c">// 默认栈大小约 512KB~1MB（-Xss 可调）</span>
+    }
+}</code></pre>
+</div>
+
+<div class="formula">栈溢出条件：递归深度 × 每帧大小 &gt; -Xss 设定的栈容量</div>
+
+<p>虚拟机栈还有一种 OOM 情况：当<strong>无法申请到足够内存来扩展栈</strong>（比如创建了太多线程，每个线程都要占用栈空间），会抛出 <code>OutOfMemoryError: unable to create new native thread</code>。</p>
+
+<h3>3.3 本地方法栈 (Native Method Stack)</h3>
+
+<p>本地方法栈与虚拟机栈类似，只不过它服务的是 <strong>Native 方法</strong>（用 C/C++ 实现的底层方法，如 <code>Unsafe.allocateMemory</code>、<code>Thread.start0()</code>）。HotSpot VM 直接把本地方法栈和虚拟机栈合二为一。</p>
+
+<p>本地方法栈同样会抛出 StackOverflowError 和 OutOfMemoryError。</p>
+</section>
+
+<!-- ═══════════════ 第4站：线程共享区域 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>线程共享区域：堆与方法区</h2></div>
+
+<h3>4.1 堆 (Heap)</h3>
+
+<p>堆是 JVM 中<strong>最大</strong>的一块内存区域，被所有线程共享。几乎所有的<strong>对象实例和数组</strong>都在这里分配。堆也是垃圾收集器（GC）的主战场。</p>
+
+<p>堆的典型分代结构：</p>
+
+<table class="nb-table">
+<thead><tr><th>分区</th><th>占比</th><th>特点</th><th>GC 类型</th></tr></thead>
+<tbody>
+  <tr><td><strong>Eden 区</strong></td><td>~80% 新生代</td><td>新对象首先分配在 Eden</td><td>Minor GC</td></tr>
+  <tr><td><strong>Survivor S0 / S1</strong></td><td>各 ~10% 新生代</td><td>Minor GC 存活对象的暂存区</td><td>Minor GC</td></tr>
+  <tr><td><strong>老年代 (Old Gen)</strong></td><td>约 2/3 总堆</td><td>经过多次 GC 仍存活的对象晋升至此</td><td>Full GC / Major GC</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HeapOOM.java</b> · 堆溢出示例</span></div>
+<pre><code><span class="k">public class</span> <span class="t">HeapOOM</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">List</span>&lt;<span class="k">byte</span>[]&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+        <span class="k">while</span> (<span class="k">true</span>) {
+            list.add(<span class="k">new byte</span>[<span class="n">1024</span> * <span class="n">1024</span>]); <span class="c">// 每次 1MB，list 持有强引用，GC 无法回收</span>
+        } <span class="c">// → OOM: Java heap space（-Xms / -Xmx 控制堆大小）</span>
+    }
+}</code></pre>
+</div>
+
+<p>通过 <code>-Xms</code>（初始堆大小）和 <code>-Xmx</code>（最大堆大小）来控制堆内存。</p>
+
+<h3>4.2 方法区 (Method Area)</h3>
+
+<p>方法区存储以下数据：</p>
+
+<table class="nb-table">
+<thead><tr><th>内容</th><th>说明</th></tr></thead>
+<tbody>
+  <tr><td><strong>类信息</strong></td><td>类的全限定名、父类、接口、字段、方法定义等元数据</td></tr>
+  <tr><td><strong>运行时常量池</strong></td><td>编译期生成的字面量和符号引用（.class 文件中的常量池的运行时表示）</td></tr>
+  <tr><td><strong>静态变量</strong></td><td><code>static</code> 修饰的字段</td></tr>
+  <tr><td><strong>JIT 编译代码</strong></td><td>热点代码被 JIT 编译后的本地机器码</td></tr>
+</tbody>
+</table>
+
+<h3>4.3 方法区的演进：永久代 → 元空间</h3>
+
+<p>这是面试中的<strong>高频考点</strong>。方法区是一个逻辑概念，不同 JDK 版本有不同的实现：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>evolution.txt</b> · 方法区演进历史</span></div>
+<pre><code><span class="c">/* ═══ JDK 5/6/7：永久代 (Permanent Generation) ═══ */</span>
+<span class="c">// 方法区用堆内存中的一块"永久代"来实现</span>
+<span class="c">// 大小由 -XX:MaxPermSize 控制（默认约 64MB~82MB）</span>
+<span class="c">// 字符串常量池在永久代中</span>
+<span class="c">// 问题：大小固定，容易因加载过多类而 OOM: PermGen space</span>
+
+<span class="c">/* ═══ JDK 8+：元空间 (Metaspace) ═══ */</span>
+<span class="c">// 永久代被移除，方法区改用"元空间"实现</span>
+<span class="c">// 元空间使用本地内存 (Native Memory)，不再占用 JVM 堆内存</span>
+<span class="c">// 默认不设上限（受限于系统物理内存）</span>
+<span class="c">// 可用 -XX:MaxMetaspaceSize 设置上限</span>
+<span class="c">// 字符串常量池从方法区移到了堆中（其实 JDK 7 就移了）</span></code></pre>
+</div>
+
+<div class="think"><div class="think-q">为什么 JDK 8 要把永久代替换成元空间？<br/><br/>
+<strong>三大原因：</strong><br/>
+1. <strong>固定大小容易 OOM</strong>：永久代大小在启动时确定，难以预估需要多少空间。Web 应用中大量使用动态代理、JSP 编译、热部署时，类不断被加载，PermGen 很容易溢出。<br/>
+2. <strong>GC 效率低</strong>：永久代的 GC 回收效率很差，类卸载条件苛刻，导致大量无用的类元数据占据空间。<br/>
+3. <strong>与 JRockit 合并</strong>：Oracle 收购 Sun 后，需要将 HotSpot 和 JRockit 的代码库合并。JRockit 没有永久代的概念，统一到元空间可以减少代码复杂度。</div></div>
+
+<div class="crack"><span class="crack-label">面试加分</span>
+JDK 7 时，字符串常量池就已经从永久代<strong>移到了堆中</strong>。所以 <code>String.intern()</code> 在 JDK 6 和 JDK 7+ 的行为不同——JDK 6 会在永久代创建新字符串，JDK 7+ 在堆中创建（或在常量池中记录已存在的引用）。这是很多候选人会搞混的知识点。
+</div>
+
+<h3>4.4 方法区 OOM 示例</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MethodAreaOOM.java</b> · 元空间溢出</span></div>
+<pre><code><span class="c">/** 使用 CGLib 动态生成大量类，撑爆元空间 */</span>
+<span class="k">public class</span> <span class="t">MethodAreaOOM</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="k">while</span> (<span class="k">true</span>) {
+            <span class="t">Enhancer</span> enhancer = <span class="k">new</span> <span class="t">Enhancer</span>();
+            enhancer.setSuperclass(<span class="t">OOMTarget</span>.<span class="k">class</span>);
+            enhancer.setUseCache(<span class="k">false</span>); <span class="c">// 关闭缓存，每次都生成新类</span>
+            enhancer.setCallback((<span class="t">MethodInterceptor</span>) (o, m, a, p) -&gt; p.invokeSuper(o, a));
+            enhancer.create(); <span class="c">// → OOM: Metaspace</span>
+        }
+    }
+}
+<span class="k">class</span> <span class="t">OOMTarget</span> {}</code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：直接内存 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>直接内存 (Direct Memory)：堆外的秘密战场</h2></div>
+
+<p>直接内存<strong>不属于 JVM 运行时数据区</strong>的规范定义，但在实际开发中极为重要——Netty、Kafka、Elasticsearch 等高性能框架大量使用直接内存。</p>
+
+<h3>5.1 什么是直接内存？</h3>
+
+<p>直接内存是在 JVM 堆<strong>之外</strong>，通过操作系统直接分配的内存。Java NIO 中的 <code>DirectByteBuffer</code> 就是典型的直接内存使用者：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DirectMemoryDemo.java</b> · 直接内存分配</span></div>
+<pre><code><span class="k">import</span> java.nio.<span class="t">ByteBuffer</span>;
+<span class="k">public class</span> <span class="t">DirectMemoryDemo</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">ByteBuffer</span> buffer = <span class="t">ByteBuffer</span>.allocateDirect(<span class="n">10</span> * <span class="n">1024</span> * <span class="n">1024</span>); <span class="c">// 分配 10MB 堆外内存</span>
+        buffer.put((<span class="k">byte</span>) <span class="n">1</span>);
+        buffer.flip();
+        <span class="k">byte</span> val = buffer.get(); <span class="c">// val = 1</span>
+        <span class="c">// 直接内存不受 GC 管理，依赖 Cleaner 机制（虚引用）回收</span>
+        <span class="c">// 当 DirectByteBuffer 对象被 GC 时，关联的 Cleaner 会释放堆外内存</span>
+    }
+}</code></pre>
+</div>
+
+<h3>5.2 为什么需要直接内存？——零拷贝</h3>
+
+<p>传统的 IO 操作需要<strong>4 次数据拷贝</strong>，而直接内存可以实现<strong>零拷贝</strong>：</p>
+
+<div class="fig">
+<svg viewBox="0 0 800 240" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="800" height="240" rx="10" fill="#f8f9fb"/>
+  <text x="400" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a2e">传统 IO vs 直接内存（零拷贝）</text>
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ef5350"/></marker><marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#66bb6a"/></marker></defs>
+  <!-- Traditional IO -->
+  <text x="300" y="52" text-anchor="middle" font-size="12" font-weight="600" fill="#c62828">传统 IO（4 次拷贝）</text>
+  <rect x="20" y="60" width="90" height="36" rx="6" fill="#ffcdd2" stroke="#ef5350" stroke-width="1"/><text x="65" y="82" text-anchor="middle" font-size="10" fill="#b71c1c">磁盘</text>
+  <line x1="110" y1="78" x2="130" y2="78" stroke="#ef5350" stroke-width="1.2" marker-end="url(#ar)"/><text x="120" y="71" font-size="7" fill="#c62828">①</text>
+  <rect x="132" y="60" width="100" height="36" rx="6" fill="#fff3e0" stroke="#ff9800" stroke-width="1"/><text x="182" y="76" text-anchor="middle" font-size="9" fill="#e65100">内核缓冲区</text><text x="182" y="89" text-anchor="middle" font-size="7" fill="#bf360c">Kernel Buffer</text>
+  <line x1="232" y1="78" x2="252" y2="78" stroke="#ef5350" stroke-width="1.2" marker-end="url(#ar)"/><text x="242" y="71" font-size="7" fill="#c62828">②</text>
+  <rect x="254" y="60" width="100" height="36" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1"/><text x="304" y="76" text-anchor="middle" font-size="9" fill="#0d47a1">用户缓冲区</text><text x="304" y="89" text-anchor="middle" font-size="7" fill="#1565c0">JVM Heap</text>
+  <line x1="354" y1="78" x2="374" y2="78" stroke="#ef5350" stroke-width="1.2" marker-end="url(#ar)"/><text x="364" y="71" font-size="7" fill="#c62828">③</text>
+  <rect x="376" y="60" width="100" height="36" rx="6" fill="#fff3e0" stroke="#ff9800" stroke-width="1"/><text x="426" y="76" text-anchor="middle" font-size="9" fill="#e65100">Socket 缓冲区</text><text x="426" y="89" text-anchor="middle" font-size="7" fill="#bf360c">Kernel Buffer</text>
+  <line x1="476" y1="78" x2="496" y2="78" stroke="#ef5350" stroke-width="1.2" marker-end="url(#ar)"/><text x="486" y="71" font-size="7" fill="#c62828">④</text>
+  <rect x="498" y="60" width="70" height="36" rx="6" fill="#e8f5e9" stroke="#66bb6a" stroke-width="1"/><text x="533" y="82" text-anchor="middle" font-size="10" fill="#2e7d32">网卡</text>
+  <!-- Direct Memory IO -->
+  <text x="300" y="125" text-anchor="middle" font-size="12" font-weight="600" fill="#2e7d32">直接内存（零拷贝）</text>
+  <rect x="20" y="134" width="90" height="36" rx="6" fill="#ffcdd2" stroke="#ef5350" stroke-width="1"/><text x="65" y="156" text-anchor="middle" font-size="10" fill="#b71c1c">磁盘</text>
+  <line x1="110" y1="152" x2="130" y2="152" stroke="#66bb6a" stroke-width="1.2" marker-end="url(#ag)"/>
+  <rect x="132" y="134" width="100" height="36" rx="6" fill="#fff3e0" stroke="#ff9800" stroke-width="1"/><text x="182" y="150" text-anchor="middle" font-size="9" fill="#e65100">内核缓冲区</text><text x="182" y="163" text-anchor="middle" font-size="7" fill="#bf360c">Kernel Buffer</text>
+  <line x1="232" y1="152" x2="376" y2="152" stroke="#66bb6a" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+  <text x="304" y="146" text-anchor="middle" font-size="9" font-weight="600" fill="#2e7d32">mmap 映射，无需拷贝</text>
+  <rect x="378" y="134" width="100" height="36" rx="6" fill="#e8eaf6" stroke="#5c6bc0" stroke-width="1"/><text x="428" y="150" text-anchor="middle" font-size="9" fill="#283593">直接内存</text><text x="428" y="163" text-anchor="middle" font-size="7" fill="#3949ab">DirectByteBuffer</text>
+  <line x1="478" y1="152" x2="498" y2="152" stroke="#66bb6a" stroke-width="1.2" marker-end="url(#ag)"/>
+  <rect x="500" y="134" width="70" height="36" rx="6" fill="#e8f5e9" stroke="#66bb6a" stroke-width="1"/><text x="535" y="156" text-anchor="middle" font-size="10" fill="#2e7d32">网卡</text>
+  <!-- Summary -->
+  <rect x="20" y="195" width="550" height="34" rx="6" fill="#e8f5e9" stroke="#a5d6a7" stroke-width="1"/>
+  <text x="295" y="213" text-anchor="middle" font-size="10" fill="#1b5e20">直接内存跳过 JVM Heap，减少数据拷贝次数，大幅提升 IO 密集型应用性能</text>
+  <text x="295" y="226" text-anchor="middle" font-size="9" fill="#388e3c">Netty、Kafka、RocketMQ 等框架的核心优化手段</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> 传统 IO 与直接内存（零拷贝）的对比：减少用户态与内核态之间的数据拷贝</figcaption>
+</div>
+
+<h3>5.3 直接内存的 OOM</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DirectOOM.java</b> · 直接内存溢出</span></div>
+<pre><code><span class="k">import</span> java.nio.<span class="t">ByteBuffer</span>;
+<span class="k">import</span> java.util.*;
+<span class="k">public class</span> <span class="t">DirectOOM</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">List</span>&lt;<span class="t">ByteBuffer</span>&gt; buffers = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+        <span class="k">while</span> (<span class="k">true</span>) {
+            buffers.add(<span class="t">ByteBuffer</span>.allocateDirect(<span class="n">1024</span> * <span class="n">1024</span>)); <span class="c">// 不断分配 1MB 直接内存</span>
+        } <span class="c">// → OOM: Direct buffer memory (-XX:MaxDirectMemorySize 控制上限)</span>
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><span class="crack-label">生产注意</span>
+直接内存的回收依赖 <code>System.gc()</code> 触发 Cleaner 来释放，如果同时设置了 <code>-XX:+DisableExplicitGC</code>，直接内存可能无法及时回收，导致 OOM。Netty 通过自定义的 <code>ReferenceCountUtil.release()</code> 手动管理直接内存的生命周期来解决这个问题。
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：StackOverflowError vs OOM ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>StackOverflowError vs OutOfMemoryError</h2></div>
+
+<p>面试中经常被问到：什么时候抛 StackOverflowError？什么时候抛 OutOfMemoryError？它们的本质区别是什么？</p>
+
+<table class="nb-table">
+<thead><tr><th>对比维度</th><th>StackOverflowError</th><th>OutOfMemoryError</th></tr></thead>
+<tbody>
+  <tr><td><strong>发生区域</strong></td><td>虚拟机栈 / 本地方法栈</td><td>堆 / 方法区 / 直接内存 / 虚拟机栈</td></tr>
+  <tr><td><strong>根本原因</strong></td><td>栈的<strong>深度</strong>超出限制</td><td>内存<strong>总量</strong>不够，无法分配更多空间</td></tr>
+  <tr><td><strong>典型场景</strong></td><td>无限递归 / 极深调用链</td><td>大对象、内存泄漏、类加载过多</td></tr>
+  <tr><td><strong>JVM 参数</strong></td><td>-Xss（栈大小）</td><td>-Xmx / -XX:MaxMetaspaceSize / -XX:MaxDirectMemorySize</td></tr>
+  <tr><td><strong>可恢复性</strong></td><td>几乎无法恢复，需修复代码</td><td>部分场景可通过扩容缓解，但根因仍需修复代码</td></tr>
+</tbody>
+</table>
+
+<h3>6.1 虚拟机栈的两种溢出</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StackErrors.java</b> · 虚拟机栈的两种异常</span></div>
+<pre><code><span class="k">public class</span> <span class="t">StackErrors</span> {
+    <span class="c">/* 场景 1：栈深度溢出 → StackOverflowError */</span>
+    <span class="k">private int</span> depth = <span class="n">0</span>;
+    <span class="k">public void</span> stackLeak() {
+        depth++;
+        stackLeak(); <span class="c">// 无限递归，栈帧不断压入 → StackOverflowError</span>
+    }
+    <span class="c">/* 场景 2：栈扩展失败 → OutOfMemoryError */</span>
+    <span class="k">public void</span> createThreads() {
+        <span class="k">while</span> (<span class="k">true</span>) {
+            <span class="k">new</span> <span class="t">Thread</span>(() -&gt; { <span class="k">try</span> { <span class="t">Thread</span>.sleep(<span class="n">1000000</span>); } <span class="k">catch</span> (<span class="t">Exception</span> e) {} }).start();
+        } <span class="c">// 线程太多 → OOM: unable to create new native thread</span>
+    }
+}</code></pre>
+</div>
+
+<h3>6.2 各种 OOM 汇总</h3>
+
+<table class="nb-table">
+<thead><tr><th>OOM 错误信息</th><th>发生区域</th><th>典型原因</th></tr></thead>
+<tbody>
+  <tr><td><code>Java heap space</code></td><td>堆</td><td>对象过多 / 大对象 / 内存泄漏</td></tr>
+  <tr><td><code>GC overhead limit exceeded</code></td><td>堆</td><td>GC 花了 98% 以上时间却回收不到 2% 的内存</td></tr>
+  <tr><td><code>Metaspace</code></td><td>方法区</td><td>加载了过多的类（动态代理、热部署）</td></tr>
+  <tr><td><code>Direct buffer memory</code></td><td>直接内存</td><td>NIO 分配的 DirectByteBuffer 过多</td></tr>
+  <tr><td><code>unable to create new native thread</code></td><td>虚拟机栈</td><td>线程数过多，操作系统无法分配更多栈空间</td></tr>
+  <tr><td><code>Requested array size exceeds VM limit</code></td><td>堆</td><td>尝试分配超过 JVM 限制的数组</td></tr>
+  <tr><td><code>PermGen space</code> (JDK 7-)</td><td>永久代</td><td>加载了过多的类或字符串</td></tr>
+</tbody>
+</table>
+
+<div class="think"><div class="think-q">StackOverflowError 和 OutOfMemoryError 之间有联系吗？<br/><br/>
+有。当栈的大小（-Xss）设得较大时，每个线程的栈会占用更多内存。如果创建大量线程，总的栈空间需求可能超出系统内存，此时就会从 StackOverflow 变成 OOM（unable to create new native thread）。<br/><br/>
+所以存在一个<strong>权衡</strong>：-Xss 设大 → 支持更深的调用链，但能创建的线程数变少；-Xss 设小 → 能创建更多线程，但容易 StackOverflow。</div></div>
+</section>
+
+<!-- ═══════════════ 第7站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：运行时数据区速查手册</h2></div>
+
+<p>最后，用一张表把所有区域的核心信息一网打尽：</p>
+
+<table class="nb-table">
+<thead><tr><th>区域</th><th>线程共享</th><th>存储内容</th><th>大小控制</th><th>溢出异常</th></tr></thead>
+<tbody>
+  <tr><td><strong>程序计数器</strong></td><td>私有</td><td>当前执行的字节码行号</td><td>固定，无需配置</td><td>无（唯一不溢出的区域）</td></tr>
+  <tr><td><strong>虚拟机栈</strong></td><td>私有</td><td>栈帧（局部变量表、操作数栈、动态链接、返回地址）</td><td>-Xss</td><td>StackOverflowError / OOM</td></tr>
+  <tr><td><strong>本地方法栈</strong></td><td>私有</td><td>Native 方法调用信息</td><td>-Xss（HotSpot 合并）</td><td>StackOverflowError / OOM</td></tr>
+  <tr><td><strong>堆</strong></td><td>共享</td><td>对象实例、数组</td><td>-Xms / -Xmx</td><td>OOM: Java heap space</td></tr>
+  <tr><td><strong>方法区</strong></td><td>共享</td><td>类元信息、常量池、静态变量、JIT 代码</td><td>PermGen: -XX:MaxPermSize<br/>Metaspace: -XX:MaxMetaspaceSize</td><td>OOM: Metaspace / PermGen</td></tr>
+  <tr><td><strong>直接内存</strong></td><td>共享</td><td>NIO DirectByteBuffer 堆外内存</td><td>-XX:MaxDirectMemorySize</td><td>OOM: Direct buffer memory</td></tr>
+</tbody>
+</table>
+
+<div class="recap">
+<strong>面试回答模板：</strong><br/>
+"JVM 运行时数据区分为线程私有和线程共享两大部分。<strong>线程私有</strong>的有程序计数器——每个线程一个，记录当前执行的字节码行号，是唯一不会 OOM 的区域；虚拟机栈——每个方法调用创建一个栈帧，包含局部变量表和操作数栈，递归过深会 StackOverflowError；本地方法栈——服务 Native 方法。<strong>线程共享</strong>的有堆——存放对象实例，是 GC 的主战场，分为新生代和老年代；方法区——存放类元信息和常量池，从 JDK 7 的永久代演进到 JDK 8 的元空间，后者使用本地内存，解决了永久代固定大小容易 OOM 的问题。此外还有<strong>直接内存</strong>，虽然不在 JVM 规范中，但 NIO 和 Netty 广泛使用，用于实现零拷贝 IO，受 MaxDirectMemorySize 控制。"
+</div>
+
+<div class="takeaway"><span class="takeaway-label">核心记忆</span>
+<strong>一句话区分：</strong>PC 不溢出，栈溢出靠深度，堆溢出靠容量，方法区溢出靠类数量，直接内存溢出靠 NIO 用量。方法区从永久代到元空间的演进，本质是从"堆内固定空间"迁移到"本地内存按需扩展"。
+</div>
+</section>
+
+</main>
+</body>
+</html>

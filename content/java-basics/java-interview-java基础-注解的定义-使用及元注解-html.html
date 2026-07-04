@@ -3,157 +3,485 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Java 中高级面试 - Day 8 | 注解的定义、使用及元注解</title>
-<style>
-:root {
-  --header-bg: #1a1a2e;
-  --accent-blue: #0ea5e9;
-  --accent-green: #22c55e;
-  --accent-purple: #a855f7;
-  --accent-orange: #f97316;
-  --accent-pink: #ec4899;
-  --accent-red: #ef4444;
-  --accent-cyan: #06b6d4;
-  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  --dot-blue: #3b82f6;
-  --dot-green: #10b981;
-  --dot-purple: #8b5cf6;
-  --dot-orange: #f59e0b;
-  --dot-pink: #ec4899;
-  --dot-red: #ef4444;
-  --dot-cyan: #06b6d4;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
-.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
-.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
-.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
-.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
-.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
-.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
-.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
-.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
-.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
-.module-card .card-body { padding: 20px; }
-.section { margin-bottom: 20px; }
-.section:last-child { margin-bottom: 0; }
-.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
-.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
-.section .content { padding-left: 32px; }
-.section .content p { margin-bottom: 6px; }
-.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
-.section .content li { margin-bottom: 4px; }
-.section .content strong { color: #0f172a; }
-.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
-.bullet-list { list-style: none; padding-left: 0; }
-.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
-.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
-.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
-.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-.code-block .comment { color: #64748b; }
-.code-block .keyword { color: #c084fc; }
-.code-block .string { color: #86efac; }
-.code-block .method { color: #67e8f9; }
-.code-block .number { color: #fbbf24; }
-.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
-.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
-.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
-.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
-.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
-.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
-.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-.comparison-table tr:nth-child(even) td { background: #f8fafc; }
-.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
-.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
-.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
-.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
-.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
-.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
-.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
-.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
-.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-.next-preview .next-content p { font-size: 13px; color: #475569; }
-@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
-@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
-</style>
-    <link rel="stylesheet" href="/assets/reading-theme.css">
-    <script defer src="/assets/theme.js"></script>
+<title>注解体系</title>
 </head>
 <body>
-<div class="header">
-  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
-  <h1>Day 8 — 注解的定义、使用及元注解</h1>
-  <div class="tag">模块：Java基础 · 泛型与反射</div>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：你自定义过注解吗？Spring 的 @Autowired 是怎么工作的？</h2></div>
+<div class="think"><div class="think-q">"你用过 @Override、@Autowired 这些注解——但你知道它们底层是怎么运作的吗？你自己写过注解吗？Spring 的依赖注入到底是靠什么机制实现的？" —— 面试官想考察的不是注解的用法，而是你是否理解注解从定义到运行时处理的完整链路。</div></div>
+<p>注解（Annotation）是 Java 5 引入的<strong>元数据机制</strong>。它本身不改变代码的执行逻辑，但可以被编译器、框架、运行时处理器读取并做出相应的动作。几乎所有现代 Java 框架——Spring、MyBatis、JUnit、Lombok——都构建在注解之上。</p>
+<ul>
+  <li><strong>内置注解</strong>：@Override、@Deprecated、@SuppressWarnings、@FunctionalInterface</li>
+  <li><strong>元注解</strong>：用来"注解注解"的注解——@Retention、@Target、@Documented、@Inherited、@Repeatable</li>
+  <li><strong>自定义注解</strong>：用 <code>@interface</code> 关键字定义，本质是一种特殊的接口</li>
+  <li><strong>注解处理器</strong>：编译期（APT）或运行期（反射）读取注解并执行逻辑</li>
+</ul>
+<p>理解注解的关键不在于"会用"，而在于理解<strong>三层架构</strong>：定义层（@interface + 元注解）→ 标注层（用在类/方法/字段上）→ 处理层（反射或 APT 读取并执行逻辑）。没有处理层的注解只是一段摆设。</p>
+<div class="formula"><strong>注解核心公式</strong><br/>注解定义（@interface）+ 元注解约束（@Retention/@Target）+ 运行时处理（反射）= 完整的注解驱动机制</div>
+<p>本文从元注解逐一讲起，手写自定义注解，用反射构建注解处理器，最后深入 Spring 注解驱动的底层原理。</p>
+</section>
+
+<!-- ═══════════════ 第2站：元注解 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>元注解：注解的注解</h2></div>
+<p>元注解（Meta-Annotation）是 JDK 提供的"用来修饰注解"的注解。它们定义了自定义注解的行为约束——在哪里能用、能活多久、能否继承、能否重复。JDK 5 引入四个，JDK 8 新增一个：</p>
+
+<h3>@Retention —— 注解的生命周期</h3>
+<p>@Retention 决定注解<strong>存活到哪个阶段</strong>，是最关键的元注解：</p>
+<table class="nb-table">
+  <thead><tr><th>策略</th><th>存活阶段</th><th>典型用途</th></tr></thead>
+  <tbody>
+    <tr><td><strong>SOURCE</strong></td><td>仅源码，编译后丢弃</td><td>Lombok @Data、@SuppressWarnings</td></tr>
+    <tr><td><strong>CLASS</strong></td><td>编译期保留在 .class 文件中，运行时不可获取（默认值）</td><td>字节码增强工具</td></tr>
+    <tr><td><strong>RUNTIME</strong></td><td>运行时可通过反射获取</td><td>Spring @Autowired、@Transactional</td></tr>
+  </tbody>
+</table>
+<div class="crack"><div class="crack-label">面试必知：只有 RUNTIME 注解才能被反射读取</div>
+<p>这是面试高频考点。如果你自定义的注解需要在运行时通过反射处理（几乎所有框架注解都是如此），<strong>必须</strong>标注 <code>@Retention(RetentionPolicy.RUNTIME)</code>。SOURCE 和 CLASS 级别的注解在运行时完全不存在，<code>getAnnotation()</code> 将返回 null。</p>
 </div>
-<div class="container">
-<div class="module-card">
-  <div class="card-header">
-    <span class="card-number">08</span>
-    <span class="card-title">注解的定义、使用及元注解</span>
-  </div>
-  <div class="card-body">
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>注解的基础概念</h3>
-      <div class="content"><ul class="bullet-list"><li>注解（Annotation）是 Java 5 引入的元数据机制，可以为代码添加额外信息，且<strong>不影响代码执行</strong></li><li>注解通过 <code>@interface</code> 关键字定义，本质上是一种特殊的接口</li><li>常见内置注解：@Override、@Deprecated、@SuppressWarnings、@FunctionalInterface</li><li>注解可以标注在：<strong>类/接口、方法、字段、参数、局部变量、包、类型使用</strong> 等位置</li></ul></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>自定义注解的定义方式</h3>
-      <div class="content"><ul class="bullet-list"><li>使用 <code>@interface</code> 定义自定义注解：</li></ul><div class="code-block">public @interface MyAnnotation {
-    String value();           // 必须指定的属性
-    String name() default ""; // 带默认值的属性
-    int priority() default 1; // 数值类型属性
-    Class&lt;?&gt; type() default Void.class; // 类型属性
-    Status level() default Status.NORMAL; // 枚举属性
-    String[] tags();          // 数组类型属性
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>RetentionPolicy.java</b> · JDK 源码</span></div>
+<pre><code><span class="k">public enum</span> <span class="t">RetentionPolicy</span> {
+    <span class="t">SOURCE</span>,    <span class="c">// 编译器处理后丢弃</span>
+    <span class="t">CLASS</span>,     <span class="c">// 保留在 class 文件，JVM 不加载</span>
+    <span class="t">RUNTIME</span>    <span class="c">// 保留在 class 文件，JVM 加载，反射可读</span>
+}</code></pre>
+</div>
+
+<h3>@Target —— 注解能标注在哪里</h3>
+<p>@Target 限定注解的<strong>使用位置</strong>，防止误用：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ElementType.java</b> · 常用枚举值</span></div>
+<pre><code><span class="k">public enum</span> <span class="t">ElementType</span> {
+    <span class="t">TYPE</span>,           <span class="c">// 类、接口、枚举</span>
+    <span class="t">FIELD</span>,          <span class="c">// 字段（成员变量）</span>
+    <span class="t">METHOD</span>,         <span class="c">// 方法</span>
+    <span class="t">PARAMETER</span>,      <span class="c">// 方法参数</span>
+    <span class="t">CONSTRUCTOR</span>,    <span class="c">// 构造方法</span>
+    <span class="t">LOCAL_VARIABLE</span>, <span class="c">// 局部变量</span>
+    <span class="t">ANNOTATION_TYPE</span>,<span class="c">// 注解类型</span>
+    <span class="t">PACKAGE</span>,        <span class="c">// 包</span>
+    <span class="t">TYPE_USE</span>,       <span class="c">// 类型使用（JDK 8：泛型、强转等）</span>
+    <span class="t">TYPE_PARAMETER</span> <span class="c">// 类型参数（JDK 8：泛型参数声明）</span>
+}</code></pre>
+</div>
+
+<h3>@Documented —— Javadoc 可见</h3>
+<p>标注了 @Documented 的注解会出现在 Javadoc 文档中。不加则 Javadoc 不会展示该注解。大多数公共 API 注解（如 @Deprecated）都会加上。</p>
+
+<h3>@Inherited —— 子类可继承</h3>
+<p>默认情况下，父类上的注解<strong>不会</strong>被子类继承。加了 @Inherited 后，子类自动继承父类的类级别注解。注意：<strong>只对类有效</strong>，方法、字段上的注解不受此影响。</p>
+
+<h3>@Repeatable —— 可重复标注（JDK 8）</h3>
+<p>JDK 8 之前，同一个注解在同一个位置只能使用一次。@Repeatable 允许重复标注，但需要定义一个<strong>容器注解</strong>：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Repeatable 示例</b></span></div>
+<pre><code><span class="c">// ① 定义容器注解</span>
+<span class="k">@interface</span> <span class="t">Roles</span> {
+    <span class="t">Role</span>[] value();
 }
 
-// 使用方式
-@MyAnnotation(value = "test", name = "demo", tags = {"a", "b"})
-public void myMethod() {}</div><ul class="bullet-list"><li>注解属性类型只能是：<strong>基本数据类型、String、Class、Enum、Annotation</strong> 以及它们的数组</li><li>属性必须通过 <code>default</code> 设置默认值，或者在使用时必须指定</li><li>如果注解只有一个属性且名为 <code>value</code>，使用时可以省略 <code>value=</code></li></ul></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>四大元注解（Meta-Annotation）</h3>
-      <div class="content"><ul class="bullet-list"><li><strong>@Target</strong> — 限定注解可以应用的目标位置：</li></ul><div class="code-block">@Target({ElementType.TYPE, ElementType.METHOD})
-public @interface MyAnnotation {}
-// ElementType.METHOD  — 方法
-// ElementType.FIELD   — 字段
-// ElementType.TYPE    — 类/接口/枚举
-// ElementType.PARAMETER — 参数
-// ElementType.CONSTRUCTOR — 构造器</div><ul class="bullet-list"><li><strong>@Retention</strong> — 定义注解的保留策略（生命周期）：</li></ul><div class="code-block">@Retention(RetentionPolicy.SOURCE)   // 仅源码阶段，编译后丢弃
-@Retention(RetentionPolicy.CLASS)    // 编译期保留，默认值
-@Retention(RetentionPolicy.RUNTIME)  // 运行期可获取，最常用</div><div class="note-box">\U0001F4CD 面试要点：只有 <code>@Retention(RetentionPolicy.RUNTIME)</code> 的注解才能通过反射在运行时获取</div><ul class="bullet-list"><li><strong>@Documented</strong> — 标注注解是否会被 javadoc 提取到文档中</li><li><strong>@Inherited</strong> — 标注注解是否可以被子类继承（仅对类有效）</li></ul></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>运行时注解的反射处理</h3>
-      <div class="content"><ul class="bullet-list"><li>通过反射获取注解信息，是注解的核心使用方式：</li></ul><div class="code-block">// 1. 判断某个方法是否有指定注解
-method.isAnnotationPresent(MyAnnotation.class)
+<span class="c">// ② 定义可重复注解，指定容器</span>
+<span class="k">@Repeatable</span>(<span class="t">Roles</span>.<span class="k">class</span>)
+<span class="k">@interface</span> <span class="t">Role</span> {
+    <span class="t">String</span> value();
+}
 
-// 2. 获取注解实例
-MyAnnotation annotation = method.getAnnotation(MyAnnotation.class);
+<span class="c">// ③ 使用：同一个类上标注多次</span>
+<span class="t">@Role</span>(<span class="s">"admin"</span>)
+<span class="t">@Role</span>(<span class="s">"user"</span>)
+<span class="k">public class</span> <span class="t">UserService</span> {}</code></pre>
+</div>
+<div class="takeaway"><div class="takeaway-label">元注解速记</div>
+<p>@Retention 管生命周期（RUNTIME 才能反射读），@Target 管使用位置（TYPE/METHOD/FIELD），@Documented 管文档可见，@Inherited 管子类继承（仅类级别），@Repeatable 管重复标注（需容器注解）。</p>
+</div>
+</section>
 
-// 3. 读取注解属性值
-String value = annotation.value();
-String name = annotation.name();
+<!-- ═══════════════ 第3站：自定义注解 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>自定义注解：手写一个 @Log</h2></div>
+<p>自定义注解用 <code>@interface</code> 关键字定义，语法类似接口，但本质是一个继承自 <code>java.lang.annotation.Annotation</code> 的特殊接口。来看一个实际的日志注解：</p>
 
-// 4. 在类级别遍历所有带注解的方法
-for (Method m : clazz.getDeclaredMethods()) {
-    if (m.isAnnotationPresent(MyAnnotation.class)) {
-        MyAnnotation ann = m.getAnnotation(MyAnnotation.class);
-        // 执行业务逻辑
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Log.java</b> · 自定义日志注解</span></div>
+<pre><code><span class="k">import</span> java.lang.annotation.*;
+
+<span class="k">@Target</span>({<span class="t">ElementType</span>.<span class="t">METHOD</span>})            <span class="c">// 只能标注在方法上</span>
+<span class="k">@Retention</span>(<span class="t">RetentionPolicy</span>.<span class="t">RUNTIME</span>)       <span class="c">// 运行时可通过反射获取</span>
+<span class="k">@Documented</span>                                <span class="c">// 出现在 Javadoc 中</span>
+<span class="k">public @interface</span> <span class="t">Log</span> {
+    <span class="c">// 注解属性：描述信息，无默认值（使用时必须指定）</span>
+    <span class="t">String</span> value();
+
+    <span class="c">// 注解属性：日志级别，有默认值 INFO</span>
+    <span class="t">String</span> level() <span class="k">default</span> <span class="s">"INFO"</span>;
+
+    <span class="c">// 注解属性：是否记录参数，默认 true</span>
+    <span class="k">boolean</span> logArgs() <span class="k">default</span> <span class="n">true</span>;
+
+    <span class="c">// 注解属性：模块名</span>
+    <span class="t">String</span> module() <span class="k">default</span> <span class="s">""</span>;
+}</code></pre>
+</div>
+
+<p>注解属性的类型<strong>有限制</strong>，只允许以下类型：</p>
+<table class="nb-table">
+  <thead><tr><th>允许的类型</th><th>示例</th></tr></thead>
+  <tbody>
+    <tr><td>基本数据类型</td><td><code>int priority() default 1;</code></td></tr>
+    <tr><td>String</td><td><code>String value();</code></td></tr>
+    <tr><td>Class</td><td><code>Class&lt;?&gt; type() default Void.class;</code></td></tr>
+    <tr><td>Enum</td><td><code>LogLevel level() default LogLevel.INFO;</code></td></tr>
+    <tr><td>Annotation</td><td><code>Author author();</code></td></tr>
+    <tr><td>以上类型的数组</td><td><code>String[] tags() default {};</code></td></tr>
+  </tbody>
+</table>
+
+<p>使用自定义注解：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>OrderService.java</b> · 使用 @Log</span></div>
+<pre><code><span class="k">public class</span> <span class="t">OrderService</span> {
+
+    <span class="t">@Log</span>(value = <span class="s">"创建订单"</span>, level = <span class="s">"WARN"</span>, module = <span class="s">"订单"</span>)
+    <span class="k">public void</span> createOrder(<span class="t">String</span> orderId) {
+        <span class="c">// 业务逻辑...</span>
     }
-}</div><div class="note-box"><strong>常用反射 API：</strong><br><code>isAnnotationPresent()</code> — 判断是否标注<br><code>getAnnotation()</code> — 获取指定注解实例<br><code>getAnnotations()</code> — 获取所有注解<br><code>getDeclaredAnnotations()</code> — 获取直接声明的注解</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>注解的实际应用场景</h3>
-      <div class="content"><ul class="bullet-list"><li><strong>Spring 框架：</strong> @Autowired（依赖注入）、@Component（组件注册）、@RequestMapping（URL映射）等，都依赖 <code>@Retention(RUNTIME)</code> + 反射扫描</li><li><strong>Junit 测试：</strong> @Test、@Before、@After 等，基于 <code>@Retention(SOURCE)</code> 或 RUNTIME</li><li><strong>Lombok：</strong> @Data、@Builder 等，在编译期通过 <code>@Retention(SOURCE)</code> + APT（注解处理器）自动生成代码</li><li><strong>Retrofit / RxJava：</strong> @GET、@POST 等 HTTP 注解，运行时通过反射构建请求</li><li><strong>自定义注解处理器（APT）：</strong> 继承 <code>javax.annotation.processing.AbstractProcessor</code>，在编译期解析注解并生成 Java 代码</li></ul><div class="note-box warning">\u26A0\uFE0F 注解处理器（APT）与运行时注解的区别：<br>• APT：编译期执行，生成源码 → 需要继承 AbstractProcessor<br>• 运行时注解：运行期通过反射获取，需要 @Retention(RUNTIME)</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">❓</span>面试高频问题</h3>
-      <div class="content"><ul class="bullet-list"><li><strong>Q：注解和注释有什么区别？</strong><br>A：注解是代码的元数据，可以被工具/框架处理；注释是给开发者看的，编译器会忽略</li><li><strong>Q：@Target 和 @Retention 的作用是什么？</strong><br>A：@Target 控制注解能用在哪些位置；@Retention 控制注解的生命周期</li><li><strong>Q：如何自定义一个注解？</strong><br>A：使用 @interface 定义，配合元注解 @Target、@Retention 等，定义属性并通过 default 设置默认值</li><li><strong>Q：注解能继承吗？</strong><br>A：普通注解不能直接继承；但 @Inherited 元注解可以让类级别的注解被子类继承</li><li><strong>Q：Spring 如何扫描并处理注解？</strong><br>A：Spring 启动时通过反射扫描 classpath 下的类，检查是否标注了特定注解，然后进行相应的处理（如注册 Bean、建立映射关系等）</li></ul></div></div>
-  </div>
+
+    <span class="t">@Log</span>(<span class="s">"查询订单"</span>)   <span class="c">// 只有 value 属性时可以省略属性名</span>
+    <span class="k">public void</span> getOrder(<span class="t">String</span> orderId) {
+        <span class="c">// 业务逻辑...</span>
+    }
+}</code></pre>
 </div>
-<div class="footer">
-  <h4>📊 今日总结</h4>
-  <div class="progress-bar"><div class="progress-fill" style="width: 12%"></div></div>
-  <div class="progress-text">8 / 66 知识点</div>
-  <div class="next-preview">
-    <div class="next-icon">👉</div>
-    <div class="next-content">
-      <h5>明日预告</h5>
-      <p>受检异常 vs 非受检异常的设计哲学 — Java基础 · 异常与断言</p>
-    </div>
-  </div>
+
+<div class="crack"><div class="crack-label">value 属性的特殊规则</div>
+<p>如果注解只有一个属性且名为 <code>value</code>，使用时可以省略 <code>value=</code>，直接写 <code>@Log("描述")</code>。一旦有其他属性需要指定，就必须显式写 <code>value="描述"</code>。这是 Java 语法糖，面试中偶尔会考。</p>
 </div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 200" role="img" aria-label="注解定义与使用">
+  <text x="360" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">自定义注解的三层结构</text>
+  <rect x="40" y="50" width="180" height="60" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="130" y="73" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">定义层</text>
+  <text x="130" y="92" text-anchor="middle" font-size="10" fill="#57544E">@interface + 元注解</text>
+  <text x="130" y="105" text-anchor="middle" font-size="10" fill="#57544E">属性 + 默认值</text>
+  <rect x="270" y="50" width="180" height="60" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="360" y="73" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">标注层</text>
+  <text x="360" y="92" text-anchor="middle" font-size="10" fill="#57544E">@Log("创建订单")</text>
+  <text x="360" y="105" text-anchor="middle" font-size="10" fill="#57544E">标注在方法/类/字段上</text>
+  <rect x="500" y="50" width="180" height="60" rx="8" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="590" y="73" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">处理层</text>
+  <text x="590" y="92" text-anchor="middle" font-size="10" fill="#57544E">反射 / APT 读取</text>
+  <text x="590" y="105" text-anchor="middle" font-size="10" fill="#57544E">执行业务逻辑</text>
+  <line x1="220" y1="80" x2="268" y2="80" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="450" y1="80" x2="498" y2="80" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
+  <defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <rect x="120" y="140" width="480" height="45" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="160" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">没有处理层的注解 = 无用的摆设</text>
+  <text x="360" y="177" text-anchor="middle" font-size="10" fill="#57544E">注解本身不改变代码行为，必须由处理器赋予意义</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>自定义注解的三层结构：定义 → 标注 → 处理</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第4站：运行时处理 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>运行时处理：用反射读取注解</h2></div>
+<p>定义注解只是第一步——真正赋予注解意义的是<strong>运行时处理器</strong>。通过反射 API，我们可以在运行时检查类、方法、字段上的注解并执行对应逻辑。</p>
+
+<h3>核心反射 API</h3>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>反射注解 API</b> · AnnotatedElement 接口</span></div>
+<pre><code><span class="c">// 判断是否标注了指定注解</span>
+<span class="k">boolean</span> hasLog = method.<span class="t">isAnnotationPresent</span>(<span class="t">Log</span>.<span class="k">class</span>);
+
+<span class="c">// 获取指定注解实例（不存在返回 null）</span>
+<span class="t">Log</span> log = method.<span class="t">getAnnotation</span>(<span class="t">Log</span>.<span class="k">class</span>);
+
+<span class="c">// 获取所有注解（包括继承来的）</span>
+<span class="t">Annotation</span>[] all = method.<span class="t">getAnnotations</span>();
+
+<span class="c">// 获取直接声明的注解（不包括继承的）</span>
+<span class="t">Annotation</span>[] declared = method.<span class="t">getDeclaredAnnotations</span>();
+
+<span class="c">// 获取重复注解（JDK 8+）</span>
+<span class="t">Log</span>[] logs = method.<span class="t">getAnnotationsByType</span>(<span class="t">Log</span>.<span class="k">class</span>);</code></pre>
 </div>
-<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 8/66</div>
+
+<h3>实战：构建一个简单的日志注解处理器</h3>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LogProcessor.java</b> · 注解处理器</span></div>
+<pre><code><span class="k">public class</span> <span class="t">LogProcessor</span> {
+
+    <span class="k">public static void</span> process(<span class="t">Class</span>&lt;?&gt; clazz) {
+        <span class="c">// 遍历类中所有声明的方法</span>
+        <span class="k">for</span> (<span class="t">Method</span> method : clazz.<span class="t">getDeclaredMethods</span>()) {
+            <span class="c">// 检查方法是否标注了 @Log</span>
+            <span class="k">if</span> (!method.<span class="t">isAnnotationPresent</span>(<span class="t">Log</span>.<span class="k">class</span>)) {
+                <span class="k">continue</span>;
+            }
+            <span class="c">// 获取注解实例并读取属性</span>
+            <span class="t">Log</span> log = method.<span class="t">getAnnotation</span>(<span class="t">Log</span>.<span class="k">class</span>);
+            <span class="t">String</span> desc = log.<span class="t">value</span>();
+            <span class="t">String</span> level = log.<span class="t">level</span>();
+            <span class="k">boolean</span> logArgs = log.<span class="t">logArgs</span>();
+            <span class="t">String</span> module = log.<span class="t">module</span>();
+
+            <span class="c">// 执行日志记录逻辑</span>
+            <span class="t">System</span>.out.<span class="t">printf</span>(<span class="s">"[%s] [%s] %s.%s - logArgs=%b%n"</span>,
+                level, module,
+                clazz.<span class="t">getSimpleName</span>(),
+                method.<span class="t">getName</span>(),
+                logArgs);
+        }
+    }
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">LogProcessor</span>.<span class="t">process</span>(<span class="t">OrderService</span>.<span class="k">class</span>);
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么注解属性看起来像方法调用？</div>
+<p>注解编译后生成一个接口，每个属性对应接口中的一个方法。当你调用 <code>log.value()</code> 时，JDK 在底层通过动态代理（<code>AnnotationParser</code>）返回注解中声明的值。这就是为什么注解属性的语法看起来和方法定义一模一样——它们本质上就是接口方法。</p>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 220" role="img" aria-label="反射处理注解流程">
+  <defs><marker id="arr6" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="360" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">运行时注解处理流程</text>
+  <rect x="30" y="50" width="130" height="50" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="95" y="72" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">获取 Class</text>
+  <text x="95" y="88" text-anchor="middle" font-size="9" fill="#8C8676">Class.forName()</text>
+  <rect x="195" y="50" width="130" height="50" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="260" y="72" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">遍历成员</text>
+  <text x="260" y="88" text-anchor="middle" font-size="9" fill="#8C8676">getMethods()</text>
+  <rect x="360" y="50" width="155" height="50" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="437" y="72" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">检查注解</text>
+  <text x="437" y="88" text-anchor="middle" font-size="9" fill="#8C8676">isAnnotationPresent()</text>
+  <rect x="550" y="50" width="140" height="50" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="620" y="72" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">读取属性</text>
+  <text x="620" y="88" text-anchor="middle" font-size="9" fill="#8C8676">getAnnotation()</text>
+  <line x1="160" y1="75" x2="193" y2="75" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr6)"/>
+  <line x1="325" y1="75" x2="358" y2="75" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr6)"/>
+  <line x1="515" y1="75" x2="548" y2="75" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr6)"/>
+  <rect x="150" y="130" width="420" height="75" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="150" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">前提条件：@Retention(RUNTIME)</text>
+  <text x="360" y="168" text-anchor="middle" font-size="10" fill="#57544E">只有 RUNTIME 级别的注解才能在运行时被反射读取</text>
+  <text x="360" y="185" text-anchor="middle" font-size="10" fill="#57544E">SOURCE 和 CLASS 级别的注解在运行时完全不存在</text>
+  <text x="360" y="200" text-anchor="middle" font-size="10" fill="#C2410C">getAnnotation() 返回 null → 处理器必须做 null 判断</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>运行时注解处理的标准四步流程</figcaption>
+</figure>
+
+<div class="takeaway"><div class="takeaway-label">反射处理注解要点</div>
+<p>① 必须先确保注解是 @Retention(RUNTIME)；② 用 isAnnotationPresent() 做判断，getAnnotation() 拿实例；③ 注解属性通过方法调用读取（本质是动态代理）；④ 遍历类成员时注意 getDeclaredMethods() 不包含继承方法，getMethods() 只包含 public 方法。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：Spring 注解驱动 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Spring 注解驱动：@Autowired 与 @Transactional 的底层原理</h2></div>
+<p>Spring 框架是注解驱动的最佳范例。面试常问"Spring 的 @Autowired 是怎么工作的"，本质是考察你是否理解<strong>注解 + 反射 + BeanPostProcessor</strong>的协作机制。</p>
+
+<h3>@Autowired 的底层实现</h3>
+<p>@Autowired 的注入并非 Spring 容器"魔法般"自动完成，而是靠一个具体的后处理器：<strong>AutowiredAnnotationBeanPostProcessor</strong>。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AutowiredAnnotationBeanPostProcessor</b> · 简化逻辑</span></div>
+<pre><code><span class="k">public class</span> <span class="t">AutowiredAnnotationBeanPostProcessor</span>
+    <span class="k">implements</span> <span class="t">BeanPostProcessor</span> {
+
+    <span class="c">// Spring 在每个 Bean 初始化前调用此方法</span>
+    <span class="k">public</span> <span class="t">Object</span> postProcessBeforeInitialization(
+            <span class="t">Object</span> bean, <span class="t">String</span> beanName) {
+
+        <span class="t">Class</span>&lt;?&gt; clazz = bean.<span class="t">getClass</span>();
+
+        <span class="c">// ① 扫描所有字段，查找 @Autowired</span>
+        <span class="k">for</span> (<span class="t">Field</span> field : clazz.<span class="t">getDeclaredFields</span>()) {
+            <span class="k">if</span> (field.<span class="t">isAnnotationPresent</span>(<span class="t">Autowired</span>.<span class="k">class</span>)) {
+                <span class="c">// ② 从容器中查找依赖</span>
+                <span class="t">Object</span> dependency = findBean(field.<span class="t">getType</span>());
+                <span class="c">// ③ 反射注入</span>
+                field.<span class="t">setAccessible</span>(<span class="n">true</span>);
+                field.<span class="t">set</span>(bean, dependency);
+            }
+        }
+        <span class="k">return</span> bean;
+    }
+}</code></pre>
+</div>
+
+<h3>@Transactional 的底层实现</h3>
+<p>@Transactional 的实现机制与 @Autowired 不同——它基于 <strong>AOP 代理</strong>。Spring 在 Bean 创建后检查是否标注了 @Transactional，如果有，则为该 Bean 创建代理对象，在方法调用前后织入事务管理逻辑：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>事务代理</b> · 简化流程</span></div>
+<pre><code><span class="c">// Spring 内部简化伪代码</span>
+<span class="k">if</span> (beanClass.<span class="t">isAnnotationPresent</span>(<span class="t">Transactional</span>.<span class="k">class</span>)
+    || hasTransactionalMethod(beanClass)) {
+    <span class="c">// 为这个 Bean 创建 AOP 代理</span>
+    proxy = <span class="t">ProxyFactory</span>.createProxy(bean);
+    <span class="c">// 代理拦截方法调用</span>
+    proxy.addAdvice(<span class="k">new</span> <span class="t">TransactionInterceptor</span>());
+}
+
+<span class="c">// 代理拦截器内部</span>
+<span class="k">public</span> <span class="t">Object</span> invoke(<span class="t">MethodInvocation</span> invocation) {
+    <span class="t">TransactionAttribute</span> attr =
+        <span class="t">getTransactionAttribute</span>(invocation.getMethod());
+    <span class="k">try</span> {
+        <span class="t">TransactionStatus</span> status = tm.<span class="t">getTransaction</span>(attr);
+        <span class="t">Object</span> result = invocation.<span class="t">proceed</span>(); <span class="c">// 执行目标方法</span>
+        tm.<span class="t">commit</span>(status);
+        <span class="k">return</span> result;
+    } <span class="k">catch</span> (<span class="t">RuntimeException</span> e) {
+        tm.<span class="t">rollback</span>(status);  <span class="c">// 回滚</span>
+        <span class="k">throw</span> e;
+    }
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 240" role="img" aria-label="Spring 注解处理机制">
+  <defs><marker id="arr7" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker><marker id="arr8" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker></defs>
+  <text x="360" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Spring 注解驱动：两种处理模式</text>
+  <rect x="240" y="42" width="240" height="42" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="360" y="62" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">Spring IoC 容器启动</text>
+  <text x="360" y="78" text-anchor="middle" font-size="9" fill="#57544E">扫描 @Component / @Bean 注册的类</text>
+  <line x1="260" y1="84" x2="160" y2="110" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr7)"/>
+  <line x1="460" y1="84" x2="560" y2="110" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr8)"/>
+  <rect x="40" y="112" width="240" height="55" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="160" y="132" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="700">BeanPostProcessor 模式</text>
+  <text x="160" y="150" text-anchor="middle" font-size="10" fill="#57544E">@Autowired / @Value / @Resource</text>
+  <text x="160" y="162" text-anchor="middle" font-size="9" fill="#8C8676">Bean 初始化阶段反射扫描并注入</text>
+  <rect x="440" y="112" width="240" height="55" rx="6" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="560" y="132" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">AOP 代理模式</text>
+  <text x="560" y="150" text-anchor="middle" font-size="10" fill="#57544E">@Transactional / @Cacheable</text>
+  <text x="560" y="162" text-anchor="middle" font-size="9" fill="#8C8676">检查注解 → 创建代理 → 方法拦截</text>
+  <rect x="80" y="190" width="560" height="40" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="210" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">核心链路：注解定义（@Retention RUNTIME）→ 容器启动时反射扫描 → 执行对应处理逻辑</text>
+  <text x="360" y="225" text-anchor="middle" font-size="10" fill="#57544E">没有反射，注解驱动就是空中楼阁</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>Spring 注解驱动的两种处理模式：BeanPostProcessor 与 AOP 代理</figcaption>
+</figure>
+
+<div class="crack"><div class="crack-label">为什么同类内部方法调用 @Transactional 不生效？</div>
+<p>因为 @Transactional 基于代理实现。同类内部调用（<code>this.methodB()</code>）走的是原始对象而非代理对象，事务拦截器不会被触发。解决方案：注入自身（@Autowired self）、使用 AopContext.currentProxy()、或拆分成不同 Bean。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：注解 vs 配置 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>注解驱动 vs XML 配置：优劣对比</h2></div>
+<p>在 Spring 早期（2.x），所有配置都写在 XML 文件中。随着注解机制的成熟（Spring 3+ 尤其是 Spring Boot），注解驱动逐渐成为主流。面试中经常要求对比两者：</p>
+
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>XML 配置</th><th>注解驱动</th></tr></thead>
+  <tbody>
+    <tr><td><strong>配置位置</strong></td><td>独立于代码，集中管理</td><td>分散在各类上，与代码耦合</td></tr>
+    <tr><td><strong>可读性</strong></td><td>结构清晰，适合大型项目</td><td>直观简洁，适合中小型项目</td></tr>
+    <tr><td><strong>修改成本</strong></td><td>改 XML 无需重新编译</td><td>改注解需重新编译</td></tr>
+    <tr><td><strong>类型安全</strong></td><td>字符串配置，易出错</td><td>编译期检查，类型安全</td></tr>
+    <tr><td><strong>灵活性</strong></td><td>运行时可替换配置</td><td>编译后固定，不可动态切换</td></tr>
+    <tr><td><strong>Spring Boot</strong></td><td>不推荐，需要额外配置</td><td>原生支持，自动配置</td></tr>
+    <tr><td><strong>第三方集成</strong></td><td>适合无源码的第三方 Bean</td><td>需要能修改源码</td></tr>
+  </tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>XML 配置</b> vs <b>注解配置</b></span></div>
+<pre><code><span class="c">&lt;!-- XML 方式：独立配置文件 --&gt;</span>
+&lt;<span class="k">bean</span> id=<span class="s">"userService"</span> class=<span class="s">"com.example.UserService"</span>&gt;
+    &lt;<span class="k">property</span> name=<span class="s">"userDao"</span> ref=<span class="s">"userDao"</span>/&gt;
+&lt;/<span class="k">bean</span>&gt;
+
+<span class="c">// 注解方式：嵌入代码</span>
+<span class="t">@Service</span>
+<span class="k">public class</span> <span class="t">UserService</span> {
+    <span class="t">@Autowired</span>
+    <span class="k">private</span> <span class="t">UserDao</span> userDao;
+}</code></pre>
+</div>
+
+<p>现代 Spring Boot 的哲学是<strong>"约定优于配置"（Convention over Configuration）</strong>，注解驱动完美契合这一理念：</p>
+<ul>
+  <li><strong>@SpringBootApplication</strong> = @Configuration + @ComponentScan + @EnableAutoConfiguration</li>
+  <li><strong>自动配置</strong>：Spring Boot 通过扫描 classpath 下的 jar 包和注解，自动装配 Bean</li>
+  <li><strong>条件注解</strong>：@ConditionalOnClass、@ConditionalOnMissingBean 实现按需装配</li>
+</ul>
+
+<div class="formula"><strong>选型原则</strong><br/>项目内部代码 → 注解驱动（简洁、类型安全）<br/>第三方库 / 无法修改源码的类 → @Bean 方法（Java Config）或 XML<br/>需要运行时动态切换 → XML 或 properties/yml 外部化配置</div>
+</section>
+
+<!-- ═══════════════ 第7站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：注解设计原则与面试回答模板</h2></div>
+<p>注解体系的设计遵循三个核心原则：</p>
+<ul>
+  <li><strong>声明式编程</strong>：注解让开发者"声明意图"而非"编写实现"。@Transactional 声明"这个方法需要事务"，而非手动写 begin/commit/rollback</li>
+  <li><strong>关注点分离</strong>：业务代码保持纯净，横切逻辑（日志、事务、缓存）通过注解 + 处理器统一管理</li>
+  <li><strong>框架扩展点</strong>：注解是框架提供给开发者的"插件接口"，框架通过反射扫描注解来执行开发者定义的逻辑</li>
+</ul>
+
+<p>常见的注解设计模式：</p>
+<table class="nb-table">
+  <thead><tr><th>模式</th><th>代表注解</th><th>处理方式</th></tr></thead>
+  <tbody>
+    <tr><td><strong>标记注解</strong></td><td>@Override、@FunctionalInterface</td><td>编译器检查（SOURCE）</td></tr>
+    <tr><td><strong>元数据注解</strong></td><td>@Deprecated、@SuppressWarnings</td><td>编译器警告 / IDE 提示</td></tr>
+    <tr><td><strong>依赖注入</strong></td><td>@Autowired、@Resource、@Inject</td><td>BeanPostProcessor 反射注入</td></tr>
+    <tr><td><strong>AOP 切面</strong></td><td>@Transactional、@Cacheable</td><td>代理 + 方法拦截器</td></tr>
+    <tr><td><strong>代码生成</strong></td><td>@Data、@Builder（Lombok）</td><td>编译期 APT 注解处理器</td></tr>
+    <tr><td><strong>路由映射</strong></td><td>@RequestMapping、@GET</td><td>启动时扫描注册路由表</td></tr>
+  </tbody>
+</table>
+
+<figure class="fig">
+<svg viewBox="0 0 720 200" role="img" aria-label="注解体系全景">
+  <text x="360" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">注解体系全景：从定义到处理</text>
+  <rect x="20" y="50" width="140" height="55" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="90" y="70" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">元注解</text>
+  <text x="90" y="86" text-anchor="middle" font-size="9" fill="#57544E">@Retention @Target</text>
+  <text x="90" y="98" text-anchor="middle" font-size="9" fill="#57544E">@Repeatable ...</text>
+  <rect x="195" y="50" width="140" height="55" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="265" y="70" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">自定义注解</text>
+  <text x="265" y="86" text-anchor="middle" font-size="9" fill="#57544E">@interface + 属性</text>
+  <text x="265" y="98" text-anchor="middle" font-size="9" fill="#57544E">default 默认值</text>
+  <rect x="370" y="50" width="140" height="55" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="440" y="70" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="700">标注使用</text>
+  <text x="440" y="86" text-anchor="middle" font-size="9" fill="#57544E">@Log("创建订单")</text>
+  <text x="440" y="98" text-anchor="middle" font-size="9" fill="#57544E">类/方法/字段/参数</text>
+  <rect x="545" y="50" width="155" height="55" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="622" y="70" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="700">处理器</text>
+  <text x="622" y="86" text-anchor="middle" font-size="9" fill="#57544E">反射 / APT / 代理</text>
+  <text x="622" y="98" text-anchor="middle" font-size="9" fill="#57544E">执行业务逻辑</text>
+  <defs><marker id="arr9" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <line x1="160" y1="77" x2="193" y2="77" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr9)"/>
+  <line x1="335" y1="77" x2="368" y2="77" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr9)"/>
+  <line x1="510" y1="77" x2="543" y2="77" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr9)"/>
+  <rect x="120" y="130" width="480" height="55" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="150" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">设计三原则</text>
+  <text x="360" y="168" text-anchor="middle" font-size="10" fill="#57544E">声明式编程 · 关注点分离 · 框架扩展点</text>
+  <text x="360" y="182" text-anchor="middle" font-size="10" fill="#57544E">注解本身无行为，处理器赋予意义</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>注解体系全景：元注解 → 自定义注解 → 标注 → 处理</figcaption>
+</figure>
+
+<div class="recap">
+<h3>面试回答模板</h3>
+<p><strong>Q：请介绍 Java 注解的机制以及你自定义注解的经验。</strong></p>
+<p>"Java 注解是元数据机制，用 @interface 定义，通过元注解约束行为。@Retention(RUNTIME) 保证运行时可反射获取，@Target 限定使用位置。自定义注解需要三个层次：定义（@interface + 属性）、标注（用在代码上）、处理（反射扫描并执行逻辑）。</p>
+<p>Spring 的 @Autowired 通过 AutowiredAnnotationBeanPostProcessor 实现——在 Bean 初始化阶段反射扫描字段，查找 @Autowired 注解，从容器中查找依赖并注入。@Transactional 则基于 AOP 代理——检测到注解后为 Bean 创建代理，在方法调用前后织入事务的 begin/commit/rollback 逻辑。</p>
+<p>注解相比 XML 的优势是类型安全和与代码紧密结合，劣势是修改需重新编译。现代 Spring Boot 以注解驱动为主，Java Config 和 yml 配置为辅。"</p>
+<p><strong>Q：@Transactional 同类内部调用为什么不生效？</strong></p>
+<p>"因为 @Transactional 基于 AOP 代理实现。同类内部调用走的是 this 引用而非代理对象，事务拦截器不会被触发。解决方案是注入自身、使用 AopContext.currentProxy()、或拆分成不同 Bean。"</p>
+</div>
+</section>
+
+</main>
 </body>
 </html>

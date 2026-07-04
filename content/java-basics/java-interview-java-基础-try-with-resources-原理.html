@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>try-with-resources 底层原理：编译器做了什么？</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "try-with-resources 底层原理：编译器做了什么？"
+  difficulty: 中级
+  interviewFreq: 高频
+  desc: "AutoCloseable 接口、编译器自动生成的 finally 块、异常抑制（suppressed）——TWR 比 try-finally 好在哪里。"
+-->
+
+<!-- ================================================================
+     第 1 站 — try-finally 的痛点
+     ================================================================ -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>try-finally 的三大痛点</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"面试官问：Java 里关闭资源有几种方式？try-finally 有什么问题？"</p>
+  </div>
+
+  <p>在 JDK 7 之前，关闭资源必须手写 try-finally。这段看似简单的代码其实暗藏三个致命问题：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>OldWay.java</b> · JDK 7 之前的写法</span></div>
+    <pre><code><span class="t">BufferedReader</span> br = <span class="k">null</span>;
+<span class="k">try</span> {
+    br = <span class="k">new</span> <span class="t">BufferedReader</span>(<span class="k">new</span> <span class="t">FileReader</span>(<span class="n">"data.txt"</span>));
+    <span class="k">return</span> br.readLine();
+} <span class="k">catch</span> (<span class="t">IOException</span> e) {
+    <span class="k">throw new</span> <span class="t">RuntimeException</span>(e);
+} <span class="k">finally</span> {
+    <span class="k">if</span> (br != <span class="k">null</span>) {
+        <span class="k">try</span> {
+            br.close();          <span class="c">// 这里也可能抛异常！</span>
+        } <span class="k">catch</span> (<span class="t">IOException</span> e) {
+            <span class="c">// 吞掉异常？还是覆盖前面的异常？</span>
+        }
+    }
+}</code></pre>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" style="max-width:800px;width:100%">
+      <defs>
+        <linearGradient id="tw1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+      </defs>
+
+      <text x="400" y="24" text-anchor="middle" fill="#1e293b" font-size="14" font-weight="700">try-finally 的三大痛点</text>
+
+      <!-- 痛点 1 -->
+      <rect x="20" y="50" width="240" height="100" rx="10" fill="url(#tw1)"/>
+      <text x="140" y="78" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">1. 代码冗长</text>
+      <text x="140" y="100" text-anchor="middle" fill="#fecaca" font-size="11">finally 里还要嵌套 try-catch</text>
+      <text x="140" y="118" text-anchor="middle" fill="#fecaca" font-size="11">多个资源时代码量翻倍</text>
+      <text x="140" y="136" text-anchor="middle" fill="#fecaca" font-size="11">容易遗漏 null 检查</text>
+
+      <!-- 痛点 2 -->
+      <rect x="280" y="50" width="240" height="100" rx="10" fill="#f59e0b"/>
+      <text x="400" y="78" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">2. 异常覆盖</text>
+      <text x="400" y="100" text-anchor="middle" fill="#fef3c7" font-size="11">finally 中的异常会</text>
+      <text x="400" y="118" text-anchor="middle" fill="#fef3c7" font-size="11">覆盖 try 块中的原始异常</text>
+      <text x="400" y="136" text-anchor="middle" fill="#fef3c7" font-size="11">导致丢失真正的错误信息</text>
+
+      <!-- 痛点 3 -->
+      <rect x="540" y="50" width="240" height="100" rx="10" fill="#8b5cf6"/>
+      <text x="660" y="78" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">3. 资源泄漏</text>
+      <text x="660" y="100" text-anchor="middle" fill="#ede9fe" font-size="11">如果 close() 抛异常</text>
+      <text x="660" y="118" text-anchor="middle" fill="#ede9fe" font-size="11">后续资源不会被关闭</text>
+      <text x="660" y="136" text-anchor="middle" fill="#ede9fe" font-size="11">多资源时关闭顺序难保证</text>
+
+      <!-- 底部总结 -->
+      <rect x="20" y="180" width="760" height="100" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="400" y="210" text-anchor="middle" fill="#1e293b" font-size="13" font-weight="700">JDK 7 引入 try-with-resources 解决所有问题</text>
+      <text x="400" y="235" text-anchor="middle" fill="#475569" font-size="12">编译器自动生成 finally 块，自动逆序关闭资源，自动处理异常抑制</text>
+      <text x="400" y="258" text-anchor="middle" fill="#3b82f6" font-size="12" font-weight="600">开发者只需声明资源，编译器负责一切收尾工作</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> try-finally 三大痛点与 try-with-resources 的解决方案</figcaption>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试怎么引入？</span>
+    <p>先从 try-finally 的痛点切入（代码冗长、异常覆盖、资源泄漏），再引出 try-with-resources 的解决方案。面试官会觉得你对底层原理有深入理解，而不只是会写代码。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 2 站 — AutoCloseable 接口
+     ================================================================ -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>AutoCloseable 接口：TWR 的契约</h2>
+  </div>
+
+  <p>try-with-resources 能自动关闭资源的前提是：资源必须实现 <code>AutoCloseable</code> 接口（或其父接口 <code>Closeable</code>）。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>AutoCloseable.java</b> · JDK 源码</span></div>
+    <pre><code><span class="k">public interface</span> <span class="t">AutoCloseable</span> {
+    <span class="c">// close() 方法声明抛出 Exception（而非 IOException）</span>
+    <span class="c">// 子类可以缩小为更具体的异常类型</span>
+    <span class="k">void</span> close() <span class="k">throws</span> <span class="t">Exception</span>;
+}</code></pre>
+  </div>
+
+  <p><code>AutoCloseable</code>（JDK 7）和 <code>Closeable</code>（JDK 5）的区别：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>对比维度</th><th>AutoCloseable</th><th>Closeable</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>引入版本</td><td>JDK 7</td><td>JDK 5</td></tr>
+      <tr><td>close() 声明</td><td>throws Exception</td><td>throws IOException</td></tr>
+      <tr><td>继承关系</td><td>顶级接口</td><td>extends AutoCloseable</td></tr>
+      <tr><td>适用范围</td><td>所有资源（DB连接、锁等）</td><td>仅限 I/O 流</td></tr>
+      <tr><td>幂等性要求</td><td>不强制</td><td>规范要求 close() 幂等</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>CustomResource.java</b> · 自定义 AutoCloseable</span></div>
+    <pre><code><span class="k">public class</span> <span class="t">DbConnection</span> <span class="k">implements</span> <span class="t">AutoCloseable</span> {
+    <span class="k">private final</span> <span class="t">Connection</span> conn;
+
+    <span class="k">public</span> <span class="t">DbConnection</span>(<span class="t">String</span> url) <span class="k">throws</span> <span class="t">SQLException</span> {
+        <span class="k">this</span>.conn = <span class="t">DriverManager</span>.getConnection(url);
+    }
+
+    <span class="t">Connection</span> get() { <span class="k">return</span> conn; }
+
+    <span class="c">// close() 应该是幂等的（多次调用无副作用）</span>
+    @<span class="t">Override</span>
+    <span class="k">public void</span> close() <span class="k">throws</span> <span class="t">SQLException</span> {
+        <span class="k">if</span> (conn != <span class="k">null</span> &amp;&amp; !conn.isClosed()) {
+            conn.close();
+        }
+    }
+}
+
+<span class="c">// 使用：自动关闭，无需 finally</span>
+<span class="k">try</span> (<span class="t">DbConnection</span> db = <span class="k">new</span> <span class="t">DbConnection</span>(url)) {
+    db.get().prepareStatement(sql).execute();
+}</code></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">设计建议</span>
+    <p>自定义资源的 <code>close()</code> 方法应该是<strong>幂等</strong>的——多次调用不应抛异常或产生副作用。同时，close() 中的异常应该被记录日志而非静默吞掉。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 3 站 — 编译器生成的代码
+     ================================================================ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>编译器做了什么？——反编译看真相</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"try-with-resources 在字节码层面是怎样的？编译器自动生成了什么代码？"</p>
+  </div>
+
+  <p>这是面试中区分"会用"和"理解原理"的关键题。我们来看编译器到底做了什么。</p>
+
+  <p><strong>源码：</strong>一行简洁的 try-with-resources：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>TWR_源码.java</b></span></div>
+    <pre><code><span class="k">try</span> (<span class="t">BufferedReader</span> br = <span class="k">new</span> <span class="t">BufferedReader</span>(
+        <span class="k">new</span> <span class="t">FileReader</span>(<span class="n">"data.txt"</span>))) {
+    <span class="k">return</span> br.readLine();
+}</code></pre>
+  </div>
+
+  <p><strong>编译器展开后：</strong>等价于一段冗长的 try-finally：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>TWR_编译器展开.java</b> · 反编译结果</span></div>
+    <pre><code><span class="t">BufferedReader</span> br = <span class="k">new</span> <span class="t">BufferedReader</span>(
+    <span class="k">new</span> <span class="t">FileReader</span>(<span class="n">"data.txt"</span>));
+<span class="t">Throwable</span> primaryException = <span class="k">null</span>;
+
+<span class="k">try</span> {
+    <span class="k">return</span> br.readLine();
+} <span class="k">catch</span> (<span class="t">Throwable</span> t) {
+    primaryException = t;
+    <span class="k">throw</span> t;
+} <span class="k">finally</span> {
+    <span class="k">if</span> (br != <span class="k">null</span>) {
+        <span class="k">if</span> (primaryException != <span class="k">null</span>) {
+            <span class="k">try</span> {
+                br.close();
+            } <span class="k">catch</span> (<span class="t">Throwable</span> suppressed) {
+                <span class="c">// 关键：close 的异常被"抑制"而非覆盖</span>
+                primaryException.addSuppressed(suppressed);
+            }
+        } <span class="k">else</span> {
+            br.close();  <span class="c">// 正常情况：直接 close</span>
+        }
+    }
+}</code></pre>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 800 280" xmlns="http://www.w3.org/2000/svg" style="max-width:800px;width:100%">
+      <defs>
+        <marker id="twa" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#64748b"/></marker>
+      </defs>
+
+      <text x="400" y="24" text-anchor="middle" fill="#1e293b" font-size="14" font-weight="700">编译器展开流程</text>
+
+      <!-- 步骤 1 -->
+      <rect x="20" y="50" width="170" height="55" rx="8" fill="#3b82f6"/>
+      <text x="105" y="72" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">1. 声明资源</text>
+      <text x="105" y="90" text-anchor="middle" fill="#dbeafe" font-size="10">+ 保存 primaryExc</text>
+
+      <line x1="190" y1="77" x2="230" y2="77" stroke="#64748b" stroke-width="1.5" marker-end="url(#twa)"/>
+
+      <!-- 步骤 2 -->
+      <rect x="230" y="50" width="170" height="55" rx="8" fill="#f59e0b"/>
+      <text x="315" y="72" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">2. 执行 try 块</text>
+      <text x="315" y="90" text-anchor="middle" fill="#fef3c7" font-size="10">捕获异常 → primaryExc</text>
+
+      <line x1="400" y1="77" x2="440" y2="77" stroke="#64748b" stroke-width="1.5" marker-end="url(#twa)"/>
+
+      <!-- 步骤 3 -->
+      <rect x="440" y="50" width="170" height="55" rx="8" fill="#10b981"/>
+      <text x="525" y="72" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">3. finally 关闭</text>
+      <text x="525" y="90" text-anchor="middle" fill="#d1fae5" font-size="10">close() 在 finally 中</text>
+
+      <line x1="610" y1="77" x2="650" y2="77" stroke="#64748b" stroke-width="1.5" marker-end="url(#twa)"/>
+
+      <!-- 步骤 4 -->
+      <rect x="650" y="50" width="130" height="55" rx="8" fill="#8b5cf6"/>
+      <text x="715" y="72" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">4. 异常处理</text>
+      <text x="715" y="90" text-anchor="middle" fill="#ede9fe" font-size="10">addSuppressed</text>
+
+      <!-- 多资源顺序 -->
+      <rect x="20" y="130" width="760" height="130" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="40" y="155" fill="#1e293b" font-size="12" font-weight="700">多资源时的关闭顺序（逆序关闭）：</text>
+
+      <text x="40" y="180" fill="#475569" font-size="11" font-family="monospace">try (A a = new A(); B b = new B(); C c = new C()) { ... }</text>
+
+      <text x="40" y="205" fill="#475569" font-size="11">关闭顺序：c.close() → b.close() → a.close()（后声明的先关闭）</text>
+
+      <text x="40" y="228" fill="#ef4444" font-size="11" font-weight="600">原因：后声明的资源可能依赖先声明的资源，先关后声明的安全</text>
+
+      <text x="40" y="248" fill="#475569" font-size="11">JDK 9+ 还支持在 try() 中使用 effectively final 的局部变量，无需重新声明</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> 编译器展开 try-with-resources 的四个步骤</figcaption>
+  </div>
+
+  <div class="formula">
+    <p><strong>核心公式：</strong></p>
+    <p style="text-align:center;font-size:1.05em;margin:12px 0"><code>TWR 源码 → 编译器生成 try-catch-finally + addSuppressed</code></p>
+    <p>开发者看到的是一行代码，编译器生成的是一整套异常安全机制。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 4 站 — 异常抑制（Suppressed Exceptions）
+     ================================================================ -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>异常抑制：被忽略但至关重要的机制</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"如果 try 块和 close() 都抛了异常，最终抛出的是哪个？"</p>
+  </div>
+
+  <p>这是 TWR 最精妙的设计。在 try-finally 中，finally 的异常会<strong>覆盖</strong> try 块的异常，导致丢失真正的错误信息。TWR 用<strong>异常抑制</strong>解决了这个问题。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>SuppressedDemo.java</b> · 异常抑制演示</span></div>
+    <pre><code><span class="k">try</span> (<span class="t">MyResource</span> res = <span class="k">new</span> <span class="t">MyResource</span>()) {
+    <span class="k">throw new</span> <span class="t">RuntimeException</span>(<span class="n">"业务异常"</span>);  <span class="c">// 主异常</span>
+}
+<span class="c">// MyResource.close() 也抛了 "关闭异常"</span>
+<span class="c">// 最终抛出的是 "业务异常"（主异常）</span>
+<span class="c">// "关闭异常" 被挂在主异常的 suppressed 列表中</span></code></pre>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg" style="max-width:800px;width:100%">
+      <text x="400" y="24" text-anchor="middle" fill="#1e293b" font-size="14" font-weight="700">异常抑制 vs 异常覆盖</text>
+
+      <!-- 左侧：try-finally -->
+      <rect x="20" y="45" width="360" height="36" rx="6" fill="#ef4444"/>
+      <text x="200" y="68" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">try-finally（异常覆盖）</text>
+
+      <rect x="20" y="90" width="360" height="55" rx="6" fill="#fef2f2" stroke="#fca5a5"/>
+      <text x="40" y="112" fill="#991b1b" font-size="11" font-weight="600">try 抛：业务异常</text>
+      <text x="40" y="130" fill="#dc2626" font-size="11" font-weight="700">finally 抛：关闭异常 → 覆盖了业务异常！</text>
+
+      <rect x="20" y="155" width="360" height="40" rx="6" fill="#fef2f2" stroke="#fca5a5"/>
+      <text x="200" y="180" text-anchor="middle" fill="#dc2626" font-size="12" font-weight="700">最终抛出：关闭异常（丢失业务异常！）</text>
+
+      <!-- 右侧：try-with-resources -->
+      <rect x="420" y="45" width="360" height="36" rx="6" fill="#10b981"/>
+      <text x="600" y="68" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">try-with-resources（异常抑制）</text>
+
+      <rect x="420" y="90" width="360" height="55" rx="6" fill="#f0fdf4" stroke="#86efac"/>
+      <text x="440" y="112" fill="#166534" font-size="11" font-weight="600">try 抛：业务异常（主异常）</text>
+      <text x="440" y="130" fill="#166534" font-size="11">close 抛：关闭异常 → addSuppressed()</text>
+
+      <rect x="420" y="155" width="360" height="40" rx="6" fill="#f0fdf4" stroke="#86efac"/>
+      <text x="600" y="180" text-anchor="middle" fill="#059669" font-size="12" font-weight="700">最终抛出：业务异常（保留真正原因）</text>
+
+      <!-- 获取 suppressed -->
+      <rect x="420" y="210" width="360" height="90" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="440" y="235" fill="#1e293b" font-size="11" font-weight="600">获取被抑制的异常：</text>
+      <text x="440" y="258" fill="#475569" font-size="11" font-family="monospace">Throwable[] suppressed = e.getSuppressed();</text>
+      <text x="440" y="278" fill="#475569" font-size="11" font-family="monospace">for (Throwable s : suppressed) {</text>
+      <text x="440" y="293" fill="#475569" font-size="11" font-family="monospace">    log.warn("Suppressed: {}", s); }</text>
+    </svg>
+    <figcaption><span class="fig-no">图 3</span> try-finally 异常覆盖 vs try-with-resources 异常抑制</figcaption>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试高分回答</span>
+    <p>"try-with-resources 用 addSuppressed() 把 close() 的异常挂在主异常上，而不是覆盖主异常。这样日志中既能看到业务异常，又能通过 getSuppressed() 看到关闭异常，排查问题时信息完整。"</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 5 站 — 实战用法与最佳实践
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>实战模式：TWR 在生产代码中的用法</h2>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>RealWorldTWR.java</b> · 常见实战场景</span></div>
+    <pre><code><span class="c">// 场景 1：多资源同时管理（逆序关闭）</span>
+<span class="k">try</span> (<span class="t">FileInputStream</span> fis = <span class="k">new</span> <span class="t">FileInputStream</span>(<span class="n">"in.txt"</span>);
+     <span class="t">BufferedInputStream</span> bis = <span class="k">new</span> <span class="t">BufferedInputStream</span>(fis);
+     <span class="t">FileOutputStream</span> fos = <span class="k">new</span> <span class="t">FileOutputStream</span>(<span class="n">"out.txt"</span>);
+     <span class="t">BufferedOutputStream</span> bos = <span class="k">new</span> <span class="t">BufferedOutputStream</span>(fos)) {
+    bis.transferTo(bos);
+}
+<span class="c">// 关闭顺序：bos → fos → bis → fis（后声明的先关）</span>
+
+<span class="c">// 场景 2：JDBC 事务管理</span>
+<span class="k">try</span> (<span class="t">Connection</span> conn = dataSource.getConnection();
+     <span class="t">PreparedStatement</span> ps = conn.prepareStatement(sql);
+     <span class="t">ResultSet</span> rs = ps.executeQuery()) {
+    <span class="k">while</span> (rs.next()) {
+        process(rs);
+    }
+}
+
+<span class="c">// 场景 3：JDK 9+ effectively final 变量</span>
+<span class="t">BufferedReader</span> br = <span class="k">new</span> <span class="t">BufferedReader</span>(<span class="k">new</span> <span class="t">FileReader</span>(<span class="n">"f.txt"</span>));
+<span class="k">try</span> (br) {   <span class="c">// JDK 9+：直接用已有变量</span>
+    <span class="k">return</span> br.readLine();
+}</code></pre>
+  </div>
+
+  <p><strong>注意事项：</strong></p>
+  <ul>
+    <li>JDK 9 之前，try() 中必须声明新变量；JDK 9+ 支持 effectively final 的局部变量</li>
+    <li>try-with-resources 可以搭配 catch 块，处理资源使用过程中的异常</li>
+    <li>不要嵌套 try-with-resources（可读性差），应把多个资源写在同一个 try() 中</li>
+    <li>自定义资源实现 AutoCloseable 时，close() 应该幂等且记录日志</li>
+  </ul>
+
+  <div class="takeaway">
+    <span class="takeaway-label">TWR 最佳实践</span>
+    <p>永远用 try-with-resources 代替 try-finally 管理资源。多资源写在同一个 try() 中，逗号分隔。自定义资源实现 AutoCloseable，close() 幂等。异常抑制机制让排查问题更高效——别忘了 <code>e.getSuppressed()</code>。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — 总结
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>总结：try-with-resources 全景回顾</h2>
+  </div>
+
+  <div class="recap">
+    <h3>全文核心要点回顾</h3>
+    <ul>
+      <li><strong>try-finally 三大痛点</strong>：代码冗长、异常覆盖、资源泄漏</li>
+      <li><strong>AutoCloseable</strong>：TWR 的前提，资源必须实现此接口</li>
+      <li><strong>编译器展开</strong>：自动生成 try-catch-finally + null 检查 + 逆序关闭</li>
+      <li><strong>异常抑制</strong>：close() 的异常通过 addSuppressed() 挂在主异常上，不覆盖</li>
+      <li><strong>多资源</strong>：后声明的先关闭，写在同一个 try() 中</li>
+      <li><strong>JDK 9+</strong>：支持 effectively final 变量直接放入 try()</li>
+    </ul>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试 30 秒总结</span>
+    <p>"try-with-resources 是 JDK 7 引入的资源管理语法糖。编译器在编译期将其展开为 try-catch-finally 结构，自动逆序关闭资源。核心优势是异常抑制机制——close() 的异常通过 addSuppressed() 挂在主异常上，不会像 try-finally 那样覆盖原始异常。前提是资源必须实现 AutoCloseable 接口。JDK 9+ 还支持 effectively final 的局部变量直接放入 try()。"</p>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bean 生命周期</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "Bean 生命周期：从实例化到销毁的完整流程"
+  difficulty: 深度
+  interviewFreq: 极高
+  desc: "实例化 → 属性注入 → Aware 回调 → BeanPostProcessor → InitializingBean → init-method → 使用 → 销毁。14 步完整链路。"
+-->
+
+<!-- ================================================================
+     第 1 站 — 开场：面试官的灵魂拷问
+     ================================================================ -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>面试官：说说 Spring Bean 的生命周期？</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"说说 Spring Bean 的生命周期？"——这是一道能拉开候选人差距的题。初级选手答"创建、使用、销毁"三阶段；中级选手能说出 InitializingBean 和 init-method；能完整说出 14 步链路并指出扩展点的，通常是真正读过 AbstractAutowireCapableBeanFactory 源码的人。</p>
+  </div>
+
+  <p>Bean 生命周期是 Spring 面试中出现频率最高的题目之一，原因很直接：它串联了 IoC 容器、依赖注入、AOP 代理、扩展点设计等核心知识点。能把这条链路讲清楚，说明你对 Spring 的理解不是停留在"会用注解"的层面，而是理解了框架的骨架。</p>
+
+  <div class="crack">
+    <span class="crack-label">面试官真正在考什么？</span>
+    <ol>
+      <li><strong>源码功底</strong>——有没有读过 <code>doCreateBean()</code> 和 <code>initializeBean()</code> 的核心流程</li>
+      <li><strong>扩展意识</strong>——知不知道 BeanPostProcessor 是 AOP、事务、异步等几乎所有 Spring 高级特性的基石</li>
+      <li><strong>工程经验</strong>——有没有在实际项目中利用生命周期回调解决过问题（如缓存预热、连接池初始化）</li>
+    </ol>
+  </div>
+
+  <p>本文将从源码层面拆解 Bean 从出生到死亡的完整 14 步，每一步都对应 <code>AbstractAutowireCapableBeanFactory</code> 中的具体方法调用。读完之后，你将能够：在面试中画出完整的流程图、说出每一步的类名和方法名、并指出框架开发者最常用的扩展点。</p>
+</section>
+
+<!-- ================================================================
+     第 2 站 — 完整生命周期 SVG 全景图
+     ================================================================ -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>14 步全景图：从 new 到 GC 的完整链路</h2>
+  </div>
+
+  <p>先看全貌，再逐站拆解。下面这张图覆盖了 Bean 生命周期的全部 14 个步骤，建议你面试时能在白板上画出类似的流程：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 880 1020" xmlns="http://www.w3.org/2000/svg" style="max-width:880px;width:100%">
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#475569"/></marker>
+        <linearGradient id="gInst" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
+        <linearGradient id="gPop" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#6d28d9"/></linearGradient>
+        <linearGradient id="gAware" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#0891b2"/></linearGradient>
+        <linearGradient id="gBpp" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+        <linearGradient id="gInit" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        <linearGradient id="gReady" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#22c55e"/><stop offset="100%" stop-color="#15803d"/></linearGradient>
+        <linearGradient id="gDest" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+      </defs>
+
+      <!-- 标题 -->
+      <text x="440" y="28" text-anchor="middle" fill="#1e293b" font-size="16" font-weight="700">Spring Bean 生命周期 —— 14 步完整链路</text>
+
+      <!-- ====== 实例化阶段 (蓝色区域) ====== -->
+      <rect x="20" y="45" width="840" height="130" rx="12" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+      <text x="40" y="68" fill="#1d4ed8" font-size="13" font-weight="700">实例化阶段</text>
+
+      <!-- Step 1 -->
+      <rect x="60" y="80" width="200" height="46" rx="8" fill="url(#gInst)"/>
+      <text x="160" y="100" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">① InstantiationAwareBPP</text>
+      <text x="160" y="115" text-anchor="middle" fill="#dbeafe" font-size="10">postProcessBeforeInstantiation</text>
+
+      <line x1="260" y1="103" x2="290" y2="103" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step 2 -->
+      <rect x="290" y="80" width="220" height="46" rx="8" fill="url(#gInst)"/>
+      <text x="400" y="100" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">② createBeanInstance</text>
+      <text x="400" y="115" text-anchor="middle" fill="#dbeafe" font-size="10">构造函数 / 工厂方法 / @Bean</text>
+
+      <line x1="510" y1="103" x2="540" y2="103" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step 3 -->
+      <rect x="540" y="80" width="250" height="46" rx="8" fill="url(#gInst)"/>
+      <text x="665" y="100" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">③ MergedBeanDefinitionPostProcessor</text>
+      <text x="665" y="115" text-anchor="middle" fill="#dbeafe" font-size="10">postProcessMergedBeanDefinition</text>
+
+      <line x1="440" y1="126" x2="440" y2="145" stroke="#475569" stroke-width="1.5"/>
+      <text x="440" y="160" text-anchor="middle" fill="#475569" font-size="10">↓ 早期引用存入三级缓存（解决循环依赖）</text>
+
+      <!-- ====== 属性注入阶段 (紫色区域) ====== -->
+      <rect x="20" y="185" width="840" height="80" rx="12" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1.5"/>
+      <text x="40" y="208" fill="#6d28d9" font-size="13" font-weight="700">属性注入阶段</text>
+
+      <!-- Step 4 -->
+      <rect x="150" y="218" width="260" height="36" rx="8" fill="url(#gPop)"/>
+      <text x="280" y="241" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">④ populateBean — 属性注入</text>
+
+      <line x1="410" y1="236" x2="440" y2="236" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step 5 -->
+      <rect x="440" y="218" width="310" height="36" rx="8" fill="url(#gPop)"/>
+      <text x="595" y="241" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑤ InstantiationAwareBPP.postProcessProperties</text>
+
+      <!-- ====== Aware 回调阶段 (青色区域) ====== -->
+      <rect x="20" y="285" width="840" height="80" rx="12" fill="#ecfeff" stroke="#a5f3fc" stroke-width="1.5"/>
+      <text x="40" y="308" fill="#0891b2" font-size="13" font-weight="700">Aware 回调阶段</text>
+
+      <!-- Step 6-8 -->
+      <rect x="80" y="318" width="190" height="36" rx="8" fill="url(#gAware)"/>
+      <text x="175" y="341" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑥ BeanNameAware</text>
+
+      <line x1="270" y1="336" x2="295" y2="336" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="295" y="318" width="210" height="36" rx="8" fill="url(#gAware)"/>
+      <text x="400" y="341" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑦ BeanFactoryAware</text>
+
+      <line x1="505" y1="336" x2="530" y2="336" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <rect x="530" y="318" width="260" height="36" rx="8" fill="url(#gAware)"/>
+      <text x="660" y="341" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑧ ApplicationContextAware</text>
+
+      <!-- ====== BeanPostProcessor + 初始化阶段 (黄色+绿色区域) ====== -->
+      <rect x="20" y="385" width="840" height="280" rx="12" fill="#fffbeb" stroke="#fde68a" stroke-width="1.5"/>
+      <text x="40" y="408" fill="#92400e" font-size="13" font-weight="700">初始化阶段（BeanPostProcessor + 回调）</text>
+
+      <!-- Step 9 -->
+      <rect x="230" y="420" width="420" height="38" rx="8" fill="url(#gBpp)"/>
+      <text x="440" y="436" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑨ BeanPostProcessor.postProcessBeforeInitialization</text>
+      <text x="440" y="450" text-anchor="middle" fill="#fef3c7" font-size="10">AOP 代理可能在此生成（AbstractAutoProxyCreator）</text>
+
+      <line x1="440" y1="458" x2="440" y2="475" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step 10 -->
+      <rect x="280" y="475" width="320" height="36" rx="8" fill="url(#gInit)"/>
+      <text x="440" y="498" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑩ @PostConstruct（CommonAnnotationBPP）</text>
+
+      <line x1="440" y1="511" x2="440" y2="525" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step 11 -->
+      <rect x="250" y="525" width="380" height="36" rx="8" fill="url(#gInit)"/>
+      <text x="440" y="548" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑪ InitializingBean.afterPropertiesSet()</text>
+
+      <line x1="440" y1="561" x2="440" y2="575" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step 12 -->
+      <rect x="300" y="575" width="280" height="36" rx="8" fill="url(#gInit)"/>
+      <text x="440" y="598" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑫ init-method（自定义初始化方法）</text>
+
+      <line x1="440" y1="611" x2="440" y2="625" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step 13 -->
+      <rect x="220" y="625" width="440" height="38" rx="8" fill="url(#gBpp)"/>
+      <text x="440" y="641" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">⑬ BeanPostProcessor.postProcessAfterInitialization</text>
+      <text x="440" y="655" text-anchor="middle" fill="#fef3c7" font-size="10">AOP 代理通常在此步创建（wrapIfNecessary）</text>
+
+      <!-- ====== 使用阶段 (绿色) ====== -->
+      <rect x="260" y="690" width="360" height="50" rx="12" fill="url(#gReady)" stroke="#15803d" stroke-width="2"/>
+      <text x="440" y="712" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">⑭ Bean 就绪，投入使用</text>
+      <text x="440" y="730" text-anchor="middle" fill="#dcfce7" font-size="11">容器运行中，Bean 正常处理业务请求</text>
+
+      <!-- ====== 销毁阶段 (红色区域) ====== -->
+      <rect x="20" y="765" width="840" height="175" rx="12" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
+      <text x="40" y="788" fill="#dc2626" font-size="13" font-weight="700">销毁阶段（容器关闭时）</text>
+
+      <!-- Arrow down from ready -->
+      <line x1="440" y1="740" x2="440" y2="800" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <text x="460" y="775" fill="#475569" font-size="10">容器 shutdown</text>
+
+      <!-- Step D1 -->
+      <rect x="260" y="800" width="360" height="36" rx="8" fill="url(#gDest)"/>
+      <text x="440" y="823" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">D1. @PreDestroy（CommonAnnotationBPP）</text>
+
+      <line x1="440" y1="836" x2="440" y2="850" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step D2 -->
+      <rect x="250" y="850" width="380" height="36" rx="8" fill="url(#gDest)"/>
+      <text x="440" y="873" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">D2. DisposableBean.destroy()</text>
+
+      <line x1="440" y1="886" x2="440" y2="900" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+      <!-- Step D3 -->
+      <rect x="280" y="900" width="320" height="36" rx="8" fill="url(#gDest)"/>
+      <text x="440" y="923" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">D3. destroy-method（自定义销毁方法）</text>
+
+      <!-- 底部注释 -->
+      <text x="440" y="970" text-anchor="middle" fill="#94a3b8" font-size="11">核心源码入口：AbstractAutowireCapableBeanFactory.doCreateBean() → populateBean() → initializeBean()</text>
+      <text x="440" y="990" text-anchor="middle" fill="#94a3b8" font-size="11">销毁入口：DisposableBeanAdapter.destroy() — 由 DefaultSingletonBeanRegistry.destroySingletons() 驱动</text>
+      <text x="440" y="1010" text-anchor="middle" fill="#94a3b8" font-size="10">图：Spring Bean 生命周期 14 步完整流程</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> Spring Bean 生命周期 14 步完整链路全景图</figcaption>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心记忆</span>
+    <p>生命周期的主干是 <code>doCreateBean()</code> 方法，内部依次调用 <code>createBeanInstance()</code> → <code>populateBean()</code> → <code>initializeBean()</code>。面试时先说这三个方法名，再展开细节，面试官会知道你确实读过源码。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 3 站 — 实例化阶段
+     ================================================================ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>实例化阶段：createBeanInstance 的三条路径</h2>
+  </div>
+
+  <p>Bean 生命周期的第一步并不是直接 <code>new</code>。Spring 在实例化之前和之后都留了扩展点，整个实例化阶段的执行顺序是：</p>
+
+  <p><strong>步骤 ①</strong>：<code>InstantiationAwareBeanPostProcessor.postProcessBeforeInstantiation()</code> — 这是最早的拦截点。如果这个方法返回了一个非 null 的对象，Spring 会直接使用它作为 Bean 实例，跳过后续所有的创建和初始化步骤。<strong>AOP 的 CGLIB 代理理论上可以在这里介入</strong>，但 Spring 默认选择在初始化后（步骤 ⑬）才创建代理。</p>
+
+  <p><strong>步骤 ②</strong>：<code>createBeanInstance()</code> — 真正创建对象实例。Spring 有三种策略来选择构造方式：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">createBeanInstance 的三条路径</div>
+    <pre class="srcbox-file"><span class="c">// 路径 1：Supplier 创建（@Bean 方法返回的 Supplier）</span>
+<span class="k">if</span> (mbd.getInstanceSupplier() != <span class="k">null</span>) {
+    instanceSupplier = mbd.getInstanceSupplier();
+}
+
+<span class="c">// 路径 2：工厂方法（@Bean 标注的方法 或 factory-method）</span>
+<span class="k">if</span> (mbd.getFactoryMethodName() != <span class="k">null</span>) {
+    <span class="k">return</span> instantiateUsingFactoryMethod(beanName, mbd, args);
+}
+
+<span class="c">// 路径 3：构造函数（最常见的方式）</span>
+<span class="c">// 如果只有默认无参构造 → 直接 newInstance()</span>
+<span class="c">// 如果有多个构造器 → Spring 会选择"最贪婪"的那个</span>
+<span class="c">// 即参数最多、且参数类型都能在容器中找到 Bean 的那个构造器</span>
+<span class="k">return</span> autowireConstructor(beanName, mbd, ctor, args);</pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">构造函数注入 vs Setter 注入：Spring 官方推荐哪种？</p>
+    <p>Spring 团队从 4.x 开始<strong>推荐使用构造函数注入</strong>，理由是：(1) 保证 Bean 创建后依赖不可变（final）；(2) 不会出现"属性忘了注入"的 NPE；(3) 方便写单测——直接在构造时传入 mock。Setter 注入（或 @Autowired 字段注入）适合可选依赖。</p>
+  </div>
+
+  <p><strong>步骤 ③</strong>：<code>MergedBeanDefinitionPostProcessor.postProcessMergedBeanDefinition()</code> — 对象已创建但还没注入属性。这一步的主要工作是<strong>预处理 BeanDefinition</strong>，比如 <code>AutowiredAnnotationBeanPostProcessor</code> 会在这一步扫描出所有带 <code>@Autowired</code>、<code>@Value</code>、<code>@Inject</code> 注解的字段和方法，缓存起来供后续 populateBean 使用。</p>
+
+  <div class="crack">
+    <span class="crack-label">三级缓存与循环依赖</span>
+    <p>实例化完成后（步骤 ② 之后），Spring 会立即将这个"半成品"Bean 的 <strong>ObjectFactory</strong> 放入三级缓存 <code>singletonFactories</code>。这是解决循环依赖的关键——如果 A 依赖 B，B 又依赖 A，B 在注入属性时发现 A 还没创建完，就会从三级缓存拿到 A 的早期引用（可能是代理对象），从而打破循环。<code>prototype</code> 作用域的 Bean 不参与缓存，因此<strong>不支持循环依赖</strong>。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 4 站 — 属性注入
+     ================================================================ -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>属性注入：populateBean 的注入顺序</h2>
+  </div>
+
+  <p>对象创建出来了，但它还是一个"空壳"——所有依赖都是 null。<code>populateBean()</code> 负责把依赖"灌"进去。</p>
+
+  <p><strong>步骤 ④</strong>：<code>populateBean()</code> — 处理 <code>autowireMode</code>（BY_NAME、BY_TYPE）等传统 XML 注入方式。在现代 Spring Boot 项目中，这个分支通常不走，真正的注入在步骤 ⑤。</p>
+
+  <p><strong>步骤 ⑤</strong>：<code>InstantiationAwareBeanPostProcessor.postProcessProperties()</code> — 这是现代 Spring 属性注入的主战场。<code>AutowiredAnnotationBeanPostProcessor</code> 会处理 <code>@Autowired</code> 和 <code>@Value</code>，<code>CommonAnnotationBeanPostProcessor</code> 会处理 <code>@Resource</code>。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">三种注入注解的区别</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">OrderService</span> {
+
+    <span class="c">// @Autowired — Spring 提供，按类型注入，多个候选时用 @Qualifier</span>
+    <span class="c">// 默认 required=true，找不到 Bean 会抛异常</span>
+    <span class="k">@Autowired</span>
+    <span class="k">private</span> <span class="t">PaymentService</span> paymentService;
+
+    <span class="c">// @Value — 注入配置值、SpEL 表达式、字面量</span>
+    <span class="k">@Value</span>(<span class="n">"${app.max-retry:3}"</span>)   <span class="c">// 带默认值的配置项</span>
+    <span class="k">private int</span> maxRetry;
+
+    <span class="c">// @Resource — JSR-250 标准，默认按名称注入</span>
+    <span class="c">// name 属性匹配 Bean 名称，找不到再按类型 fallback</span>
+    <span class="k">@Resource</span>(name = <span class="n">"smsSender"</span>)
+    <span class="k">private</span> <span class="t">MessageSender</span> messageSender;
+}</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>注解</th><th>来源</th><th>注入策略</th><th>找不到 Bean 时</th><th>推荐场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>@Autowired</code></td><td>Spring</td><td>先按类型，多个候选按名称</td><td>抛 NoSuchBeanDefinitionException</td><td>构造函数注入</td></tr>
+      <tr><td><code>@Value</code></td><td>Spring</td><td>SpEL / 配置值</td><td>抛异常（除非有默认值）</td><td>注入配置项</td></tr>
+      <tr><td><code>@Resource</code></td><td>JSR-250</td><td>先按名称，再按类型</td><td>抛 NoSuchBeanDefinitionException</td><td>指定名称注入</td></tr>
+    </tbody>
+  </table>
+
+  <div class="think">
+    <p class="think-q">@Autowired 和 @Resource 同时标注在一个字段上，谁生效？</p>
+    <p>两者由不同的 <code>BeanPostProcessor</code> 处理。Spring 的处理顺序是：先执行 <code>AutowiredAnnotationBeanPostProcessor</code>（处理 @Autowired / @Value），再执行 <code>CommonAnnotationBeanPostProcessor</code>（处理 @Resource）。所以如果两个注解都在，<strong>@Autowired 先注入，@Resource 后覆盖</strong>——最终效果是 @Resource 的值生效。</p>
+  </div>
+
+  <div class="formula">
+    <strong>属性注入完成条件</strong>：所有 <code>required=true</code> 的依赖都已解析并赋值。如果某个 <code>@Autowired(required=false)</code> 的依赖找不到，该字段保持 null，不抛异常。
+  </div>
+</section>
+
+<!-- ================================================================
+     第 5 站 — 初始化阶段（核心重点）
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>初始化阶段：6 步回调链（面试重灾区）</h2>
+  </div>
+
+  <p>属性注入完成后，Bean 进入初始化阶段——这是生命周期中回调最密集、面试最爱考的阶段。全部由 <code>initializeBean()</code> 方法驱动，源码结构非常清晰：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">AbstractAutowireCapableBeanFactory.initializeBean()</div>
+    <pre class="srcbox-file"><span class="k">protected</span> Object initializeBean(String beanName, Object bean,
+                                 RootBeanDefinition mbd) {
+
+    <span class="c">// —— 步骤 ⑥⑦⑧：Aware 回调 ——</span>
+    invokeAwareMethods(beanName, bean);
+
+    <span class="c">// —— 步骤 ⑨：BPP 前置处理 ——</span>
+    wrappedBean = applyBeanPostProcessorsBeforeInitialization(
+                      wrappedBean, beanName);
+
+    <span class="c">// —— 步骤 ⑩⑪⑫：初始化回调 ——</span>
+    invokeInitMethods(beanName, wrappedBean, mbd);
+
+    <span class="c">// —— 步骤 ⑬：BPP 后置处理（AOP 代理在此创建）——</span>
+    wrappedBean = applyBeanPostProcessorsAfterInitialization(
+                      wrappedBean, beanName);
+
+    <span class="k">return</span> wrappedBean;
+}</pre>
+  </div>
+
+  <p>我们逐步拆解：</p>
+
+  <p><strong>步骤 ⑥⑦⑧</strong>：<code>invokeAwareMethods()</code> — 如果 Bean 实现了以下 Aware 接口，Spring 会依次回调：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>顺序</th><th>接口</th><th>回调方法</th><th>注入的内容</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>⑥</td><td><code>BeanNameAware</code></td><td>setBeanName(name)</td><td>Bean 在容器中的名称</td></tr>
+      <tr><td>⑦</td><td><code>BeanClassLoaderAware</code></td><td>setBeanClassLoader(cl)</td><td>加载此 Bean 的 ClassLoader</td></tr>
+      <tr><td>⑧</td><td><code>BeanFactoryAware</code></td><td>setBeanFactory(factory)</td><td>BeanFactory 实例本身</td></tr>
+    </tbody>
+  </table>
+
+  <p>注意：<code>ApplicationContextAware</code> <strong>不在这个方法里处理</strong>！它是由 <code>ApplicationContextAwareProcessor</code>（一个 BeanPostProcessor）在步骤 ⑨ 中处理的。这个细节是面试区分度很高的考点。</p>
+
+  <p><strong>步骤 ⑨</strong>：<code>BeanPostProcessor.postProcessBeforeInitialization()</code> — 所有注册的 BPP 按顺序执行。其中最重要的几个：</p>
+
+  <ul>
+    <li><code>ApplicationContextAwareProcessor</code>：处理 <code>EnvironmentAware</code>、<code>ApplicationContextAware</code>、<code>MessageSourceAware</code> 等 6 个 Aware 接口</li>
+    <li><code>CommonAnnotationBeanPostProcessor</code>：识别 <code>@PostConstruct</code> 方法</li>
+  </ul>
+
+  <p><strong>步骤 ⑩</strong>：<code>@PostConstruct</code> — JSR-250 标准注解。由 <code>InitDestroyAnnotationBeanPostProcessor</code> 处理，标注的方法在所有属性注入完成后、<code>afterPropertiesSet</code> 之前执行。</p>
+
+  <p><strong>步骤 ⑪</strong>：<code>InitializingBean.afterPropertiesSet()</code> — Spring 自定义的初始化回调接口。在 <code>@PostConstruct</code> 之后执行。Spring 内部很多组件（如 <code>AbstractApplicationContext</code> 自身）使用此接口。</p>
+
+  <p><strong>步骤 ⑫</strong>：<code>init-method</code> — 通过 <code>@Bean(initMethod="xxx")</code> 或 XML <code>init-method</code> 指定的自定义方法。在 <code>afterPropertiesSet</code> 之后执行。</p>
+
+  <p><strong>步骤 ⑬</strong>：<code>BeanPostProcessor.postProcessAfterInitialization()</code> — 这是 Bean 初始化完成前的<strong>最后一个拦截点</strong>。<code>AbstractAutoProxyCreator</code> 在这个步骤中检查 Bean 是否需要 AOP 代理（事务、缓存、异步等），如果需要就创建代理对象替换原始 Bean。</p>
+
+  <div class="crack">
+    <span class="crack-label">为什么 AOP 代理在步骤 ⑬ 而不是步骤 ⑨？</span>
+    <p>因为代理对象需要包装的是"完全初始化好的 Bean"。如果在 <code>postProcessBeforeInitialization</code> 就创建代理，那么 <code>@PostConstruct</code>、<code>afterPropertiesSet</code> 等回调就会作用在代理对象上，可能触发不该触发的事务切面或安全检查。放在 <code>postProcessAfterInitialization</code> 可以保证：原始 Bean 完成所有初始化后，再被包装成代理——<strong>代理只拦截业务方法，不参与初始化流程</strong>。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试必背顺序</span>
+    <p>Aware 回调 → postProcessBeforeInitialization → @PostConstruct → afterPropertiesSet → init-method → postProcessAfterInitialization。记口诀：<strong>"先 Aware、再 BPP 前、三初始化、最后 BPP 后"</strong>。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — 使用与销毁
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>使用与销毁：Bean 的谢幕</h2>
+  </div>
+
+  <p>经过步骤 ⑭，Bean 已经完全初始化（可能被 AOP 代理包装），存放在单例池中，等待业务代码调用。这个阶段没什么特别的回调——Bean 就是一个正常的 Java 对象。</p>
+
+  <p>真正的故事发生在<strong>容器关闭</strong>时。当调用 <code>ApplicationContext.close()</code> 或 JVM 收到 shutdown 信号时，Spring 会触发销毁流程，由 <code>DisposableBeanAdapter.destroy()</code> 驱动：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">销毁流程三步走</div>
+    <pre class="srcbox-file"><span class="k">public void</span> destroy() {
+    <span class="c">// D1. @PreDestroy — JSR-250 标准，最先执行</span>
+    <span class="c">// 由 InitDestroyAnnotationBeanPostProcessor 触发</span>
+    invokeCustomDestroyMethod(this.destroyMethod);
+
+    <span class="c">// D2. DisposableBean.destroy() — Spring 接口回调</span>
+    <span class="k">if</span> (this.bean <span class="k">instanceof</span> <span class="t">DisposableBean</span>) {
+        ((<span class="t">DisposableBean</span>) <span class="k">this</span>.bean).destroy();
+    }
+
+    <span class="c">// D3. destroy-method — 自定义销毁方法</span>
+    <span class="c">// 通过 @Bean(destroyMethod="cleanup") 指定</span>
+    invokeCustomDestroyMethod(<span class="k">this</span>.destroyMethodName);
+}</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>顺序</th><th>回调</th><th>来源</th><th>典型用途</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>D1</td><td><code>@PreDestroy</code></td><td>JSR-250</td><td>释放连接、关闭文件句柄</td></tr>
+      <tr><td>D2</td><td><code>DisposableBean.destroy()</code></td><td>Spring 接口</td><td>框架内部资源清理</td></tr>
+      <tr><td>D3</td><td><code>destroy-method</code></td><td>配置指定</td><td>业务自定义清理逻辑</td></tr>
+    </tbody>
+  </table>
+
+  <div class="think">
+    <p class="think-q">@Bean(destroyMethod="close") 中的 close 是怎么来的？</p>
+    <p>Spring 有一个 <strong>inferred destroy method</strong> 机制：如果 <code>@Bean</code> 的 <code>destroyMethod</code> 没有显式指定，Spring 会检查 Bean 类中是否存在 <code>close()</code> 或 <code>shutdown()</code> 方法。如果存在，自动将其注册为销毁回调。这就是为什么 DataSource、ConnectionPool 等资源类不需要手动配置 destroyMethod 也能正确关闭。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">实战示例：完整生命周期的 Bean</div>
+    <pre class="srcbox-file"><span class="k">@Component</span>
+<span class="k">public class</span> <span class="t">CacheManager</span> <span class="k">implements</span>
+        <span class="t">BeanNameAware</span>, <span class="t">InitializingBean</span>, <span class="t">DisposableBean</span> {
+
+    <span class="k">private</span> <span class="t">String</span> beanName;
+    <span class="k">private</span> <span class="t">ConcurrentHashMap</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; cache;
+
+    <span class="c">// 步骤 ⑥：Aware 回调</span>
+    <span class="k">@Override</span>
+    <span class="k">public void</span> setBeanName(<span class="t">String</span> name) {
+        <span class="k">this</span>.beanName = name;
+        log.info(<span class="n">"[⑥] BeanNameAware: "</span> + name);
+    }
+
+    <span class="c">// 步骤 ⑩：@PostConstruct</span>
+    <span class="k">@PostConstruct</span>
+    <span class="k">public void</span> postConstruct() {
+        log.info(<span class="n">"[⑩] @PostConstruct"</span>);
+    }
+
+    <span class="c">// 步骤 ⑪：InitializingBean</span>
+    <span class="k">@Override</span>
+    <span class="k">public void</span> afterPropertiesSet() {
+        <span class="k">this</span>.cache = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();
+        log.info(<span class="n">"[⑪] afterPropertiesSet: 缓存初始化完成"</span>);
+        loadHotData();  <span class="c">// 缓存预热</span>
+    }
+
+    <span class="c">// 步骤 ⑫：init-method</span>
+    <span class="k">public void</span> customInit() {
+        log.info(<span class="n">"[⑫] init-method: customInit()"</span>);
+    }
+
+    <span class="c">// D1：@PreDestroy</span>
+    <span class="k">@PreDestroy</span>
+    <span class="k">public void</span> preDestroy() {
+        log.info(<span class="n">"[D1] @PreDestroy: 准备清理"</span>);
+    }
+
+    <span class="c">// D2：DisposableBean</span>
+    <span class="k">@Override</span>
+    <span class="k">public void</span> destroy() {
+        cache.clear();
+        log.info(<span class="n">"[D2] DisposableBean.destroy: 缓存已清空"</span>);
+    }
+}</pre>
+  </div>
+
+  <p>启动并关闭容器后，日志输出顺序严格为：⑥ → ⑩ → ⑪ → ⑫ → ... 应用运行 ... → D1 → D2。你可以自己跑一下验证。</p>
+</section>
+
+<!-- ================================================================
+     第 7 站 — 总结与速查表
+     ================================================================ -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>总结：面试速查表与框架扩展点</h2>
+  </div>
+
+  <div class="recap">
+    <h3>Bean 生命周期 14 步速查</h3>
+    <table class="nb-table">
+      <thead>
+        <tr><th>#</th><th>步骤</th><th>核心方法 / 类</th><th>阶段</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>①</td><td>BPP.postProcessBeforeInstantiation</td><td>InstantiationAwareBeanPostProcessor</td><td rowspan="3" style="background:#eff6ff">实例化</td></tr>
+        <tr><td>②</td><td>createBeanInstance</td><td>构造函数 / 工厂方法 / @Bean Supplier</td></tr>
+        <tr><td>③</td><td>postProcessMergedBeanDefinition</td><td>MergedBeanDefinitionPostProcessor</td></tr>
+        <tr><td>④</td><td>populateBean（XML autowire）</td><td>BY_NAME / BY_TYPE 传统模式</td><td rowspan="2" style="background:#f5f3ff">属性注入</td></tr>
+        <tr><td>⑤</td><td>postProcessProperties</td><td>@Autowired / @Value / @Resource</td></tr>
+        <tr><td>⑥</td><td>BeanNameAware.setBeanName</td><td rowspan="3" style="vertical-align:middle">invokeAwareMethods</td><td rowspan="3" style="background:#ecfeff">Aware 回调</td></tr>
+        <tr><td>⑦</td><td>BeanClassLoaderAware</td></tr>
+        <tr><td>⑧</td><td>BeanFactoryAware.setBeanFactory</td></tr>
+        <tr><td>⑨</td><td>BPP.postProcessBeforeInitialization</td><td>含 ApplicationContextAwareProcessor</td><td rowspan="5" style="background:#fffbeb">初始化</td></tr>
+        <tr><td>⑩</td><td>@PostConstruct</td><td>InitDestroyAnnotationBeanPostProcessor</td></tr>
+        <tr><td>⑪</td><td>InitializingBean.afterPropertiesSet</td><td>Spring 接口回调</td></tr>
+        <tr><td>⑫</td><td>init-method</td><td>自定义初始化方法</td></tr>
+        <tr><td>⑬</td><td>BPP.postProcessAfterInitialization</td><td>AOP 代理在此创建</td></tr>
+        <tr><td>⑭</td><td>Bean 就绪，投入使用</td><td>—</td><td style="background:#dcfce7">使用</td></tr>
+        <tr><td>D1</td><td>@PreDestroy</td><td>InitDestroyAnnotationBeanPostProcessor</td><td rowspan="3" style="background:#fef2f2">销毁</td></tr>
+        <tr><td>D2</td><td>DisposableBean.destroy</td><td>Spring 接口回调</td></tr>
+        <tr><td>D3</td><td>destroy-method</td><td>自定义销毁方法</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">框架开发者的 5 个黄金扩展点</span>
+    <p>如果你要写一个 Spring Starter 或自定义框架组件，以下扩展点最常用：</p>
+    <ol>
+      <li><strong>BeanPostProcessor</strong> — 最强大也最通用的扩展点。AOP、@Async、@ConfigurationProperties 绑定都靠它。实现 <code>postProcessAfterInitialization</code> 可以在 Bean 初始化完成后进行包装或替换。</li>
+      <li><strong>BeanFactoryPostProcessor</strong> — 在 Bean 实例化之前修改 BeanDefinition。典型用途：<code>PropertySourcesPlaceholderConfigurer</code>（处理 <code>${...}</code> 占位符）。</li>
+      <li><strong>InstantiationAwareBeanPostProcessor</strong> — 比 BeanPostProcessor 更早介入，能在实例化前后拦截。<code>AutowiredAnnotationBeanPostProcessor</code> 就是它的实现。</li>
+      <li><strong>SmartInitializingSingleton</strong> — 在所有单例 Bean 初始化完成后回调。<code>@EventListener</code> 的注册就是在这一步完成的。</li>
+      <li><strong>ApplicationListener&lt;ContextRefreshedEvent&gt;</strong> — 容器刷新完成事件。适合做全局性的启动后检查或预热。</li>
+    </ol>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试回答模板（60 秒版）</span>
+    <p>"Bean 生命周期的主干是 <code>doCreateBean()</code> 里的三步：<code>createBeanInstance</code> 实例化、<code>populateBean</code> 属性注入、<code>initializeBean</code> 初始化。初始化阶段最复杂，依次是：Aware 回调（BeanNameAware、BeanFactoryAware）、BPP 前置处理、@PostConstruct、afterPropertiesSet、init-method、BPP 后置处理。AOP 代理在 BPP 后置处理中创建。销毁时按 @PreDestroy → DisposableBean.destroy → destroy-method 的顺序回调。如果我要写框架扩展，最常用的扩展点是 BeanPostProcessor 和 BeanFactoryPostProcessor。"</p>
+  </div>
+
+  <div class="formula">
+    <strong>一句话总结</strong>：Bean 生命周期的本质是 Spring 在 <code>doCreateBean()</code> 中预留了一系列回调接口，让框架和开发者可以在 Bean 的每个阶段插入自定义逻辑。理解这条链路，就理解了 Spring IoC 容器的骨架。
+  </div>
+</section>
+
+</main>
+</body>
+</html>

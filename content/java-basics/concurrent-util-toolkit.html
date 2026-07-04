@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>并发工具全解</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!--
+  title: "并发工具全解：CountDownLatch、CyclicBarrier、Semaphore、Phaser"
+  difficulty: 中级
+  interviewFreq: 高频
+  desc: "四大并发工具的使用场景、底层实现与区别。CountDownLatch 是一次性的，CyclicBarrier 可复用——面试题总爱在这里挖坑。"
+-->
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试中四大并发工具的使用场景区别是什么？</h2></div>
+
+<div class="think"><div class="think-q">"CountDownLatch 和 CyclicBarrier 都能让线程互相等待，它们有什么区别？Semaphore 和限流有什么关系？Phaser 又是什么？" —— 面试官考的不是 API 背诵，而是你能否在实际场景中选出正确的工具。</div></div>
+
+<p>在 <code>java.util.concurrent</code> 包中，有四个并发协调工具经常被放在一起考察：</p>
+<ul>
+  <li><strong>CountDownLatch</strong> —— 一次性倒计数器，一个或多个线程等待 N 个事件完成</li>
+  <li><strong>CyclicBarrier</strong> —— 可循环栅栏，N 个线程互相等待到达同步点后再一起继续</li>
+  <li><strong>Semaphore</strong> —— 信号量，控制同时访问某个资源的线程数量</li>
+  <li><strong>Phaser</strong> —— 灵活的阶段器，支持动态注册和阶段式推进，是前两者的超集</li>
+</ul>
+<p>大多数候选人只能说出"CountDownLatch 是一次性的，CyclicBarrier 可复用"这一句——这恰恰是面试官最爱挖坑的地方。本文将从使用场景、代码示例、底层实现三个维度，彻底厘清四大工具的本质区别。</p>
+<div class="formula"><strong>选型核心公式</strong><br/>等待"事件"完成 → CountDownLatch | 等待"线程"汇合 → CyclicBarrier | 限制"并发数" → Semaphore | 动态+多阶段 → Phaser</div>
+</section>
+
+<!-- ═══════════════ 第2站：CountDownLatch ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>CountDownLatch：一次性倒计数器</h2></div>
+
+<p>CountDownLatch 的语义极其简单：<strong>一个计数器，初始值为 N，每次调用 <code>countDown()</code> 减 1，调用 <code>await()</code> 的线程会阻塞直到计数器归零</strong>。计数一旦到达 0，不可重置——这是一次性工具。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景一</b> · 等待 N 个服务初始化完成</span></div>
+<pre><code><span class="k">public class</span> <span class="t">ServiceBootstrap</span> {
+    <span class="k">private static final int</span> SERVICE_COUNT = <span class="n">5</span>;
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">InterruptedException</span> {
+        <span class="t">CountDownLatch</span> latch = <span class="k">new</span> <span class="t">CountDownLatch</span>(SERVICE_COUNT);
+
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; SERVICE_COUNT; i++) {
+            <span class="k">final int</span> idx = i;
+            <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+                initService(idx);           <span class="c">// 模拟服务初始化</span>
+                latch.countDown();          <span class="c">// 完成一个，计数减 1</span>
+                <span class="t">System</span>.out.println(<span class="t">"服务"</span> + idx + <span class="t">" 初始化完毕"</span>);
+            }, <span class="t">"init-thread-"</span> + i).start();
+        }
+
+        latch.await();  <span class="c">// 主线程阻塞，直到 5 个服务全部初始化</span>
+        <span class="t">System</span>.out.println(<span class="t">"所有服务就绪，系统启动完成！"</span>);
+    }
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景二</b> · 等待 N 个任务执行完毕后汇总结果</span></div>
+<pre><code><span class="t">CountDownLatch</span> latch = <span class="k">new</span> <span class="t">CountDownLatch</span>(<span class="n">10</span>);
+<span class="t">AtomicInteger</span> total = <span class="k">new</span> <span class="t">AtomicInteger</span>(<span class="n">0</span>);
+
+<span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">10</span>; i++) {
+    executor.submit(() -&gt; {
+        total.addAndGet(fetchData());   <span class="c">// 每个线程拉取数据并累加</span>
+        latch.countDown();
+    });
+}
+
+latch.await();                          <span class="c">// 等待全部完成</span>
+<span class="t">System</span>.out.println(<span class="t">"汇总结果: "</span> + total.get());</code></pre>
+</div>
+
+<p>底层实现非常精炼——基于 AQS 共享模式：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CountDownLatch.Sync</b> · JDK 8 源码</span></div>
+<pre><code><span class="k">private static final class</span> <span class="t">Sync</span> <span class="k">extends</span> <span class="t">AbstractQueuedSynchronizer</span> {
+    <span class="t">Sync</span>(<span class="k">int</span> count) { setState(count); }  <span class="c">// AQS state = 计数值</span>
+
+    <span class="k">protected int</span> tryAcquireShared(<span class="k">int</span> acquires) {
+        <span class="k">return</span> (getState() == <span class="n">0</span>) ? <span class="n">1</span> : <span class="n">-1</span>;  <span class="c">// state==0 获取成功，否则阻塞</span>
+    }
+
+    <span class="k">protected boolean</span> tryReleaseShared(<span class="k">int</span> releases) {
+        <span class="k">for</span> (;;) {
+            <span class="k">int</span> c = getState();
+            <span class="k">if</span> (c == <span class="n">0</span>) <span class="k">return false</span>;
+            <span class="k">int</span> nextc = c - <span class="n">1</span>;
+            <span class="k">if</span> (compareAndSetState(c, nextc))
+                <span class="k">return</span> nextc == <span class="n">0</span>;  <span class="c">// 减到 0 才释放所有 await 线程</span>
+        }
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么 countDown() 用 CAS 循环？</div>
+<p>多个线程可能同时调用 <code>countDown()</code>，CAS 保证在高并发下每次减 1 的原子性。<code>tryReleaseShared</code> 返回 true 的条件是 <code>nextc == 0</code>，只有最后一个 countDown 的线程才会触发 AQS 的 <code>doReleaseShared()</code>，一次性唤醒所有 <code>await()</code> 阻塞的线程。</p>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">CountDownLatch 要点</div>
+<p>state = count，countDown() 通过 CAS 递减，await() 通过 AQS 共享模式阻塞直到 state==0。<strong>一次性使用</strong>，计数归零后无法重置。典型场景：等待多个服务初始化、等待多个子任务完成后汇总。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：CyclicBarrier ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>CyclicBarrier：可循环复用的栅栏</h2></div>
+
+<p>CyclicBarrier 的语义：<strong>N 个线程互相等待，全部到达屏障点后一起继续执行</strong>。与 CountDownLatch 的关键差异在于——它是"线程等线程"而非"线程等事件"，并且<strong>可以反复使用</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景</b> · 并行矩阵分块计算（每轮结束后同步）</span></div>
+<pre><code><span class="k">public class</span> <span class="t">MatrixCalculator</span> {
+    <span class="k">static final int</span> THREADS = <span class="n">4</span>;
+    <span class="c">// 所有线程到齐后，执行一次 barrierAction（如打印日志）</span>
+    <span class="k">static</span> <span class="t">CyclicBarrier</span> barrier = <span class="k">new</span> <span class="t">CyclicBarrier</span>(THREADS, () -&gt;
+        <span class="t">System</span>.out.println(<span class="t">"第 "</span> + round + <span class="t">" 轮计算完毕，进入下一轮"</span>));
+
+    <span class="k">static int</span> round = <span class="n">0</span>;
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; THREADS; i++) {
+            <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+                <span class="k">for</span> (<span class="k">int</span> r = <span class="n">0</span>; r &lt; <span class="n">3</span>; r++) {
+                    computePartition();          <span class="c">// 计算自己负责的分块</span>
+                    <span class="k">try</span> {
+                        barrier.await();         <span class="c">// 等待其他线程完成本轮</span>
+                    } <span class="k">catch</span> (<span class="t">Exception</span> e) { <span class="k">return</span>; }
+                    <span class="c">// ★ 屏障打开后，所有线程同时进入下一轮</span>
+                }
+            }).start();
+        }
+    }
+}</code></pre>
+</div>
+
+<p>底层实现与 CountDownLatch 完全不同——<strong>CyclicBarrier 没有使用 AQS</strong>，而是基于 ReentrantLock + Condition：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CyclicBarrier</b> · 核心字段与 await 逻辑</span></div>
+<pre><code><span class="k">public class</span> <span class="t">CyclicBarrier</span> {
+    <span class="k">private final</span> <span class="t">ReentrantLock</span> lock = <span class="k">new</span> <span class="t">ReentrantLock</span>();
+    <span class="k">private final</span> <span class="t">Condition</span> trip = lock.newCondition();
+    <span class="k">private final int</span> parties;          <span class="c">// 参与者数量（不可变）</span>
+    <span class="k">private int</span> count;                  <span class="c">// 已到达的线程数</span>
+    <span class="k">private int</span> generation = <span class="n">0</span>;          <span class="c">// 代数：每次 reset 递增，防止旧 await 误唤醒</span>
+    <span class="k">private final</span> <span class="t">Runnable</span> barrierCommand; <span class="c">// 屏障动作（可选）</span>
+
+    <span class="k">public int</span> await() <span class="k">throws</span> ... {
+        lock.lock();
+        <span class="k">try</span> {
+            <span class="k">int</span> g = generation;
+            <span class="k">int</span> index = --count;        <span class="c">// 到达计数减 1</span>
+            <span class="k">if</span> (index == <span class="n">0</span>) {           <span class="c">// ★ 最后一个到达的线程</span>
+                <span class="k">if</span> (barrierCommand != <span class="k">null</span>) barrierCommand.run();
+                nextGeneration();        <span class="c">// 唤醒所有线程，重置 count，generation++</span>
+                <span class="k">return</span> <span class="n">0</span>;
+            }
+            <span class="c">// 不是最后一个：挂起等待</span>
+            <span class="k">while</span> (g == generation)
+                trip.await();            <span class="c">// 在 Condition 上等待</span>
+            <span class="k">return</span> index;
+        } <span class="k">finally</span> { lock.unlock(); }
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">CyclicBarrier 为什么不用 AQS？</div>
+<p>因为 CyclicBarrier 需要"可重置"——当所有线程到齐后，必须把 count 恢复为 parties、generation 递增，然后开始新一轮。AQS 的 state 是单向递减模型，不支持这种"到 0 后自动恢复"的语义。Lock + Condition 天然支持这种循环模式。</p>
+</div>
+
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>CountDownLatch</th><th>CyclicBarrier</th></tr></thead>
+  <tbody>
+    <tr><td><strong>等待关系</strong></td><td>一个/多个线程等待 N 个<em>事件</em>完成</td><td>N 个<em>线程</em>互相等待到达同步点</td></tr>
+    <tr><td><strong>可复用</strong></td><td>不可以（一次性）</td><td>可以（自动重置 / reset()）</td></tr>
+    <tr><td><strong>底层实现</strong></td><td>AQS 共享模式</td><td>ReentrantLock + Condition</td></tr>
+    <tr><td><strong>屏障动作</strong></td><td>无</td><td>支持（barrierAction）</td></tr>
+    <tr><td><strong>异常传播</strong></td><td>无（各线程独立）</td><td>一个线程异常 → BrokenBarrierException</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway"><div class="takeaway-label">面试回答要点</div>
+<p>"CountDownLatch 是一次性的，await() 阻塞直到 count 减为 0，底层是 AQS 共享模式。CyclicBarrier 可循环复用，N 个线程全部 await() 后才一起放行，底层是 Lock + Condition。CountDownLatch 是'等事件'，CyclicBarrier 是'等线程'。"</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：Semaphore ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>Semaphore：基于许可的并发限流器</h2></div>
+
+<p>Semaphore 维护一组<strong>许可（permits）</strong>。<code>acquire()</code> 获取一个许可（没有则阻塞），<code>release()</code> 归还一个许可。本质是一个<strong>共享计数器</strong>，控制同时访问资源的线程数。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景一</b> · 限制数据库连接池并发数</span></div>
+<pre><code><span class="k">public class</span> <span class="t">DbPool</span> {
+    <span class="c">// 最多允许 10 个线程同时获取连接</span>
+    <span class="k">private static final</span> <span class="t">Semaphore</span> semaphore = <span class="k">new</span> <span class="t">Semaphore</span>(<span class="n">10</span>);
+
+    <span class="k">public</span> <span class="t">ResultSet</span> query(<span class="t">String</span> sql) <span class="k">throws</span> <span class="t">InterruptedException</span> {
+        semaphore.acquire();               <span class="c">// 获取许可，不够则阻塞</span>
+        <span class="k">try</span> {
+            <span class="k">return</span> executeQuery(sql);      <span class="c">// 执行数据库操作</span>
+        } <span class="k">finally</span> {
+            semaphore.release();           <span class="c">// ★ 必须归还，否则许可泄漏！</span>
+        }
+    }
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景二</b> · API 限流（每秒最多 100 个请求）</span></div>
+<pre><code><span class="c">// 令牌桶简化版：Semaphore + 定时补充</span>
+<span class="t">Semaphore</span> rateLimiter = <span class="k">new</span> <span class="t">Semaphore</span>(<span class="n">100</span>);
+
+<span class="c">// 定时任务每秒补满许可</span>
+scheduler.scheduleAtFixedRate(() -&gt; {
+    <span class="k">int</span> available = rateLimiter.availablePermits();
+    <span class="k">if</span> (available &lt; <span class="n">100</span>)
+        rateLimiter.release(<span class="n">100</span> - available);  <span class="c">// 补充到 100</span>
+}, <span class="n">1</span>, <span class="n">1</span>, <span class="t">TimeUnit</span>.SECONDS);
+
+<span class="c">// 请求处理</span>
+<span class="k">if</span> (rateLimiter.tryAcquire()) {   <span class="c">// 非阻塞尝试</span>
+    handleRequest();
+} <span class="k">else</span> {
+    rejectWith429();                 <span class="c">// 限流拒绝</span>
+}</code></pre>
+</div>
+
+<p>Semaphore 同时支持<strong>公平模式和非公平模式</strong>，构造时通过参数选择：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Semaphore</b> · 公平 vs 非公平</span></div>
+<pre><code><span class="c">// 非公平（默认）：允许"插队"，吞吐量高</span>
+<span class="t">Semaphore</span> unfair = <span class="k">new</span> <span class="t">Semaphore</span>(<span class="n">10</span>);
+
+<span class="c">// 公平：严格按排队顺序获取许可</span>
+<span class="t">Semaphore</span> fair = <span class="k">new</span> <span class="t">Semaphore</span>(<span class="n">10</span>, <span class="k">true</span>);</code></pre>
+</div>
+
+<p>底层实现同样基于 AQS 共享模式，但 state 语义与 CountDownLatch 不同：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Semaphore.NonfairSync</b> · JDK 8 源码</span></div>
+<pre><code><span class="k">protected int</span> tryAcquireShared(<span class="k">int</span> acquires) {
+    <span class="k">for</span> (;;) {
+        <span class="k">int</span> available = getState();
+        <span class="k">int</span> remaining = available - acquires;
+        <span class="c">// remaining &lt; 0 → 许可不足，获取失败 → 入队 park</span>
+        <span class="c">// CAS 成功 → 扣减许可，获取成功</span>
+        <span class="k">if</span> (remaining &lt; <span class="n">0</span> || compareAndSetState(available, remaining))
+            <span class="k">return</span> remaining;
+    }
+}
+
+<span class="k">protected boolean</span> tryReleaseShared(<span class="k">int</span> releases) {
+    <span class="k">for</span> (;;) {
+        <span class="k">int</span> current = getState();
+        <span class="k">int</span> next = current + releases;
+        <span class="k">if</span> (compareAndSetState(current, next))
+            <span class="k">return true</span>;   <span class="c">// release 总是成功，唤醒等待线程</span>
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">Semaphore(1) 能当互斥锁用吗？</div>
+<p>能，但不推荐。许可数为 1 的 Semaphore 确实是互斥的，但它没有"持有者"概念——<strong>任何线程都能 release()</strong>，不要求是 acquire 的那个线程。ReentrantLock 要求同一线程 lock/unlock。此外 Semaphore 不支持可重入。</p>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">Semaphore 要点</div>
+<p>AQS state = 可用许可数。acquire() CAS 递减 state，不够则阻塞；release() CAS 递增 state 并唤醒等待线程。支持公平/非公平模式。典型场景：连接池限流、API 限流、资源池管理。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：Phaser ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Phaser：CountDownLatch + CyclicBarrier 的超集</h2></div>
+
+<p>Phaser 是 JDK 7 引入的灵活同步工具，解决了前两者的三个局限：<strong>参与者数量固定</strong>、<strong>只能单次或固定循环</strong>、<strong>不支持层次化</strong>。Phaser 支持动态注册/注销、阶段式推进、树形结构。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景</b> · 迭代算法（线程数可能每轮变化）</span></div>
+<pre><code><span class="k">public class</span> <span class="t">IterativeSolver</span> {
+    <span class="k">static final int</span> MAX_ROUNDS = <span class="n">100</span>;
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">Phaser</span> phaser = <span class="k">new</span> <span class="t">Phaser</span>(<span class="n">1</span>); <span class="c">// 主线程先注册</span>
+
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">4</span>; i++) {
+            phaser.register();             <span class="c">// 动态注册工作线程</span>
+            <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+                <span class="k">for</span> (<span class="k">int</span> r = <span class="n">0</span>; r &lt; MAX_ROUNDS; r++) {
+                    compute();
+                    phaser.arriveAndAwaitAdvance(); <span class="c">// 到达并等待本轮所有线程</span>
+                    <span class="c">// 某些线程可能提前 deregister()</span>
+                }
+                phaser.arriveAndDeregister();       <span class="c">// 完成后注销</span>
+            }).start();
+        }
+
+        phaser.arriveAndDeregister(); <span class="c">// 主线程注销</span>
+    }
+}</code></pre>
+</div>
+
+<p>Phaser 的核心 API 一览：</p>
+
+<table class="nb-table">
+  <thead><tr><th>方法</th><th>作用</th></tr></thead>
+  <tbody>
+    <tr><td><code>register()</code></td><td>动态注册一个参与者，parties 数 +1</td></tr>
+    <tr><td><code>bulkRegister(n)</code></td><td>批量注册 n 个参与者</td></tr>
+    <tr><td><code>arrive()</code></td><td>到达但不等待，直接继续执行</td></tr>
+    <tr><td><code>arriveAndAwaitAdvance()</code></td><td>到达并等待本阶段所有线程到齐（最常用）</td></tr>
+    <tr><td><code>arriveAndDeregister()</code></td><td>到达并注销自己，后续阶段不再参与</td></tr>
+    <tr><td><code>awaitAdvance(phase)</code></td><td>等待指定阶段完成（自己不参与计数）</td></tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">Phaser 底层为什么不用 AQS？</div>
+<p>Phaser 的同步状态需要同时编码"阶段号"和"到达计数"两个维度，且需要支持原子性的阶段推进。AQS 的单一 state 无法满足。Phaser 内部使用 <code>volatile long state</code>（64 位），高 32 位存 phase，低 32 位分两段存 parties 和 arrived 计数，通过 CAS 操作实现原子更新。</p>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">Phaser 选型指南</div>
+<p>当 CountDownLatch 或 CyclicBarrier 无法满足需求时考虑 Phaser：参与者数量在运行时变化、需要多个同步阶段、需要层次化结构（父子 Phaser 降低竞争）。代价是 API 更复杂，简单场景用前两者即可。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：对比总结表 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>横向对比：一张表看清四大工具</h2></div>
+
+<table class="nb-table">
+  <thead><tr><th>特性</th><th>CountDownLatch</th><th>CyclicBarrier</th><th>Semaphore</th><th>Phaser</th></tr></thead>
+  <tbody>
+    <tr><td><strong>可复用</strong></td><td>不可以</td><td>可以</td><td>可以</td><td>可以</td></tr>
+    <tr><td><strong>参与者数量</strong></td><td>构造时固定</td><td>构造时固定</td><td>无"参与者"概念</td><td>动态注册/注销</td></tr>
+    <tr><td><strong>屏障动作</strong></td><td>无</td><td>支持 barrierAction</td><td>无</td><td>支持 onAdvance()</td></tr>
+    <tr><td><strong>底层实现</strong></td><td>AQS（共享模式）</td><td>Lock + Condition</td><td>AQS（共享模式）</td><td>自定义 volatile long + CAS</td></tr>
+    <tr><td><strong>公平模式</strong></td><td>无</td><td>无</td><td>支持</td><td>无</td></tr>
+    <tr><td><strong>超时支持</strong></td><td>await(timeout)</td><td>await(timeout)</td><td>tryAcquire(timeout)</td><td>awaitAdvanceInterruptibly(timeout)</td></tr>
+    <tr><td><strong>中断响应</strong></td><td>支持</td><td>支持</td><td>支持</td><td>支持</td></tr>
+    <tr><td><strong>层次化</strong></td><td>不支持</td><td>不支持</td><td>不支持</td><td>支持（父子树形）</td></tr>
+  </tbody>
+</table>
+
+<p>根据场景选择合适的工具：</p>
+
+<table class="nb-table">
+  <thead><tr><th>业务场景</th><th>推荐工具</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr><td>主线程等待 N 个子任务完成</td><td><strong>CountDownLatch</strong></td><td>一次性等待，语义最清晰</td></tr>
+    <tr><td>多线程并行计算 + 多轮同步</td><td><strong>CyclicBarrier</strong></td><td>可循环复用，支持 barrierAction</td></tr>
+    <tr><td>限制并发访问数（连接池/限流）</td><td><strong>Semaphore</strong></td><td>唯一专为"限流"设计的工具</td></tr>
+    <tr><td>迭代算法，线程数每轮可能变化</td><td><strong>Phaser</strong></td><td>支持动态注册，阶段式推进</td></tr>
+    <tr><td>多个子系统启动完毕后才能服务</td><td><strong>CountDownLatch</strong></td><td>经典场景，一次性等待</td></tr>
+    <tr><td>分布式仿真/游戏回合制</td><td><strong>Phaser</strong></td><td>多阶段 + 动态参与者</td></tr>
+  </tbody>
+</table>
+
+<div class="formula"><strong>选择决策公式</strong><br/>
+需要限流？ → <strong>Semaphore</strong><br/>
+等待"事件"（一次性）？ → <strong>CountDownLatch</strong><br/>
+等待"线程"汇合（可循环）？ → <strong>CyclicBarrier</strong><br/>
+参与者动态变化 / 多阶段？ → <strong>Phaser</strong></div>
+</section>
+
+<!-- ═══════════════ 第7站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>决策树与高频面试陷阱</h2></div>
+
+<figure class="fig">
+<svg viewBox="0 0 740 520" role="img" aria-label="并发工具选型决策树">
+  <defs>
+    <marker id="dt-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+  <text x="370" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">并发工具选型决策树</text>
+
+  <!-- 起点 -->
+  <rect x="260" y="42" width="220" height="42" rx="20" fill="#1e293b"/>
+  <text x="370" y="68" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">你的同步需求是什么？</text>
+
+  <!-- 第一层分支 -->
+  <line x1="370" y1="84" x2="370" y2="118" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#dt-arr)"/>
+
+  <!-- 判断1：限流？ -->
+  <polygon points="370,120 500,168 370,216 240,168" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="370" y="163" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">限制同时访问</text>
+  <text x="370" y="180" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">的线程数量？</text>
+
+  <!-- YES → Semaphore -->
+  <line x1="500" y1="168" x2="620" y2="168" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#dt-arr)"/>
+  <text x="560" y="160" text-anchor="middle" fill="#16a34a" font-size="12" font-weight="600">YES</text>
+  <rect x="622" y="146" width="110" height="44" rx="8" fill="#16a34a"/>
+  <text x="677" y="173" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Semaphore</text>
+
+  <!-- NO ↓ -->
+  <line x1="370" y1="216" x2="370" y2="250" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#dt-arr)"/>
+  <text x="390" y="238" fill="#dc2626" font-size="12" font-weight="600">NO</text>
+
+  <!-- 判断2：等事件？ -->
+  <polygon points="370,252 500,300 370,348 240,300" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="370" y="295" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">等待 N 个事件</text>
+  <text x="370" y="312" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">完成（一次性）？</text>
+
+  <!-- YES → CountDownLatch -->
+  <line x1="500" y1="300" x2="620" y2="300" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#dt-arr)"/>
+  <text x="560" y="292" text-anchor="middle" fill="#16a34a" font-size="12" font-weight="600">YES</text>
+  <rect x="622" y="278" width="110" height="44" rx="8" fill="#2563eb"/>
+  <text x="677" y="296" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">CountDown</text>
+  <text x="677" y="312" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">Latch</text>
+
+  <!-- NO ↓ -->
+  <line x1="370" y1="348" x2="370" y2="382" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#dt-arr)"/>
+  <text x="390" y="370" fill="#dc2626" font-size="12" font-weight="600">NO</text>
+
+  <!-- 判断3：参与者动态？ -->
+  <polygon points="370,384 500,432 370,480 240,432" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="370" y="427" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">参与者数量</text>
+  <text x="370" y="444" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">动态变化？</text>
+
+  <!-- YES → Phaser -->
+  <line x1="500" y1="432" x2="620" y2="432" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#dt-arr)"/>
+  <text x="560" y="424" text-anchor="middle" fill="#16a34a" font-size="12" font-weight="600">YES</text>
+  <rect x="622" y="410" width="110" height="44" rx="8" fill="#7c3aed"/>
+  <text x="677" y="437" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Phaser</text>
+
+  <!-- NO → CyclicBarrier -->
+  <line x1="240" y1="432" x2="120" y2="432" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#dt-arr)"/>
+  <text x="180" y="424" text-anchor="middle" fill="#dc2626" font-size="12" font-weight="600">NO</text>
+  <rect x="10" y="410" width="110" height="44" rx="8" fill="#d97706"/>
+  <text x="65" y="428" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">Cyclic</text>
+  <text x="65" y="444" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">Barrier</text>
+
+  <!-- 底部注释 -->
+  <text x="370" y="505" text-anchor="middle" font-size="11" fill="#8C8676">按顺序回答三个问题，即可锁定正确的并发工具</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>并发工具选型决策树：三个问题锁定正确工具</figcaption>
+</figure>
+
+<p>下面汇总面试中最常见的陷阱问题及标准回答：</p>
+
+<div class="think"><div class="think-q">陷阱题 1："CountDownLatch 的 count 能增加吗？"</div></div>
+<p><strong>不能。</strong>CountDownLatch 只暴露了 <code>countDown()</code> 方法（递减），没有 increment。如果需要"计数可以增加也可以减少"的场景，应该用 Semaphore 或自定义同步器。<code>getCount()</code> 可以查看当前计数值，但只用于监控/调试。</p>
+
+<div class="think"><div class="think-q">陷阱题 2："CyclicBarrier 中一个线程抛异常会怎样？"</div></div>
+<p>如果一个线程在 <code>await()</code> 期间抛出异常或被中断，CyclicBarrier 会进入 <strong>broken 状态</strong>，所有其他正在等待的线程都会收到 <code>BrokenBarrierException</code>。这是与 CountDownLatch 的重要区别——CountDownLatch 中各线程互相独立，一个线程异常不影响其他线程。</p>
+
+<div class="think"><div class="think-q">陷阱题 3："Semaphore 的 release() 必须由 acquire 的线程调用吗？"</div></div>
+<p><strong>不需要。</strong>任何线程都可以调用 <code>release()</code> 归还许可。这是 Semaphore 和 Lock 的本质区别——Lock 要求同一个线程 lock/unlock（ReentrantLock 有 ownerThread 校验），Semaphore 没有"持有者"概念。但也正因如此，Semaphore 不能替代互斥锁。</p>
+
+<div class="think"><div class="think-q">陷阱题 4："CountDownLatch 能用 CyclicBarrier 替代吗？"</div></div>
+<p>功能上部分可以，但语义不同。<code>new CyclicBarrier(N+1)</code> 配合 N 个工作线程 + 1 个主线程可以模拟 CountDownLatch 的"等待 N 个事件"。但 CountDownLatch 更轻量（无锁实现），且语义更精确——countDown 线程完成后可以继续做别的事，而 CyclicBarrier 的 await 线程必须等到所有人到齐才能继续。</p>
+
+<div class="think"><div class="think-q">陷阱题 5："Phaser 在什么场景下比 CyclicBarrier 性能更好？"</div></div>
+<p>当参与者数量很大时，Phaser 支持<strong>层次化（树形）结构</strong>：多个子 Phaser 注册到一个父 Phaser 上，每个子 Phaser 独立管理一组线程。这避免了所有线程竞争同一把锁（CyclicBarrier 的 ReentrantLock），显著降低竞争。对于 20+ 线程的大规模并行计算，Phaser 的性能优势明显。</p>
+
+<div class="recap">
+<h3>面试回答模板</h3>
+<p><strong>Q：请比较 CountDownLatch、CyclicBarrier、Semaphore、Phaser 的区别和适用场景。</strong></p>
+<p>"这四个工具都是 JUC 包中的并发协调器，但解决的问题各有不同。</p>
+<p>CountDownLatch 是一次性倒计数器，基于 AQS 共享模式实现。state 初始为 N，每次 countDown() 通过 CAS 减 1，await() 阻塞到 state==0。典型场景是主线程等待多个子任务完成。不可复用。</p>
+<p>CyclicBarrier 是可循环栅栏，基于 ReentrantLock + Condition 实现。N 个线程全部 arrive 后一起放行，支持 barrierAction。一个线程异常会导致 BrokenBarrierException。典型场景是多轮并行计算。</p>
+<p>Semaphore 是许可计数器，基于 AQS 共享模式。acquire() 获取许可，release() 归还。支持公平/非公平模式。典型场景是连接池限流和 API 限流。</p>
+<p>Phaser 是 JDK 7 引入的灵活替代，支持动态注册/注销和阶段式推进，底层用 volatile long 的 CAS 操作。适合参与者数量运行时变化的场景，如迭代算法。</p>
+<p>选型时按三个问题决策：是否限流？是否一次性等事件？参与者是否动态变化？"</p>
+</div>
+</section>
+
+</main>
+</body>
+</html>

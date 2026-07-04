@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>垃圾收集器全览</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "垃圾收集器全览：Serial → Parallel → CMS → G1 → ZGC"
+  difficulty: 深度
+  interviewFreq: 极高
+  desc: "五代收集器的设计目标与取舍。CMS 的并发标记问题、G1 的 Region 化、ZGC 的染色指针——面试中最有深度的回答。"
+-->
+
+<!-- ================================================================
+     第 1 站 — 开场：面试官的灵魂拷问
+     ================================================================ -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>面试官：你用过哪些垃圾收集器？它们有什么区别？</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"我们线上用的 G1。" 大部分候选人只能说到这一句。如果你能讲清楚五代收集器的演进脉络、每一代要解决的核心痛点、以及它们各自的工程取舍——这道题就是全场最佳回答。</p>
+  </div>
+
+  <p>垃圾收集器是 JVM 面试中区分度极高的话题。初级工程师知道"有 GC"，中级工程师知道"G1 是默认"，而高级工程师能讲清楚<strong>为什么会有五代收集器，每一代在吞吐量、延迟、内存 footprint 三者之间做了怎样的取舍</strong>。</p>
+
+  <p>JDK 的垃圾收集器演进史就是一部"如何在停顿时间与吞吐量之间寻找最优解"的工程史：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>收集器</th><th>登场时间</th><th>核心目标</th><th>一句话特征</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Serial</td><td>JDK 1.0</td><td>简单、无额外开销</td><td>单线程，全程 STW</td></tr>
+      <tr><td>Parallel</td><td>JDK 1.4</td><td>最大化吞吐量</td><td>多线程 STW，JDK 8 默认</td></tr>
+      <tr><td>CMS</td><td>JDK 1.5</td><td>低停顿时间</td><td>并发标记-清除，JDK 14 移除</td></tr>
+      <tr><td>G1</td><td>JDK 7</td><td>可预测停顿</td><td>Region 化堆，Mixed GC，JDK 9+ 默认</td></tr>
+      <tr><td>ZGC</td><td>JDK 11</td><td>亚毫秒停顿</td><td>染色指针 + 读屏障，JDK 15 生产可用</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">面试加分项</span>
+    <p>不要只说"G1 好用"。能说出"CMS 在 JDK 14 被移除，因为它的浮动垃圾和并发模式失败问题在 G1 的 Region 架构下被根本性地解决了"——这才是有深度的回答。本文会帮你建立这种全局视角。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 2 站 — Serial GC
+     ================================================================ -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>Serial GC：最朴素的单线程回收</h2>
+  </div>
+
+  <p>Serial GC 是 JVM 最古老的垃圾收集器，也是最简单的一个。它的核心思想只有一句话：<strong>用一个线程来完成所有垃圾回收工作，回收期间暂停所有用户线程（Stop-The-World）</strong>。</p>
+
+  <div class="think">
+    <p class="think-q">单线程做 GC 听起来很低效，为什么它至今仍然存在？</p>
+    <p>因为"简单"本身就是一种优势。没有多线程切换开销、没有同步屏障、没有内存碎片整理——在堆很小的场景下（比如客户端应用、嵌入式 JVM），Serial GC 反而是效率最高的选择。</p>
+  </div>
+
+  <h3>工作流程</h3>
+  <p>Serial GC 对新生代和老年代分别使用不同的算法：</p>
+  <ul>
+    <li><strong>新生代（Young Gen）</strong>：使用 <strong>复制算法（Copying）</strong>。将 Eden 和 From Survivor 中的存活对象复制到 To Survivor，然后清空 Eden 和 From。这个过程称为 <strong>Minor GC</strong>。</li>
+    <li><strong>老年代（Old Gen）</strong>：使用 <strong>标记-整理算法（Mark-Compact）</strong>。先标记所有存活对象，然后将它们向一端移动压缩，最后清理边界之外的空间。这个过程称为 <strong>Major GC / Full GC</strong>。</li>
+  </ul>
+
+  <div class="srcbox">
+    <div class="srcbox-head">启用 Serial GC</div>
+    <pre class="srcbox-file"><span class="c"># 客户端模式（Client VM）默认启用</span>
+<span class="k">java</span> -XX:+UseSerialGC -jar app.jar
+
+<span class="c"># 典型适用场景</span>
+<span class="c"># - 堆大小 &lt; 100MB 的小型应用</span>
+<span class="c"># - 单核 CPU 环境（如容器内 cpu=1）</span>
+<span class="c"># - GraalVM Native Image 默认 GC</span></pre>
+  </div>
+
+  <h3>Serial GC 的优劣势</h3>
+  <table class="nb-table">
+    <thead>
+      <tr><th>维度</th><th>表现</th><th>原因</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>停顿时间</td><td>差（毫秒~秒级）</td><td>全程 STW，单线程处理</td></tr>
+      <tr><td>吞吐量</td><td>小堆下尚可</td><td>没有多线程开销</td></tr>
+      <tr><td>内存开销</td><td>极低</td><td>不需要额外的数据结构</td></tr>
+      <tr><td>适用场景</td><td>小堆、单核</td><td>简单即是美</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试话术</span>
+    <p>Serial GC 是单线程全程 STW 的收集器，没有多线程同步开销，适合小堆和单核环境。在容器化场景下，如果容器只分配了 1 个 CPU 核心，Serial GC 反而可能比 Parallel GC 表现更好，因为避免了线程上下文切换。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 3 站 — Parallel GC
+     ================================================================ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>Parallel GC：吞吐量之王</h2>
+  </div>
+
+  <p>Parallel GC（也叫 Throughput Collector）是 JDK 8 的默认垃圾收集器。它的设计目标非常明确：<strong>最大化应用程序的吞吐量</strong>。做法也很直接——把 Serial GC 的单线程回收改成多线程并行回收。</p>
+
+  <div class="think">
+    <p class="think-q">Parallel 和 Serial 的核心区别是什么？停顿时间会减少吗？</p>
+    <p>Parallel GC 的多线程回收确实减少了每次 GC 的停顿<strong>墙钟时间</strong>（wall-clock time），但所有用户线程仍然被暂停（STW）。它的目标不是减少停顿，而是在给定 CPU 资源下最大化应用吞吐量。如果你关心的是"单位时间内处理更多请求"，Parallel GC 是对的选择。</p>
+  </div>
+
+  <h3>新生代：Parallel Scavenge（并行复制）</h3>
+  <p>新生代使用 <strong>Mark-Copy</strong> 算法，多线程并行完成：</p>
+  <ol>
+    <li>多线程并行扫描根集合（GC Roots），标记 Eden 和 From Survivor 中的存活对象</li>
+    <li>多线程并行将存活对象复制到 To Survivor</li>
+    <li>清空 Eden 和 From Survivor</li>
+  </ol>
+  <p>Parallel Scavenge 收集器有一个独特特性：它关注的是<strong>吞吐量</strong>而非停顿时间，因此提供了 <code>-XX:MaxGCPauseMillis</code>（最大停顿目标）和 <code>-XX:GCTimeRatio</code>（GC 时间占比目标）两个自适应调节参数。</p>
+
+  <h3>老年代：Parallel Old（并行标记-整理）</h3>
+  <p>老年代使用 <strong>Parallel Mark-Compact</strong>：多线程并行标记存活对象，然后多线程并行压缩整理。这比 CMS 的标记-清除算法有更好的空间利用率（无碎片），但停顿时间更长。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Parallel GC 调优参数</div>
+    <pre class="srcbox-file"><span class="c"># 启用 Parallel GC（JDK 8 默认）</span>
+<span class="k">java</span> -XX:+UseParallelGC -XX:+UseParallelOldGC \
+     -XX:ParallelGCThreads=<span class="n">8</span>          <span class="c"># GC 线程数，默认=CPU 核心数</span>
+     -XX:MaxGCPauseMillis=<span class="n">200</span>        <span class="c"># 目标最大停顿时间</span>
+     -XX:GCTimeRatio=<span class="n">19</span>              <span class="c"># 目标 GC 时间占比 1/(1+19) = 5%</span>
+     -jar app.jar</pre>
+  </div>
+
+  <div class="formula">
+    吞吐量 = 应用运行时间 / (应用运行时间 + GC 时间) × 100%<br>
+    Parallel GC 的 GCTimeRatio=19 意味着目标吞吐量 = 1/(1+19) = 95%
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试话术</span>
+    <p>Parallel GC 是 JDK 8 的默认收集器，通过多线程并行回收来最大化吞吐量。新生代用并行 Mark-Copy，老年代用并行 Mark-Compact。它的 STW 时间虽然比 Serial 短（因为多线程），但仍然是全程暂停用户线程的。适合后台计算、批处理等吞吐量敏感场景，不太适合 Web 服务等延迟敏感场景。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 4 站 — CMS
+     ================================================================ -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>CMS：并发标记清除的先驱与困境</h2>
+  </div>
+
+  <p>CMS（Concurrent Mark-Sweep）是 JDK 1.5 引入的低延迟收集器，在 JDK 5~8 时代是 Web 应用的首选。它的设计目标与 Parallel GC 完全相反：<strong>最小化停顿时间</strong>。CMS 通过将大部分回收工作与用户线程并发执行来实现这一目标。</p>
+
+  <div class="think">
+    <p class="think-q">为什么"并发"比"并行"更难？</p>
+    <p>并行是多线程同时做同一件事（比如多线程一起标记），线程之间做的是同一份工作的不同部分。并发是 GC 线程和用户线程<strong>同时运行</strong>——用户线程在 GC 标记的同时还在修改对象引用关系，这就产生了"我标记了 A 引用 B，但用户线程把 A 改成了引用 C"的一致性问题。CMS 的许多复杂机制都是为了处理这个并发不一致问题。</p>
+  </div>
+
+  <h3>CMS 的四个阶段</h3>
+  <p>CMS 的老年代回收分为四个阶段，其中两个需要 STW，两个与用户线程并发：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>阶段</th><th>类型</th><th>做了什么</th><th>停顿?</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1. 初始标记（Initial Mark）</td><td>STW</td><td>标记 GC Roots 直接引用的对象</td><td>是（很短）</td></tr>
+      <tr><td>2. 并发标记（Concurrent Mark）</td><td>并发</td><td>从 GC Roots 出发遍历整个对象图</td><td>否</td></tr>
+      <tr><td>3. 并发预清理（Concurrent Preclean）</td><td>并发</td><td>处理并发标记期间发生变化的引用</td><td>否</td></tr>
+      <tr><td>4. 最终标记（Final Remark）</td><td>STW</td><td>修正并发阶段因用户线程运行而变动的标记</td><td>是（较长）</td></tr>
+      <tr><td>5. 并发清除（Concurrent Sweep）</td><td>并发</td><td>清除标记为垃圾的对象</td><td>否</td></tr>
+    </tbody>
+  </table>
+
+  <h3>CMS 的三大问题</h3>
+
+  <p><strong>问题一：浮动垃圾（Floating Garbage）</strong></p>
+  <p>在并发清除阶段，用户线程仍在运行，会产生新的垃圾。这些垃圾只能在<strong>下一次</strong> GC 时才能被回收。这意味着 CMS 不能等到堆快满了才启动 GC，需要提前触发——通常当老年代使用率达到 68%（<code>-XX:CMSInitiatingOccupancyFraction</code>）时就开始回收。</p>
+
+  <p><strong>问题二：并发模式失败（Concurrent Mode Failure）</strong></p>
+  <p>如果 CMS 回收的速度赶不上对象分配的速度，老年代空间耗尽，CMS 就会退化为一次 Full GC（Serial Old 单线程标记-整理），停顿时间暴涨到秒级。这是 CMS 最让人头疼的问题。</p>
+
+  <p><strong>问题三：内存碎片</strong></p>
+  <p>CMS 使用<strong>标记-清除</strong>算法，不会压缩整理老年代，因此会产生大量内存碎片。碎片化严重时，即使总空闲内存足够，也可能因为找不到连续空间来分配大对象而触发 Full GC。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">CMS 配置（JDK 9+ 已弃用，JDK 14 已移除）</div>
+    <pre class="srcbox-file"><span class="c"># JDK 8 中启用 CMS</span>
+<span class="k">java</span> -XX:+UseConcMarkSweepGC \
+     -XX:CMSInitiatingOccupancyFraction=<span class="n">68</span>  <span class="c"># 老年代占用 68% 时触发</span>
+     -XX:+UseCMSInitiatingOccupancyOnly      <span class="c"># 只在达到阈值时触发</span>
+     -XX:+CMSScavengeBeforeRemark            <span class="c"># Remark 前先做一次 Minor GC</span>
+     -jar app.jar
+
+<span class="c"># JDK 9: -XX:+UseConcMarkSweepGC 产生警告</span>
+<span class="c"># JDK 14: 彻底移除 CMS，使用该参数会报错</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试高频追问</span>
+    <p><strong>Q: CMS 为什么被移除？</strong><br>
+    三个原因：① 浮动垃圾导致空间利用率低；② 并发模式失败会退化为 Serial Old 单线程 Full GC，停顿不可预测；③ 标记-清除产生内存碎片。这些问题在 G1 的 Region 化架构下得到了根本性解决——G1 使用复制算法天然无碎片，Mixed GC 可以增量回收老年代。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试话术</span>
+    <p>CMS 是第一个尝试将 GC 工作与用户线程并发执行的收集器，目标是低停顿。它有四个阶段：初始标记（STW）→ 并发标记 → 并发预清理 → 最终标记（STW）→ 并发清除。但有三个致命问题：浮动垃圾（并发清除期间产生的新垃圾）、并发模式失败（回收速度跟不上分配速度，退化为 Full GC）、内存碎片（标记-清除不压缩）。这些问题促使了 G1 的诞生，CMS 在 JDK 14 被正式移除。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 5 站 — G1
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>G1：Region 化堆与 Mixed GC</h2>
+  </div>
+
+  <p>G1（Garbage First）是 JDK 9 以来的默认垃圾收集器。它从架构层面颠覆了前面几代收集器的设计思路：<strong>不再将堆划分为固定的新生代和老年代，而是将整个堆划分为大小相等的 Region</strong>。每个 Region 可以动态扮演 Eden、Survivor、Old 或 Humongous 角色。</p>
+
+  <div class="think">
+    <p class="think-q">为什么要把堆切成一块一块的 Region？</p>
+    <p>CMS 最大的问题是 Full GC 停顿不可控——当并发模式失败时，要对整个老年代做单线程标记-整理。G1 的核心洞察是：如果堆被切成独立的 Region，GC 时可以只选择<strong>收益最高的 Region</strong>（Garbage First 名字由来）进行回收，而不是每次都处理整个堆。这让停顿时间变得可预测。</p>
+  </div>
+
+  <h3>Region 架构</h3>
+  <p>G1 将堆划分为约 <strong>2048 个</strong>大小相等的 Region，每个 Region 大小在 1MB~32MB 之间（必须是 2 的幂次方），由堆大小自动决定：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 820 500" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
+      <!-- G1 Region 布局示意图 -->
+      <defs>
+        <linearGradient id="gEden" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient>
+        <linearGradient id="gSurv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#34d399"/><stop offset="100%" stop-color="#10b981"/></linearGradient>
+        <linearGradient id="gOld" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#f59e0b"/></linearGradient>
+        <linearGradient id="gHum" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f87171"/><stop offset="100%" stop-color="#ef4444"/></linearGradient>
+        <linearGradient id="gFree" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9ca3af"/><stop offset="100%" stop-color="#6b7280"/></linearGradient>
+      </defs>
+
+      <!-- 标题 -->
+      <text x="410" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#1f2937">G1 堆布局：Region 化架构（~2048 个 Region）</text>
+
+      <!-- 第一行：Eden 区 -->
+      <g transform="translate(20, 50)">
+        <!-- 行标签 -->
+        <text x="-5" y="24" text-anchor="end" font-size="11" fill="#6b7280"></text>
+        <!-- Eden regions -->
+        <rect x="0" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="18" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="40" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="58" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="80" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="98" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="120" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="138" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="160" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="178" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="200" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="218" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="240" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="258" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="280" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="298" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="320" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="338" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="360" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="378" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="400" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="418" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <rect x="440" y="0" width="36" height="36" rx="4" fill="url(#gEden)" opacity="0.9"/><text x="458" y="22" text-anchor="middle" font-size="8" fill="white">E</text>
+        <!-- Survivor -->
+        <rect x="490" y="0" width="36" height="36" rx="4" fill="url(#gSurv)" opacity="0.9"/><text x="508" y="22" text-anchor="middle" font-size="8" fill="white">S</text>
+        <rect x="530" y="0" width="36" height="36" rx="4" fill="url(#gSurv)" opacity="0.9"/><text x="548" y="22" text-anchor="middle" font-size="8" fill="white">S</text>
+        <!-- Humongous -->
+        <rect x="580" y="0" width="36" height="36" rx="4" fill="url(#gHum)" opacity="0.9"/><text x="598" y="22" text-anchor="middle" font-size="8" fill="white">H</text>
+        <rect x="620" y="0" width="36" height="36" rx="4" fill="url(#gHum)" opacity="0.9"/><text x="638" y="22" text-anchor="middle" font-size="8" fill="white">H</text>
+        <!-- Old -->
+        <rect x="670" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="688" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="710" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="728" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="750" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="768" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+      </g>
+
+      <!-- 第二行 -->
+      <g transform="translate(20, 96)">
+        <rect x="0" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="18" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="40" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="58" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="80" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="98" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="120" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="138" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="160" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="178" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="200" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="218" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="240" y="0" width="36" height="36" rx="4" fill="url(#gHum)" opacity="0.9"/><text x="258" y="22" text-anchor="middle" font-size="8" fill="white">H</text>
+        <rect x="280" y="0" width="36" height="36" rx="4" fill="url(#gHum)" opacity="0.9"/><text x="298" y="22" text-anchor="middle" font-size="8" fill="white">H</text>
+        <rect x="320" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="338" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="360" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="378" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="400" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="418" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="440" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="458" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="480" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="498" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="520" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="538" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="560" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="578" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="600" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="618" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="640" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="658" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="680" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="698" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="720" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="738" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="760" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="778" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+      </g>
+
+      <!-- 第三行 -->
+      <g transform="translate(20, 142)">
+        <rect x="0" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="18" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="40" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="58" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="80" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="98" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="120" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="138" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="160" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="178" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="200" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="218" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="240" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="258" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="280" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="298" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="320" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="338" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="360" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="378" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="400" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="418" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="440" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="458" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="480" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="498" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="520" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="538" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="560" y="0" width="36" height="36" rx="4" fill="url(#gOld)" opacity="0.9"/><text x="578" y="22" text-anchor="middle" font-size="8" fill="white">O</text>
+        <rect x="600" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="618" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="640" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="658" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="680" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="698" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="720" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="738" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+        <rect x="760" y="0" width="36" height="36" rx="4" fill="url(#gFree)" opacity="0.5"/><text x="778" y="22" text-anchor="middle" font-size="8" fill="white">F</text>
+      </g>
+
+      <!-- 省略号 -->
+      <text x="410" y="205" text-anchor="middle" font-size="14" fill="#9ca3af">... ~2048 个 Region ...</text>
+
+      <!-- 图例 -->
+      <g transform="translate(20, 225)">
+        <rect x="0" y="0" width="20" height="20" rx="3" fill="url(#gEden)"/><text x="28" y="15" font-size="12" fill="#374151">E = Eden（伊甸区）</text>
+        <rect x="180" y="0" width="20" height="20" rx="3" fill="url(#gSurv)"/><text x="208" y="15" font-size="12" fill="#374151">S = Survivor（幸存区）</text>
+        <rect x="380" y="0" width="20" height="20" rx="3" fill="url(#gOld)"/><text x="408" y="15" font-size="12" fill="#374151">O = Old（老年代）</text>
+        <rect x="560" y="0" width="20" height="20" rx="3" fill="url(#gHum)"/><text x="588" y="15" font-size="12" fill="#374151">H = Humongous（大对象）</text>
+        <rect x="0" y="30" width="20" height="20" rx="3" fill="url(#gFree)" opacity="0.5"/><text x="28" y="45" font-size="12" fill="#374151">F = Free（空闲 Region）</text>
+      </g>
+
+      <!-- 关键说明 -->
+      <g transform="translate(20, 290)">
+        <rect x="0" y="0" width="780" height="110" rx="8" fill="#f0f9ff" stroke="#bfdbfe"/>
+        <text x="16" y="24" font-size="13" font-weight="bold" fill="#1e40af">Region 关键参数</text>
+        <text x="16" y="48" font-size="12" fill="#374151">&#8226; Region 大小：1MB ~ 32MB（2 的幂次方），由堆大小自动计算，目标 ~2048 个 Region</text>
+        <text x="16" y="68" font-size="12" fill="#374151">&#8226; Humongous Region：对象大小 &gt; Region 大小的 50% 时，分配在连续的 Humongous Region 中</text>
+        <text x="16" y="88" font-size="12" fill="#374151">&#8226; 新生代/老年代不再物理隔离：每个 Region 的角色是动态的，GC 后可重新分配</text>
+        <text x="16" y="108" font-size="12" fill="#374151">&#8226; Remembered Set（RSet）：每个 Region 维护一个 RSet，记录其他 Region 对本 Region 的引用</text>
+      </g>
+
+      <!-- Mixed GC 说明 -->
+      <g transform="translate(20, 415)">
+        <rect x="0" y="0" width="780" height="70" rx="8" fill="#fef3c7" stroke="#fcd34d"/>
+        <text x="16" y="24" font-size="13" font-weight="bold" fill="#92400e">Mixed GC（混合回收）</text>
+        <text x="16" y="48" font-size="12" fill="#374151">Young GC：回收所有 Eden + Survivor Region | Mixed GC：回收所有年轻代 + 部分收益最高的老年代 Region</text>
+        <text x="16" y="66" font-size="12" fill="#374151">"Garbage First"：优先选择垃圾比例最高的 Region 进行回收，在停顿时间内回收最多的垃圾</text>
+      </g>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> G1 的 Region 化堆布局——堆不再划分为固定的新生代和老年代，而是由 ~2048 个等大的 Region 动态组成</figcaption>
+  </div>
+
+  <h3>G1 的回收过程</h3>
+  <p>G1 的回收分为两种类型：</p>
+
+  <p><strong>Young GC</strong>：回收所有 Eden 和 Survivor Region。使用多线程并行复制存活对象到新的 Region（本质上是并行复制算法）。</p>
+
+  <p><strong>Mixed GC</strong>：在 Young GC 的基础上，额外选择部分老年代 Region 一起回收。G1 通过并发标记周期来确定哪些老年代 Region 的垃圾比例最高（Garbage First），然后选择收益最高的 Region 进行回收。</p>
+
+  <h3>并发标记周期</h3>
+  <p>G1 的并发标记与 CMS 类似，但更简洁，因为 G1 使用了 <strong>Snapshot-At-The-Beginning（SATB）</strong> 算法：</p>
+  <ol>
+    <li><strong>初始标记（STW）</strong>：标记 GC Roots 直接引用的对象，搭载在 Young GC 的 STW 阶段</li>
+    <li><strong>并发标记</strong>：与用户线程并发遍历对象图</li>
+    <li><strong>最终标记（STW）</strong>：处理 SATB 队列中的引用变更记录</li>
+    <li><strong>筛选回收（STW）</strong>：计算每个 Region 的回收价值（垃圾比例），选择性价比最高的 Region 组成 Collection Set</li>
+  </ol>
+
+  <h3>Remembered Set（RSet）</h3>
+  <p>因为 Region 的角色是动态的，G1 无法像分代收集器那样只扫描新生代。为了解决跨 Region 引用的问题，每个 Region 都维护一个 <strong>RSet</strong>，记录"谁引用了我"。这样在 Young GC 时，只需扫描年轻代 Region 的 RSet 就能找到所有引用关系，而不需要扫描整个老年代。</p>
+
+  <p>RSet 的代价：每个 Region 的 RSet 通常占用 Region 大小的 5%~20%，这是 G1 内存开销比 Parallel GC 更高的主要原因之一。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">G1 核心调优参数</div>
+    <pre class="srcbox-file"><span class="k">java</span> -XX:+UseG1GC \
+     -XX:MaxGCPauseMillis=<span class="n">200</span>          <span class="c"># 目标最大停顿时间（默认 200ms）</span>
+     -XX:G1HeapRegionSize=<span class="n">4m</span>          <span class="c"># Region 大小（1m/2m/4m/.../32m）</span>
+     -XX:InitiatingHeapOccupancyPercent=<span class="n">45</span> <span class="c"># 触发并发标记的堆占用率</span>
+     -XX:G1NewSizePercent=<span class="n">20</span>          <span class="c"># 新生代最小占比（默认 5%）</span>
+     -XX:G1MaxNewSizePercent=<span class="n">60</span>       <span class="c"># 新生代最大占比（默认 60%）</span>
+     -XX:ConcGCThreads=<span class="n">2</span>              <span class="c"># 并发标记线程数</span>
+     -XX:G1ReservePercent=<span class="n">10</span>          <span class="c"># 保留空间防 evacuation failure</span>
+     -jar app.jar</pre>
+  </div>
+
+  <h3>Evacuation Failure（疏散失败）</h3>
+  <p>类似 CMS 的并发模式失败，G1 在 Mixed GC 期间如果没有足够的空闲 Region 来存放存活对象，就会触发 <strong>Evacuation Failure</strong>，退化为一次 Full GC（单线程标记-整理，JDK 10 后改为多线程）。这是 G1 调优中需要极力避免的情况。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试话术</span>
+    <p>G1 将堆划分为约 2048 个等大的 Region，每个 Region 可以动态扮演 Eden/Survivor/Old/Humongous 角色。回收分为 Young GC（只回收年轻代 Region）和 Mixed GC（年轻代 + 部分老年代 Region）。G1 通过"Garbage First"策略，优先选择垃圾比例最高的 Region 回收，使得在用户设定的目标停顿时间（-XX:MaxGCPauseMillis）内回收最多的垃圾。G1 使用 SATB 算法做并发标记，每个 Region 维护 RSet 来记录跨 Region 引用。它是 JDK 9+ 的默认收集器，适合中等大小堆（4GB~64GB）的延迟敏感应用。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — ZGC
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>ZGC：亚毫秒停顿的终极方案</h2>
+  </div>
+
+  <p>ZGC（Z Garbage Collector）是 JDK 11 引入的实验性收集器，JDK 15 正式生产可用。它的目标极其大胆：<strong>停顿时间不超过 1 毫秒，且不随堆大小增长</strong>。无论堆是 8GB 还是 16TB，停顿时间都保持在亚毫秒级别。</p>
+
+  <div class="think">
+    <p class="think-q">G1 已经把停顿控制到 200ms 了，为什么还需要 ZGC？</p>
+    <p>因为 200ms 对于某些场景来说太长了。高频交易、实时广告竞价、在线游戏服务器——这些场景要求 P99 延迟在个位数毫秒。如果 GC 一次就停顿 200ms，整个 SLA 就崩了。ZGC 的目标是把 GC 停顿压缩到亚毫秒级，让 GC 对应用来说几乎"不可见"。</p>
+  </div>
+
+  <h3>核心机制一：染色指针（Colored Pointers）</h3>
+  <p>ZGC 最核心的创新是<strong>染色指针</strong>——利用 64 位指针中的空闲位来存储 GC 元数据。在 64 位系统中，虚拟地址空间远大于实际物理内存，指针的高位通常有多余的 bit。ZGC 利用这些 bit 来存储四个标记：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
+      <!-- ZGC 染色指针结构 -->
+      <defs>
+        <linearGradient id="gMarked" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+        <linearGradient id="gRemap" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+        <linearGradient id="gFinal" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        <linearGradient id="gSoft" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient>
+        <linearGradient id="gAddr" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#2563eb"/></linearGradient>
+      </defs>
+
+      <text x="410" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#1f2937">ZGC 染色指针结构（64-bit）</text>
+
+      <!-- 64-bit 指针 -->
+      <g transform="translate(60, 50)">
+        <!-- 高位未使用 -->
+        <rect x="0" y="0" width="80" height="50" rx="0" fill="#e5e7eb" stroke="#9ca3af"/>
+        <text x="40" y="30" text-anchor="middle" font-size="11" fill="#6b7280">未使用</text>
+        <text x="40" y="68" text-anchor="middle" font-size="10" fill="#9ca3af">63~46</text>
+
+        <!-- Marked0 -->
+        <rect x="80" y="0" width="50" height="50" rx="0" fill="url(#gMarked)"/>
+        <text x="105" y="25" text-anchor="middle" font-size="10" font-weight="bold" fill="white">M0</text>
+        <text x="105" y="38" text-anchor="middle" font-size="8" fill="white">bit 45</text>
+        <text x="105" y="68" text-anchor="middle" font-size="10" fill="#dc2626">Marked0</text>
+
+        <!-- Remapped -->
+        <rect x="130" y="0" width="50" height="50" rx="0" fill="url(#gRemap)"/>
+        <text x="155" y="25" text-anchor="middle" font-size="10" font-weight="bold" fill="white">R</text>
+        <text x="155" y="38" text-anchor="middle" font-size="8" fill="white">bit 44</text>
+        <text x="155" y="68" text-anchor="middle" font-size="10" fill="#d97706">Remapped</text>
+
+        <!-- Finalizable -->
+        <rect x="180" y="0" width="50" height="50" rx="0" fill="url(#gFinal)"/>
+        <text x="205" y="25" text-anchor="middle" font-size="10" font-weight="bold" fill="white">F</text>
+        <text x="205" y="38" text-anchor="middle" font-size="8" fill="white">bit 43</text>
+        <text x="205" y="68" text-anchor="middle" font-size="10" fill="#059669">Finalizable</text>
+
+        <!-- SoftReference -->
+        <rect x="230" y="0" width="50" height="50" rx="0" fill="url(#gSoft)"/>
+        <text x="255" y="25" text-anchor="middle" font-size="10" font-weight="bold" fill="white">S</text>
+        <text x="255" y="38" text-anchor="middle" font-size="8" fill="white">bit 42</text>
+        <text x="255" y="68" text-anchor="middle" font-size="10" fill="#7c3aed">SoftRef</text>
+
+        <!-- 地址位 -->
+        <rect x="280" y="0" width="420" height="50" rx="0" fill="url(#gAddr)"/>
+        <text x="490" y="25" text-anchor="middle" font-size="13" font-weight="bold" fill="white">对象地址（42 bit，最大支持 4TB 堆）</text>
+        <text x="490" y="42" text-anchor="middle" font-size="10" fill="#bfdbfe">bit 41 ~ bit 0</text>
+        <text x="490" y="68" text-anchor="middle" font-size="10" fill="#2563eb">实际物理地址</text>
+      </g>
+
+      <!-- 说明框 -->
+      <g transform="translate(60, 140)">
+        <rect x="0" y="0" width="700" height="140" rx="8" fill="#f0fdf4" stroke="#86efac"/>
+        <text x="16" y="24" font-size="13" font-weight="bold" fill="#166534">染色指针的精妙之处</text>
+        <text x="16" y="48" font-size="12" fill="#374151">&#8226; M0 / M1（Marked0/Marked1）：交替使用，标记对象是否在 GC 中被标记为存活</text>
+        <text x="16" y="68" font-size="12" fill="#374151">&#8226; Remapped：标记指针是否已指向对象的新地址（用于并发转移后的指针修正）</text>
+        <text x="16" y="88" font-size="12" fill="#374151">&#8226; Finalizable：标记对象只能通过 Finalizer 可达（弱引用相关优化）</text>
+        <text x="16" y="108" font-size="12" fill="#374151">&#8226; SoftRef：标记对象只能通过 SoftReference 可达</text>
+        <text x="16" y="132" font-size="12" fill="#374151">&#8226; 核心优势：不需要额外的 Mark Bitmap 或 Mark Word 来存储 GC 标记，GC 信息直接"染"在指针上</text>
+      </g>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> ZGC 染色指针——利用 64 位指针的空闲位存储 GC 标记信息，将对象元数据嵌入指针本身</figcaption>
+  </div>
+
+  <h3>核心机制二：读屏障（Load Barrier）</h3>
+  <p>当应用线程通过指针读取对象引用时，ZGC 会在读取前插入一段<strong>读屏障</strong>代码。读屏障会检查指针的染色位：</p>
+  <ul>
+    <li>如果指针的 Remapped 位被设置，说明对象已经被 GC 转移到了新地址，读屏障会<strong>自动修正指针</strong>指向新地址</li>
+    <li>这样就不需要像 G1 那样在 STW 阶段批量修正所有引用——修正工作被分散到了每次指针读取时</li>
+  </ul>
+
+  <h3>核心机制三：并发转移（Concurrent Relocation）</h3>
+  <p>ZGC 将 G1 中必须 STW 的 Evacuation（转移存活对象）阶段也变成了并发的：</p>
+  <ol>
+    <li>GC 线程并发将存活对象从旧 Region 复制到新 Region</li>
+    <li>旧地址的指针被标记为 Remapped（染色位）</li>
+    <li>应用线程下次通过读屏障访问该指针时，自动修正为新地址</li>
+    <li>当所有旧指针都被修正后，旧 Region 可以被安全回收</li>
+  </ol>
+
+  <h3>ZGC 的执行流程</h3>
+  <table class="nb-table">
+    <thead>
+      <tr><th>阶段</th><th>类型</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Pause Init Mark</td><td>STW（亚毫秒）</td><td>标记 GC Roots 直接引用的对象</td></tr>
+      <tr><td>Concurrent Mark</td><td>并发</td><td>遍历整个对象图</td></tr>
+      <tr><td>Pause Mark End</td><td>STW（亚毫秒）</td><td>处理引用队列、软引用等</td></tr>
+      <tr><td>Concurrent Prepare for Relocate</td><td>并发</td><td>构建转移集合</td></tr>
+      <tr><td>Pause Relocate Start</td><td>STW（亚毫秒）</td><td>转移 GC Roots 引用的对象</td></tr>
+      <tr><td>Concurrent Relocate</td><td>并发</td><td>转移存活对象 + 读屏障自动修正指针</td></tr>
+    </tbody>
+  </table>
+
+  <p>注意：所有 STW 阶段都是<strong>亚毫秒级</strong>的，最长的 Pause Mark End 通常也不超过 1ms。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">启用 ZGC</div>
+    <pre class="srcbox-file"><span class="c"># JDK 11（实验性）</span>
+<span class="k">java</span> -XX:+UnlockExperimentalVMOptions -XX:+UseZGC -jar app.jar
+
+<span class="c"># JDK 15+（生产可用，无需 UnlockExperimental）</span>
+<span class="k">java</span> -XX:+UseZGC -jar app.jar
+
+<span class="c"># JDK 17+ 启用分代 ZGC（进一步提升吞吐量）</span>
+<span class="k">java</span> -XX:+UseZGC -XX:+ZGenerational -jar app.jar
+
+<span class="c"># ZGC 默认最大堆 16TB，适用于超大堆场景</span></pre>
+  </div>
+
+  <h3>ZGC 的取舍</h3>
+  <table class="nb-table">
+    <thead>
+      <tr><th>维度</th><th>表现</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>停顿时间</td><td>极好（&lt;1ms）</td><td>所有 STW 阶段都在亚毫秒级</td></tr>
+      <tr><td>吞吐量</td><td>中等偏低</td><td>读屏障有额外开销，CPU 使用率比 G1 高 ~10%</td></tr>
+      <tr><td>内存开销</td><td>较高</td><td>需要额外的 Region Map、转移表等元数据</td></tr>
+      <tr><td>适用堆大小</td><td>8GB ~ 16TB</td><td>大堆下优势最明显</td></tr>
+      <tr><td>CPU 要求</td><td>多核</td><td>需要较多 CPU 核心给并发 GC 线程</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">面试话术</span>
+    <p>ZGC 的核心目标是亚毫秒停顿且不随堆大小增长。它通过三个关键技术实现：① 染色指针——将 GC 标记信息嵌入 64 位指针的空闲 bit 中，避免了额外的元数据结构；② 读屏障——在应用线程读取对象引用时自动修正被转移的指针，将批量修正工作分散化；③ 并发转移——将 G1 中必须 STW 的 Evacuation 阶段变为并发，配合读屏障实现无停顿的对象转移。代价是吞吐量略低于 G1（读屏障开销约 10%），内存开销更大。JDK 15 后生产可用，JDK 17 引入了分代 ZGC 进一步改善吞吐量。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 7 站 — 对比总结表
+     ================================================================ -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>五代收集器全维度对比</h2>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr>
+        <th>维度</th>
+        <th>Serial</th>
+        <th>Parallel</th>
+        <th>CMS</th>
+        <th>G1</th>
+        <th>ZGC</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>停顿时间</strong></td>
+        <td>毫秒~秒级</td>
+        <td>毫秒~秒级</td>
+        <td>10~100ms</td>
+        <td>10~200ms（可调）</td>
+        <td>&lt;1ms</td>
+      </tr>
+      <tr>
+        <td><strong>停顿可控性</strong></td>
+        <td>不可控</td>
+        <td>粗略可调</td>
+        <td>不可控（CMF 退化）</td>
+        <td>目标值可调</td>
+        <td>硬保证 &lt;1ms</td>
+      </tr>
+      <tr>
+        <td><strong>吞吐量</strong></td>
+        <td>低（小堆尚可）</td>
+        <td>最高</td>
+        <td>中等</td>
+        <td>中高</td>
+        <td>中等</td>
+      </tr>
+      <tr>
+        <td><strong>内存开销</strong></td>
+        <td>极低</td>
+        <td>低</td>
+        <td>中（需预留空间）</td>
+        <td>中高（RSet）</td>
+        <td>高（染色指针+元数据）</td>
+      </tr>
+      <tr>
+        <td><strong>CPU 开销</strong></td>
+        <td>最低</td>
+        <td>GC 时高</td>
+        <td>持续占用 1~2 核</td>
+        <td>GC 时高</td>
+        <td>持续占用（读屏障）</td>
+      </tr>
+      <tr>
+        <td><strong>堆大小</strong></td>
+        <td>&lt;100MB</td>
+        <td>&lt;8GB</td>
+        <td>&lt;8GB</td>
+        <td>4GB~64GB</td>
+        <td>8GB~16TB</td>
+      </tr>
+      <tr>
+        <td><strong>默认 JDK 版本</strong></td>
+        <td>Client VM</td>
+        <td>JDK 8</td>
+        <td>无（JDK 14 移除）</td>
+        <td>JDK 9+</td>
+        <td>JDK 15+（生产可用）</td>
+      </tr>
+      <tr>
+        <td><strong>碎片问题</strong></td>
+        <td>无（Compact）</td>
+        <td>无（Compact）</td>
+        <td>严重</td>
+        <td>无（复制）</td>
+        <td>无（复制）</td>
+      </tr>
+      <tr>
+        <td><strong>浮动垃圾</strong></td>
+        <td>无</td>
+        <td>无</td>
+        <td>有</td>
+        <td>有（较轻）</td>
+        <td>有（较轻）</td>
+      </tr>
+      <tr>
+        <td><strong>典型场景</strong></td>
+        <td>嵌入式/小容器</td>
+        <td>批处理/后台计算</td>
+        <td>Web 服务（已淘汰）</td>
+        <td>通用 Web 服务</td>
+        <td>超低延迟/大堆</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>GC 演进时间线</h3>
+
+  <div class="fig">
+    <svg viewBox="0 0 820 420" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
+      <!-- GC 演进时间线 -->
+      <defs>
+        <linearGradient id="gTimeline" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#6366f1"/>
+          <stop offset="50%" stop-color="#3b82f6"/>
+          <stop offset="100%" stop-color="#06b6d4"/>
+        </linearGradient>
+      </defs>
+
+      <text x="410" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#1f2937">垃圾收集器演进时间线</text>
+
+      <!-- 时间轴 -->
+      <line x1="60" y1="80" x2="780" y2="80" stroke="url(#gTimeline)" stroke-width="4" stroke-linecap="round"/>
+
+      <!-- Serial -->
+      <circle cx="100" cy="80" r="12" fill="#6366f1"/>
+      <text x="100" y="84" text-anchor="middle" font-size="9" font-weight="bold" fill="white">1</text>
+      <text x="100" y="56" text-anchor="middle" font-size="12" font-weight="bold" fill="#4338ca">Serial</text>
+      <text x="100" y="115" text-anchor="middle" font-size="11" fill="#6b7280">JDK 1.0</text>
+      <text x="100" y="132" text-anchor="middle" font-size="10" fill="#9ca3af">1996</text>
+
+      <!-- Parallel -->
+      <circle cx="240" cy="80" r="12" fill="#3b82f6"/>
+      <text x="240" y="84" text-anchor="middle" font-size="9" font-weight="bold" fill="white">2</text>
+      <text x="240" y="56" text-anchor="middle" font-size="12" font-weight="bold" fill="#1d4ed8">Parallel</text>
+      <text x="240" y="115" text-anchor="middle" font-size="11" fill="#6b7280">JDK 1.4</text>
+      <text x="240" y="132" text-anchor="middle" font-size="10" fill="#9ca3af">2002</text>
+
+      <!-- CMS -->
+      <circle cx="360" cy="80" r="12" fill="#0ea5e9"/>
+      <text x="360" y="84" text-anchor="middle" font-size="9" font-weight="bold" fill="white">3</text>
+      <text x="360" y="56" text-anchor="middle" font-size="12" font-weight="bold" fill="#0369a1">CMS</text>
+      <text x="360" y="115" text-anchor="middle" font-size="11" fill="#6b7280">JDK 1.5</text>
+      <text x="360" y="132" text-anchor="middle" font-size="10" fill="#9ca3af">2004</text>
+
+      <!-- G1 -->
+      <circle cx="500" cy="80" r="12" fill="#10b981"/>
+      <text x="500" y="84" text-anchor="middle" font-size="9" font-weight="bold" fill="white">4</text>
+      <text x="500" y="56" text-anchor="middle" font-size="12" font-weight="bold" fill="#059669">G1</text>
+      <text x="500" y="115" text-anchor="middle" font-size="11" fill="#6b7280">JDK 7（9+默认）</text>
+      <text x="500" y="132" text-anchor="middle" font-size="10" fill="#9ca3af">2011 / 2017</text>
+
+      <!-- ZGC -->
+      <circle cx="660" cy="80" r="12" fill="#06b6d4"/>
+      <text x="660" y="84" text-anchor="middle" font-size="9" font-weight="bold" fill="white">5</text>
+      <text x="660" y="56" text-anchor="middle" font-size="12" font-weight="bold" fill="#0891b2">ZGC</text>
+      <text x="660" y="115" text-anchor="middle" font-size="11" fill="#6b7280">JDK 11（15+生产）</text>
+      <text x="660" y="132" text-anchor="middle" font-size="10" fill="#9ca3af">2018 / 2020</text>
+
+      <!-- CMS 移除标记 -->
+      <line x1="360" y1="150" x2="360" y2="200" stroke="#ef4444" stroke-width="2" stroke-dasharray="4"/>
+      <text x="360" y="215" text-anchor="middle" font-size="11" fill="#ef4444" font-weight="bold">JDK 14 移除</text>
+      <text x="360" y="232" text-anchor="middle" font-size="10" fill="#ef4444">2020</text>
+
+      <!-- 演进主题 -->
+      <g transform="translate(60, 260)">
+        <rect x="0" y="0" width="720" height="145" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="360" y="24" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e293b">演进主线：从"暂停一切"到"几乎不停"</text>
+
+        <text x="20" y="52" font-size="12" fill="#374151">
+          <tspan font-weight="bold" fill="#6366f1">Serial → Parallel</tspan>：单线程 → 多线程，提升吞吐量（目标：快）
+        </text>
+        <text x="20" y="74" font-size="12" fill="#374151">
+          <tspan font-weight="bold" fill="#0ea5e9">Parallel → CMS</tspan>：STW → 并发，降低停顿时间（目标：稳）
+        </text>
+        <text x="20" y="96" font-size="12" fill="#374151">
+          <tspan font-weight="bold" fill="#10b981">CMS → G1</tspan>：固定分代 → Region 化，解决碎片 + 不可控停顿（目标：可控）
+        </text>
+        <text x="20" y="118" font-size="12" fill="#374151">
+          <tspan font-weight="bold" fill="#06b6d4">G1 → ZGC</tspan>：STW 转移 → 并发转移 + 染色指针，亚毫秒停顿（目标：极致）
+        </text>
+        <text x="20" y="140" font-size="12" fill="#6b7280">
+          每一次演进都在回答同一个问题：如何让 GC 对应用的影响更小？
+        </text>
+      </g>
+    </svg>
+    <figcaption><span class="fig-no">图 3</span> 垃圾收集器演进时间线——从 1996 年的 Serial 到 2020 年生产可用的 ZGC，核心主线是降低停顿时间</figcaption>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">Shenandoah 和 Epsilon</span>
+    <p>JDK 中还有两个值得一提的收集器：<strong>Shenandoah</strong>（Red Hat 开发，目标类似 ZGC 的低停顿，但不使用染色指针而是用 Brooks Pointer 转发）和 <strong>Epsilon</strong>（不做任何回收，用于性能测试和短生命周期应用）。面试中提到它们可以作为加分项，但不需要深入展开。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 8 站 — 总结与选择指南
+     ================================================================ -->
+<section class="station reveal" id="s8">
+  <div class="station-head">
+    <span class="station-no">第 8 站</span>
+    <h2>你的项目该用哪个收集器？</h2>
+  </div>
+
+  <h3>选择决策树</h3>
+
+  <div class="srcbox">
+    <div class="srcbox-head">GC 选择指南</div>
+    <pre class="srcbox-file"><span class="c">/*
+ * 第一步：你的堆有多大？
+ */</span>
+<span class="k">if</span> (heapSize &lt; <span class="n">100</span>MB && cpuCores == <span class="n">1</span>) {
+    <span class="k">return</span> <span class="t">Serial</span>;           <span class="c">// 小堆单核，简单就是美</span>
+}
+
+<span class="k">if</span> (heapSize &lt; <span class="n">4</span>GB && 吞吐量优先) {
+    <span class="k">return</span> <span class="t">Parallel</span>;         <span class="c">// 批处理、后台任务</span>
+}
+
+<span class="k">if</span> (heapSize &lt; <span class="n">64</span>GB && 通用场景) {
+    <span class="k">return</span> <span class="t">G1</span>;               <span class="c">// JDK 9+ 默认，大多数场景的最优选</span>
+}
+
+<span class="k">if</span> (延迟敏感 || heapSize &gt; <span class="n">16</span>GB || P99要求 &lt; <span class="n">10</span>ms) {
+    <span class="k">return</span> <span class="t">ZGC</span>;              <span class="c">// 超低延迟，JDK 15+</span>
+}
+
+<span class="c">// 默认：用 G1，别折腾</span>
+<span class="k">return</span> <span class="t">G1</span>;</pre>
+  </div>
+
+  <h3>生产环境 GC 监控指标</h3>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>指标</th><th>含义</th><th>健康范围</th><th>告警阈值</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>GC Pause Time</td><td>单次 GC 停顿时长</td><td>G1: &lt;200ms / ZGC: &lt;1ms</td><td>超过目标值 2 倍</td></tr>
+      <tr><td>GC Frequency</td><td>GC 触发频率</td><td>Young: 每几分钟一次</td><td>每分钟超过 1 次</td></tr>
+      <tr><td>GC Time Ratio</td><td>GC 时间占总时间比</td><td>&lt;5%</td><td>&gt;10%</td></tr>
+      <tr><td>Full GC 次数</td><td>Full GC 触发次数</td><td>0（不应发生）</td><td>任何 Full GC 都要告警</td></tr>
+      <tr><td>Heap Usage Trend</td><td>堆使用率趋势</td><td>锯齿状波动</td><td>持续上升不回落</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">JVM GC 日志关键参数（JDK 9+ 统一日志框架）</div>
+    <pre class="srcbox-file"><span class="c"># JDK 9+ 统一日志</span>
+<span class="k">java</span> -Xlog:gc*,gc+heap=debug:file=gc-%t.log:time,uptime,level,tags:filecount=<span class="n">5</span>,filesize=<span class="n">10M</span>
+
+<span class="c"># JDK 8 传统参数</span>
+<span class="k">java</span> -XX:+PrintGCDetails -XX:+PrintGCDateStamps \
+     -Xloggc:/var/log/gc-<span class="n">%t</span>.log \
+     -XX:+UseGCLogFileRotation \
+     -XX:NumberOfGCLogFiles=<span class="n">5</span> \
+     -XX:GCLogFileSize=<span class="n">10M</span></pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">面试官问"你们线上用的什么 GC？怎么调优的？"怎么回答？</p>
+    <p>好的回答模板："我们线上用的是 G1 / ZGC，堆大小 X GB。核心关注三个指标：单次停顿时间不超过 N ms（通过 -XX:MaxGCPauseMillis 设定）、GC 时间占比低于 5%（通过 GC 日志分析）、不发生 Full GC。曾经遇到过 Mixed GC 不及时导致的 Evacuation Failure，通过调低 InitiatingHeapOccupancyPercent 从 45 到 35 解决，让并发标记更早启动。"</p>
+  </div>
+
+  <div class="recap">
+    <p><strong>全文核心记忆点：</strong></p>
+    <ul>
+      <li><strong>Serial</strong>：单线程全程 STW，适合小堆单核</li>
+      <li><strong>Parallel</strong>：多线程 STW，吞吐量最高，JDK 8 默认</li>
+      <li><strong>CMS</strong>：并发标记-清除，低停顿但有浮动垃圾、并发模式失败、内存碎片三大问题，JDK 14 移除</li>
+      <li><strong>G1</strong>：Region 化堆 + Mixed GC + SATB，可预测停顿，JDK 9+ 默认，适合大多数场景</li>
+      <li><strong>ZGC</strong>：染色指针 + 读屏障 + 并发转移，亚毫秒停顿，JDK 15 生产可用，适合大堆/超低延迟</li>
+    </ul>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">最终面试话术</span>
+    <p>JDK 的 GC 演进是一条"降低停顿"的主线：Serial 全程 STW → Parallel 多线程缩短 STW → CMS 将标记与用户线程并发 → G1 用 Region 化 + 增量回收实现可预测停顿 → ZGC 用染色指针和读屏障将停顿压到亚毫秒。每一代都是在吞吐量、延迟、内存三者之间的重新取舍。生产环境大多数情况用 G1，对延迟有极致要求或堆超过 16GB 时选 ZGC。</p>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

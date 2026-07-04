@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IO 模型：BIO、NIO 与 Reactor 模式</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：BIO ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>BIO：一个连接一个线程，简单但昂贵</h2></div>
+
+<p>BIO（Blocking IO）是 JDK 1.0 就有的传统 IO 模型。核心特征：<strong>线程在读写数据时会阻塞，直到操作完成</strong>。最典型的编程模式是"一个连接一个线程"。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BioServer.java</b> · 传统 BIO 服务器</span></div>
+<pre><code><span class="k">public class</span> <span class="t">BioServer</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">ServerSocket</span> server = <span class="k">new</span> <span class="t">ServerSocket</span>(<span class="n">8080</span>);
+        System.out.println(<span class="s">"BIO Server 启动，端口 8080"</span>);
+
+        <span class="k">while</span> (<span class="k">true</span>) {
+            <span class="c">// ★ accept() 会阻塞，直到有客户端连接</span>
+            <span class="t">Socket</span> socket = server.accept();
+
+            <span class="c">// ★ 每个连接必须启动一个新线程处理</span>
+            <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+                <span class="k">try</span> (<span class="t">InputStream</span> in = socket.getInputStream();
+                     <span class="t">OutputStream</span> out = socket.getOutputStream()) {
+
+                    <span class="k">byte</span>[] buf = <span class="k">new byte</span>[<span class="n">1024</span>];
+                    <span class="k">int</span> len;
+                    <span class="c">// ★ read() 会阻塞，直到有数据可读</span>
+                    <span class="k">while</span> ((len = in.read(buf)) != -<span class="n">1</span>) {
+                        out.write(buf, <span class="n">0</span>, len);  <span class="c">// echo 回写</span>
+                        out.flush();
+                    }
+                } <span class="k">catch</span> (<span class="t">Exception</span> e) { e.printStackTrace(); }
+            }).start();
+        }
+    }
+}</code></pre>
+</div>
+
+<p>BIO 的核心问题：<strong>线程数量与连接数量 1:1 绑定</strong>。1 万个连接就需要 1 万个线程，每个线程栈默认占 1MB 内存，光线程栈就要 10GB。更严重的是上下文切换开销——操作系统在 1 万个线程间调度，CPU 时间大量浪费在切换而非计算上。</p>
+
+<div class="crack"><div class="crack-label">BIO 的两处阻塞</div>
+<p><strong>阻塞点 1：</strong><code>accept()</code>——没有新连接时，主线程卡在这里。</p>
+<p><strong>阻塞点 2：</strong><code>read()/write()</code>——没有数据可读/缓冲区满时，工作线程卡在这里。</p>
+<p>两处阻塞意味着：即使客户端连接建立后不发送任何数据，为其分配的线程也只能干等，无法服务其他连接。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：NIO 三件套 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>NIO 三件套：Channel、Buffer、Selector</h2></div>
+
+<p>JDK 1.4 引入 NIO（New IO / Non-blocking IO），核心是三个组件：<strong>Channel</strong>（通道）、<strong>Buffer</strong>（缓冲区）、<strong>Selector</strong>（多路复用器）。它们共同实现了一个线程处理多个连接。</p>
+
+<table class="nb-table">
+<thead><tr><th>组件</th><th>BIO 对应</th><th>NIO 角色</th></tr></thead>
+<tbody>
+  <tr><td><strong>Channel</strong></td><td>Stream</td><td>双向通道，支持读写。核心实现：<code>SocketChannel</code>、<code>ServerSocketChannel</code>、<code>FileChannel</code></td></tr>
+  <tr><td><strong>Buffer</strong></td><td>byte[]</td><td>结构化缓冲区，通过 position/limit/capacity 精确控制读写位置。核心：<code>ByteBuffer</code></td></tr>
+  <tr><td><strong>Selector</strong></td><td>无</td><td>IO 多路复用器，一个线程监控多个 Channel 的事件（连接、读、写）</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>NioServer.java</b> · NIO 服务器基本结构</span></div>
+<pre><code><span class="k">public class</span> <span class="t">NioServer</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">Selector</span> selector = <span class="t">Selector</span>.open();
+
+        <span class="t">ServerSocketChannel</span> serverChannel = <span class="t">ServerSocketChannel</span>.open();
+        serverChannel.bind(<span class="k">new</span> <span class="t">InetSocketAddress</span>(<span class="n">8080</span>));
+        serverChannel.configureBlocking(<span class="k">false</span>);  <span class="c">// ★ 非阻塞模式</span>
+
+        <span class="c">// 将 ServerChannel 注册到 Selector，监听 ACCEPT 事件</span>
+        serverChannel.register(selector, <span class="t">SelectionKey</span>.OP_ACCEPT);
+
+        <span class="t">ByteBuffer</span> buffer = <span class="t">ByteBuffer</span>.allocate(<span class="n">1024</span>);
+
+        <span class="k">while</span> (<span class="k">true</span>) {
+            <span class="c">// ★ select() 阻塞直到有事件就绪</span>
+            selector.select();
+
+            <span class="t">Set</span>&lt;<span class="t">SelectionKey</span>&gt; keys = selector.selectedKeys();
+            <span class="t">Iterator</span>&lt;<span class="t">SelectionKey</span>&gt; it = keys.iterator();
+
+            <span class="k">while</span> (it.hasNext()) {
+                <span class="t">SelectionKey</span> key = it.next();
+                it.remove();  <span class="c">// ★ 必须移除，否则下次会重复处理</span>
+
+                <span class="k">if</span> (key.isAcceptable()) {
+                    <span class="t">SocketChannel</span> client = serverChannel.accept();
+                    client.configureBlocking(<span class="k">false</span>);
+                    client.register(selector, <span class="t">SelectionKey</span>.OP_READ);
+                } <span class="k">else if</span> (key.isReadable()) {
+                    <span class="t">SocketChannel</span> client = (<span class="t">SocketChannel</span>) key.channel();
+                    buffer.clear();
+                    <span class="k">int</span> len = client.read(buffer);  <span class="c">// ★ 非阻塞，可能返回 0</span>
+                    <span class="k">if</span> (len &gt; <span class="n">0</span>) {
+                        buffer.flip();  <span class="c">// ★ 切换为读模式</span>
+                        client.write(buffer);
+                    }
+                }
+            }
+        }
+    }
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BufferMechanism.java</b> · Buffer 的 position/limit/capacity</span></div>
+<pre><code><span class="t">ByteBuffer</span> buf = <span class="t">ByteBuffer</span>.allocate(<span class="n">10</span>);
+<span class="c">// capacity=10, position=0, limit=10</span>
+
+<span class="c">// 写入 "Hello"（5 个字节）</span>
+buf.put(<span class="s">"Hello"</span>.getBytes());
+<span class="c">// capacity=10, position=5, limit=10</span>
+
+<span class="c">// flip()：准备读取——limit 设为当前 position，position 归零</span>
+buf.flip();
+<span class="c">// capacity=10, position=0, limit=5</span>
+
+<span class="c">// 读取 5 字节</span>
+<span class="k">byte</span>[] data = <span class="k">new byte</span>[buf.remaining()];  <span class="c">// remaining = limit - position = 5</span>
+buf.get(data);
+<span class="c">// capacity=10, position=5, limit=5</span>
+
+<span class="c">// clear()：重置为写模式</span>
+buf.clear();
+<span class="c">// capacity=10, position=0, limit=10（数据还在，但 position 重置了）</span>
+
+<span class="c">// compact()：丢弃已读数据，保留未读数据</span>
+buf.compact();
+<span class="c">// 将未读数据移到缓冲区开头，position 紧跟其后</span></code></pre>
+</div>
+
+<div class="think"><div class="think-q">为什么 NIO 的 read() 是非阻塞的？那 read() 返回 0 怎么办？<br/><br/>
+非阻塞模式下，<code>SocketChannel.read()</code> 如果没有数据可读，会立即返回 0 而不是等待。所以代码中必须检查 <code>len > 0</code> 再处理数据。配合 Selector，只有当 Channel 确实有数据可读时（OP_READ 事件就绪），才调用 read()，这样就避免了"忙轮询"浪费 CPU。</div></div>
+</section>
+
+<!-- ═══════════════ 第3站：IO 多路复用 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>IO 多路复用：select / poll / epoll</h2></div>
+
+<p>Selector 的底层实现依赖操作系统的 IO 多路复用机制。理解 select、poll、epoll 三者的区别，是理解 NIO 性能的关键。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 760 480" role="img" aria-label="IO 多路复用机制对比">
+  <text x="380" y="26" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">select / poll / epoll 对比</text>
+
+  <!-- select -->
+  <rect x="20" y="50" width="220" height="200" rx="10" fill="#FFF7ED" stroke="#C2410C" stroke-width="2"/>
+  <text x="130" y="76" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">select</text>
+  <text x="130" y="100" text-anchor="middle" font-size="11" fill="#57544E">fd_set 位图（固定 1024）</text>
+
+  <rect x="40" y="115" width="30" height="20" rx="3" fill="#16A34A" stroke="#16A34A" stroke-width="1"/>
+  <rect x="75" y="115" width="30" height="20" rx="3" fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1"/>
+  <rect x="110" y="115" width="30" height="20" rx="3" fill="#16A34A" stroke="#16A34A" stroke-width="1"/>
+  <rect x="145" y="115" width="30" height="20" rx="3" fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1"/>
+  <rect x="180" y="115" width="30" height="20" rx="3" fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1"/>
+  <text x="130" y="158" text-anchor="middle" font-size="10" fill="#57544E">每次调用都要拷贝全部 fd 到内核</text>
+  <text x="130" y="175" text-anchor="middle" font-size="10" fill="#57544E">内核遍历所有 fd 检查就绪</text>
+  <text x="130" y="192" text-anchor="middle" font-size="10" fill="#EF4444" font-weight="600">O(n) 遍历 + 返回后需再次遍历</text>
+  <text x="130" y="210" text-anchor="middle" font-size="10" fill="#EF4444">fd 返回后位图被清空，需重新设置</text>
+  <text x="130" y="232" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">上限 1024 个 fd</text>
+
+  <!-- poll -->
+  <rect x="270" y="50" width="220" height="200" rx="10" fill="#EDE9FE" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="380" y="76" text-anchor="middle" font-size="14" fill="#8B5CF6" font-weight="700">poll</text>
+  <text x="380" y="100" text-anchor="middle" font-size="11" fill="#57544E">pollfd 数组（无上限）</text>
+
+  <rect x="290" y="115" width="30" height="20" rx="3" fill="#16A34A" stroke="#16A34A" stroke-width="1"/>
+  <rect x="325" y="115" width="30" height="20" rx="3" fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1"/>
+  <rect x="360" y="115" width="30" height="20" rx="3" fill="#16A34A" stroke="#16A34A" stroke-width="1"/>
+  <rect x="395" y="115" width="30" height="20" rx="3" fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1"/>
+  <rect x="430" y="115" width="30" height="20" rx="3" fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1"/>
+  <text x="380" y="158" text-anchor="middle" font-size="10" fill="#57544E">用 revents 字段标记就绪</text>
+  <text x="380" y="175" text-anchor="middle" font-size="10" fill="#57544E">返回后不需要重新设置 fd 列表</text>
+  <text x="380" y="192" text-anchor="middle" font-size="10" fill="#EF4444" font-weight="600">O(n) 遍历（仍需全量扫描）</text>
+  <text x="380" y="210" text-anchor="middle" font-size="10" fill="#57544E">每次仍需用户态→内核态拷贝</text>
+  <text x="380" y="232" text-anchor="middle" font-size="10" fill="#8B5CF6" font-weight="600">无 fd 数量限制</text>
+
+  <!-- epoll -->
+  <rect x="520" y="50" width="220" height="200" rx="10" fill="#F0FDF4" stroke="#16A34A" stroke-width="2"/>
+  <text x="630" y="76" text-anchor="middle" font-size="14" fill="#16A34A" font-weight="700">epoll（Linux）</text>
+  <text x="630" y="100" text-anchor="middle" font-size="11" fill="#57544E">红黑树 + 就绪链表</text>
+
+  <rect x="540" y="115" width="180" height="30" rx="5" fill="#DCFCE7" stroke="#16A34A" stroke-width="1.5"/>
+  <text x="630" y="135" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">就绪链表（只包含活跃 fd）</text>
+  <text x="630" y="165" text-anchor="middle" font-size="10" fill="#57544E">epoll_create → 内核创建实例</text>
+  <text x="630" y="182" text-anchor="middle" font-size="10" fill="#57544E">epoll_ctl → 增删改 fd（mmap 共享）</text>
+  <text x="630" y="199" text-anchor="middle" font-size="10" fill="#16A34A" font-weight="600">O(1) 事件通知（回调机制）</text>
+  <text x="630" y="216" text-anchor="middle" font-size="10" fill="#57544E">epoll_wait → 只返回就绪 fd</text>
+  <text x="630" y="232" text-anchor="middle" font-size="10" fill="#16A34A" font-weight="600">无 fd 上限，内存共享</text>
+
+  <!-- 对比表 -->
+  <rect x="20" y="270" width="720" height="195" rx="8" fill="#fff" stroke="#CBD5E1" stroke-width="1.5"/>
+  <text x="380" y="296" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">核心差异对比</text>
+
+  <text x="60" y="320" text-anchor="start" font-size="11" fill="#57544E" font-weight="600">性能维度</text>
+  <text x="250" y="320" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">select</text>
+  <text x="420" y="320" text-anchor="middle" font-size="11" fill="#8B5CF6" font-weight="600">poll</text>
+  <text x="610" y="320" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">epoll</text>
+
+  <line x1="40" y1="328" x2="720" y2="328" stroke="#E5E7EB" stroke-width="1"/>
+
+  <text x="60" y="348" text-anchor="start" font-size="11" fill="#57544E">时间复杂度</text>
+  <text x="250" y="348" text-anchor="middle" font-size="11" fill="#EF4444">O(n)</text>
+  <text x="420" y="348" text-anchor="middle" font-size="11" fill="#EF4444">O(n)</text>
+  <text x="610" y="348" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">O(1)</text>
+
+  <text x="60" y="370" text-anchor="start" font-size="11" fill="#57544E">fd 上限</text>
+  <text x="250" y="370" text-anchor="middle" font-size="11" fill="#EF4444">1024</text>
+  <text x="420" y="370" text-anchor="middle" font-size="11" fill="#57544E">无</text>
+  <text x="610" y="370" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">无</text>
+
+  <text x="60" y="392" text-anchor="start" font-size="11" fill="#57544E">数据拷贝</text>
+  <text x="250" y="392" text-anchor="middle" font-size="11" fill="#EF4444">每次全量拷贝</text>
+  <text x="420" y="392" text-anchor="middle" font-size="11" fill="#EF4444">每次全量拷贝</text>
+  <text x="610" y="392" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">mmap 共享</text>
+
+  <text x="60" y="414" text-anchor="start" font-size="11" fill="#57544E">触发方式</text>
+  <text x="250" y="414" text-anchor="middle" font-size="11" fill="#57544E">水平触发</text>
+  <text x="420" y="414" text-anchor="middle" font-size="11" fill="#57544E">水平触发</text>
+  <text x="610" y="414" text-anchor="middle" font-size="11" fill="#16A34A" font-weight="600">水平 + 边缘触发</text>
+
+  <text x="60" y="440" text-anchor="start" font-size="11" fill="#57544E">适用场景</text>
+  <text x="250" y="440" text-anchor="middle" font-size="10" fill="#57544E">连接少且活跃</text>
+  <text x="420" y="440" text-anchor="middle" font-size="10" fill="#57544E">跨平台兼容</text>
+  <text x="610" y="440" text-anchor="middle" font-size="10" fill="#16A34A" font-weight="600">大量连接，少量活跃</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>select / poll / epoll 对比：epoll 通过回调机制实现 O(1) 事件通知，配合 mmap 避免数据拷贝，是 Linux 上高性能网络编程的基石</figcaption>
+</figure>
+
+<div class="formula">
+<strong>epoll 的核心优势：回调 + 共享内存</strong><br/><br/>
+1. <code>epoll_create()</code> 在内核创建一个事件表（红黑树），通过 <code>mmap</code> 与用户空间共享内存<br/>
+2. <code>epoll_ctl()</code> 注册 fd 时，内核为该 fd 设置一个<strong>回调函数</strong>——当该 fd 就绪时，回调将其加入就绪链表<br/>
+3. <code>epoll_wait()</code> 只需观察就绪链表，<strong>只返回有事件的 fd</strong>，无需遍历全部 fd
+</div>
+
+<div class="think"><div class="think-q">epoll 一定是最好的吗？连接数很少时呢？<br/><br/>
+当连接数很少（比如 &lt; 100）且都很活跃时，epoll 的优势不明显，select/poll 的简单实现反而可能更快。epoll 的真正价值在于<strong>大量连接中只有少量活跃</strong>的场景——这正是 Web 服务器的典型负载。</div></div>
+</section>
+
+<!-- ═══════════════ 第4站：Reactor 模式 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>Reactor 模式：事件驱动的服务端架构</h2></div>
+
+<p>Reactor 模式是基于 IO 多路复用的<strong>事件驱动架构</strong>。核心思想：所有 IO 操作都通过事件注册和回调完成，主线程（Reactor）只负责监听事件和分发任务。</p>
+
+<p>Reactor 模式有三种经典实现：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ReactorPatterns.java</b> · 三种 Reactor 模式对比</span></div>
+<pre><code><span class="c">/* ═══════════ 模型一：单线程 Reactor ═══════════
+ *
+ *   Acceptor/Reader/Writer 全部在一个线程中
+ *
+ *   [Reactor Thread]
+ *     ├── select() 监听事件
+ *     ├── accept() 处理连接
+ *     ├── read()   读取数据
+ *     ├── process() 业务处理 ← 阻塞在这里会影响其他事件！
+ *     └── write()  写回响应
+ *
+ *   优点：简单，无线程切换开销
+ *   缺点：业务处理耗时会阻塞整个 Reactor
+ *   适用：业务逻辑简单、处理速度快的场景
+ */</span>
+
+<span class="c">/* ═══════════ 模型二：多线程 Reactor（一主多从）═══════════
+ *
+ *   Reactor 线程只负责 IO，业务处理交给 Worker 线程池
+ *
+ *   [Reactor Thread]            [Worker Pool]
+ *     ├── select()                ├── Thread-1: process()
+ *     ├── accept()                ├── Thread-2: process()
+ *     ├── read()                  └── Thread-3: process()
+ *     └── write() ←── 回调
+ *
+ *   优点：IO 和业务分离，互不阻塞
+ *   缺点：单 Reactor 仍是连接数瓶颈（百万连接时 select 压力大）
+ *   适用：中等并发，业务处理较重的场景
+ */</span>
+
+<span class="c">/* ═══════════ 模型三：主从 Reactor（多线程 + 多 Reactor）═══════════
+ *
+ *   MainReactor 负责 accept，SubReactor 负责读写
+ *
+ *   [MainReactor]
+ *     └── accept() → 分配给 SubReactor
+ *
+ *   [SubReactor-1]     [SubReactor-2]     [SubReactor-N]
+ *     ├── select()       ├── select()       ├── select()
+ *     ├── read()         ├── read()         ├── read()
+ *     └── write()        └── write()        └── write()
+ *          ↓                  ↓                  ↓
+ *   [Worker Pool]（如果业务处理也很重）
+ *
+ *   优点：连接建立和 IO 读写分离，支持百万连接
+ *   缺点：实现复杂
+ *   适用：高并发、高性能场景（Netty 采用此模型）
+ */</span></code></pre>
+</div>
+
+<table class="nb-table">
+<thead><tr><th>模型</th><th>Reactor 数量</th><th>业务处理</th><th>连接能力</th><th>代表框架</th></tr></thead>
+<tbody>
+  <tr><td><strong>单线程</strong></td><td>1</td><td>同线程</td><td>数千</td><td>Redis（单线程版）</td></tr>
+  <tr><td><strong>多线程</strong></td><td>1</td><td>Worker 池</td><td>数万</td><td>早期 Mina</td></tr>
+  <tr><td><strong>主从</strong></td><td>N+1</td><td>Worker 池</td><td>数十万+</td><td>Netty、Nginx</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第5站：Netty 架构 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Netty 架构：主从 Reactor 的工业级实现</h2></div>
+
+<p>Netty 是 Java 生态最流行的高性能网络框架，底层就是主从 Reactor + NIO。理解 Netty 的线程模型，就是理解 Reactor 模式的落地。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>NettyServer.java</b> · Netty 服务器启动代码</span></div>
+<pre><code><span class="k">public class</span> <span class="t">NettyServer</span> {
+    <span class="k">public void</span> start() <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="c">// BossGroup：MainReactor，负责 accept 新连接（通常 1 个线程）</span>
+        <span class="t">EventLoopGroup</span> bossGroup = <span class="k">new</span> <span class="t">NioEventLoopGroup</span>(<span class="n">1</span>);
+
+        <span class="c">// WorkerGroup：SubReactor，负责已连接 Channel 的 IO 读写（默认 CPU*2 线程）</span>
+        <span class="t">EventLoopGroup</span> workerGroup = <span class="k">new</span> <span class="t">NioEventLoopGroup</span>();
+
+        <span class="t">ServerBootstrap</span> bootstrap = <span class="k">new</span> <span class="t">ServerBootstrap</span>();
+        bootstrap.group(bossGroup, workerGroup)
+            .channel(<span class="t">NioServerSocketChannel</span>.<span class="k">class</span>)
+            .childHandler(<span class="k">new</span> <span class="t">ChannelInitializer</span>&lt;<span class="t">SocketChannel</span>&gt;() {
+                <span class="k">@Override</span>
+                <span class="k">protected void</span> initChannel(<span class="t">SocketChannel</span> ch) {
+                    <span class="t">ChannelPipeline</span> p = ch.pipeline();
+                    p.addLast(<span class="k">new</span> <span class="t">Decoder</span>());       <span class="c">// 解码器</span>
+                    p.addLast(<span class="k">new</span> <span class="t">Encoder</span>());       <span class="c">// 编码器</span>
+                    p.addLast(<span class="k">new</span> <span class="t">BusinessHandler</span>()); <span class="c">// 业务逻辑</span>
+                }
+            })
+            .option(<span class="t">ChannelOption</span>.SO_BACKLOG, <span class="n">1024</span>)   <span class="c">// 连接队列大小</span>
+            .childOption(<span class="t">ChannelOption</span>.SO_KEEPALIVE, <span class="k">true</span>);
+
+        <span class="c">// 绑定端口，异步启动</span>
+        <span class="t">ChannelFuture</span> future = bootstrap.bind(<span class="n">8080</span>).sync();
+        future.channel().closeFuture().sync();
+
+        bossGroup.shutdownGracefully();
+        workerGroup.shutdownGracefully();
+    }
+}</code></pre>
+</div>
+
+<p>Netty 线程模型的关键要点：</p>
+
+<div class="crack"><div class="crack-label">BossGroup 为什么通常只配 1 个线程？</div>
+<p>accept 操作的频率远低于读写操作。一个端口上每秒能 accept 的连接数有限（受 TCP 三次握手和 backlog 队列限制），1 个线程绑死一个端口完全够用。如果有多个端口监听，可以配置多个 Boss 线程。</p>
+</div>
+
+<div class="crack"><div class="crack-label">WorkerGroup 默认为什么是 CPU*2 个线程？</div>
+<p>每个 NioEventLoop 线程绑定一个 Selector，负责一批 Channel 的 IO 操作。CPU*2 是一个经验值——在保证充分利用 CPU 的同时，避免过多的上下文切换。对于 IO 密集型场景可以适当增大。</p>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>NettyPipeline.java</b> · ChannelPipeline 责任链</span></div>
+<pre><code><span class="c">/*
+ * Netty 的 ChannelPipeline 是一条 Handler 链（责任链模式）：
+ *
+ *  Inbound:  网络数据 → Decoder → Handler1 → Handler2 → ...
+ *  Outbound: ... ← Handler2 ← Handler1 ← Encoder ← 业务写入
+ *
+ * 关键设计：
+ * ① 每个 Channel 有独立的 Pipeline，线程安全
+ * ② 同一个 Channel 的所有操作都在同一个 EventLoop 线程执行，无需加锁
+ * ③ 如果 Handler 中有耗时操作，必须提交到独立的业务线程池
+ */</span>
+
+<span class="k">public class</span> <span class="t">BusinessHandler</span> <span class="k">extends</span> <span class="t">SimpleChannelInboundHandler</span>&lt;<span class="t">String</span>&gt; {
+    <span class="c">// ★ 业务线程池——耗时操作不在 EventLoop 中执行</span>
+    <span class="k">private static final</span> <span class="t">EventExecutorGroup</span> bizGroup =
+        <span class="k">new</span> <span class="t">DefaultEventExecutorGroup</span>(<span class="n">16</span>);
+
+    <span class="k">@Override</span>
+    <span class="k">protected void</span> channelRead0(<span class="t">ChannelHandlerContext</span> ctx, <span class="t">String</span> msg) {
+        <span class="c">// 如果业务处理很快，直接在 EventLoop 线程执行即可</span>
+        <span class="c">// 如果涉及 DB 查询、RPC 调用等耗时操作，必须异步</span>
+        ctx.writeAndFlush(<span class="s">"Echo: "</span> + msg);
+    }
+}
+
+<span class="c">// 或者在 pipeline 中指定业务线程池：</span>
+pipeline.addLast(bizGroup, <span class="s">"biz"</span>, <span class="k">new</span> <span class="t">BusinessHandler</span>());</code></pre>
+</div>
+
+<div class="formula">
+<strong>Netty 高性能的核心设计：</strong><br/><br/>
+1. <strong>零拷贝</strong>：CompositeByteBuf 逻辑组合多个 Buffer，避免内存拷贝<br/>
+2. <strong>无锁串行化</strong>：同一 Channel 的所有操作在同一 EventLoop 线程执行，无需加锁<br/>
+3. <strong>内存池</strong>：ByteBuf 对象池化复用，减少 GC 压力<br/>
+4. <strong>直接内存</strong>：DirectByteBuffer 避免 JVM 堆与系统内存之间的拷贝
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：AIO / NIO.2 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>AIO / NIO.2：异步 IO 的理想与现实</h2></div>
+
+<p>JDK 7 引入了 NIO.2（也叫 AIO），提供真正的<strong>异步 IO</strong>：发起读写操作后立即返回，操作系统完成后通过回调通知。与 NIO 的"非阻塞 + 轮询事件"不同，AIO 是"发起操作 + 完成回调"。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AioServer.java</b> · AIO 异步服务器</span></div>
+<pre><code><span class="k">public class</span> <span class="t">AioServer</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">AsynchronousServerSocketChannel</span> server =
+            <span class="t">AsynchronousServerSocketChannel</span>.open().bind(<span class="k">new</span> <span class="t">InetSocketAddress</span>(<span class="n">8080</span>));
+
+        System.out.println(<span class="s">"AIO Server 启动"</span>);
+
+        <span class="c">// ★ 异步 accept：发起后立即返回，连接到达时回调 completed()</span>
+        server.accept(<span class="k">null</span>, <span class="k">new</span> <span class="t">CompletionHandler</span>&lt;<span class="t">AsynchronousSocketChannel</span>, <span class="t">Void</span>&gt;() {
+            <span class="k">@Override</span>
+            <span class="k">public void</span> completed(<span class="t">AsynchronousSocketChannel</span> client, <span class="t">Void</span> att) {
+                <span class="c">// 继续接受下一个连接</span>
+                server.accept(<span class="k">null</span>, <span class="k">this</span>);
+
+                <span class="t">ByteBuffer</span> buf = <span class="t">ByteBuffer</span>.allocate(<span class="n">1024</span>);
+                <span class="c">// ★ 异步 read：发起后立即返回，数据就绪时回调</span>
+                client.read(buf, buf, <span class="k">new</span> <span class="t">CompletionHandler</span>&lt;<span class="t">Integer</span>, <span class="t">ByteBuffer</span>&gt;() {
+                    <span class="k">@Override</span>
+                    <span class="k">public void</span> completed(<span class="t">Integer</span> len, <span class="t">ByteBuffer</span> buffer) {
+                        buffer.flip();
+                        client.write(buffer);
+                    }
+                    <span class="k">@Override</span>
+                    <span class="k">public void</span> failed(<span class="t">Throwable</span> exc, <span class="t">ByteBuffer</span> buffer) { }
+                });
+            }
+            <span class="k">@Override</span>
+            <span class="k">public void</span> failed(<span class="t">Throwable</span> exc, <span class="t">Void</span> att) { }
+        });
+
+        <span class="t">System</span>.in.read(); <span class="c">// 主线程阻塞等待</span>
+    }
+}</code></pre>
+</div>
+
+<table class="nb-table">
+<thead><tr><th>特性</th><th>BIO</th><th>NIO</th><th>AIO (NIO.2)</th></tr></thead>
+<tbody>
+  <tr><td><strong>IO 模型</strong></td><td>同步阻塞</td><td>同步非阻塞（多路复用）</td><td>异步非阻塞</td></tr>
+  <tr><td><strong>编程模型</strong></td><td>每连接一线程</td><td>事件驱动 + 回调</td><td>Future / CompletionHandler</td></tr>
+  <tr><td><strong>线程模型</strong></td><td>线程池 per connection</td><td>Reactor（少量线程）</td><td>OS 线程池回调</td></tr>
+  <tr><td><strong>适用场景</strong></td><td>连接少、短连接</td><td>大量长连接（通用）</td><td>大量长连接 + 重 IO</td></tr>
+  <tr><td><strong>Linux 支持</strong></td><td>良好</td><td>epoll 优秀</td><td>io_uring（内核 5.1+）</td></tr>
+  <tr><td><strong>生态成熟度</strong></td><td>高</td><td>高（Netty）</td><td>低（Java AIO 几乎没人用）</td></tr>
+</tbody>
+</table>
+
+<div class="crack"><div class="crack-label">为什么 Java AIO 在生产中几乎没人用？</div>
+<p><strong>Linux 上的 AIO 实现不成熟</strong>。Linux 内核的 AIO（libaio）仅支持文件 IO，不支持 Socket IO。Java 的 AsynchronousSocketChannel 在 Linux 上实际是用 epoll 模拟的——和 NIO 本质上一样，但多了一层封装，性能反而不如直接用 NIO。</p>
+<p>在 Windows 上，AIO 使用 IOCP（IO Completion Port），性能很好。但服务端主要跑在 Linux 上，所以 Netty 选择了 NIO + epoll 的路线。</p>
+<p>Linux 5.1+ 引入的 <code>io_uring</code> 是真正的高性能异步 IO 接口，但 Java 原生还不支持。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：总结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：IO 模型全景与面试高频问题</h2></div>
+
+<table class="nb-table">
+<thead><tr><th>维度</th><th>BIO</th><th>NIO</th><th>AIO</th></tr></thead>
+<tbody>
+  <tr><td><strong>同步/异步</strong></td><td>同步</td><td>同步</td><td>异步</td></tr>
+  <tr><td><strong>阻塞/非阻塞</strong></td><td>阻塞</td><td>非阻塞</td><td>非阻塞</td></tr>
+  <tr><td><strong>编程复杂度</strong></td><td>低</td><td>高</td><td>中</td></tr>
+  <tr><td><strong>并发能力</strong></td><td>低（千级）</td><td>高（十万级）</td><td>高（理论百万级）</td></tr>
+  <tr><td><strong>JDK 版本</strong></td><td>1.0</td><td>1.4</td><td>7</td></tr>
+  <tr><td><strong>代表框架</strong></td><td>JDK 原生</td><td>Netty、Mina</td><td>少有人用</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway">
+<div class="takeaway-label">面试高频问题速记</div>
+<ul>
+  <li><strong>"同步和异步的区别？"</strong>——同步：调用者等待结果返回；异步：调用后立即返回，通过回调/Future 获取结果</li>
+  <li><strong>"阻塞和非阻塞的区别？"</strong>——阻塞：线程在 IO 操作期间被挂起；非阻塞：IO 操作立即返回（可能没数据）</li>
+  <li><strong>"NIO 比 BIO 好在哪？"</strong>——BIO 一线程一连接，NIO 一线程多连接（Selector 多路复用），大幅减少线程数和上下文切换</li>
+  <li><strong>"epoll 为什么快？"</strong>——事件回调 O(1) 通知 + mmap 共享内存 + 只返回就绪 fd</li>
+  <li><strong>"Reactor 模式是什么？"</strong>——基于 IO 多路复用的事件驱动架构，主从 Reactor 将 accept 和 IO 读写分离</li>
+  <li><strong>"Netty 为什么高性能？"</strong>——主从 Reactor + 零拷贝 + 无锁串行化 + 内存池 + DirectBuffer</li>
+</ul>
+</div>
+
+<div class="recap">
+<p><strong>面试回答模板：</strong></p>
+<p>"Java IO 模型分为 BIO、NIO、AIO 三种。BIO 是同步阻塞，一个连接对应一个线程，简单但并发能力低。NIO 基于 Selector 实现 IO 多路复用，一个线程可以监控多个 Channel 的事件，底层在 Linux 上使用 epoll 实现 O(1) 的事件通知。Reactor 模式是基于 NIO 的事件驱动架构，Netty 采用主从 Reactor 模型：BossGroup 负责 accept 连接，WorkerGroup 负责 IO 读写，配合 ChannelPipeline 责任链、零拷贝和内存池实现了高性能。AIO 虽然是异步非阻塞，但在 Linux 上实现不成熟，生产中基本用 NIO + Netty。"</p>
+</div>
+
+</section>
+
+</main>
+</body>
+</html>

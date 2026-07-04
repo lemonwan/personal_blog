@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分布式事务：2PC、TCC、Saga 与最终一致性</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：为什么需要分布式事务 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：分布式事务有哪些解决方案？</h2></div>
+<div class="think"><div class="think-q">"你在项目里用过分布式事务吗？2PC 有什么缺陷？TCC 的补偿逻辑怎么写？Saga 和 TCC 有什么区别？" —— 面试官想考察的是你对分布式事务各种模式的深入理解，而不只是知道名词。</div></div>
+<p>在单体应用中，数据库事务（ACID）就够了。但在微服务架构中，一个业务操作可能跨越多个服务和多个数据库：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>典型场景</b> · 电商下单的分布式事务</span></div>
+<pre><code><span class="c">// 下单流程涉及三个微服务，三个数据库</span>
+
+<span class="k">订单服务</span>（订单库）：创建订单记录
+<span class="k">库存服务</span>（库存库）：扣减商品库存
+<span class="k">账户服务</span>（账户库）：扣减用户余额
+
+<span class="c">// 问题：如果订单创建成功，但库存扣减失败？</span>
+<span class="c">// 问题：如果库存扣减成功，但余额扣减失败？</span>
+<span class="c">// 需要保证三个操作要么全成功，要么全回滚</span>
+
+<span class="c">// 传统 @Transactional 只能管一个数据库</span>
+<span class="c">// 跨数据库、跨服务的事务 → 需要分布式事务方案</span></code></pre>
+</div>
+
+<p>分布式事务的核心挑战：</p>
+<ul>
+  <li><strong>跨网络</strong>：多个服务之间通过网络通信，网络可能失败</li>
+  <li><strong>跨数据库</strong>：每个服务有自己的数据库，无法共享事务</li>
+  <li><strong>跨进程</strong>：每个服务是独立进程，无法共享 JVM 级别的事务上下文</li>
+</ul>
+<p>主流的分布式事务方案从强到弱排列：<strong>2PC → 3PC → TCC → Saga → 消息最终一致性</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第2站：2PC ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>2PC：两阶段提交</h2></div>
+<p>2PC（Two-Phase Commit）是最经典的分布式事务协议，由 Jim Gray 在 1970 年代提出。核心思想是引入一个<strong>协调者（Coordinator）</strong>来统一管理所有参与者（Participant）。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 280" role="img" aria-label="2PC流程">
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">2PC 两阶段提交流程</text>
+  <rect x="280" y="40" width="140" height="35" rx="6" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="350" y="62" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">协调者 Coordinator</text>
+  <rect x="60" y="110" width="120" height="30" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1"/>
+  <text x="120" y="130" text-anchor="middle" font-size="10" fill="#059669" font-weight="600">参与者 A（订单）</text>
+  <rect x="290" y="110" width="120" height="30" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1"/>
+  <text x="350" y="130" text-anchor="middle" font-size="10" fill="#059669" font-weight="600">参与者 B（库存）</text>
+  <rect x="520" y="110" width="120" height="30" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1"/>
+  <text x="580" y="130" text-anchor="middle" font-size="10" fill="#059669" font-weight="600">参与者 C（账户）</text>
+  <text x="350" y="165" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">阶段一：Prepare（准备 / 投票）</text>
+  <line x1="320" y1="75" x2="140" y2="108" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="180" y="92" font-size="9" fill="#3E6B8F">Can commit?</text>
+  <line x1="350" y1="75" x2="350" y2="108" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="375" y="92" font-size="9" fill="#3E6B8F">Can commit?</text>
+  <line x1="380" y1="75" x2="560" y2="108" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="510" y="92" font-size="9" fill="#3E6B8F">Can commit?</text>
+  <text x="120" y="155" text-anchor="middle" font-size="9" fill="#059669">执行本地事务</text>
+  <text x="120" y="168" text-anchor="middle" font-size="9" fill="#059669">写 redo/undo 日志</text>
+  <text x="120" y="181" text-anchor="middle" font-size="9" fill="#059669">返回 YES</text>
+  <text x="350" y="155" text-anchor="middle" font-size="9" fill="#059669">执行本地事务</text>
+  <text x="350" y="168" text-anchor="middle" font-size="9" fill="#059669">写 redo/undo 日志</text>
+  <text x="350" y="181" text-anchor="middle" font-size="9" fill="#059669">返回 YES</text>
+  <text x="580" y="155" text-anchor="middle" font-size="9" fill="#059669">执行本地事务</text>
+  <text x="580" y="168" text-anchor="middle" font-size="9" fill="#059669">写 redo/undo 日志</text>
+  <text x="580" y="181" text-anchor="middle" font-size="9" fill="#059669">返回 YES/NO</text>
+  <text x="350" y="210" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">阶段二：Commit / Rollback（提交或回滚）</text>
+  <text x="350" y="232" text-anchor="middle" font-size="10" fill="#57544E">全部 YES → 发送 COMMIT 指令；任一 NO → 发送 ROLLBACK 指令</text>
+  <text x="350" y="255" text-anchor="middle" font-size="10" fill="#059669">参与者收到指令后执行提交或回滚，并回复 ACK</text>
+  <text x="350" y="272" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">协调者收到所有 ACK 后，事务结束</text>
+  <defs><marker id="arr3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+</svg>
+<figcaption><span class="fig-no">图 1</span>2PC 两阶段提交：准备阶段投票 + 提交阶段执行</figcaption>
+</figure>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>2PC 的致命问题</b> · 同步阻塞</span></div>
+<pre><code><span class="c">// 2PC 的四个致命问题</span>
+
+<span class="k">1. 同步阻塞</span>：
+   准备阶段所有参与者持有本地锁（如行锁），等待协调者的提交/回滚指令
+   → 如果协调者响应慢，所有参与者的资源都被锁住
+   → 高并发下性能极差
+
+<span class="k">2. 单点故障</span>：
+   协调者挂了 → 所有参与者无限期阻塞
+   参与者挂了 → 协调者等待超时后回滚
+
+<span class="k">3. 数据不一致</span>：
+   阶段二发送 COMMIT 时，如果部分参与者收到、部分没收到
+   → 有的提交了，有的没提交 → 数据不一致
+
+<span class="k">4. 性能差</span>：
+   两次网络往返（prepare + commit），且全程同步阻塞
+   → 吞吐量极低，不适合互联网高并发场景</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">核心结论</div>2PC 是强一致性的分布式事务方案，但同步阻塞、单点故障、性能差使其几乎不适用于互联网高并发场景。它主要用在传统企业的 XA 事务中（如银行核心系统）。</div>
+
+<p><strong>XA 标准接口：</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>XA 接口规范</b> · 数据库层面的 2PC</span></div>
+<pre><code><span class="c">// XA 是 X/Open 组织定义的分布式事务标准接口</span>
+<span class="c">// 大多数关系型数据库都支持 XA：MySQL、Oracle、PostgreSQL</span>
+
+<span class="k">XA 事务的四个阶段</span>：
+<span class="n">1.</span> XA_START  — 开启分布式事务分支
+<span class="n">2.</span> XA_END    — 结束事务分支（但不提交）
+<span class="n">3.</span> XA_PREPARE — 准备阶段（参与者确认能否提交）
+<span class="n">4.</span> XA_COMMIT / XA_ROLLBACK — 提交或回滚
+
+<span class="c">// MySQL 中的 XA 使用</span>
+<span class="k">XA START</span> <span class="s">'tx1'</span>;
+<span class="k">UPDATE</span> account SET balance = balance - <span class="n">100</span> WHERE user_id = <span class="s">'A'</span>;
+<span class="k">XA END</span> <span class="s">'tx1'</span>;
+<span class="k">XA PREPARE</span> <span class="s">'tx1'</span>;  <span class="c">-- 此时事务已持久化，但未提交</span>
+<span class="c">-- 协调者确认所有参与者都 PREPARE 成功后：</span>
+<span class="k">XA COMMIT</span> <span class="s">'tx1'</span>;
+
+<span class="c">// Java 中使用 XA</span>
+<span class="t">XADataSource</span> xaDs = <span class="k">new</span> <span class="t">MysqlXADataSource</span>();
+xaDs.setUrl(<span class="s">"jdbc:mysql://localhost/db1"</span>);
+<span class="t">XAConnection</span> xaConn = xaDs.getXAConnection();
+<span class="t">XAResource</span> xaRes = xaConn.getXAResource();
+
+<span class="t">Xid</span> xid = <span class="k">new</span> <span class="t">XidImpl</span>(<span class="n">1</span>, <span class="s">"global-tx-1"</span>.getBytes(), <span class="s">"branch-1"</span>.getBytes());
+xaRes.start(xid, <span class="t">XAResource</span>.TMNOFLAGS);
+<span class="c">// 执行 SQL...</span>
+xaRes.end(xid, <span class="t">XAResource</span>.TMSUCCESS);
+xaRes.prepare(xid);
+xaRes.commit(xid, <span class="k">false</span>);</code></pre>
+</div>
+
+<p><strong>为什么互联网不用 XA？</strong></p>
+<ul>
+  <li>XA 准备阶段持有数据库行锁，整个 2PC 过程锁不释放 → 并发性能极差</li>
+  <li>协调者（Transaction Manager）是单点，挂了所有参与者阻塞</li>
+  <li>跨数据库的 XA 需要所有参与者都支持 XA 接口，异构系统集成困难</li>
+  <li>互联网场景追求高吞吐、低延迟，XA 的同步阻塞模式无法接受</li>
+</ul>
+</section>
+
+<!-- ═══════════════ 第3站：3PC ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>3PC：三阶段提交——超时处理的改进</h2></div>
+<p>3PC（Three-Phase Commit）在 2PC 基础上增加了<strong>Pre-Commit</strong>阶段，并引入了<strong>超时机制</strong>：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>3PC 三个阶段</b></span></div>
+<pre><code><span class="k">阶段一：CanCommit（询问）</span>
+  协调者问参与者"你能提交吗？"
+  参与者只做预检查，不执行事务
+  → 返回 YES / NO
+
+<span class="k">阶段二：PreCommit（预提交）</span>
+  如果全部 YES → 协调者发送 PreCommit 指令
+  参与者执行本地事务（但不提交），写 redo/undo 日志
+  → 返回 ACK
+
+<span class="k">阶段三：DoCommit（提交）</span>
+  协调者收到所有 ACK → 发送 DoCommit
+  参与者提交本地事务
+
+<span class="c">// 3PC 相比 2PC 的改进</span>
+<span class="c">// 1. CanCommit 阶段不锁资源，减少阻塞时间</span>
+<span class="c">// 2. 引入超时机制：如果阶段三超时，参与者自动提交</span>
+<span class="c">//    （假设能进入阶段三说明之前都同意了）</span>
+
+<span class="c">// 但 3PC 仍然无法完全解决数据不一致：</span>
+<span class="c">// 网络分区时，部分参与者超时提交，部分等待回滚 → 仍然不一致</span></code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">工程实践</div>3PC 在理论上比 2PC 好，但实际工程中几乎不用。原因是：实现复杂、仍然无法保证强一致性、性能依然不好。工程上更多使用 TCC 和 Saga 方案。</div>
+</section>
+
+<!-- ═══════════════ 第4站：TCC ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>TCC：Try-Confirm-Cancel 业务级事务</h2></div>
+<p>TCC 是一种<strong>业务层面</strong>的两阶段提交方案。不同于 2PC 依赖数据库，TCC 把事务逻辑写到业务代码中：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 240" role="img" aria-label="TCC流程">
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">TCC 三步流程：Try → Confirm / Cancel</text>
+  <rect x="40" y="50" width="180" height="80" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="130" y="73" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">Try（预留）</text>
+  <text x="130" y="93" text-anchor="middle" font-size="10" fill="#57544E">检查资源并预留</text>
+  <text x="130" y="110" text-anchor="middle" font-size="10" fill="#57544E">冻结库存/冻结余额</text>
+  <text x="130" y="127" text-anchor="middle" font-size="10" fill="#57544E">不做实际变更</text>
+  <rect x="260" y="50" width="180" height="80" rx="8" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <text x="350" y="73" text-anchor="middle" font-size="13" fill="#059669" font-weight="700">Confirm（确认）</text>
+  <text x="350" y="93" text-anchor="middle" font-size="10" fill="#57544E">执行实际变更</text>
+  <text x="350" y="110" text-anchor="middle" font-size="10" fill="#57544E">扣减冻结的库存</text>
+  <text x="350" y="127" text-anchor="middle" font-size="10" fill="#57544E">幂等、可重试</text>
+  <rect x="480" y="50" width="180" height="80" rx="8" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="570" y="73" text-anchor="middle" font-size="13" fill="#DC2626" font-weight="700">Cancel（取消）</text>
+  <text x="570" y="93" text-anchor="middle" font-size="10" fill="#57544E">释放预留资源</text>
+  <text x="570" y="110" text-anchor="middle" font-size="10" fill="#57544E">解冻库存/解冻余额</text>
+  <text x="570" y="127" text-anchor="middle" font-size="10" fill="#57544E">幂等、可重试</text>
+  <line x1="220" y1="90" x2="258" y2="90" stroke="#059669" stroke-width="2" marker-end="url(#arr3)"/>
+  <text x="240" y="82" font-size="10" fill="#059669" font-weight="600">全部 Try 成功</text>
+  <line x1="220" y1="100" x2="258" y2="170" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="240" y="152" font-size="10" fill="#DC2626">任一 Try 失败</text>
+  <rect x="480" y="155" width="180" height="35" rx="6" fill="#FEE2E2" stroke="#DC2626" stroke-width="1"/>
+  <text x="570" y="177" text-anchor="middle" font-size="11" fill="#DC2626" font-weight="600">Cancel 所有已 Try 的</text>
+  <rect x="260" y="155" width="180" height="35" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1"/>
+  <text x="350" y="177" text-anchor="middle" font-size="11" fill="#059669" font-weight="600">Confirm 所有参与者</text>
+  <text x="350" y="218" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">关键：Cancel 要能处理"空回滚"（Try 没执行就收到 Cancel）</text>
+  <text x="350" y="236" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">关键：Confirm/Cancel 必须幂等（可能重试多次）</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>TCC 业务级两阶段事务：Try 预留资源，Confirm 执行，Cancel 回滚</figcaption>
+</figure>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>InventoryTccService.java</b> · 库存服务 TCC 实现</span></div>
+<pre><code><span class="k">public class</span> <span class="t">InventoryTccService</span> {
+
+    <span class="c">// Phase 1: Try — 冻结库存（不实际扣减）</span>
+    <span class="k">public boolean</span> tryDeduct(<span class="t">String</span> txId, <span class="t">String</span> productId, <span class="k">int</span> qty) {
+        <span class="c">// 幂等检查：是否已经 Try 过</span>
+        <span class="k">if</span> (tccLogRepository.exists(txId, <span class="s">"TRY"</span>)) <span class="k">return true</span>;
+
+        <span class="c">// 检查库存是否充足</span>
+        <span class="t">Inventory</span> inv = inventoryRepo.findByProductId(productId);
+        <span class="k">if</span> (inv.getAvailable() &lt; qty) <span class="k">return false</span>;
+
+        <span class="c">// 冻结库存：available -= qty, frozen += qty</span>
+        inv.setAvailable(inv.getAvailable() - qty);
+        inv.setFrozen(inv.getFrozen() + qty);
+        inventoryRepo.save(inv);
+
+        <span class="c">// 记录 TCC 事务日志</span>
+        tccLogRepository.save(txId, <span class="s">"TRY"</span>, productId, qty);
+        <span class="k">return true</span>;
+    }
+
+    <span class="c">// Phase 2a: Confirm — 实际扣减冻结库存</span>
+    <span class="k">public void</span> confirm(<span class="t">String</span> txId, <span class="t">String</span> productId, <span class="k">int</span> qty) {
+        <span class="c">// 幂等：已确认过就跳过</span>
+        <span class="k">if</span> (tccLogRepository.exists(txId, <span class="s">"CONFIRM"</span>)) <span class="k">return</span>;
+
+        <span class="t">Inventory</span> inv = inventoryRepo.findByProductId(productId);
+        inv.setFrozen(inv.getFrozen() - qty); <span class="c">// 冻结减少</span>
+        inventoryRepo.save(inv);
+        tccLogRepository.save(txId, <span class="s">"CONFIRM"</span>, productId, qty);
+    }
+
+    <span class="c">// Phase 2b: Cancel — 释放冻结库存</span>
+    <span class="k">public void</span> cancel(<span class="t">String</span> txId, <span class="t">String</span> productId, <span class="k">int</span> qty) {
+        <span class="c">// 幂等：已取消过就跳过</span>
+        <span class="k">if</span> (tccLogRepository.exists(txId, <span class="s">"CANCEL"</span>)) <span class="k">return</span>;
+
+        <span class="c">// 空回滚处理：Try 没执行就收到 Cancel</span>
+        <span class="k">if</span> (!tccLogRepository.exists(txId, <span class="s">"TRY"</span>)) {
+            tccLogRepository.save(txId, <span class="s">"CANCEL_EMPTY"</span>, productId, qty);
+            <span class="k">return</span>;
+        }
+
+        <span class="t">Inventory</span> inv = inventoryRepo.findByProductId(productId);
+        inv.setFrozen(inv.getFrozen() - qty);
+        inv.setAvailable(inv.getAvailable() + qty);
+        inventoryRepo.save(inv);
+        tccLogRepository.save(txId, <span class="s">"CANCEL"</span>, productId, qty);
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">TCC 的三大难点</div>
+<ul>
+  <li><strong>业务侵入性高</strong>：每个服务都要写 Try/Confirm/Cancel 三个接口，代码量 ×3</li>
+  <li><strong>幂等性</strong>：Confirm 和 Cancel 必须幂等，网络重试可能调用多次</li>
+  <li><strong>空回滚和悬挂</strong>：Try 超时后收到 Cancel（空回滚）；Cancel 执行后 Try 才到达（悬挂）</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：Saga ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Saga：长事务编排与补偿</h2></div>
+<p>Saga 将一个长事务拆分成一系列<strong>本地短事务</strong>，每个短事务都有对应的<strong>补偿操作</strong>。如果某一步失败，就反向执行补偿操作：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 200" role="img" aria-label="Saga流程">
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Saga：正向执行 + 反向补偿</text>
+  <text x="350" y="48" text-anchor="middle" font-size="11" fill="#059669" font-weight="600">正向执行：T1 → T2 → T3 → T4</text>
+  <rect x="60" y="58" width="120" height="35" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <text x="120" y="80" text-anchor="middle" font-size="11" fill="#059669" font-weight="600">T1 创建订单</text>
+  <rect x="210" y="58" width="120" height="35" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <text x="270" y="80" text-anchor="middle" font-size="11" fill="#059669" font-weight="600">T2 扣库存</text>
+  <rect x="360" y="58" width="120" height="35" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <text x="420" y="80" text-anchor="middle" font-size="11" fill="#059669" font-weight="600">T3 扣余额</text>
+  <rect x="510" y="58" width="120" height="35" rx="6" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="570" y="80" text-anchor="middle" font-size="11" fill="#DC2626" font-weight="600">T4 发短信 ✕</text>
+  <line x1="180" y1="75" x2="208" y2="75" stroke="#059669" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <line x1="330" y1="75" x2="358" y2="75" stroke="#059669" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <line x1="480" y1="75" x2="508" y2="75" stroke="#059669" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="350" y="118" text-anchor="middle" font-size="11" fill="#DC2626" font-weight="600">T4 失败 → 反向补偿：C3 → C2 → C1</text>
+  <rect x="60" y="130" width="120" height="35" rx="6" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="120" y="152" text-anchor="middle" font-size="11" fill="#DC2626" font-weight="600">C1 取消订单</text>
+  <rect x="210" y="130" width="120" height="35" rx="6" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="270" y="152" text-anchor="middle" font-size="11" fill="#DC2626" font-weight="600">C2 回滚库存</text>
+  <rect x="360" y="130" width="120" height="35" rx="6" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="420" y="152" text-anchor="middle" font-size="11" fill="#DC2626" font-weight="600">C3 退回余额</text>
+  <line x1="420" y1="130" x2="332" y2="147" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <line x1="270" y1="147" x2="182" y2="147" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="350" y="190" text-anchor="middle" font-size="10" fill="#57544E">每个 Ti 都有对应的补偿操作 Ci，失败时反向执行补偿</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>Saga 模式：正向执行本地事务，失败时反向执行补偿操作</figcaption>
+</figure>
+
+<p>Saga 有两种实现方式：</p>
+<table class="nb-table">
+<thead><tr><th>方式</th><th>原理</th><th>优势</th><th>劣势</th></tr></thead>
+<tbody>
+<tr><td><strong>编排式<br/>(Orchestration)</strong></td><td>中央协调者按顺序调用各服务</td><td>流程清晰，易追踪</td><td>协调者是中心点</td></tr>
+<tr><td><strong>协同式<br/>(Choreography)</strong></td><td>各服务通过事件（MQ）驱动，无中央协调者</td><td>松耦合，无单点</td><td>流程分散，难追踪</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>编排式 Saga 伪代码</b> · Order Saga Coordinator</span></div>
+<pre><code><span class="k">public class</span> <span class="t">OrderSagaOrchestrator</span> {
+
+    <span class="c">// Saga 步骤定义</span>
+    <span class="k">public</span> <span class="t">Saga</span>&lt;<span class="t">OrderContext</span>&gt; buildSaga() {
+        <span class="k">return</span> Saga
+            .&lt;<span class="t">OrderContext</span>&gt;create()
+            .step(<span class="s">"createOrder"</span>)
+                .action(ctx -&gt; orderService.create(ctx))
+                .compensation(ctx -&gt; orderService.cancel(ctx))
+            .step(<span class="s">"deductInventory"</span>)
+                .action(ctx -&gt; inventoryService.deduct(ctx))
+                .compensation(ctx -&gt; inventoryService.rollback(ctx))
+            .step(<span class="s">"deductBalance"</span>)
+                .action(ctx -&gt; accountService.deduct(ctx))
+                .compensation(ctx -&gt; accountService.refund(ctx))
+            .step(<span class="s">"sendNotification"</span>)
+                .action(ctx -&gt; notificationService.send(ctx))
+                .compensation(ctx -&gt; {})  <span class="c">// 通知无需补偿</span>
+            .build();
+    }
+
+    <span class="c">// 执行 Saga</span>
+    <span class="k">public void</span> execute(<span class="t">OrderContext</span> ctx) {
+        saga.execute(ctx);
+        <span class="c">// 如果某步失败，自动反向执行已完成步骤的 compensation</span>
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">Saga vs TCC</div>
+<strong>Saga</strong>：每一步直接提交本地事务，失败时通过补偿操作回滚。适合长事务、步骤间无强依赖。<br/>
+<strong>TCC</strong>：先预留资源（Try），全部成功后再确认（Confirm）。适合对资源控制要求高的场景（如金融）。<br/>
+<strong>关键区别</strong>：Saga 中间状态可见（T1 提交后其他服务能看到），TCC 在 Confirm 之前中间状态不可见。
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：消息最终一致性 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>消息最终一致性：事务消息与事务发件箱</h2></div>
+<p>对于不需要强一致性的场景，基于消息队列的最终一致性方案是<strong>性价比最高</strong>的选择。</p>
+
+<p><strong>方案一：事务消息（Transaction Outbox）</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>事务发件箱模式</b> · Transactional Outbox Pattern</span></div>
+<pre><code><span class="c">// 核心问题：本地事务 + 发送 MQ 消息 不是原子的</span>
+<span class="c">// 如果本地事务成功但消息发送失败 → 下游收不到通知</span>
+<span class="c">// 如果消息发送成功但本地事务回滚 → 下游收到"幽灵消息"</span>
+
+<span class="k">事务发件箱模式</span>：
+<span class="c">// 1. 同一个本地事务中：写业务表 + 写消息表</span>
+<span class="k">@Transactional</span>
+<span class="k">public void</span> createOrder(<span class="t">Order</span> order) {
+    orderRepository.save(order); <span class="c">// 写业务表</span>
+
+    <span class="t">OutboxMessage</span> msg = <span class="k">new</span> <span class="t">OutboxMessage</span>();
+    msg.setTopic(<span class="s">"order-created"</span>);
+    msg.setPayload(toJson(order));
+    msg.setStatus(<span class="s">"PENDING"</span>);
+    outboxRepository.save(msg); <span class="c">// 写消息表（同一个数据库，同一个事务）</span>
+}
+
+<span class="c">// 2. 独立线程/定时任务：扫描消息表，发送到 MQ</span>
+<span class="k">@Scheduled</span>(fixedRate = <span class="n">1000</span>)
+<span class="k">public void</span> publishMessages() {
+    <span class="t">List</span>&lt;<span class="t">OutboxMessage</span>&gt; pending = outboxRepository
+        .findByStatus(<span class="s">"PENDING"</span>);
+
+    <span class="k">for</span> (<span class="t">OutboxMessage</span> msg : pending) {
+        mqProducer.send(msg.getTopic(), msg.getPayload());
+        msg.setStatus(<span class="s">"SENT"</span>);
+        outboxRepository.save(msg);
+    }
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 200" role="img" aria-label="事务发件箱">
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">事务发件箱模式：本地事务保证业务+消息的原子性</text>
+  <rect x="40" y="50" width="200" height="60" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="140" y="72" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="600">本地事务</text>
+  <text x="140" y="90" text-anchor="middle" font-size="10" fill="#57544E">写业务表 + 写消息表</text>
+  <text x="140" y="104" text-anchor="middle" font-size="9" fill="#059669">同一事务，保证原子性</text>
+  <rect x="290" y="50" width="150" height="60" rx="8" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1.5"/>
+  <text x="365" y="72" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">消息表</text>
+  <text x="365" y="90" text-anchor="middle" font-size="10" fill="#57544E">PENDING 状态</text>
+  <text x="365" y="104" text-anchor="middle" font-size="9" fill="#57544E">等待投递</text>
+  <rect x="490" y="50" width="160" height="60" rx="8" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <text x="570" y="72" text-anchor="middle" font-size="12" fill="#059669" font-weight="600">消息队列</text>
+  <text x="570" y="90" text-anchor="middle" font-size="10" fill="#57544E">RocketMQ / Kafka</text>
+  <text x="570" y="104" text-anchor="middle" font-size="9" fill="#059669">下游消费</text>
+  <line x1="240" y1="80" x2="288" y2="80" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <line x1="440" y1="80" x2="488" y2="80" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <text x="264" y="72" font-size="9" fill="#3E6B8F">同事务</text>
+  <text x="464" y="72" font-size="9" fill="#3E6B8F">定时投递</text>
+  <rect x="120" y="135" width="460" height="50" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="155" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">核心保证</text>
+  <text x="350" y="173" text-anchor="middle" font-size="10" fill="#57544E">业务表和消息表在同一个数据库中 → 本地事务保证原子写入</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>事务发件箱模式：本地事务写业务+消息，独立线程投递消息</figcaption>
+</figure>
+
+<p><strong>方案二：RocketMQ 事务消息</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>RocketMQ 事务消息</b> · 半消息机制</span></div>
+<pre><code><span class="c">// RocketMQ 的事务消息流程</span>
+
+<span class="k">1. 发送半消息（Half Message）</span>
+   → 消息对消费者不可见（存在半消息队列）
+
+<span class="k">2. 执行本地事务</span>
+   → 成功 → 发送 Commit → 消息对消费者可见
+   → 失败 → 发送 Rollback → 删除半消息
+
+<span class="k">3. 如果 RocketMQ 没收到 Commit/Rollback</span>
+   → 定时回查（TransactionListener.checkLocalTransaction）
+   → 检查本地事务状态，决定 Commit 还是 Rollback
+
+<span class="c">// 本质是把"事务发件箱"的逻辑搬到了 MQ Broker 侧</span></code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：Seata 框架对比 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>Seata 框架：四种模式对比</h2></div>
+<p><strong>Seata</strong>（Simple Extensible Autonomous Transaction Architecture）是阿里巴巴开源的分布式事务框架，支持四种模式：</p>
+
+<table class="nb-table">
+<thead><tr><th>模式</th><th>原理</th><th>一致性</th><th>性能</th><th>适用场景</th></tr></thead>
+<tbody>
+<tr><td><strong>AT</strong></td><td>自动补偿（类 2PC，但无锁）</td><td>最终一致</td><td>中</td><td>传统业务，不想改代码</td></tr>
+<tr><td><strong>TCC</strong></td><td>Try-Confirm-Cancel 业务层</td><td>最终一致</td><td>高</td><td>核心业务，资源预留</td></tr>
+<tr><td><strong>Saga</strong></td><td>长事务拆分 + 补偿</td><td>最终一致</td><td>高</td><td>长流程、跨机构</td></tr>
+<tr><td><strong>XA</strong></td><td>标准 XA 两阶段提交</td><td>强一致</td><td>低</td><td>传统企业应用</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Seata AT 模式核心原理</b> · 自动补偿</span></div>
+<pre><code><span class="c">// AT 模式的核心思想：自动帮你做补偿</span>
+
+<span class="c">// 阶段一：业务 SQL 执行</span>
+<span class="c">// Seata 拦截 SQL，自动记录 undo_log（回滚日志）</span>
+<span class="k">UPDATE</span> inventory SET stock = stock - <span class="n">1</span> WHERE product_id = <span class="s">'P001'</span>;
+<span class="c">// Seata 记录：</span>
+<span class="c">// before_image: {product_id: P001, stock: 100}</span>
+<span class="c">// after_image:  {product_id: P001, stock: 99}</span>
+
+<span class="c">// 阶段二：</span>
+<span class="c">// 全部成功 → 异步删除 undo_log（非常轻量）</span>
+<span class="c">// 任一失败 → 根据 undo_log 的 before_image 反向执行</span>
+<span class="c">// → UPDATE inventory SET stock = 100 WHERE product_id = 'P001'</span>
+
+<span class="c">// AT vs XA 的关键区别：</span>
+<span class="c">// XA：Prepare 阶段持有数据库行锁，直到 Commit → 同步阻塞</span>
+<span class="c">// AT：Prepare 阶段直接提交本地事务，释放行锁 → 异步补偿</span>
+<span class="c">// 所以 AT 性能比 XA 好很多，但只能保证最终一致性</span></code></pre>
+</div>
+
+<p><strong>如何选择？</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>选型决策树</b> · 分布式事务方案选择</span></div>
+<pre><code><span class="k">需要强一致性？</span>
+├── 是 → <span class="n">2PC / XA</span>（传统金融系统，能接受低性能）
+└── 否（最终一致性可接受）
+    ├── <span class="k">业务能拆分出 Try/Confirm/Cancel？</span>
+    │   ├── 是 → <span class="n">TCC</span>（核心业务，如交易、支付）
+    │   └── 否 → <span class="n">Saga / AT</span>
+    ├── <span class="k">流程长、步骤多？</span>
+    │   ├── 是 → <span class="n">Saga</span>（跨机构、跨系统）
+    │   └── 否 → <span class="n">AT</span>（简单业务，不想改代码）
+    └── <span class="k">能接受消息异步方案？</span>
+        └── 是 → <span class="n">消息最终一致性</span>（性价比最高）</code></pre>
+</div>
+
+<div class="recap">
+<strong>本课文脑图回顾</strong>
+<ul>
+  <li>2PC：两阶段提交，强一致但同步阻塞、单点故障、性能差</li>
+  <li>3PC：增加预提交和超时机制，改进有限，工程中不用</li>
+  <li>TCC：业务层 Try-Confirm-Cancel，性能好但代码量大，要处理幂等/空回滚/悬挂</li>
+  <li>Saga：长事务拆分+补偿，编排式 vs 协同式，中间状态可见</li>
+  <li>消息最终一致性：事务发件箱模式/RocketMQ 事务消息，性价比最高</li>
+  <li>Seata 四种模式：AT（自动补偿）/ TCC / Saga / XA，按需选择</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

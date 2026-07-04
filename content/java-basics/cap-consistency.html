@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAP 理论与一致性模型：从理论到工程取舍</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：CAP 定理 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：CAP 理论是什么？工程中怎么取舍？</h2></div>
+<div class="think"><div class="think-q">"你说 ZooKeeper 是 CP 系统，Eureka 是 AP 系统——它们到底差在哪？CAP 理论在真实工程中是怎么落地的？" —— 面试官想考察的不是你背不背得出三个字母，而是你面对分布式场景时的架构判断力。</div></div>
+<p>2000 年，Eric Brewer 在 PODC 大会上提出 <strong>CAP 猜想</strong>；2002 年，Gilbert 和 Lynch 在论文中给出了严格证明。CAP 定理说的是：</p>
+<div class="formula"><strong>CAP 定理</strong><br/>在一个分布式系统中，<strong>C</strong>onsistency（一致性）、<strong>A</strong>vailability（可用性）、<strong>P</strong>artition Tolerance（分区容错性）—— 三者最多只能同时满足两个。</div>
+<p>三个特性的准确定义：</p>
+<table class="nb-table">
+<thead><tr><th>特性</th><th>定义</th><th>大白话</th></tr></thead>
+<tbody>
+<tr><td><strong>C — 一致性</strong></td><td>所有节点在同一时刻看到相同的数据</td><td>你改了数据，别人立刻能看到</td></tr>
+<tr><td><strong>A — 可用性</strong></td><td>每个请求都能在合理时间内收到非错误响应</td><td>系统随时能响应你的请求</td></tr>
+<tr><td><strong>P — 分区容错</strong></td><td>网络分区（节点间通信中断）时系统仍能继续运行</td><td>网线被拔了系统也不会整体挂掉</td></tr>
+</tbody>
+</table>
+<p>关键认知：<strong>P 不是选择题，是必答题</strong>。在分布式环境下，网络分区是客观存在的、不可避免的。所以真正的选择只剩：</p>
+<div class="takeaway"><div class="takeaway-label">核心结论</div>当网络分区发生时：选 C 则牺牲 A（拒绝服务直到数据一致）；选 A 则牺牲 C（允许返回旧数据/不一致数据）。</div>
+
+<figure class="fig">
+<svg viewBox="0 0 640 280" role="img" aria-label="CAP 三角">
+  <text x="320" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">CAP 定理：三选二的取舍</text>
+  <polygon points="320,50 160,220 480,220" fill="none" stroke="#3E6B8F" stroke-width="2"/>
+  <text x="320" y="46" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">C 一致性</text>
+  <text x="140" y="240" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">A 可用性</text>
+  <text x="500" y="240" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">P 分区容错</text>
+  <rect x="195" y="105" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="240" y="126" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">CP 系统</text>
+  <text x="240" y="146" text-anchor="middle" font-size="9" fill="#8C8676">ZooKeeper, etcd</text>
+  <rect x="355" y="105" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="400" y="126" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">AP 系统</text>
+  <text x="400" y="146" text-anchor="middle" font-size="9" fill="#8C8676">Eureka, Cassandra</text>
+  <rect x="270" y="185" width="100" height="34" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="320" y="206" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">CA（单节点）</text>
+  <text x="320" y="226" text-anchor="middle" font-size="9" fill="#8C8676">非分布式场景</text>
+  <line x1="240" y1="139" x2="280" y2="85" stroke="#3E6B8F" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="400" y1="139" x2="370" y2="85" stroke="#3E6B8F" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="320" y="265" text-anchor="middle" font-size="11" fill="#57544E">分布式系统必须容忍 P，所以实际只在 CP 和 AP 之间选择</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>CAP 三角：分布式系统只能在 CP 和 AP 之间做选择</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第2站：分区容错——不可避免 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>分区容错：为什么 P 是必选项？</h2></div>
+<p>很多人初学 CAP 时会想：能不能选 CA，干脆不让网络分区发生？答案是：<strong>在分布式系统中做不到</strong>。</p>
+<p>只要你的数据分布在多台机器上，就必然面临网络分区风险：</p>
+<ul>
+  <li>交换机故障、光纤被挖断 —— 物理层不可靠</li>
+  <li>跨机房、跨地域部署 —— 网络延迟和丢包是常态</li>
+  <li>云环境中的虚拟机漂移、容器调度 —— 网络拓扑动态变化</li>
+</ul>
+<p>当分区发生时，系统面临的选择：</p>
+<table class="nb-table">
+<thead><tr><th>选择</th><th>行为</th><th>代价</th><th>典型系统</th></tr></thead>
+<tbody>
+<tr><td><strong>选 CP</strong></td><td>少数派分区拒绝写入，保证数据一致</td><td>部分节点不可用（牺牲 A）</td><td>ZooKeeper、etcd、HBase</td></tr>
+<tr><td><strong>选 AP</strong></td><td>所有分区都接受读写，容忍不一致</td><td>可能读到旧数据（牺牲 C）</td><td>Cassandra、DynamoDB、Eureka</td></tr>
+</tbody>
+</table>
+<div class="think"><div class="think-q">"那 CAP 是不是太绝对了？实际上 C 和 A 不是非黑即白的。" —— 对，这就是为什么 CAP 之后又出现了 BASE 理论和多种一致性模型。</div></div>
+<p>CAP 定理中的 C 指的是<strong>强一致性（线性一致性）</strong>，而工程中大量使用的是<strong>最终一致性</strong>。同理，A 也不是"100% 可用"，而是"在合理时间内响应"。所以 CAP 的取舍更像是一个<strong>光谱</strong>，而不是一个开关。</p>
+</section>
+
+<!-- ═══════════════ 第3站：CP 系统 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>CP 系统：ZooKeeper / ZAB 与 etcd / Raft</h2></div>
+<p>CP 系统的核心原则：<strong>当网络分区发生时，少数派节点拒绝服务，只保留多数派节点的可用性</strong>，以此保证数据一致性。</p>
+
+<p><strong>ZooKeeper — ZAB 协议</strong></p>
+<p>ZooKeeper 使用 ZAB（ZooKeeper Atomic Broadcast）协议来保证一致性：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ZAB 核心机制</b> · ZooKeeper</span></div>
+<pre><code><span class="c">// ZAB 两种模式</span>
+<span class="k">1. 崩溃恢复模式</span>（Leader Election）
+   - Leader 挂掉后，Follower 选举新 Leader
+   - 必须选到包含最新数据的节点（<span class="n">zxid</span> 最大的）
+   - 新 Leader 同步数据给 Follower，确保多数派数据一致
+
+<span class="k">2. 消息广播模式</span>（Atomic Broadcast）
+   - 所有写请求转发到 Leader
+   - Leader 生成事务提案 → 发给 Follower
+   - Follower 写入本地日志 → 返回 ACK
+   - 收到多数派 ACK → Leader 发送 COMMIT
+   - <span class="c">// 本质是一个简化版的 2PC</span>
+
+<span class="c">// 写一致性保证</span>
+<span class="k">顺序一致性</span>：所有事务按 zxid 全局有序
+<span class="k">原子性</span>：事务要么全集群成功，要么全失败</code></pre>
+</div>
+
+<p><strong>etcd — Raft 协议</strong></p>
+<p>Raft 是另一种共识算法，相比 Paxos 更易理解：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Raft 核心流程</b> · etcd</span></div>
+<pre><code><span class="c">// 三种角色</span>
+<span class="k">Leader</span>  — 处理所有读写（可配置读走 Follower）
+<span class="k">Follower</span> — 被动接收日志，超时未收到心跳则发起选举
+<span class="k">Candidate</span> — 发起选举，获得多数票后成为 Leader
+
+<span class="c">// 日志复制流程</span>
+<span class="n">1.</span> Client 向 Leader 发送写请求
+<span class="n">2.</span> Leader 将日志条目追加到本地日志
+<span class="n">3.</span> Leader 并行发送 AppendEntries RPC 给所有 Follower
+<span class="n">4.</span> 收到多数派 ACK → Leader 将日志标记为 committed
+<span class="n">5.</span> Leader 将 committed 日志应用到状态机，返回结果给 Client
+
+<span class="c">// 关键约束</span>
+<span class="k">Election Safety</span>：一个任期最多一个 Leader
+<span class="k">Log Matching</span>：两个日志在相同索引和任期号处，内容相同</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 240" role="img" aria-label="CP系统多数派">
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">CP 系统的多数派决策（5 节点集群）</text>
+  <circle cx="120" cy="100" r="30" fill="#D1FAE5" stroke="#059669" stroke-width="2"/>
+  <text x="120" y="105" text-anchor="middle" font-size="11" fill="#059669" font-weight="600">Leader</text>
+  <circle cx="250" cy="70" r="25" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <text x="250" y="75" text-anchor="middle" font-size="10" fill="#059669">F1</text>
+  <circle cx="250" cy="135" r="25" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <text x="250" y="140" text-anchor="middle" font-size="10" fill="#059669">F2</text>
+  <circle cx="380" cy="70" r="25" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="380" y="75" text-anchor="middle" font-size="10" fill="#DC2626">F3 ✕</text>
+  <circle cx="380" cy="135" r="25" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="380" y="140" text-anchor="middle" font-size="10" fill="#DC2626">F4 ✕</text>
+  <line x1="150" y1="92" x2="225" y2="75" stroke="#059669" stroke-width="1.5"/>
+  <line x1="150" y1="108" x2="225" y2="130" stroke="#059669" stroke-width="1.5"/>
+  <line x1="275" y1="75" x2="355" y2="75" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <line x1="275" y1="130" x2="355" y2="130" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="315" y="56" text-anchor="middle" font-size="9" fill="#DC2626">网络分区</text>
+  <rect x="60" y="175" width="250" height="50" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1"/>
+  <text x="185" y="195" text-anchor="middle" font-size="11" fill="#059669" font-weight="600">多数派（3/5）→ 正常服务</text>
+  <text x="185" y="212" text-anchor="middle" font-size="10" fill="#57544E">可以选举 Leader、提交日志</text>
+  <rect x="370" y="175" width="250" height="50" rx="6" fill="#FEE2E2" stroke="#DC2626" stroke-width="1"/>
+  <text x="495" y="195" text-anchor="middle" font-size="11" fill="#DC2626" font-weight="600">少数派（2/5）→ 拒绝服务</text>
+  <text x="495" y="212" text-anchor="middle" font-size="10" fill="#57544E">无法选举、写入失败</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>CP 系统：网络分区时少数派拒绝服务，多数派保证数据一致</figcaption>
+</figure>
+
+<p><strong>ZAB vs Raft 对比：</strong></p>
+<table class="nb-table">
+<thead><tr><th>维度</th><th>ZAB（ZooKeeper）</th><th>Raft（etcd）</th></tr></thead>
+<tbody>
+<tr><td><strong>日志方向</strong></td><td>主节点发给从节点（推模型）</td><td>Leader 发给 Follower（推模型）</td></tr>
+<tr><td><strong>Leader 选举</strong></td><td>Fast Paxos 变体，投票 + zxid 比较</td><td>随机超时 + 投票 + 任期号比较</td></tr>
+<tr><td><strong>成员变更</strong></td><td>动态添加/移除节点</td><td>联合共识（Joint Consensus）</td></tr>
+<tr><td><strong>读操作</strong></td><td>默认读 Leader（可配置读 Follower + sync）</td><td>默认读 Leader（可配置 ReadIndex）</td></tr>
+<tr><td><strong>典型应用</strong></td><td>Hadoop、Kafka、HBase 配置中心</td><td>Kubernetes、TiKV、Consul</td></tr>
+</tbody>
+</table>
+
+<p>Raft 还定义了<strong>三个子问题</strong>来简化理解：</p>
+<ul>
+  <li><strong>Leader 选举</strong>：Follower 超时后变为 Candidate，向所有节点发 RequestVote，获得多数票后成为 Leader</li>
+  <li><strong>日志复制</strong>：Leader 将客户端请求追加到日志，通过 AppendEntries RPC 复制到 Follower</li>
+  <li><strong>安全性</strong>：已提交的日志条目不会丢失，且所有节点的已提交日志一致</li>
+</ul>
+
+<div class="think"><div class="think-q">"CP 系统能保证多强的可用性？" —— 在正常情况下（无分区），CP 系统的可用性很高。只有在分区发生时才会牺牲可用性。5 节点集群容忍 2 个节点故障，7 节点容忍 3 个——但节点越多，写入延迟越高（需要更多 ACK）。</div></div>
+
+<div class="crack"><div class="crack-label">面试破解</div>ZooKeeper 为什么不适合做注册中心？因为它在 Leader 选举期间（通常几十秒）整个集群不可用，这对于需要高可用服务发现的场景是不可接受的。这就是 Eureka 选择 AP 的原因。而 Nacos 通过双模式设计（临时实例 AP + 持久实例 CP）兼顾了两者。</div>
+</section>
+
+<!-- ═══════════════ 第4站：AP 系统 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>AP 系统：Eureka、Cassandra 与 DynamoDB</h2></div>
+<p>AP 系统的核心原则：<strong>当网络分区发生时，所有分区都继续接受读写请求</strong>，代价是可能读到不一致的数据。</p>
+
+<p><strong>Eureka — 服务注册与发现</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Eureka 的 AP 设计</b> · Spring Cloud</span></div>
+<pre><code><span class="c">// Eureka 集群中每个节点都是对等的</span>
+<span class="c">// 节点间通过 P2P 复制，没有 Leader</span>
+
+<span class="k">服务注册</span>：
+  → 注册到任意一个 Eureka 节点
+  → 该节点异步复制到所有其他节点
+  → 复制失败？不管，继续接受新请求
+
+<span class="k">服务发现</span>：
+  → 从任意节点查询
+  → 可能返回的数据比其他节点"旧一点"
+  → 但对于服务发现来说，几秒的延迟完全可以接受
+
+<span class="c">// 关键设计：自我保护模式</span>
+<span class="k">Self-Preservation</span>：
+  当 <span class="n">15 分钟</span>内超过 <span class="n">85%</span> 的心跳没有收到时
+  → 进入自我保护模式
+  → 不剔除任何服务实例（宁可保留过期数据）
+  → 宁可返回可能不正确的数据，也不让服务列表为空</code></pre>
+</div>
+
+<p><strong>Cassandra / DynamoDB — 最终一致性存储</strong></p>
+<p>这些系统借鉴了 Amazon Dynamo 论文的设计思想：</p>
+<ul>
+  <li><strong>向量时钟（Vector Clock）</strong>：用于检测并发写冲突</li>
+  <li><strong>Gossip 协议</strong>：节点间异步传播数据变更</li>
+  <li><strong>反熵（Anti-entropy）</strong>：通过 Merkle Tree 定期同步差异数据</li>
+  <li><strong>可调一致性级别</strong>：客户端可以选择 ONE / QUORUM / ALL</li>
+</ul>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Cassandra 的一致性级别</b></span></div>
+<pre><code><span class="c">// 写操作的一致性级别</span>
+<span class="k">ONE</span>     — 写到一个副本就返回（延迟最低，一致性最弱）
+<span class="k">QUORUM</span>  — 写到多数派副本才返回（N/2+1 个节点）
+<span class="k">ALL</span>     — 写到所有副本才返回（一致性最强，延迟最高）
+
+<span class="c">// 读操作的一致性级别</span>
+<span class="k">ONE</span>     — 从一个副本读取（最快，可能读到旧数据）
+<span class="k">QUORUM</span>  — 从多数派读取并比较（强一致性保证）
+<span class="k">LOCAL_QUORUM</span> — 只在本地数据中心的多数派中读取
+
+<span class="c">// 强一致性的条件：R + W > N</span>
+<span class="c">// R = 读节点数，W = 写节点数，N = 副本总数</span>
+<span class="c">// 例：N=3, R=2, W=2 → 读写必有交集 → 读到最新数据</span></code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">工程洞察</div>AP 不等于"不靠谱"。Eureka 的"宁可返回旧数据也不让服务列表为空"恰恰是服务发现场景的最佳选择——客户端有本地缓存，短暂的不一致不影响路由。</div>
+</section>
+
+<!-- ═══════════════ 第5站：一致性模型 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>一致性模型：强一致、最终一致与因果一致</h2></div>
+<p>CAP 定理中的 C 是"强一致性"，但工程中的一致性远不止这一种。理解一致性模型的光谱，才能做出正确的技术选型。</p>
+
+<table class="nb-table">
+<thead><tr><th>一致性模型</th><th>定义</th><th>保证</th><th>典型场景</th></tr></thead>
+<tbody>
+<tr><td><strong>线性一致性</strong><br/>(Linearizability)</td><td>所有操作看起来像是在某个全局顺序下原子执行</td><td>写入后立刻读到新值</td><td>分布式锁、etcd</td></tr>
+<tr><td><strong>顺序一致性</strong><br/>(Sequential)</td><td>所有操作按某种顺序执行，每个线程的操作保持程序顺序</td><td>全局有序，但不要求实时</td><td>ZooKeeper（ZAB）</td></tr>
+<tr><td><strong>因果一致性</strong><br/>(Causal)</td><td>有因果关系的操作保证顺序，无因果关系的操作可能乱序</td><td>"我发帖 → 你回复"这个因果不丢</td><td>社交系统、聊天</td></tr>
+<tr><td><strong>最终一致性</strong><br/>(Eventual)</td><td>如果没有新写入，最终所有副本数据一致</td><td>最终一致，但"最终"可能是几秒到几分钟</td><td>DNS、Redis 主从</td></tr>
+</tbody>
+</table>
+
+<figure class="fig">
+<svg viewBox="0 0 700 180" role="img" aria-label="一致性模型光谱">
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">一致性模型：从强到弱的光谱</text>
+  <defs><linearGradient id="spec" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#059669"/><stop offset="50%" stop-color="#D97706"/><stop offset="100%" stop-color="#DC2626"/></linearGradient></defs>
+  <rect x="60" y="45" width="580" height="28" rx="14" fill="url(#spec)" opacity="0.3"/>
+  <rect x="60" y="45" width="580" height="28" rx="14" fill="none" stroke="#3E6B8F" stroke-width="1"/>
+  <text x="60" y="38" font-size="10" fill="#059669" font-weight="600">强一致</text>
+  <text x="600" y="38" font-size="10" fill="#DC2626" font-weight="600">弱一致</text>
+  <circle cx="100" cy="59" r="8" fill="#059669"/>
+  <text x="100" y="96" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">线性一致</text>
+  <text x="100" y="110" text-anchor="middle" font-size="9" fill="#8C8676">etcd</text>
+  <circle cx="220" cy="59" r="8" fill="#059669"/>
+  <text x="220" y="96" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">顺序一致</text>
+  <text x="220" y="110" text-anchor="middle" font-size="9" fill="#8C8676">ZooKeeper</text>
+  <circle cx="370" cy="59" r="8" fill="#D97706"/>
+  <text x="370" y="96" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">因果一致</text>
+  <text x="370" y="110" text-anchor="middle" font-size="9" fill="#8C8676">社交系统</text>
+  <circle cx="520" cy="59" r="8" fill="#DC2626"/>
+  <text x="520" y="96" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">最终一致</text>
+  <text x="520" y="110" text-anchor="middle" font-size="9" fill="#8C8676">DNS, Redis</text>
+  <circle cx="610" cy="59" r="8" fill="#DC2626" opacity="0.6"/>
+  <text x="610" y="96" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="600">弱一致</text>
+  <text x="610" y="110" text-anchor="middle" font-size="9" fill="#8C8676">UDP 广播</text>
+  <text x="350" y="150" text-anchor="middle" font-size="11" fill="#57544E">← 一致性越强，延迟越高、可用性越低 ——</text>
+  <text x="350" y="168" text-anchor="middle" font-size="11" fill="#57544E">← 一致性越弱，延迟越低、可用性越高 ——</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>一致性模型从强到弱的光谱，工程中根据业务需求选择合适的模型</figcaption>
+</figure>
+
+<p><strong>因果一致性</strong>是一个常被忽视但非常实用的模型。它只保证有因果关系的操作顺序，比如"发帖→回帖"，而对于没有因果关系的操作（比如两个人同时在不同地方发帖），则不保证顺序。这在社交媒体、即时通讯等场景中非常自然。</p>
+</section>
+
+<!-- ═══════════════ 第6站：BASE 理论 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>BASE 理论：CAP 的工程化延伸</h2></div>
+<p>BASE 理论是 eBay 架构师 Dan Pritchett 提出的，是对 CAP 中 AP 方向的工程化实践指导：</p>
+
+<div class="formula"><strong>BASE = BA + S + E</strong><br/>
+<strong>BA</strong>sically Available（基本可用）<br/>
+<strong>S</strong>oft State（软状态）<br/>
+<strong>E</strong>ventually Consistent（最终一致性）</div>
+
+<table class="nb-table">
+<thead><tr><th>原则</th><th>含义</th><th>工程实践</th></tr></thead>
+<tbody>
+<tr><td><strong>基本可用</strong></td><td>允许损失部分可用性（响应时间增长、部分功能降级）</td><td>限流降级、故障隔离、灰度发布</td></tr>
+<tr><td><strong>软状态</strong></td><td>允许系统中的数据存在中间状态，且该状态不影响系统整体功能</td><td>缓存与 DB 的短暂不一致、MQ 消息的中间状态</td></tr>
+<tr><td><strong>最终一致</strong></td><td>数据最终达到一致，但允许短暂的不一致窗口</td><td>异步复制、重试机制、对账补偿</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BASE 在电商系统中的应用</b></span></div>
+<pre><code><span class="c">// 场景：用户下单扣减库存</span>
+
+<span class="k">基本可用</span>：
+  大促时库存扣减压力大 → 允许先扣减 Redis 缓存库存
+  异步同步到数据库 → 用户感知到的是"下单成功"
+
+<span class="k">软状态</span>：
+  购物车数量、商品浏览量 → 允许短暂不准确
+  推荐列表 → 允许几秒前的缓存数据
+
+<span class="k">最终一致</span>：
+  订单创建 → 发送 MQ 消息 → 库存服务异步扣减
+  如果扣减失败 → 定时对账任务补偿
+  <span class="c">// 保证"订单状态"和"库存数量"最终一致</span></code></pre>
+</div>
+
+<p><strong>ACID vs BASE 对比：</strong></p>
+<table class="nb-table">
+<thead><tr><th>维度</th><th>ACID（传统关系型数据库）</th><th>BASE（分布式系统）</th></tr></thead>
+<tbody>
+<tr><td><strong>一致性</strong></td><td>强一致（每次读都能读到最新写入）</td><td>最终一致（允许短暂不一致窗口）</td></tr>
+<tr><td><strong>隔离性</strong></td><td>事务隔离（Serializable / RR / RC）</td><td>弱隔离（允许并发修改可见）</td></tr>
+<tr><td><strong>可用性</strong></td><td>低（锁竞争、事务阻塞）</td><td>高（基本可用，降级容忍）</td></tr>
+<tr><td><strong>适用场景</strong></td><td>单机/单库事务、金融核心系统</td><td>大规模分布式系统、互联网应用</td></tr>
+<tr><td><strong>典型技术</strong></td><td>MySQL、Oracle、PostgreSQL</td><td>Cassandra、DynamoDB、Redis</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BASE 在不同业务层的应用</b></span></div>
+<pre><code><span class="c">// 核心交易层 — 偏 CP</span>
+<span class="k">支付、转账、库存扣减</span>：
+  必须保证数据一致性 → 宁可暂时不可用
+  使用 TCC 或 Saga 分布式事务保证最终一致
+  <span class="c">// BASE 的应用：允许异步扣减，但必须有对账补偿</span>
+
+<span class="c">// 中间业务层 — BASE 的典型应用</span>
+<span class="k">订单状态同步、物流追踪、评价系统</span>：
+  订单创建成功 → 异步通知物流系统
+  物流状态变化 → 异步更新订单页面
+  <span class="c">// 用户看到的状态可能有几秒延迟，完全可接受</span>
+
+<span class="c">// 边缘业务层 — 纯 AP</span>
+<span class="k">推荐列表、搜索排序、广告曝光</span>：
+  推荐算法算出的结果缓存 5 分钟
+  新上架商品可能在 5 分钟后出现在推荐中
+  <span class="c">// 不影响用户体验，反而降低系统压力</span></code></pre>
+</div>
+
+<p><strong>最终一致性的延迟窗口：</strong></p>
+<ul>
+  <li><strong>毫秒级</strong>：Redis 主从复制（通常 < 1ms）</li>
+  <li><strong>秒级</strong>：MySQL 主从复制（通常 1-5 秒）、消息队列消费延迟</li>
+  <li><strong>分钟级</strong>：跨地域数据同步、定时对账任务</li>
+  <li><strong>小时级</strong>：数据仓库 ETL、离线分析任务</li>
+</ul>
+
+<div class="think"><div class="think-q">"BASE 是不是意味着放弃一致性？" —— 不是放弃，而是把一致性从"每时每刻"放宽到"最终"。关键是要有补偿机制：对账、重试、告警。BASE 不是偷懒的借口，而是精心设计的取舍。选择 BASE 的前提是你已经评估过不一致的代价可承受。</div></div>
+</section>
+
+<!-- ═══════════════ 第7站：工程选择 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>实战：工程中如何做出 CP/AP 选择？</h2></div>
+
+<p>面对一个具体的业务场景，选择 CP 还是 AP？问自己三个问题：</p>
+
+<table class="nb-table">
+<thead><tr><th>决策维度</th><th>选 CP</th><th>选 AP</th></tr></thead>
+<tbody>
+<tr><td><strong>数据不一致的后果</strong></td><td>资金、订单等核心数据，不一致 = 资损</td><td>用户头像、昵称，短暂不一致可接受</td></tr>
+<tr><td><strong>对可用性的容忍度</strong></td><td>能接受短暂的不可用（如配置中心重启）</td><td>必须 7×24 可用（如注册中心、DNS）</td></tr>
+<tr><td><strong>延迟要求</strong></td><td>能接受几十毫秒到秒级的同步延迟</td><td>需要毫秒级响应</td></tr>
+</tbody>
+</table>
+
+<p><strong>常见组件的 CAP 定位：</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>常见分布式组件选型参考</b></span></div>
+<pre><code><span class="c">// CP 阵营 —— 数据一致性优先</span>
+<span class="k">ZooKeeper</span>  — 配置中心、分布式锁、Leader 选举（ZAB）
+<span class="k">etcd</span>       — K8s 元数据存储、服务发现（Raft）
+<span class="k">HBase</span>      — 大数据强一致存储（依赖 ZK）
+<span class="k">TiKV</span>       — 分布式 KV，金融级强一致（Raft）
+
+<span class="c">// AP 阵营 —— 可用性优先</span>
+<span class="k">Eureka</span>     — Spring Cloud 服务注册发现（P2P 复制）
+<span class="k">Cassandra</span>  — 大规模写入（Gossip + 可调一致性）
+<span class="k">DynamoDB</span>   — AWS 托管 NoSQL（向量时钟 + 最终一致）
+<span class="k">Redis Cluster</span> — 主从异步复制，故障时可能丢少量写入
+
+<span class="c">// 混合/可配置</span>
+<span class="k">Consul</span>     — 默认 CP（Raft），但也支持 AP 模式
+<span class="k">Nacos</span>      — 临时实例用 AP（Distro），持久实例用 CP（Raft）
+<span class="k">MongoDB</span>    — 默认最终一致，可配置 w=majority 达到强一致</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 200" role="img" aria-label="Nacos 双模式">
+  <text x="350" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Nacos 的双模式设计：根据实例类型选择一致性协议</text>
+  <rect x="60" y="50" width="250" height="130" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="185" y="75" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">临时实例 — AP 模式</text>
+  <text x="185" y="98" text-anchor="middle" font-size="11" fill="#1C1C1C">Distro 协议（P2P 异步复制）</text>
+  <text x="185" y="118" text-anchor="middle" font-size="10" fill="#57544E">客户端心跳维持实例存活</text>
+  <text x="185" y="136" text-anchor="middle" font-size="10" fill="#57544E">节点间异步同步注册信息</text>
+  <text x="185" y="154" text-anchor="middle" font-size="10" fill="#57544E">允许短暂不一致，保证高可用</text>
+  <text x="185" y="172" text-anchor="middle" font-size="10" fill="#059669" font-weight="600">适合：微服务实例注册</text>
+  <rect x="390" y="50" width="250" height="130" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="515" y="75" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">持久实例 — CP 模式</text>
+  <text x="515" y="98" text-anchor="middle" font-size="11" fill="#1C1C1C">JRaft 协议（类 Raft）</text>
+  <text x="515" y="118" text-anchor="middle" font-size="10" fill="#57544E">服务端主动探测实例健康</text>
+  <text x="515" y="136" text-anchor="middle" font-size="10" fill="#57544E">多数派写入保证一致性</text>
+  <text x="515" y="154" text-anchor="middle" font-size="10" fill="#57544E">Leader 选举期间短暂不可用</text>
+  <text x="515" y="172" text-anchor="middle" font-size="10" fill="#059669" font-weight="600">适合：DNS、配置管理</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>Nacos 同时支持 AP 和 CP 模式，是工程中灵活选择的典范</figcaption>
+</figure>
+
+<p><strong>面试常考场景分析：</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景决策</b> · 面试中如何回答 CP vs AP 选择</span></div>
+<pre><code><span class="c">// 场景一：秒杀库存扣减</span>
+<span class="k">分析</span>：库存数据不一致 → 超卖 → 资损
+<span class="k">结论</span>：选 CP 方向，用 Redis 原子扣减 + 数据库最终一致
+
+<span class="c">// 场景二：用户注册</span>
+<span class="k">分析</span>：注册成功后立即登录，如果注册数据和登录数据不一致 → 用户体验差
+<span class="k">结论</span>：选 CP 方向，注册写入主库后同步完成再返回
+
+<span class="c">// 场景三：朋友圈/动态</span>
+<span class="k">分析</span>：发布动态后朋友看到的时间有先后 → 完全可接受
+<span class="k">结论</span>：选 AP 方向，异步推送到粉丝的 Feed 列表
+
+<span class="c">// 场景四：分布式配置中心</span>
+<span class="k">分析</span>：配置变更必须所有节点一致生效 → 否则行为不可预测
+<span class="k">结论</span>：选 CP 方向，用 ZooKeeper/Nacos 持久实例
+
+<span class="c">// 场景五：商品详情页浏览</span>
+<span class="k">分析</span>：价格、描述等数据变更，用户看到旧版 → 影响不大
+<span class="k">结论</span>：选 AP 方向，缓存 + 异步更新</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">面试回答模板</div>"选择 CP 还是 AP 取决于业务对数据不一致的容忍度。核心交易数据（资金、订单）选 CP，非核心数据（推荐、日志）选 AP。工程中很多系统是混合的：比如 Nacos 临时实例用 AP 保证高可用，持久实例用 CP 保证一致性。"</div>
+
+<div class="recap">
+<strong>本课文脑图回顾</strong>
+<ul>
+  <li>CAP 三选二：分布式系统中 P 是必选项，实际在 CP 和 AP 之间选择</li>
+  <li>CP 系统（ZooKeeper/etcd）：多数派决策，少数派不可用，保证强一致性</li>
+  <li>AP 系统（Eureka/Cassandra）：所有分区可服务，容忍短暂不一致</li>
+  <li>一致性模型是一个光谱：线性一致 → 顺序一致 → 因果一致 → 最终一致</li>
+  <li>BASE 理论是 CAP 的工程化延伸：基本可用 + 软状态 + 最终一致</li>
+  <li>工程选型核心三问：数据不一致后果？可用性容忍度？延迟要求？</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

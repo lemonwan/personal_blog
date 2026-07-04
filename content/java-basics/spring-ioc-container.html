@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spring IoC 容器原理</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：Spring IoC 的原理是什么？</h2></div>
+<div class="think"><div class="think-q">"Spring IoC 的原理是什么？"——别只说「帮你管理对象」。面试官想听的是：BeanFactory 与 ApplicationContext 的区别、容器启动的 refresh() 十二步、BeanDefinition 元模型、Bean 创建的完整生命周期，以及三级缓存如何解决循环依赖。能说到第三层，就已经超过 90% 的候选人。</div></div>
+<p> IoC（Inversion of Control）是 Spring 的灵魂，但大多数人停留在「控制反转 = 把 new 对象的权力交给容器」这一层。真正的面试深度回答需要覆盖：</p>
+<ul>
+  <li><strong>概念层</strong>：IoC 与 DI 的精确区分</li>
+  <li><strong>接口层</strong>：BeanFactory → ApplicationContext 的继承体系与职责差异</li>
+  <li><strong>流程层</strong>：容器启动 refresh() 的 12 步、Bean 创建的完整链路</li>
+  <li><strong>元模型</strong>：BeanDefinition 如何描述一个 Bean 的全部元信息</li>
+  <li><strong>难点</strong>：三级缓存与循环依赖（本文预告，专文展开）</li>
+</ul>
+<p>本文逐站深入，从概念到源码，给出可直接在面试中复述的完整回答。</p>
+</section>
+
+<!-- ═══════════════ 第2站：IoC 与 DI 概念 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>IoC 与 DI：不是一回事</h2></div>
+<p>很多人把 IoC 和 DI 混为一谈，但面试中精确区分它们是加分项：</p>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>维度</th><th>IoC（控制反转）</th><th>DI（依赖注入）</th></tr></thead>
+<tbody>
+<tr><td>本质</td><td>一种<strong>设计思想</strong></td><td>IoC 的一种<strong>具体实现方式</strong></td></tr>
+<tr><td>含义</td><td>对象的创建、装配、生命周期由容器控制，而非程序代码直接管理</td><td>容器在运行时将依赖对象「注入」到组件中</td></tr>
+<tr><td>对立面</td><td>程序自己 new 对象</td><td>程序自己查找依赖（Service Locator 模式）</td></tr>
+<tr><td>关系</td><td>IoC ⊃ DI（DI 是 IoC 的子集）</td><td>IoC 的实现方式之一（另一种是 Service Locator）</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>DI 的三种注入方式：</strong></p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>三种注入方式对比</b> · Java</span></div>
+<pre><code><span class="c">// ① 构造器注入（推荐：不可变、可测试、保证非空）</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">private final</span> <span class="t">UserRepository</span> userRepo;
+    <span class="k">public</span> <span class="n">OrderService</span>(<span class="t">UserRepository</span> userRepo) {
+        <span class="k">this</span>.userRepo = userRepo;
+    }
+}
+
+<span class="c">// ② Setter 注入（可选依赖、运行时可变）</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">private</span> <span class="t">UserRepository</span> userRepo;
+    <span class="k">@Autowired</span>
+    <span class="k">public void</span> <span class="n">setUserRepo</span>(<span class="t">UserRepository</span> userRepo) {
+        <span class="k">this</span>.userRepo = userRepo;
+    }
+}
+
+<span class="c">// ③ 字段注入（最方便，但不推荐：不可变差、难测试）</span>
+<span class="k">public class</span> <span class="t">OrderService</span> {
+    <span class="k">@Autowired</span>
+    <span class="k">private</span> <span class="t">UserRepository</span> userRepo;
+}</code></pre>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">面试加分点</span>Spring 官方推荐构造器注入。理由：① 依赖不可变（final）；② 保证依赖非空（构造时就失败）；③ 方便单元测试（直接传 mock，无需反射）。Spring 4.3+ 单构造器可省略 @Autowired。</div>
+</section>
+
+<!-- ═══════════════ 第3站：BeanFactory vs ApplicationContext ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>BeanFactory vs ApplicationContext：接口体系</h2></div>
+<p>Spring 容器的核心接口不只有一个 BeanFactory，而是一棵继承树。理解这棵树是理解容器能力的钥匙：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 740 380" role="img" aria-label="Spring 容器接口继承体系">
+  <defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="370" y="22" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">Spring 容器接口继承体系（简化）</text>
+
+  <!-- BeanFactory 根 -->
+  <rect x="270" y="38" width="200" height="36" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="370" y="61" text-anchor="middle" font-family="monospace" font-size="12" fill="#C2410C" font-weight="700">BeanFactory</text>
+
+  <!-- ListableBeanFactory -->
+  <rect x="40" y="118" width="200" height="36" rx="6" fill="#E8F0E4" stroke="#5B8C5A" stroke-width="1.5"/>
+  <text x="140" y="141" text-anchor="middle" font-family="monospace" font-size="11" fill="#3B6B3B" font-weight="600">ListableBeanFactory</text>
+  <line x1="290" y1="74" x2="200" y2="118" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- HierarchicalBeanFactory -->
+  <rect x="270" y="118" width="200" height="36" rx="6" fill="#E8F0E4" stroke="#5B8C5A" stroke-width="1.5"/>
+  <text x="370" y="141" text-anchor="middle" font-family="monospace" font-size="11" fill="#3B6B3B" font-weight="600">HierarchicalBeanFactory</text>
+  <line x1="370" y1="74" x2="370" y2="118" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- ApplicationContext -->
+  <rect x="130" y="200" width="280" height="42" rx="6" fill="#D6E4F0" stroke="#3E6B8F" stroke-width="2"/>
+  <text x="270" y="218" text-anchor="middle" font-family="monospace" font-size="13" fill="#1C3A5F" font-weight="700">ApplicationContext</text>
+  <text x="270" y="234" text-anchor="middle" font-size="9" fill="#5A7DA0">+ EnvironmentCapable</text>
+  <line x1="180" y1="154" x2="220" y2="200" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="340" y1="154" x2="310" y2="200" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- 三大能力标注 -->
+  <rect x="460" y="200" width="250" height="42" rx="4" fill="#FFF8E1" stroke="#E6A817" stroke-width="1"/>
+  <text x="585" y="215" text-anchor="middle" font-size="10" fill="#8B6914" font-weight="600">ApplicationContext 额外能力</text>
+  <text x="585" y="230" text-anchor="middle" font-size="9" fill="#8B6914">i18n · 事件发布 · AOP · 资源加载</text>
+  <line x1="410" y1="221" x2="460" y2="221" stroke="#E6A817" stroke-width="1.2" stroke-dasharray="4,3"/>
+
+  <!-- ConfigurableApplicationContext -->
+  <rect x="130" y="282" width="280" height="36" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="270" y="305" text-anchor="middle" font-family="monospace" font-size="11" fill="#1C3A5F" font-weight="600">ConfigurableApplicationContext</text>
+  <line x1="270" y1="242" x2="270" y2="282" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- 实现类 -->
+  <rect x="30" y="346" width="220" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="140" y="366" text-anchor="middle" font-family="monospace" font-size="10" fill="#6B5E46">ClassPathXmlApplicationContext</text>
+  <line x1="200" y1="318" x2="160" y2="346" stroke="#888" stroke-width="1" marker-end="url(#arr)"/>
+
+  <rect x="280" y="346" width="250" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="405" y="366" text-anchor="middle" font-family="monospace" font-size="10" fill="#6B5E46">AnnotationConfigApplicationContext</text>
+  <line x1="310" y1="318" x2="380" y2="346" stroke="#888" stroke-width="1" marker-end="url(#arr)"/>
+</svg>
+<figcaption><span class="fig-no">图 1</span> Spring 容器接口继承体系：BeanFactory 是根，ApplicationContext 集成了 Listable + Hierarchical + 环境能力</figcaption>
+</figure>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>能力</th><th>BeanFactory</th><th>ApplicationContext</th></tr></thead>
+<tbody>
+<tr><td>Bean 实例化 / 依赖注入</td><td>&#10003;</td><td>&#10003;</td></tr>
+<tr><td>Bean 初始化策略</td><td>懒加载（getBean 时创建）</td><td>启动时<strong>预创建</strong>所有单例</td></tr>
+<tr><td>国际化（i18n / MessageSource）</td><td>&#10007;</td><td>&#10003;</td></tr>
+<tr><td>事件发布（ApplicationEvent）</td><td>&#10007;</td><td>&#10003;</td></tr>
+<tr><td>AOP 自动代理</td><td>需手动配置</td><td>&#10003; 自动集成</td></tr>
+<tr><td>资源加载（Resource）</td><td>&#10007;</td><td>&#10003;</td></tr>
+<tr><td>注解支持（@Autowired 等）</td><td>需注册后处理器</td><td>&#10003; 默认开启</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="crack"><span class="crack-label">面试金句</span>BeanFactory 是 Spring 的「最小可用容器」，只做 Bean 的注册和获取；ApplicationContext 是「全功能容器」，在 BeanFactory 基础上叠加了企业级能力。日常开发 100% 用的是 ApplicationContext。</div>
+</section>
+
+<!-- ═══════════════ 第4站：容器启动流程 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>容器启动流程：refresh() 十二步</h2></div>
+<p>Spring 容器启动的核心入口是 <code>AbstractApplicationContext.refresh()</code>。这个方法只有不到 100 行，却编排了整个 Spring 的启动逻辑。面试中被问到的概率极高：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AbstractApplicationContext.java</b> · Spring 5.x 简化</span></div>
+<pre><code><span class="k">public void</span> <span class="n">refresh</span>() <span class="k">throws</span> <span class="t">BeansException</span>, <span class="t">IllegalStateException</span> {
+    <span class="k">synchronized</span> (<span class="k">this</span>.startupShutdownMonitor) {
+
+        <span class="c">// ① 准备刷新：校验必要属性、初始化 PropertySources</span>
+        <span class="n">prepareRefresh</span>();
+
+        <span class="c">// ② 获取 BeanFactory：解析 XML/注解，注册 BeanDefinition</span>
+        <span class="t">ConfigurableListableBeanFactory</span> beanFactory = <span class="n">obtainFreshBeanFactory</span>();
+
+        <span class="c">// ③ 准备 BeanFactory：设置类加载器、注册标准 Bean</span>
+        <span class="n">prepareBeanFactory</span>(beanFactory);
+
+        <span class="k">try</span> {
+            <span class="c">// ④ 子类扩展点：注册容器级后处理器</span>
+            <span class="n">postProcessBeanFactory</span>(beanFactory);
+
+            <span class="c">// ⑤ 执行 BeanFactoryPostProcessor（如 PropertyPlaceholder）</span>
+            <span class="n">invokeBeanFactoryPostProcessors</span>(beanFactory);
+
+            <span class="c">// ⑥ 注册 BeanPostProcessor（如 AutowiredAnnotationBPP）</span>
+            <span class="n">registerBeanPostProcessors</span>(beanFactory);
+
+            <span class="c">// ⑦ 初始化国际化 MessageSource</span>
+            <span class="n">initMessageSource</span>();
+
+            <span class="c">// ⑧ 初始化事件广播器</span>
+            <span class="n">initApplicationEventMulticaster</span>();
+
+            <span class="c">// ⑨ 子类扩展点（如 SpringBoot 在此启动内嵌 Tomcat）</span>
+            <span class="n">onRefresh</span>();
+
+            <span class="c">// ⑩ 注册事件监听器</span>
+            <span class="n">registerListeners</span>();
+
+            <span class="c">// ⑪ 实例化所有非懒加载的单例 Bean ★最重的一步</span>
+            <span class="n">finishBeanFactoryInitialization</span>(beanFactory);
+
+            <span class="c">// ⑫ 发布 ContextRefreshedEvent、注册 JMX 等收尾</span>
+            <span class="n">finishRefresh</span>();
+        } <span class="k">catch</span> (<span class="t">BeansException</span> ex) {
+            <span class="n">destroyBeans</span>();
+            <span class="n">cancelRefresh</span>(ex);
+            <span class="k">throw</span> ex;
+        }
+    }
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 520" role="img" aria-label="refresh() 十二步流程图">
+  <defs><marker id="ar2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
+  <text x="350" y="20" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">AbstractApplicationContext.refresh() 十二步</text>
+
+  <!-- Step boxes: left column ①-⑥, right column ⑫-⑦ -->
+  <!-- ① -->
+  <rect x="50" y="40" width="260" height="32" rx="5" fill="#E8F0E4" stroke="#5B8C5A" stroke-width="1.2"/>
+  <text x="60" y="60" font-size="11" fill="#3B6B3B" font-weight="600">① prepareRefresh()</text>
+  <text x="60" y="72" font-size="9" fill="#6B8C6B">校验属性、初始化占位符</text>
+
+  <!-- ② -->
+  <rect x="50" y="82" width="260" height="32" rx="5" fill="#D6E4F0" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="60" y="102" font-size="11" fill="#1C3A5F" font-weight="700">② obtainFreshBeanFactory()</text>
+  <text x="60" y="114" font-size="9" fill="#5A7DA0">解析配置 → BeanDefinition 注册</text>
+
+  <!-- ③ -->
+  <rect x="50" y="124" width="260" height="32" rx="5" fill="#E8F0E4" stroke="#5B8C5A" stroke-width="1.2"/>
+  <text x="60" y="144" font-size="11" fill="#3B6B3B" font-weight="600">③ prepareBeanFactory()</text>
+  <text x="60" y="156" font-size="9" fill="#6B8C6B">设置类加载器、表达式解析器</text>
+
+  <!-- ④ -->
+  <rect x="50" y="166" width="260" height="32" rx="5" fill="#FFF8E1" stroke="#E6A817" stroke-width="1.2"/>
+  <text x="60" y="186" font-size="11" fill="#8B6914" font-weight="600">④ postProcessBeanFactory() 📌</text>
+  <text x="60" y="198" font-size="9" fill="#B08A20">子类扩展点（模板方法）</text>
+
+  <!-- ⑤ -->
+  <rect x="50" y="208" width="260" height="32" rx="5" fill="#D6E4F0" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="60" y="228" font-size="11" fill="#1C3A5F" font-weight="700">⑤ invokeBeanFactoryPostProcessors()</text>
+  <text x="60" y="240" font-size="9" fill="#5A7DA0">执行 BeanFactory 级别后处理器</text>
+
+  <!-- ⑥ -->
+  <rect x="50" y="250" width="260" height="32" rx="5" fill="#D6E4F0" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="60" y="270" font-size="11" fill="#1C3A5F" font-weight="700">⑥ registerBeanPostProcessors()</text>
+  <text x="60" y="282" font-size="9" fill="#5A7DA0">注册 Bean 级别后处理器</text>
+
+  <!-- arrows left column -->
+  <line x1="180" y1="72" x2="180" y2="82" stroke="#3E6B8F" stroke-width="1" marker-end="url(#ar2)"/>
+  <line x1="180" y1="114" x2="180" y2="124" stroke="#3E6B8F" stroke-width="1" marker-end="url(#ar2)"/>
+  <line x1="180" y1="156" x2="180" y2="166" stroke="#3E6B8F" stroke-width="1" marker-end="url(#ar2)"/>
+  <line x1="180" y1="198" x2="180" y2="208" stroke="#3E6B8F" stroke-width="1" marker-end="url(#ar2)"/>
+  <line x1="180" y1="240" x2="180" y2="250" stroke="#3E6B8F" stroke-width="1" marker-end="url(#ar2)"/>
+
+  <!-- ⑦ -->
+  <rect x="390" y="82" width="260" height="32" rx="5" fill="#E8F0E4" stroke="#5B8C5A" stroke-width="1.2"/>
+  <text x="400" y="102" font-size="11" fill="#3B6B3B" font-weight="600">⑦ initMessageSource()</text>
+  <text x="400" y="114" font-size="9" fill="#6B8C6B">初始化国际化资源</text>
+
+  <!-- ⑧ -->
+  <rect x="390" y="124" width="260" height="32" rx="5" fill="#E8F0E4" stroke="#5B8C5A" stroke-width="1.2"/>
+  <text x="400" y="144" font-size="11" fill="#3B6B3B" font-weight="600">⑧ initApplicationEventMulticaster()</text>
+  <text x="400" y="156" font-size="9" fill="#6B8C6B">初始化事件广播器</text>
+
+  <!-- ⑨ -->
+  <rect x="390" y="166" width="260" height="32" rx="5" fill="#FFF8E1" stroke="#E6A817" stroke-width="1.2"/>
+  <text x="400" y="186" font-size="11" fill="#8B6914" font-weight="600">⑨ onRefresh() 📌</text>
+  <text x="400" y="198" font-size="9" fill="#B08A20">子类扩展（SpringBoot 启动 Tomcat）</text>
+
+  <!-- ⑩ -->
+  <rect x="390" y="208" width="260" height="32" rx="5" fill="#E8F0E4" stroke="#5B8C5A" stroke-width="1.2"/>
+  <text x="400" y="228" font-size="11" fill="#3B6B3B" font-weight="600">⑩ registerListeners()</text>
+  <text x="400" y="240" font-size="9" fill="#6B8C6B">注册 ApplicationListener</text>
+
+  <!-- ⑪ STAR -->
+  <rect x="160" y="320" width="380" height="44" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/>
+  <text x="350" y="342" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">⑪ finishBeanFactoryInitialization()  ★</text>
+  <text x="350" y="358" text-anchor="middle" font-size="10" fill="#8B5E3C">实例化所有非懒加载单例 Bean（最重的一步）</text>
+
+  <!-- ⑫ -->
+  <rect x="160" y="380" width="380" height="36" rx="5" fill="#D6E4F0" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="350" y="400" text-anchor="middle" font-size="12" fill="#1C3A5F" font-weight="700">⑫ finishRefresh()</text>
+  <text x="350" y="414" text-anchor="middle" font-size="9" fill="#5A7DA0">发布 ContextRefreshedEvent · Lifecycle 回调 · JMX 注册</text>
+
+  <!-- connecting arrows -->
+  <line x1="310" y1="282" x2="310" y2="320" stroke="#C2410C" stroke-width="1.5" marker-end="url(#ar2)"/>
+  <line x1="350" y1="364" x2="350" y2="380" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#ar2)"/>
+
+  <!-- cross arrow ⑥→⑦ -->
+  <path d="M310,266 Q350,290 390,98" fill="none" stroke="#3E6B8F" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#ar2)"/>
+
+  <!-- error path -->
+  <rect x="200" y="440" width="300" height="32" rx="5" fill="#FDE8E8" stroke="#C53030" stroke-width="1"/>
+  <text x="350" y="460" text-anchor="middle" font-size="11" fill="#C53030" font-weight="600">catch: destroyBeans() → cancelRefresh()</text>
+  <line x1="350" y1="416" x2="350" y2="440" stroke="#C53030" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#ar2)"/>
+
+  <!-- legend -->
+  <rect x="40" y="480" width="12" height="12" rx="2" fill="#FFF8E1" stroke="#E6A817"/>
+  <text x="58" y="491" font-size="9" fill="#8B6914">📌 子类扩展点（模板方法）</text>
+  <rect x="240" y="480" width="12" height="12" rx="2" fill="#FBE6C7" stroke="#C2410C"/>
+  <text x="258" y="491" font-size="9" fill="#C2410C">★ 核心步骤</text>
+  <rect x="390" y="480" width="12" height="12" rx="2" fill="#D6E4F0" stroke="#3E6B8F"/>
+  <text x="408" y="491" font-size="9" fill="#3E6B8F">框架标准步骤</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> refresh() 十二步流程：② 解析 BeanDefinition → ⑤⑥ 注册后处理器 → ⑪ 实例化所有单例 Bean</figcaption>
+</figure>
+
+<div class="think"><div class="think-q">面试追问：「第 ⑤ 步和第 ⑥ 步有什么区别？」<br/>第 ⑤ 步执行的是 <strong>BeanFactoryPostProcessor</strong>，它作用于 BeanFactory 本身（如替换占位符 ${...}）；第 ⑥ 步注册的是 <strong>BeanPostProcessor</strong>，它作用于每个 Bean 实例（如 @Autowired 注入、AOP 代理）。二者执行的时机和作用对象完全不同。</div></div>
+</section>
+
+<!-- ═══════════════ 第5站：BeanDefinition ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>BeanDefinition：Bean 的元数据模型</h2></div>
+<p>Spring 容器并不直接存储你的 Bean 类，而是存储一份<strong>描述这个 Bean 的元数据对象</strong>——<code>BeanDefinition</code>。就像数据库的 Schema 描述表结构一样，BeanDefinition 描述 Bean 的全部配置信息：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>BeanDefinition.java</b> · 核心属性（简化）</span></div>
+<pre><code><span class="k">public interface</span> <span class="t">BeanDefinition</span> <span class="k">extends</span> <span class="t">AttributeAccessor</span>, <span class="t">BeanMetadataElement</span> {
+    <span class="c">// Bean 的全限定类名</span>
+    <span class="t">String</span> <span class="n">getBeanClassName</span>();
+
+    <span class="c">// 作用域：singleton / prototype / request / session</span>
+    <span class="t">String</span> <span class="n">getScope</span>();
+
+    <span class="c">// 是否懒加载</span>
+    <span class="k">boolean</span> <span class="n">isLazyInit</span>();
+
+    <span class="c">// 依赖的其他 Bean（保证创建顺序）</span>
+    <span class="t">String</span>[] <span class="n">getDependsOn</span>();
+
+    <span class="c">// 构造器参数</span>
+    <span class="t">ConstructorArgumentValues</span> <span class="n">getConstructorArgumentValues</span>();
+
+    <span class="c">// 属性值（setter 注入）</span>
+    <span class="t">MutablePropertyValues</span> <span class="n">getPropertyValues</span>();
+
+    <span class="c">// 初始化 / 销毁方法</span>
+    <span class="t">String</span> <span class="n">getInitMethodName</span>();
+    <span class="t">String</span> <span class="n">getDestroyMethodName</span>();
+}</code></pre>
+</div>
+
+<p><strong>BeanDefinition 从哪来？</strong>三大解析路径：</p>
+<div class="nb-table">
+<table>
+<thead><tr><th>配置方式</th><th>解析器</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>XML 配置</td><td><code>XmlBeanDefinitionReader</code></td><td>解析 &lt;bean&gt; 标签</td></tr>
+<tr><td>注解配置</td><td><code>AnnotatedBeanDefinitionReader</code></td><td>解析 @Component / @Bean</td></tr>
+<tr><td>Java Config</td><td><code>ConfigurationClassPostProcessor</code></td><td>解析 @Configuration 类</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>所有解析结果都注册到 <code>BeanDefinitionRegistry</code>（本质是一个 <code>ConcurrentHashMap&lt;String, BeanDefinition&gt;</code>）：</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DefaultListableBeanFactory.java</b> · 核心存储</span></div>
+<pre><code><span class="k">public class</span> <span class="t">DefaultListableBeanFactory</span>
+        <span class="k">extends</span> <span class="t">AbstractAutowireCapableBeanFactory</span>
+        <span class="k">implements</span> <span class="t">ConfigurableListableBeanFactory</span>, <span class="t">BeanDefinitionRegistry</span> {
+
+    <span class="c">// ★ BeanDefinition 的最终存储地</span>
+    <span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">BeanDefinition</span>&gt; beanDefinitionMap
+            = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;(<span class="n">256</span>);
+
+    <span class="c">// 保持注册顺序的 Bean 名称列表</span>
+    <span class="k">private volatile</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; beanDefinitionNames
+            = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="n">256</span>);
+}</code></pre>
+</div>
+
+<div class="formula"><strong>BeanDefinition 生命周期公式</strong><br/>配置源（XML / @Component / @Bean） → <code>BeanDefinitionReader</code> 解析 → <code>BeanDefinition</code> 对象 → 注册到 <code>BeanDefinitionRegistry</code>（Map） → 容器启动时按 BeanDefinition 创建 Bean 实例</div>
+</section>
+
+<!-- ═══════════════ 第6站：Bean 创建流程 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>Bean 创建流程：从 getBean 到完整实例</h2></div>
+<p>当容器执行到 refresh() 的第 ⑪ 步 <code>finishBeanFactoryInitialization()</code> 时，会遍历所有非懒加载的单例 BeanDefinition，逐个调用 <code>getBean()</code>。完整链路如下：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AbstractBeanFactory.java</b> · getBean 链路简化</span></div>
+<pre><code><span class="c">// 入口：外部调用或容器内部触发</span>
+<span class="k">public</span> <span class="t">Object</span> <span class="n">getBean</span>(<span class="t">String</span> name) {
+    <span class="k">return</span> <span class="n">doGetBean</span>(name, <span class="k">null</span>, <span class="k">null</span>, <span class="k">false</span>);
+}
+
+<span class="k">protected</span> &lt;<span class="t">T</span>&gt; <span class="t">T</span> <span class="n">doGetBean</span>(<span class="t">String</span> name, ...) {
+    <span class="c">// ① 先查三级缓存（处理循环依赖）</span>
+    <span class="t">Object</span> sharedInstance = <span class="n">getSingleton</span>(beanName);
+    <span class="k">if</span> (sharedInstance != <span class="k">null</span>) <span class="k">return</span> (<span class="t">T</span>) sharedInstance;
+
+    <span class="c">// ② 检查并创建依赖的 Bean（depends-on）</span>
+    <span class="t">String</span>[] dependsOn = mbd.<span class="n">getDependsOn</span>();
+    <span class="k">for</span> (<span class="t">String</span> dep : dependsOn) <span class="n">getBean</span>(dep);
+
+    <span class="c">// ③ 根据 scope 创建 Bean</span>
+    <span class="k">if</span> (mbd.<span class="n">isSingleton</span>()) {
+        sharedInstance = <span class="n">getSingleton</span>(beanName, () -&gt; {
+            <span class="k">return</span> <span class="n">createBean</span>(beanName, mbd, args);
+        });
+    }
+    <span class="k">return</span> (<span class="t">T</span>) sharedInstance;
+}</code></pre>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AbstractAutowireCapableBeanFactory.java</b> · createBean 内部</span></div>
+<pre><code><span class="k">protected</span> <span class="t">Object</span> <span class="n">createBean</span>(<span class="t">String</span> beanName, <span class="t">RootBeanDefinition</span> mbd, <span class="t">Object</span>[] args) {
+    <span class="c">// 解析 Bean 的 Class（处理 FactoryBean 等情况）</span>
+    <span class="t">Class</span>&lt;?&gt; resolvedClass = <span class="n">resolveBeanClass</span>(mbd, beanName);
+
+    <span class="k">return</span> <span class="n">doCreateBean</span>(beanName, mbd, args);
+}
+
+<span class="k">protected</span> <span class="t">Object</span> <span class="n">doCreateBean</span>(<span class="t">String</span> beanName, <span class="t">RootBeanDefinition</span> mbd, <span class="t">Object</span>[] args) {
+    <span class="c">// ──── 阶段 1：实例化 ────</span>
+    <span class="t">BeanWrapper</span> instanceWrapper = <span class="n">createBeanInstance</span>(beanName, mbd, args);
+    <span class="t">Object</span> bean = instanceWrapper.<span class="n">getWrappedInstance</span>();
+
+    <span class="c">// ★ 提前暴露到三级缓存（解决循环依赖的关键）</span>
+    <span class="n">addSingletonFactory</span>(beanName, () -&gt; <span class="n">getEarlyBeanReference</span>(beanName, mbd, bean));
+
+    <span class="c">// ──── 阶段 2：属性填充 ────</span>
+    <span class="n">populateBean</span>(beanName, mbd, instanceWrapper);
+
+    <span class="c">// ──── 阶段 3：初始化 ────</span>
+    <span class="t">Object</span> exposedBean = <span class="n">initializeBean</span>(beanName, bean, mbd);
+    <span class="c">//   ├─ invokeAwareMethods()      → BeanNameAware, BeanFactoryAware</span>
+    <span class="c">//   ├─ applyBeanPostProcessorsBeforeInitialization()  → @PostConstruct</span>
+    <span class="c">//   ├─ invokeInitMethods()       → InitializingBean.afterPropertiesSet(), init-method</span>
+    <span class="c">//   └─ applyBeanPostProcessorsAfterInitialization()   → AOP 代理在此生成</span>
+
+    <span class="k">return</span> exposedBean;
+}</code></pre>
+</div>
+
+<p>Bean 创建的三个阶段可以总结为：</p>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>阶段</th><th>方法</th><th>做了什么</th><th>回调 / 扩展点</th></tr></thead>
+<tbody>
+<tr><td><strong>实例化</strong></td><td>createBeanInstance()</td><td>反射/工厂方法/CGLIB 创建裸对象</td><td>InstantiationAwareBPP.postProcessBeforeInstantiation()</td></tr>
+<tr><td><strong>属性填充</strong></td><td>populateBean()</td><td>注入依赖（@Autowired, @Value）</td><td>InstantiationAwareBPP.postProcessAfterInstantiation()</td></tr>
+<tr><td><strong>初始化</strong></td><td>initializeBean()</td><td>Aware 回调 + BPP + init 方法</td><td>BeanPostProcessor（AOP 代理在这里生成）</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">关键细节</span>AOP 代理不是在「初始化之后」额外创建的，而是在 <code>BeanPostProcessor.postProcessAfterInitialization()</code> 中，由 <code>AbstractAutoProxyCreator</code> 判断是否需要代理，如果需要则返回代理对象替代原始 Bean。</div>
+</section>
+
+<!-- ═══════════════ 第7站：三级缓存（预告） ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>三级缓存：循环依赖的解决思路（预告）</h2></div>
+<div class="think"><div class="think-q">面试追问：「如果 A 依赖 B，B 又依赖 A，Spring 怎么解决？」——这是 Spring 面试中频率最高的深度问题之一。本文做简要预告，完整解析见专文。</div></div>
+
+<p>Spring 用<strong>三级缓存</strong>解决单例 Bean 的循环依赖。三级缓存定义在 <code>DefaultSingletonBeanRegistry</code> 中：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>DefaultSingletonBeanRegistry.java</b> · 三级缓存</span></div>
+<pre><code><span class="c">// 一级缓存：完整的 Bean 实例（已初始化完毕）</span>
+<span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; singletonObjects = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;(<span class="n">256</span>);
+
+<span class="c">// 二级缓存：早期 Bean 实例（已实例化，未填充属性）</span>
+<span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; earlySingletonObjects = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;(<span class="n">16</span>);
+
+<span class="c">// 三级缓存：Bean 工厂（ObjectFactory，用于生成早期引用）</span>
+<span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">ObjectFactory</span>&lt;?&gt;&gt; singletonFactories
+        = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;(<span class="n">16</span>);</code></pre>
+</div>
+
+<p><strong>解决循环依赖的核心流程（以 A→B→A 为例）：</strong></p>
+<ol>
+  <li><strong>创建 A</strong>：实例化 A（裸对象）→ 将 A 的 ObjectFactory 放入<strong>三级缓存</strong></li>
+  <li><strong>填充 A</strong>：发现依赖 B → 触发创建 B</li>
+  <li><strong>创建 B</strong>：实例化 B（裸对象）→ 将 B 的 ObjectFactory 放入三级缓存</li>
+  <li><strong>填充 B</strong>：发现依赖 A → 从三级缓存取 A 的 ObjectFactory → 生成 A 的早期引用 → 放入<strong>二级缓存</strong>，删除三级缓存</li>
+  <li><strong>B 完成初始化</strong> → 放入<strong>一级缓存</strong></li>
+  <li><strong>A 获得 B</strong> → 继续填充属性 → A 完成初始化 → 放入<strong>一级缓存</strong></li>
+</ol>
+
+<div class="crack"><span class="crack-label">为什么需要三级而不是两级？</span>三级缓存存的不是 Bean 实例，而是一个 <code>ObjectFactory</code>（Lambda 表达式）。它的作用是在需要早期引用时，通过 <code>getEarlyBeanReference()</code> 提前触发 AOP 代理。如果没有 AOP，两级缓存就够了；正是为了<strong>延迟代理对象的创建</strong>（只在真正被循环依赖时才创建代理），才需要第三级。</div>
+
+<div class="formula"><strong>三级缓存查找顺序</strong><br/>getSingleton() = L1 有就返回 → L2 有就返回 → L3 有就调用 factory.getObject() 放入 L2 并删除 L3 → 返回</div>
+
+<p><em>完整的三级缓存源码拆解、构造器注入为何无法解决循环依赖、Spring Boot 2.6+ 默认禁止循环依赖的原因，将在「Spring 循环依赖与三级缓存」专文中详细展开。</em></p>
+</section>
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结：关键接口速查 + 面试回答模板</h2></div>
+
+<div class="nb-table">
+<table>
+<thead><tr><th>接口 / 类</th><th>职责</th><th>关键方法</th></tr></thead>
+<tbody>
+<tr><td><code>BeanFactory</code></td><td>容器根接口，定义 getBean / containsBean</td><td>getBean(), isSingleton()</td></tr>
+<tr><td><code>ApplicationContext</code></td><td>全功能容器，集成 i18n / 事件 / AOP</td><td>publishEvent(), getMessage()</td></tr>
+<tr><td><code>BeanDefinition</code></td><td>Bean 的元数据描述</td><td>getBeanClassName(), getScope()</td></tr>
+<tr><td><code>BeanDefinitionRegistry</code></td><td>BeanDefinition 的注册中心</td><td>registerBeanDefinition()</td></tr>
+<tr><td><code>BeanPostProcessor</code></td><td>Bean 初始化前后的拦截钩子</td><td>postProcessBeforeInitialization(), postProcessAfterInitialization()</td></tr>
+<tr><td><code>BeanFactoryPostProcessor</code></td><td>BeanFactory 级别的处理器（修改 BeanDefinition）</td><td>postProcessBeanFactory()</td></tr>
+<tr><td><code>DefaultSingletonBeanRegistry</code></td><td>单例 Bean 的三级缓存管理</td><td>getSingleton(), addSingleton()</td></tr>
+<tr><td><code>AbstractApplicationContext</code></td><td>容器启动流程的编排者</td><td>refresh()（十二步）</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="recap">
+<strong>面试回答模板（60 秒版）：</strong>
+<ol>
+  <li><strong>概念</strong>：IoC 是设计思想，DI 是实现方式。Spring 容器负责对象的创建、装配和生命周期管理。</li>
+  <li><strong>接口</strong>：BeanFactory 是最小容器（懒加载），ApplicationContext 是全功能容器（预创建单例、i18n、事件、AOP）。日常用的都是 ApplicationContext。</li>
+  <li><strong>启动</strong>：核心方法是 <code>refresh()</code>，十二步编排了整个启动流程——先解析 BeanDefinition，再注册后处理器，最后实例化所有单例 Bean。</li>
+  <li><strong>Bean 创建</strong>：getBean → createBean → doCreateBean，分三阶段：实例化 → 属性填充 → 初始化（含 AOP 代理）。</li>
+  <li><strong>循环依赖</strong>：通过三级缓存解决——一级存完整 Bean，二级存早期引用，三级存 ObjectFactory（为 AOP 代理延迟创建）。</li>
+</ol>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">下一步</span>「Spring 循环依赖与三级缓存」专文将深入 getSingleton() 源码、构造器注入为何无解、@Lazy 如何绕过循环依赖、Spring Boot 2.6+ 为何默认禁止循环依赖。</div>
+</section>
+
+</main>
+</body>
+</html>

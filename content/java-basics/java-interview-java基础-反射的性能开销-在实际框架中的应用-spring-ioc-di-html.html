@@ -3,210 +3,497 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Java 中高级面试 - Day 7 | 反射的性能开销、在实际框架中的应用（Spring IOC/DI）</title>
-<style>
-:root {
-  --header-bg: #1a1a2e;
-  --accent-blue: #0ea5e9;
-  --accent-green: #22c55e;
-  --accent-purple: #a855f7;
-  --accent-orange: #f97316;
-  --accent-pink: #ec4899;
-  --accent-red: #ef4444;
-  --accent-cyan: #06b6d4;
-  --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  --dot-blue: #3b82f6;
-  --dot-green: #10b981;
-  --dot-purple: #8b5cf6;
-  --dot-orange: #f59e0b;
-  --dot-pink: #ec4899;
-  --dot-red: #ef4444;
-  --dot-cyan: #06b6d4;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.7; font-size: 15px; }
-.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #e0e0e0; padding: 40px 20px 32px; text-align: center; border-bottom: 4px solid #0ea5e9; }
-.header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
-.header .subtitle { font-size: 15px; opacity: 0.8; margin-bottom: 12px; }
-.header .tag { display: inline-block; background: #0ea5e9; color: #fff; padding: 3px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
-.container { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
-.module-card { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); margin-bottom: 24px; overflow: hidden; border-top: 4px solid #0ea5e9; }
-.module-card .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent); border-bottom: 1px solid #e2e8f0; }
-.module-card .card-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 8px; background: #0ea5e9; color: #fff; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; }
-.module-card .card-title { font-size: 18px; font-weight: 700; color: #0f172a; }
-.module-card .card-body { padding: 20px; }
-.section { margin-bottom: 20px; }
-.section:last-child { margin-bottom: 0; }
-.section h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
-.section h3 .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: #fff; flex-shrink: 0; }
-.section .content { padding-left: 32px; }
-.section .content p { margin-bottom: 6px; }
-.section .content ul, .section .content ol { padding-left: 20px; margin-bottom: 8px; }
-.section .content li { margin-bottom: 4px; }
-.section .content strong { color: #0f172a; }
-.section .content code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #0f172a; }
-.bullet-list { list-style: none; padding-left: 0; }
-.bullet-list li { position: relative; padding: 6px 0 6px 20px; margin-bottom: 4px; }
-.bullet-list li::before { content: ''; position: absolute; left: 0; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-blue); }
-.bullet-list li .highlight { font-weight: 600; color: #0c4a6e; }
-.code-block { background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-.code-block .comment { color: #64748b; }
-.code-block .keyword { color: #c084fc; }
-.code-block .string { color: #86efac; }
-.code-block .method { color: #67e8f9; }
-.code-block .number { color: #fbbf24; }
-.note-box { border-left: 4px solid var(--accent-blue); background: #eff6ff; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
-.note-box.warning { border-left-color: var(--accent-orange); background: #fff7ed; }
-.note-box.danger { border-left-color: var(--accent-red); background: #fef2f2; }
-.note-box .note-title { font-weight: 700; margin-bottom: 4px; font-size: 14px; }
-.comparison-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; border-radius: 8px; overflow: hidden; }
-.comparison-table th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
-.comparison-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-.comparison-table tr:nth-child(even) td { background: #f8fafc; }
-.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
-.footer { background: #fff; border-radius: 12px; box-shadow: var(--card-shadow); padding: 20px; margin-top: 24px; }
-.footer h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
-.progress-bar { width: 100%; height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
-.progress-bar .progress-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #0ea5e9, var(--accent-purple)); }
-.progress-text { font-size: 13px; color: #64748b; text-align: center; margin-bottom: 16px; }
-.next-preview { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-radius: 8px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px; }
-.next-preview .next-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
-.next-preview .next-content h5 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-.next-preview .next-content p { font-size: 13px; color: #475569; }
-@media print { body { background: #fff; } .header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; } .module-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; } .code-block { background: #f1f5f9 !important; color: #1e293b !important; border: 1px solid #e2e8f0; } }
-@media (max-width: 640px) { .header h1 { font-size: 22px; } .container { padding: 16px 12px 32px; } .module-card .card-body { padding: 16px; } .code-block { font-size: 12px; padding: 12px 14px; } .comparison-table { font-size: 13px; } }
-</style>
-    <link rel="stylesheet" href="/assets/reading-theme.css">
-    <script defer src="/assets/theme.js"></script>
+<title>反射原理</title>
 </head>
 <body>
-<div class="header">
-  <div class="subtitle">Java 中高级开发面试知识点复习 · 每天一个小节</div>
-  <h1>Day 7 — 反射的性能开销、在实际框架中的应用（Spring IOC/DI）</h1>
-  <div class="tag">模块：Java基础 · 泛型与反射</div>
-</div>
-<div class="container">
-<div class="module-card">
-  <div class="card-header">
-    <span class="card-number">07</span>
-    <span class="card-title">反射的性能开销、在实际框架中的应用（Spring IOC/DI）</span>
-  </div>
-  <div class="card-body">
-    <div class="section"><h3><span class="icon" style="background:var(--accent-blue)">📖</span>反射是什么？为什么需要它？</h3>
-      <div class="content"><p>反射（Reflection）是Java提供的<strong>运行时自省</strong>机制，允许程序在运行期间动态获取类的信息并调用其成员。</p>
-<ul class="bullet-list">
-<li>可以在运行时获取类的构造方法、字段、方法、注解等所有信息</li>
-<li>支持运行时动态创建对象、调用方法、修改字段值</li>
-<li>是几乎所有Java框架（Spring、MyBatis、Jackson等）的底层基石</li>
-</ul>
-<div class="note-box">
-<div class="note-title">💡 核心能力</div>
-<p>获取Class对象 → 反射获取成员 → 动态调用/实例化。这是反射的三步走。</p>
-</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-red)">🔬</span>获取Class对象的三种方式</h3>
-      <div class="content"><div class="code-block"><span class="keyword">Class</span>&lt;?&gt; clazz1 = <span class="method">Person.class</span>;                    <span class="comment">// 1. 类字面量（编译期检查，最推荐）</span>
-<span class="keyword">Class</span>&lt;?&gt; clazz2 = person.<span class="method">getClass</span>();           <span class="comment">// 2. 实例.getClass()（运行期获取）</span>
-<span class="keyword">Class</span>&lt;?&gt; clazz3 = <span class="method">Class.forName</span>(<span class="string">"com.example.Person"</span>); <span class="comment">// 3. forName（类加载器，最灵活）</span></div>
-<ul class="bullet-list">
-<li><span class="highlight">forName</span> 会触发类的初始化（执行静态块），而 <code>.class</code> 不会</li>
-<li>反射获取的Class对象在JVM中是<strong>单例</strong>的，相同类型只存在一份</li>
-</ul></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-purple)">🔒</span>反射的性能开销——面试重点</h3>
-      <div class="content"><p>反射的核心痛点：<strong>性能不如直接调用</strong>。面试官常问"反射为什么慢"和"如何优化"。</p>
+<main class="lesson-body">
 
-<h4 style="margin:12px 0 6px;font-size:15px;">性能差距对比</h4>
-<table class="comparison-table">
-<tr><th>方式</th><th>相对性能</th><th>原因</th></tr>
-<tr><td>直接调用</td><td>1x（基准）</td><td>编译期绑定，JVM可直接优化（内联、逃逸分析）</td></tr>
-<tr><td>普通反射</td><td>~10x~ 慢</td><td>运行时动态查找方法、安全检查、未内联</td></tr>
-<tr><td>关闭安全检查后</td><td>~1x~ 接近</td><td><code>setAccessible(true)</code> 跳过访问检查</td></tr>
-<tr><td>MethodHandle</td><td>~2x~ 慢</td><td>Java 7+ 新API，更接近直接调用</td></tr>
+<!-- ========== 第 1 站 ========== -->
+<section class="station reveal" id="s1">
+<div class="station-head">
+<span class="station-no">第 1 站</span>
+<h2>面试官的连环问</h2>
+</div>
+
+<div class="think">
+<p class="think-q">面试官：反射为什么慢？Spring 的 IoC 是怎么用反射实现的？setAccessible(true) 到底做了什么？</p>
+<p>三个问题，层层递进，考的不只是"会用反射"，而是你能否从<strong>JVM 底层</strong>解释它的开销来源，以及在真实框架中如何驾驭它。</p>
+</div>
+
+<p>反射（Reflection）是 Java 提供的<strong>运行时自省</strong>机制——程序可以在运行期间动态获取类的字段、方法、构造器等信息并加以操作。几乎所有主流框架（Spring、MyBatis、Jackson、Hibernate）都以此作为底层基石。</p>
+
+<p>但反射也是面试中被"拷问"最多的话题之一，因为：</p>
+<ul>
+  <li>它<strong>慢</strong>——比直接调用慢 10 ~ 50 倍</li>
+  <li>它<strong>危险</strong>——可以绕过 private 访问控制</li>
+  <li>它<strong>无处不在</strong>——框架离不开它</li>
+</ul>
+
+<div class="takeaway">
+<span class="takeaway-label">本篇主线</span>
+<p>反射 API → 性能开销根因 → setAccessible 原理 → Spring IoC 实战 → 优化方案。走完之后，你将拥有一条完整的反射知识链。</p>
+</div>
+</section>
+
+<!-- ========== 第 2 站 ========== -->
+<section class="station reveal" id="s2">
+<div class="station-head">
+<span class="station-no">第 2 站</span>
+<h2>反射核心 API 全景</h2>
+</div>
+
+<p>反射的核心类只有四个，全部位于 <code>java.lang.reflect</code> 包下：</p>
+
+<table class="nb-table">
+<thead>
+  <tr><th>核心类</th><th>职责</th><th>关键方法</th></tr>
+</thead>
+<tbody>
+  <tr><td><code>Class&lt;?&gt;</code></td><td>类的运行时描述，反射入口</td><td><code>forName()</code>、<code>getDeclaredField()</code>、<code>getDeclaredMethod()</code></td></tr>
+  <tr><td><code>Field</code></td><td>字段句柄</td><td><code>get()</code>、<code>set()</code></td></tr>
+  <tr><td><code>Method</code></td><td>方法句柄</td><td><code>invoke()</code></td></tr>
+  <tr><td><code>Constructor</code></td><td>构造器句柄</td><td><code>newInstance()</code></td></tr>
+</tbody>
 </table>
 
-<h4 style="margin:12px 0 6px;font-size:15px;">为什么慢？三大原因</h4>
-<ul class="bullet-list">
-<li><strong>动态查找</strong>：每次都要通过方法名/参数类型在运行时查找方法，无法编译期优化</li>
-<li><strong>安全检查</strong>：默认进行权限检查（public/protected/private），消耗CPU</li>
-<li><strong>无法内联</strong>：JIT编译器无法对反射调用做内联优化（早期版本），无法做逃逸分析和GC优化</li>
+<p>获取 <code>Class</code> 对象有三种方式，区别在于是否触发类的初始化：</p>
+
+<div class="srcbox">
+<div class="srcbox-head">获取 Class 对象的三种方式</div>
+<div class="srcbox-file"><span class="c">// 方式一：类字面量 — 编译期检查，不触发初始化</span>
+<span class="k">Class</span>&lt;?&gt; clazz1 = <span class="t">Person</span>.<span class="n">class</span>;
+
+<span class="c">// 方式二：实例方法 — 需要已有对象</span>
+<span class="k">Class</span>&lt;?&gt; clazz2 = person.<span class="n">getClass</span>();
+
+<span class="c">// 方式三：forName — 最灵活，会触发 static 块</span>
+<span class="k">Class</span>&lt;?&gt; clazz3 = <span class="t">Class</span>.<span class="n">forName</span>(<span class="n">"com.example.Person"</span>);</div>
+</div>
+
+<p>下面是完整的反射使用流程——动态创建对象、读写字段、调用方法：</p>
+
+<div class="srcbox">
+<div class="srcbox-head">反射典型用法示例</div>
+<div class="srcbox-file"><span class="k">Class</span>&lt;?&gt; clazz = <span class="t">Class</span>.<span class="n">forName</span>(<span class="n">"com.example.UserService"</span>);
+
+<span class="c">// 1. 构造器创建实例</span>
+<span class="k">Constructor</span>&lt;?&gt; ctor = clazz.<span class="n">getDeclaredConstructor</span>(<span class="t">String</span>.<span class="n">class</span>);
+ctor.<span class="n">setAccessible</span>(<span class="k">true</span>);
+<span class="t">Object</span> instance = ctor.<span class="n">newInstance</span>(<span class="n">"admin"</span>);
+
+<span class="c">// 2. 读取 / 写入字段</span>
+<span class="k">Field</span> field = clazz.<span class="n">getDeclaredField</span>(<span class="n">"name"</span>);
+field.<span class="n">setAccessible</span>(<span class="k">true</span>);
+field.<span class="n">set</span>(instance, <span class="n">"Alice"</span>);
+<span class="t">Object</span> val = field.<span class="n">get</span>(instance);
+
+<span class="c">// 3. 调用方法</span>
+<span class="k">Method</span> method = clazz.<span class="n">getDeclaredMethod</span>(<span class="n">"greet"</span>, <span class="t">String</span>.<span class="n">class</span>);
+method.<span class="n">setAccessible</span>(<span class="k">true</span>);
+<span class="t">Object</span> result = method.<span class="n">invoke</span>(instance, <span class="n">"World"</span>);</div>
+</div>
+
+<div class="takeaway">
+<span class="takeaway-label">小结</span>
+<p>反射三步走：获取 Class → 定位成员（Field / Method / Constructor）→ 动态操作。框架中的一切魔法都建立在这三步之上。</p>
+</div>
+</section>
+
+<!-- ========== 第 3 站 ========== -->
+<section class="station reveal" id="s3">
+<div class="station-head">
+<span class="station-no">第 3 站</span>
+<h2>性能分析：反射为什么慢？</h2>
+</div>
+
+<p>先看一组基准测试数据（JMH，单线程，百万次调用耗时）：</p>
+
+<table class="nb-table">
+<thead>
+  <tr><th>调用方式</th><th>耗时 (ms / 百万次)</th><th>相对倍数</th></tr>
+</thead>
+<tbody>
+  <tr><td>直接调用 <code>obj.greet()</code></td><td>~2 ms</td><td>1x</td></tr>
+  <tr><td>反射 <code>Method.invoke()</code></td><td>~40 ms</td><td>~20x</td></tr>
+  <tr><td>反射 + <code>setAccessible(true)</code></td><td>~25 ms</td><td>~12x</td></tr>
+  <tr><td>反射 + 含装箱 (int → Integer)</td><td>~90 ms</td><td>~45x</td></tr>
+  <tr><td>MethodHandle</td><td>~5 ms</td><td>~2.5x</td></tr>
+</tbody>
+</table>
+
+<p>反射的慢来源于<strong>四个层面</strong>：</p>
+
+<div class="fig">
+<svg viewBox="0 0 600 220" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowR" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#0ea5e9"/></marker>
+  </defs>
+  <rect x="10" y="10" width="130" height="80" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="75" y="38" text-anchor="middle" font-size="12" font-weight="700" fill="#1e3a5f">动态查找</text>
+  <text x="75" y="58" text-anchor="middle" font-size="10" fill="#475569">方法名 + 参数签名</text>
+  <text x="75" y="72" text-anchor="middle" font-size="10" fill="#475569">线性搜索方法表</text>
+  <rect x="160" y="10" width="130" height="80" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="225" y="38" text-anchor="middle" font-size="12" font-weight="700" fill="#7f1d1d">安全检查</text>
+  <text x="225" y="58" text-anchor="middle" font-size="10" fill="#475569">access modifier 校验</text>
+  <text x="225" y="72" text-anchor="middle" font-size="10" fill="#475569">SecurityManager 调用</text>
+  <rect x="310" y="10" width="130" height="80" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="375" y="38" text-anchor="middle" font-size="12" font-weight="700" fill="#14532d">装箱 / 拆箱</text>
+  <text x="375" y="58" text-anchor="middle" font-size="10" fill="#475569">参数 Object[] 包装</text>
+  <text x="375" y="72" text-anchor="middle" font-size="10" fill="#475569">基本类型开销巨大</text>
+  <rect x="460" y="10" width="130" height="80" rx="8" fill="#faf5ff" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="525" y="38" text-anchor="middle" font-size="12" font-weight="700" fill="#581c87">JIT 无法优化</text>
+  <text x="525" y="58" text-anchor="middle" font-size="10" fill="#475569">不能内联 invoke</text>
+  <text x="525" y="72" text-anchor="middle" font-size="10" fill="#475569">逃逸分析失效</text>
+  <line x1="75"  y1="100" x2="75"  y2="140" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrowR)"/>
+  <line x1="225" y1="100" x2="225" y2="140" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arrowR)"/>
+  <line x1="375" y1="100" x2="375" y2="140" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrowR)"/>
+  <line x1="525" y1="100" x2="525" y2="140" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arrowR)"/>
+
+  <rect x="50" y="150" width="500" height="55" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="300" y="175" text-anchor="middle" font-size="13" font-weight="700" fill="#92400e">综合开销：反射比直接调用慢 10 ~ 50 倍</text>
+  <text x="300" y="195" text-anchor="middle" font-size="11" fill="#78350f">调用次数少时无感，热循环中性能差距被放大</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> 反射性能开销的四个来源</figcaption>
+</div>
+
+<h3>逐一拆解四大开销</h3>
+<p><strong>1. 动态查找</strong>：直接调用在编译期就确定了方法的偏移量（vtable index），而反射每次需要通过方法名和参数类型在 <code>Method[]</code> 中做<strong>线性搜索</strong>。<strong>2. 安全检查</strong>：JVM 在每次 <code>invoke</code>/<code>set</code>/<code>get</code> 前都要校验调用者权限，涉及 <code>SecurityManager</code> 和类加载器层级的比对。<strong>3. 装箱/拆箱</strong>：<code>Method.invoke(Object, Object...)</code> 参数为 <code>Object[]</code>，基本类型必须自动装箱为 <code>Integer</code>/<code>Double</code> 等，返回值同理。<strong>4. JIT 无法优化</strong>：JIT 编译器依赖<strong>静态类型信息</strong>做方法内联和逃逸分析，反射目标方法在编译期未知，只能走<em>去优化</em>路径。</p>
+
+<div class="formula">
+<p>反射实际开销 ≈ 动态查找 + 安全检查 + 装箱拆箱 + JIT 去优化</p>
+</div>
+
+<div class="crack">
+<span class="crack-label">面试破解点</span>
+<p>被问"反射为什么慢"时，答出以上四点即可拿满分。如果能补一句"在 JDK 8 之后，HotSpot 引入了 <code>ReflectionFactory</code> 的 inflation 机制，对频繁调用的反射方法会动态生成字节码来加速"，会进一步加分。</p>
+</div>
+</section>
+
+<!-- ========== 第 4 站 ========== -->
+<section class="station reveal" id="s4">
+<div class="station-head">
+<span class="station-no">第 4 站</span>
+<h2>setAccessible(true)：打开潘多拉之盒</h2>
+</div>
+
+<p><code>setAccessible(true)</code> 是 <code>AccessibleObject</code>（<code>Field</code>、<code>Method</code>、<code>Constructor</code> 的父类）上的方法，它做了<strong>一件事</strong>：告诉 JVM 在后续调用时<strong>跳过 Java 语言层面的访问控制检查</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head">setAccessible 效果对比</div>
+<div class="srcbox-file"><span class="k">class</span> <span class="t">Secret</span> {
+    <span class="k">private</span> <span class="t">String</span> password = <span class="n">"s3cret"</span>;
+}
+
+<span class="t">Secret</span> obj = <span class="k">new</span> <span class="t">Secret</span>();
+<span class="k">Field</span> f = <span class="t">Secret</span>.<span class="n">class</span>.<span class="n">getDeclaredField</span>(<span class="n">"password"</span>);
+
+<span class="c">// f.get(obj);  ← 抛出 IllegalAccessException</span>
+
+f.<span class="n">setAccessible</span>(<span class="k">true</span>);    <span class="c">// 关闭访问检查</span>
+<span class="t">String</span> pw = (<span class="t">String</span>) f.<span class="n">get</span>(obj);  <span class="c">// 成功读到 "s3cret"</span></div>
+</div>
+
+<h3>它不做什么？</h3>
+<ul>
+  <li><strong>不修改字段的修饰符</strong>：<code>field.getModifiers()</code> 仍然返回 <code>private</code></li>
+  <li><strong>不绕过 JVM 内存保护</strong>：它只是跳过 Java 语言层的访问检查，不涉及底层内存安全</li>
+  <li><strong>不是免费的</strong>：首次调用时仍需一次安全检查来确定"是否允许你 setAccessible"</li>
 </ul>
 
-<h4 style="margin:12px 0 6px;font-size:15px;">优化手段</h4>
-<ul class="bullet-list">
-<li><code>setAccessible(true)</code>：跳过访问检查，性能提升显著</li>
-<li><strong>Cached Method/Field</strong>：缓存获取到的Method/Field对象，避免重复查找</li>
-<li><strong>MethodHandle / VarHandle</strong>（Java 7+）：更接近直接调用的反射替代品</li>
-<li><strong>CGProxy</strong>：Spring AOP等框架用CGLIB/ByteBuddy生成字节码，替代反射调用</li>
-</ul>
+<h3>JDK 9+ 模块系统的限制</h3>
 
-<div class="note-box warning">
-<div class="note-title">⚠️ 面试高频</div>
-<p>Spring中反射使用频率极高（Bean创建、AOP、属性注入），但Spring会通过MethodHandle和缓存大幅优化，所以实际框架中使用反射并不一定慢——关键看是否有缓存和优化的策略。</p>
-</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-cyan)">🛠️</span>反射在Spring IOC中的核心应用</h3>
-      <div class="content"><p>Spring IOC/DI几乎全程依赖反射——这是反射最大的用武之地。</p>
+<p>Java 9 引入了模块系统（JPMS），对 <code>setAccessible(true)</code> 施加了新的约束：</p>
 
-<h4 style="margin:12px 0 6px;font-size:15px;">Spring使用反射的场景</h4>
-<ul class="bullet-list">
-<li><strong>Bean实例化</strong>：通过 <code>Class.newInstance()</code>（旧）/ <code>Constructor.newInstance()</code>（新）创建对象</li>
-<li><strong>属性注入</strong>：通过 <code>Field.set()</code> 注入依赖（@Autowired底层实现）</li>
-<li><strong>方法注入</strong>：通过 <code>Method.invoke()</code> 调用Setter/初始化方法</li>
-<li><strong>@Bean方法调用</strong>：解析@Configuration中的@Bean注解方法并调用</li>
-</ul>
+<div class="srcbox">
+<div class="srcbox-head">JDK 9+ 模块限制</div>
+<div class="srcbox-file"><span class="c">// 默认情况下，跨模块反射 private 成员会抛出：</span>
+<span class="c">// java.lang.reflect.InaccessibleObjectException</span>
 
-<div class="code-block"><span class="comment">// Spring 内部简化的Bean创建逻辑</span>
-<span class="keyword">public</span> Object <span class="method">createBean</span>(Class&lt;?&gt; beanClass) {
-    <span class="comment">// 1. 通过反射创建实例</span>
-    Constructor&lt;?&gt; constructor = beanClass.<span class="method">getDeclaredConstructor</span>();
-    constructor.<span class="method">setAccessible</span>(<span class="keyword">true</span>); <span class="comment">// 关键优化：跳过安全检查</span>
-    Object bean = constructor.<span class="method">newInstance</span>();
-    
-    <span class="comment">// 2. 通过反射注入依赖</span>
-    <span class="keyword">for</span> (Field field : beanClass.<span class="method">getDeclaredFields</span>()) {
-        field.<span class="method">setAccessible</span>(<span class="keyword">true</span>); <span class="comment">// 跳过private检查</span>
-        Object dependency = resolveDependency(field);
-        field.<span class="method">set</span>(bean, dependency);  <span class="comment">// 属性注入</span>
-    }
-    
-    <span class="keyword">return</span> bean;
+<span class="c">// 解决方案一：启动参数开放包</span>
+<span class="n">--add-opens java.base/java.lang=ALL-UNNAMED</span>
+
+<span class="c">// 解决方案二：模块声明中显式 open</span>
+<span class="k">module</span> myapp {
+    <span class="k">opens</span> com.example.model;  <span class="c">// 允许外部反射访问</span>
 }</div>
+</div>
 
-<div class="note-box">
-<div class="note-title">🎯 关键优化点</div>
-<p>Spring大量使用 <code>setAccessible(true)</code> 来消除反射的性能损失。同时通过 <strong>CachedIntrospectionResults</strong> 缓存Bean的信息，避免重复反射查找。</p>
-</div></div></div>
-    <div class="section"><h3><span class="icon" style="background:var(--accent-pink)">🎤</span>面试高频问题与回答思路</h3>
-      <div class="content"><ul class="bullet-list">
-<li><strong>Q: 反射和直接调用的区别？</strong>
-<p>A: 反射是运行时动态绑定，直接调用是编译期静态绑定。反射慢但灵活，直接调用快但缺乏灵活性。</p>
-</li>
-<li><strong>Q: 反射为什么慢？怎么优化？</strong>
-<p>A: ①动态查找方法 ②安全检查 ③无法内联优化。优化：setAccessible(true)、缓存Method对象、使用MethodHandle、框架层用CGLIB/ByteBuddy生成字节码。</p>
-</li>
-<li><strong>Q: Spring中哪里用了反射？</strong>
-<p>A: Bean实例化、依赖注入(Autowired)、@Bean方法调用、AOP代理创建等。Spring通过缓存和setAccessible优化了性能。</p>
-</li>
-<li><strong>Q: Class.forName 和 ClassLoader.loadClass 区别？</strong>
-<p>A: forName会触发类初始化（执行静态块），loadClass只加载不初始化。forName内部委托给ClassLoader.loadClass但多了一步初始化。</p>
-</li>
-<li><strong>Q: 反射能访问private成员吗？</strong>
-<p>A: 可以，通过 <code>setAccessible(true)</code> 可以绕过访问控制检查，但SecurityManager可能会阻止。</p>
-</li>
-</ul></div></div>
-  </div>
+<div class="think">
+<p class="think-q">Spring 大量使用 setAccessible(true) 来注入 private 字段——JDK 9+ 会不会让 Spring 跑不起来？</p>
+<p>Spring 5.x+ 在启动时会检测模块系统，并通过 <code>sun.misc.Unsafe</code> 或直接使用 <code>--add-opens</code> 引导用户配置。大多数场景下，Spring Boot 已经帮你在构建工具中添加了必要的 JVM 参数。</p>
 </div>
-<div class="footer">
-  <h4>📊 今日总结</h4>
-  <div class="progress-bar"><div class="progress-fill" style="width: 5%"></div></div>
-  <div class="progress-text">7 / 142 知识点</div>
-  <div class="next-preview">
-    <div class="next-icon">👉</div>
-    <div class="next-content">
-      <h5>明日预告</h5>
-      <p>注解的定义、使用及元注解</p>
-    </div>
-  </div>
+
+<div class="takeaway">
+<span class="takeaway-label">安全启示</span>
+<p>setAccessible(true) 是框架利器，但在业务代码中应<strong>谨慎使用</strong>。它打破了封装，可能引发难以追踪的 bug，且在 JDK 9+ 中受到模块系统限制。</p>
 </div>
+</section>
+
+<!-- ========== 第 5 站 ========== -->
+<section class="station reveal" id="s5">
+<div class="station-head">
+<span class="station-no">第 5 站</span>
+<h2>Spring IoC 中的反射：依赖注入的引擎</h2>
 </div>
-<div style="text-align:center; padding:20px; color:#aaa; font-size:13px;">Java 中高级面试复习 · Day 7/142</div>
+
+<p>Spring IoC 容器的核心职责是<strong>创建 Bean 并组装依赖</strong>，整个过程高度依赖反射。让我们拆解三个关键环节：</p>
+
+<div class="fig">
+<svg viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowB" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#0ea5e9"/></marker>
+  </defs>
+  <rect x="10" y="30" width="150" height="100" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="85" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="#1e3a5f">① 实例化</text>
+  <text x="85" y="80" text-anchor="middle" font-size="10" fill="#475569">Constructor</text>
+  <text x="85" y="95" text-anchor="middle" font-size="10" fill="#475569">.newInstance()</text>
+  <text x="85" y="115" text-anchor="middle" font-size="9" fill="#94a3b8">创建 Bean 实例</text>
+  <rect x="220" y="30" width="150" height="100" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="295" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="#14532d">② 注入依赖</text>
+  <text x="295" y="80" text-anchor="middle" font-size="10" fill="#475569">Field.set()</text>
+  <text x="295" y="95" text-anchor="middle" font-size="10" fill="#475569">@Autowired</text>
+  <text x="295" y="115" text-anchor="middle" font-size="9" fill="#94a3b8">填充属性值</text>
+  <rect x="430" y="30" width="150" height="100" rx="10" fill="#faf5ff" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="505" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="#581c87">③ 初始化回调</text>
+  <text x="505" y="80" text-anchor="middle" font-size="10" fill="#475569">Method.invoke()</text>
+  <text x="505" y="95" text-anchor="middle" font-size="10" fill="#475569">@PostConstruct</text>
+  <text x="505" y="115" text-anchor="middle" font-size="9" fill="#94a3b8">执行初始化方法</text>
+  <line x1="160" y1="80" x2="220" y2="80" stroke="#0ea5e9" stroke-width="2" marker-end="url(#arrowB)"/>
+  <line x1="370" y1="80" x2="430" y2="80" stroke="#0ea5e9" stroke-width="2" marker-end="url(#arrowB)"/>
+</svg>
+<figcaption><span class="fig-no">图 2</span> Spring Bean 创建流程中的三步反射调用</figcaption>
+</div>
+
+<h3>Step 1：Constructor.newInstance() — 实例化</h3>
+
+<div class="srcbox">
+<div class="srcbox-head">Spring 简化版 Bean 实例化</div>
+<div class="srcbox-file"><span class="c">// AbstractAutowireCapableBeanFactory 简化逻辑</span>
+<span class="k">protected</span> <span class="t">Object</span> <span class="n">instantiateBean</span>(<span class="t">Class</span>&lt;?&gt; beanClass) {
+    <span class="k">Constructor</span>&lt;?&gt; ctor = beanClass.<span class="n">getDeclaredConstructor</span>();
+    ctor.<span class="n">setAccessible</span>(<span class="k">true</span>);           <span class="c">// 跳过 private 构造器检查</span>
+    <span class="k">return</span> ctor.<span class="n">newInstance</span>();           <span class="c">// 反射创建实例</span>
+}</div>
+</div>
+
+<p>Spring 还会根据 Bean 定义选择最合适的构造器：如果有 <code>@Autowired</code> 标注的构造器，则优先使用；否则使用默认无参构造器。对于多参数构造器，Spring 会通过 <code>ConstructorResolver</code> 做参数匹配。</p>
+
+<h3>Step 2：Field.set() — 依赖注入</h3>
+
+<div class="srcbox">
+<div class="srcbox-head">@Autowired 字段注入的底层实现</div>
+<div class="srcbox-file"><span class="c">// AutowiredAnnotationBeanPostProcessor 简化逻辑</span>
+<span class="k">private void</span> <span class="n">injectField</span>(<span class="t">Object</span> bean, <span class="t">Field</span> field, <span class="t">Object</span> dependency) {
+    field.<span class="n">setAccessible</span>(<span class="k">true</span>);              <span class="c">// 允许注入 private 字段</span>
+    field.<span class="n">set</span>(bean, dependency);              <span class="c">// 将依赖注入到目标 Bean</span>
+}</div>
+</div>
+
+<h3>Step 3：Method.invoke() — 初始化回调</h3>
+
+<div class="srcbox">
+<div class="srcbox-head">@PostConstruct 的执行</div>
+<div class="srcbox-file"><span class="c">// InitDestroyAnnotationBeanPostProcessor 简化逻辑</span>
+<span class="k">private void</span> <span class="n">invokePostConstruct</span>(<span class="t">Object</span> bean, <span class="t">Method</span> method) {
+    method.<span class="n">setAccessible</span>(<span class="k">true</span>);
+    method.<span class="n">invoke</span>(bean);                     <span class="c">// 调用 @PostConstruct 方法</span>
+}</div>
+</div>
+
+<h3>Spring 的缓存优化</h3>
+
+<p>Spring 并不会每次都重新反射查找。它使用 <code>CachedIntrospectionResults</code> 将 Bean 的字段和方法信息缓存起来，后续直接命中缓存：</p>
+
+<div class="srcbox">
+<div class="srcbox-head">Spring 反射缓存机制</div>
+<div class="srcbox-file"><span class="c">// CachedIntrospectionResults 简化示意</span>
+<span class="k">private static final</span> <span class="t">ConcurrentMap</span>&lt;<span class="t">Class</span>&lt;?&gt;, <span class="t">BeanInfo</span>&gt; cache
+    = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();
+
+<span class="k">static</span> <span class="t">BeanInfo</span> <span class="n">forClass</span>(<span class="t">Class</span>&lt;?&gt; clazz) {
+    <span class="k">return</span> cache.<span class="n">computeIfAbsent</span>(clazz, c -&gt; {
+        <span class="c">// 只在第一次做完整反射扫描</span>
+        <span class="k">return new</span> <span class="t">BeanInfo</span>(c.<span class="n">getDeclaredFields</span>(),
+                            c.<span class="n">getDeclaredMethods</span>());
+    });
+}</div>
+</div>
+
+<div class="takeaway">
+<span class="takeaway-label">关键洞察</span>
+<p>Spring IoC 本质上是"反射 + 缓存 + 策略模式"的组合。Bean 定义解析只做一次，后续的依赖注入全部走缓存，因此 Spring 的实际运行性能远好于"裸反射"。</p>
+</div>
+</section>
+
+<!-- ========== 第 6 站 ========== -->
+<section class="station reveal" id="s6">
+<div class="station-head">
+<span class="station-no">第 6 站</span>
+<h2>优化方案：让反射飞起来</h2>
+</div>
+
+<p>面对反射的性能问题，Java 生态提供了多条优化路径，按"改造成本"从低到高排列：</p>
+
+<h3>方案一：缓存反射对象</h3>
+
+<div class="srcbox">
+<div class="srcbox-head">缓存 Method / Field，避免重复查找</div>
+<div class="srcbox-file"><span class="k">private static final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Method</span>&gt; METHOD_CACHE = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+
+<span class="k">public</span> <span class="t">Object</span> <span class="n">cachedInvoke</span>(<span class="t">Object</span> target, <span class="t">String</span> name, <span class="t">Class</span>&lt;?&gt;... paramTypes) {
+    <span class="t">Method</span> m = METHOD_CACHE.<span class="n">computeIfAbsent</span>(name, n -&gt; {
+        <span class="k">try</span> {
+            <span class="t">Method</span> method = target.<span class="n">getClass</span>().<span class="n">getDeclaredMethod</span>(n, paramTypes);
+            method.<span class="n">setAccessible</span>(<span class="k">true</span>);
+            <span class="k">return</span> method;
+        } <span class="k">catch</span> (<span class="t">NoSuchMethodException</span> e) { <span class="k">throw new</span> <span class="t">RuntimeException</span>(e); }
+    });
+    <span class="k">return</span> m.<span class="n">invoke</span>(target, args);
+}</div>
+</div>
+
+<p>效果：消除"动态查找"开销，性能提升约 <strong>2-3 倍</strong>。这是最低成本的优化，Spring、MyBatis 都采用此策略。</p>
+
+<h3>方案二：MethodHandle（JDK 7+）</h3>
+
+<div class="srcbox">
+<div class="srcbox-head">使用 MethodHandle 替代 Method.invoke</div>
+<div class="srcbox-file"><span class="t">MethodHandles.Lookup</span> lookup = <span class="t">MethodHandles</span>.<span class="n">lookup</span>();
+<span class="t">MethodType</span> mt = <span class="t">MethodType</span>.<span class="n">methodType</span>(<span class="t">String</span>.<span class="n">class</span>, <span class="t">String</span>.<span class="n">class</span>);
+<span class="t">MethodHandle</span> mh = lookup.<span class="n">findVirtual</span>(<span class="t">UserService</span>.<span class="n">class</span>, <span class="n">"greet"</span>, mt);
+
+<span class="c">// 调用方式：比 Method.invoke 更接近直接调用</span>
+<span class="t">String</span> result = (<span class="t">String</span>) mh.<span class="n">invokeExact</span>(userService, <span class="n">"World"</span>);</div>
+</div>
+
+<p>MethodHandle 模拟的是<strong>字节码级别的调用</strong>，没有 <code>Method.invoke</code> 的参数装箱和安全检查开销。JIT 可以对 <code>invokeExact</code> 做内联优化，性能接近直接调用（约 2-3x 慢于直接调用）。</p>
+
+<h3>方案三：VarHandle（JDK 9+）</h3>
+
+<div class="srcbox">
+<div class="srcbox-head">用 VarHandle 替代 Field.get / set</div>
+<div class="srcbox-file"><span class="k">private static final</span> <span class="t">VarHandle</span> NAME_VH;
+<span class="k">static</span> {
+    <span class="k">try</span> {
+        NAME_VH = <span class="t">MethodHandles</span>.<span class="n">privateLookupIn</span>(<span class="t">User</span>.<span class="n">class</span>, <span class="t">MethodHandles</span>.<span class="n">lookup</span>())
+            .<span class="n">findVar</span>(<span class="t">User</span>.<span class="n">class</span>, <span class="n">"name"</span>, <span class="t">String</span>.<span class="n">class</span>);
+    } <span class="k">catch</span> (<span class="t">Exception</span> e) { <span class="k">throw new</span> <span class="t">Error</span>(e); }
+}
+
+<span class="c">// 读写速度等同于直接访问，且支持 CAS 操作</span>
+NAME_VH.<span class="n">set</span>(user, <span class="n">"Alice"</span>);
+<span class="t">String</span> name = (<span class="t">String</span>) NAME_VH.<span class="n">get</span>(user);</div>
+</div>
+
+<p>VarHandle 是 Field 的高性能替代品，不仅支持普通读写，还支持 <code>compareAndSet</code> 等原子操作，被 Netty 等高性能框架广泛使用。</p>
+
+<h3>方案四：字节码生成（CGLIB / ByteBuddy）</h3>
+
+<div class="srcbox">
+<div class="srcbox-head">通过代码生成彻底消除反射</div>
+<div class="srcbox-file"><span class="c">// ByteBuddy 示例：生成一个直接调用目标方法的代理</span>
+<span class="t">Class</span>&lt;?&gt; proxyClass = <span class="k">new</span> <span class="t">ByteBuddy</span>()
+    .<span class="n">subclass</span>(<span class="t">UserService</span>.<span class="n">class</span>)
+    .<span class="n">method</span>(<span class="t">ElementMatchers</span>.<span class="n">named</span>(<span class="n">"greet"</span>))
+    .<span class="n">intercept</span>(<span class="t">MethodDelegation</span>.<span class="n">to</span>(loggingInterceptor))
+    .<span class="n">make</span>()
+    .<span class="n">load</span>(<span class="n">getClass</span>().<span class="n">getClassLoader</span>())
+    .<span class="n">getLoaded</span>();
+
+<span class="c">// 生成后的类里是直接方法调用，无反射开销</span>
+<span class="t">UserService</span> proxy = (<span class="t">UserService</span>) proxyClass.<span class="n">getDeclaredConstructor</span>().<span class="n">newInstance</span>();</div>
+</div>
+
+<p>CGLIB 和 ByteBuddy 在<strong>运行时生成新的字节码</strong>，将反射调用转化为直接方法调用。Spring AOP 就是基于 CGLIB 实现的——这也是为什么 Spring 的 AOP 代理性能远好于纯反射。</p>
+
+<div class="fig">
+<svg viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Y axis -->
+  <line x1="60" y1="10" x2="60" y2="170" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="55" y="20" text-anchor="end" font-size="9" fill="#94a3b8">快</text>
+  <text x="55" y="165" text-anchor="end" font-size="9" fill="#94a3b8">慢</text>
+  <!-- Bars -->
+  <rect x="90"  y="25" width="80" height="22" rx="4" fill="#22c55e"/>
+  <text x="130" y="40" text-anchor="middle" font-size="10" fill="#fff" font-weight="600">直接调用</text>
+  <text x="175" y="40" font-size="9" fill="#64748b">1x</text>
+
+  <rect x="90"  y="55" width="100" height="22" rx="4" fill="#0ea5e9"/>
+  <text x="140" y="70" text-anchor="middle" font-size="10" fill="#fff" font-weight="600">VarHandle</text>
+  <text x="195" y="70" font-size="9" fill="#64748b">~1.5x</text>
+
+  <rect x="90"  y="85" width="130" height="22" rx="4" fill="#8b5cf6"/>
+  <text x="155" y="100" text-anchor="middle" font-size="10" fill="#fff" font-weight="600">MethodHandle</text>
+  <text x="225" y="100" font-size="9" fill="#64748b">~2.5x</text>
+
+  <rect x="90"  y="115" width="200" height="22" rx="4" fill="#f97316"/>
+  <text x="190" y="130" text-anchor="middle" font-size="10" fill="#fff" font-weight="600">反射 + 缓存 + setAccessible</text>
+  <text x="295" y="130" font-size="9" fill="#64748b">~12x</text>
+
+  <rect x="90"  y="145" width="300" height="22" rx="4" fill="#ef4444"/>
+  <text x="240" y="160" text-anchor="middle" font-size="10" fill="#fff" font-weight="600">裸反射 Method.invoke（含装箱）</text>
+  <text x="395" y="160" font-size="9" fill="#64748b">~45x</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span> 各方案性能对比（调用耗时，越低越快）</figcaption>
+</div>
+
+<div class="crack">
+<span class="crack-label">面试加分项</span>
+<p>面试官问"如何优化反射"时，按层次回答：① 缓存反射对象（成本最低）→ ② 使用 MethodHandle / VarHandle（JDK 原生替代）→ ③ 用 CGLIB / ByteBuddy 生成字节码（框架级方案，彻底消除反射）。再补充 Spring 的实际做法，完美。</p>
+</div>
+</section>
+
+<!-- ========== 第 7 站 ========== -->
+<section class="station reveal" id="s7">
+<div class="station-head">
+<span class="station-no">第 7 站</span>
+<h2>总结：何时该用反射？何时该避免？</h2>
+</div>
+
+<table class="nb-table">
+<thead>
+  <tr><th>维度</th><th>直接调用</th><th>反射</th><th>MethodHandle</th><th>字节码生成</th></tr>
+</thead>
+<tbody>
+  <tr><td>性能</td><td>最快 (1x)</td><td>慢 (10-50x)</td><td>接近直接 (2-3x)</td><td>等同直接 (1x)</td></tr>
+  <tr><td>灵活性</td><td>低：编译期绑定</td><td>高：运行时决定</td><td>高</td><td>中：生成后固定</td></tr>
+  <tr><td>类型安全</td><td>编译期检查</td><td>运行时异常</td><td>部分检查</td><td>生成时检查</td></tr>
+  <tr><td>JDK 要求</td><td>所有版本</td><td>所有版本</td><td>JDK 7+</td><td>第三方库</td></tr>
+  <tr><td>典型使用场景</td><td>业务代码</td><td>框架 / 工具类</td><td>高性能框架</td><td>AOP / 序列化</td></tr>
+</tbody>
+</table>
+
+<h3>反射的适用场景</h3>
+<ul>
+  <li><strong>框架底层</strong>：IoC 容器、ORM 映射、JSON 序列化</li>
+  <li><strong>工具类</strong>：通用拷贝、对比、toString 生成器</li>
+  <li><strong>插件系统</strong>：运行时加载未知类并调用标准接口</li>
+  <li><strong>测试框架</strong>：JUnit 通过反射发现和调用测试方法</li>
+</ul>
+
+<h3>反射应避免的场景</h3>
+<ul>
+  <li><strong>热循环</strong>：每秒调用上万次的方法，应缓存或替换为 MethodHandle</li>
+  <li><strong>可用接口替代</strong>：如果编译期能确定类型，用接口多态代替反射</li>
+  <li><strong>安全敏感代码</strong>：setAccessible 绕过封装，在安全审计严格的系统中应被禁止</li>
+</ul>
+
+<div class="recap">
+<h3>本篇核心回顾</h3>
+<ul>
+  <li>反射四大 API：<code>Class</code>、<code>Field</code>、<code>Method</code>、<code>Constructor</code></li>
+  <li>性能开销四大来源：动态查找、安全检查、装箱拆箱、JIT 无法优化</li>
+  <li><code>setAccessible(true)</code> 跳过访问控制，JDK 9+ 受模块系统限制</li>
+  <li>Spring IoC 通过"反射 + 缓存"实现 Bean 创建与依赖注入</li>
+  <li>优化路径：缓存 → MethodHandle → VarHandle → 字节码生成</li>
+</ul>
+</div>
+
+<div class="takeaway">
+<span class="takeaway-label">一句话总结</span>
+<p>反射是 Java 灵活性的天花板，慢但不可替代。掌握它的开销来源和优化手段，就能在面试中把"反射为什么慢"讲成一个完整的技术故事。</p>
+</div>
+</section>
+
+</main>
 </body>
 </html>

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对象存活判定</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "对象存活判定：引用计数 vs 可达性分析"
+  difficulty: 中级
+  interviewFreq: 极高
+  desc: "Python 用引用计数，Java 用可达性分析——为什么？循环引用怎么处理？finalize() 该不该用？"
+-->
+
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>开场：这个对象还要不要？</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">面试官问："JVM 怎么知道一个对象可以被回收？" 很多人答"没有引用指向它"——这个答案只对了一半。</p>
+  </div>
+
+  <p>垃圾回收的第一步不是"怎么回收"，而是<strong>"怎么判断一个对象还活着"</strong>。如果判错了，要么把活对象删了（程序崩溃），要么把死对象留着（内存泄漏）。这是 GC 最底层的问题。</p>
+
+  <p>业界有两种主流方案：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>方案</th><th>核心思想</th><th>代表语言</th><th>致命弱点</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>引用计数</td><td>给每个对象维护一个计数器</td><td>Python / PHP / Swift</td><td>循环引用</td></tr>
+      <tr><td>可达性分析</td><td>从根节点出发做图遍历</td><td>Java / C# / Go / JS</td><td>需要 STW 或写屏障</td></tr>
+    </tbody>
+  </table>
+
+  <p>Java 选择了可达性分析，Python 选择了引用计数（加上循环引用检测）。<strong>为什么它们做了不同的选择？</strong> 这就是本文要讲清楚的事。</p>
+
+  <div class="crack">
+    <span class="crack-label">面试加分项</span>
+    <p>不要只回答"没有引用就回收"。要说清楚"JVM 用的是可达性分析，不是简单的引用计数，因为引用计数无法处理循环引用"——一句话就把两个方案都点到了。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>引用计数：最直觉的方案</h2>
+  </div>
+
+  <p>引用计数的规则非常简单：</p>
+  <ul>
+    <li>每个对象有一个整型字段 <code>refCount</code></li>
+    <li>有新的引用指向它 → <code>refCount++</code></li>
+    <li>引用离开作用域或被置空 → <code>refCount--</code></li>
+    <li><code>refCount == 0</code> → 立即回收</li>
+  </ul>
+
+  <div class="srcbox">
+    <div class="srcbox-head">引用计数的伪代码</div>
+    <pre class="srcbox-file"><span class="k">class</span> <span class="t">RefCountedObject</span> {
+    <span class="k">int</span> refCount = <span class="n">0</span>;
+
+    <span class="k">void</span> <span class="n">retain</span>()  { refCount++; }
+    <span class="k">void</span> <span class="n">release</span>() {
+        refCount--;
+        <span class="k">if</span> (refCount == <span class="n">0</span>) {
+            <span class="n">deallocate</span>(<span class="k">this</span>);   <span class="c">// 立即回收内存</span>
+        }
+    }
+}</pre>
+  </div>
+
+  <h3>优点</h3>
+  <ul>
+    <li><strong>实时性好</strong>：计数归零的那一刻就回收，不需要等 GC 周期</li>
+    <li><strong>实现简单</strong>：不需要暂停程序，不需要复杂的图遍历</li>
+    <li><strong>回收粒度细</strong>：每次只处理单个对象，停顿极短</li>
+  </ul>
+
+  <h3>致命缺陷：循环引用</h3>
+
+  <figure class="fig">
+    <svg viewBox="0 0 500 220" xmlns="http://www.w3.org/2000/svg">
+      <rect x="40" y="60" width="140" height="100" rx="12" fill="#3b82f6" opacity="0.15" stroke="#3b82f6" stroke-width="2"/>
+      <text x="110" y="95" text-anchor="middle" font-size="16" font-weight="bold" fill="#1e40af">对象 A</text>
+      <text x="110" y="120" text-anchor="middle" font-size="13" fill="#475569">refCount = 1</text>
+      <text x="110" y="142" text-anchor="middle" font-size="12" fill="#94a3b8">field: → B</text>
+      <rect x="320" y="60" width="140" height="100" rx="12" fill="#3b82f6" opacity="0.15" stroke="#3b82f6" stroke-width="2"/>
+      <text x="390" y="95" text-anchor="middle" font-size="16" font-weight="bold" fill="#1e40af">对象 B</text>
+      <text x="390" y="120" text-anchor="middle" font-size="13" fill="#475569">refCount = 1</text>
+      <text x="390" y="142" text-anchor="middle" font-size="12" fill="#94a3b8">field: → A</text>
+      <path d="M180 100 C230 70, 270 70, 320 100" fill="none" stroke="#ef4444" stroke-width="2.5" marker-end="url(#arrowRed)"/>
+      <path d="M320 130 C270 160, 230 160, 180 130" fill="none" stroke="#ef4444" stroke-width="2.5" marker-end="url(#arrowRed)"/>
+      <line x1="10" y1="20" x2="60" y2="65" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,4"/>
+      <text x="10" y="15" font-size="11" fill="#94a3b8">外部引用已断开 ✕</text>
+      <line x1="490" y1="20" x2="440" y2="65" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,4"/>
+      <text x="430" y="15" font-size="11" fill="#94a3b8">外部引用已断开 ✕</text>
+      <text x="250" y="200" text-anchor="middle" font-size="13" fill="#ef4444" font-weight="bold">互相引用 → refCount 永远不为 0 → 内存泄漏</text>
+      <defs>
+        <marker id="arrowRed" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#ef4444"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> 循环引用：A 和 B 互相持有引用，即使外部引用全部断开，两者的 refCount 仍为 1，永远不会被回收</figcaption>
+  </figure>
+
+  <p>当 A 引用 B、B 又引用 A 时，即使外部没有任何变量再指向它们，两者的 <code>refCount</code> 都是 1，永远不会归零。<strong>这两个对象就成了"孤岛"——活着但永远无法到达</strong>。</p>
+
+  <div class="think">
+    <p class="think-q">Python 怎么解决这个问题？</p>
+    <p>CPython 在引用计数之上加了一个<strong>循环垃圾收集器（cycle detector）</strong>，定期扫描所有容器对象，找出不可达的循环引用组并打破它们。本质上是在引用计数之上补了一层"简化版可达性分析"。PHP 也用类似策略。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试加分项</span>
+    <p>提到"Python 用引用计数 + 循环检测"比只说"Python 用引用计数"更准确。Swift 则用 ARC + weak/unowned 引用让开发者手动打破循环。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>可达性分析：从根出发，能走到就是活的</h2>
+  </div>
+
+  <p>Java、C#、Go、JavaScript 的 GC 都采用<strong>可达性分析（Reachability Analysis）</strong>。核心思路只有一句话：</p>
+
+  <div class="formula">
+    从一组"GC Roots"出发，沿引用链做图遍历。能被遍历到的对象 → 存活；遍历不到的 → 可回收。
+  </div>
+
+  <h3>哪些东西可以作为 GC Roots？</h3>
+  <ul>
+    <li><strong>栈帧中的局部变量</strong>（每个线程的虚拟机栈中引用的对象）</li>
+    <li><strong>方法区中的静态变量</strong>（<code>static</code> 字段引用的对象）</li>
+    <li><strong>方法区中的常量</strong>（<code>final static</code> 引用的对象）</li>
+    <li><strong>JNI（Native 方法）引用的对象</strong></li>
+    <li><strong>同步监视器（synchronized 持有的对象）</strong></li>
+  </ul>
+
+  <figure class="fig">
+    <svg viewBox="0 0 560 400" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="10" width="540" height="56" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+      <text x="280" y="28" text-anchor="middle" font-size="12" fill="#15803d" font-weight="bold">GC Roots</text>
+      <rect x="40" y="36" width="80" height="24" rx="4" fill="#22c55e" opacity="0.25" stroke="#22c55e"/>
+      <text x="80" y="53" text-anchor="middle" font-size="11" fill="#15803d">栈变量 a</text>
+      <rect x="180" y="36" width="80" height="24" rx="4" fill="#22c55e" opacity="0.25" stroke="#22c55e"/>
+      <text x="220" y="53" text-anchor="middle" font-size="11" fill="#15803d">static ref</text>
+      <rect x="360" y="36" width="80" height="24" rx="4" fill="#22c55e" opacity="0.25" stroke="#22c55e"/>
+      <text x="400" y="53" text-anchor="middle" font-size="11" fill="#15803d">栈变量 b</text>
+      <circle cx="100" cy="130" r="28" fill="#3b82f6" opacity="0.2" stroke="#3b82f6" stroke-width="2"/>
+      <text x="100" y="135" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">Obj1</text>
+      <circle cx="220" cy="140" r="28" fill="#3b82f6" opacity="0.2" stroke="#3b82f6" stroke-width="2"/>
+      <text x="220" y="145" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">Obj2</text>
+      <circle cx="160" cy="240" r="28" fill="#3b82f6" opacity="0.2" stroke="#3b82f6" stroke-width="2"/>
+      <text x="160" y="245" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">Obj3</text>
+      <circle cx="380" cy="140" r="28" fill="#3b82f6" opacity="0.2" stroke="#3b82f6" stroke-width="2"/>
+      <text x="380" y="145" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">Obj4</text>
+      <circle cx="460" cy="240" r="28" fill="#3b82f6" opacity="0.2" stroke="#3b82f6" stroke-width="2"/>
+      <text x="460" y="245" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">Obj5</text>
+      <circle cx="340" cy="270" r="28" fill="#ef4444" opacity="0.1" stroke="#ef4444" stroke-width="2" stroke-dasharray="5,4"/>
+      <text x="340" y="275" text-anchor="middle" font-size="13" font-weight="bold" fill="#dc2626">Obj6</text>
+      <circle cx="420" cy="350" r="28" fill="#ef4444" opacity="0.1" stroke="#ef4444" stroke-width="2" stroke-dasharray="5,4"/>
+      <text x="420" y="355" text-anchor="middle" font-size="13" font-weight="bold" fill="#dc2626">Obj7</text>
+      <path d="M355 292 C370 320, 400 335, 410 345" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowGray)"/>
+      <path d="M405 340 C390 315, 365 300, 352 280" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowGray)"/>
+      <line x1="80" y1="60" x2="95" y2="103" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <line x1="220" y1="60" x2="220" y2="112" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <line x1="400" y1="60" x2="385" y2="112" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <line x1="110" y1="155" x2="148" y2="215" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <line x1="240" y1="162" x2="175" y2="218" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+      <line x1="398" y1="165" x2="448" y2="215" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowBlue)"/>
+      <circle cx="50" cy="370" r="10" fill="#3b82f6" opacity="0.2" stroke="#3b82f6" stroke-width="2"/>
+      <text x="68" y="375" font-size="12" fill="#334155">可达（存活）</text>
+      <circle cx="200" cy="370" r="10" fill="#ef4444" opacity="0.1" stroke="#ef4444" stroke-width="2" stroke-dasharray="4,3"/>
+      <text x="218" y="375" font-size="12" fill="#334155">不可达（可回收）</text>
+      <defs>
+        <marker id="arrowBlue" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+          <polygon points="0 0, 7 2.5, 0 5" fill="#3b82f6"/>
+        </marker>
+        <marker id="arrowGray" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+          <polygon points="0 0, 7 2.5, 0 5" fill="#ef4444"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> 可达性分析：从 GC Roots 出发做图遍历。Obj6 和 Obj7 虽然互相引用，但没有任何 GC Root 能到达它们，因此被判定为可回收——循环引用不再是问题</figcaption>
+  </figure>
+
+  <p>注意图中 Obj6 和 Obj7 互相引用，但没有任何 GC Root 能遍历到它们。<strong>可达性分析天然免疫循环引用</strong>——只要从根走不到，不管你内部怎么互指，都会被回收。这就是 Java 选择可达性分析的核心原因。</p>
+
+  <div class="think">
+    <p class="think-q">可达性分析需要"暂停世界"（STW）吗？</p>
+    <p>是的，标记阶段必须保证引用关系不变，否则遍历过程中引用被修改会导致漏标或错标。这就是为什么 GC 的标记阶段通常需要 Stop-The-World。不过现代收集器（如 ZGC）通过<strong>染色指针 + 读屏障</strong>技术，把大部分标记工作做到了并发阶段，只在极少数关键点短暂暂停。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心结论</span>
+    <p>可达性分析解决了引用计数的循环引用难题，代价是需要 STW 或写屏障来保证遍历期间引用关系的一致性。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>finalize()：一次"自我救赎"的机会</h2>
+  </div>
+
+  <p>在可达性分析判定一个对象"不可达"之后，JVM 并不会立刻回收它。如果这个对象重写了 <code>Object.finalize()</code> 方法，它会获得<strong>一次"复活"的机会</strong>。</p>
+
+  <h3>逃逸流程</h3>
+  <ol>
+    <li>对象被判定不可达，进入 <strong>F-Queue</strong>（Finalizer 队列）</li>
+    <li>Finalizer 线程（低优先级守护线程）执行对象的 <code>finalize()</code> 方法</li>
+    <li>如果 <code>finalize()</code> 中把 <code>this</code> 赋给了某个 GC Root 可达的变量 → <strong>对象复活</strong></li>
+    <li>如果没复活 → 第二次标记后真正回收</li>
+  </ol>
+
+  <div class="srcbox">
+    <div class="srcbox-head">finalize() 复活演示——仅作理解原理用，生产代码不要这么写</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">EscapeDemo</span> {
+    <span class="k">public static</span> <span class="t">EscapeDemo</span> SAVE_HOOK = <span class="k">null</span>;
+
+    <span class="k">protected void</span> <span class="n">finalize</span>() <span class="k">throws</span> <span class="t">Throwable</span> {
+        <span class="k">super</span>.<span class="n">finalize</span>();
+        System.out.<span class="n">println</span>(<span class="t">"finalize() 被执行，尝试自救"</span>);
+        SAVE_HOOK = <span class="k">this</span>;   <span class="c">// 把 this 挂到一个静态变量上 → 重新可达</span>
+    }
+
+    <span class="k">public static void</span> <span class="n">main</span>(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        SAVE_HOOK = <span class="k">new</span> <span class="t">EscapeDemo</span>();
+        SAVE_HOOK = <span class="k">null</span>;    <span class="c">// 断开引用</span>
+        System.<span class="n">gc</span>();          <span class="c">// 触发 GC</span>
+        Thread.<span class="n">sleep</span>(<span class="n">1000</span>);   <span class="c">// 等 Finalizer 线程执行</span>
+
+        <span class="k">if</span> (SAVE_HOOK != <span class="k">null</span>) {
+            System.out.<span class="n">println</span>(<span class="t">"对象复活了！"</span>);   <span class="c">// 会打印</span>
+        }
+    }
+}</pre>
+  </div>
+
+  <h3>为什么 finalize() 被废弃？</h3>
+
+  <p>JDK 9 将 <code>Object.finalize()</code> 标记为 <code>@Deprecated</code>，JDK 18+ 的 JEP 421 进一步讨论移除。原因：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>问题</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>不可预测</td><td>你不知道 finalize() 何时执行，甚至不确定它一定会执行</td></tr>
+      <tr><td>性能差</td><td>有 finalize() 的对象回收速度比普通对象慢 <strong>数十倍</strong>（需要进 F-Queue、等守护线程）</td></tr>
+      <tr><td>只给一次机会</td><td>同一个对象的 finalize() 最多被调用一次，第二次不可达时直接回收</td></tr>
+      <tr><td>安全隐患</td><td>finalize() 中可以复活对象，导致本应释放的资源被意外保留</td></tr>
+      <tr><td>异常被吞</td><td>finalize() 中抛出的异常会被 Finalizer 线程直接忽略，不会打印堆栈</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">正确做法</span>
+    <p>需要释放资源时，使用 <code>try-with-resources</code>（<code>AutoCloseable</code>）或 JDK 9 引入的 <code>Cleaner</code>（基于 PhantomReference）。永远不要依赖 finalize() 来关闭文件或连接。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>四种引用：强、软、弱、虚</h2>
+  </div>
+
+  <p>Java 在可达性分析的基础上，还提供了四种不同强度的引用类型，让你可以<strong>精细控制对象的生命周期</strong>：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>引用类型</th><th>类</th><th>回收时机</th><th>典型用途</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>强引用</strong></td><td>普通赋值</td><td>永不回收（只要可达）</td><td>绝大多数变量</td></tr>
+      <tr><td><strong>软引用</strong></td><td><code>SoftReference</code></td><td>内存不足时才回收</td><td>内存敏感型缓存</td></tr>
+      <tr><td><strong>弱引用</strong></td><td><code>WeakReference</code></td><td>下次 GC 就回收</td><td>ThreadLocal、WeakHashMap</td></tr>
+      <tr><td><strong>虚引用</strong></td><td><code>PhantomReference</code></td><td>随时回收，get() 返回 null</td><td>跟踪对象被回收的时机</td></tr>
+    </tbody>
+  </table>
+
+  <h3>软引用：内存敏感的缓存</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">SoftReference 实现图片缓存</div>
+    <pre class="srcbox-file"><span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">SoftReference</span>&lt;<span class="t">Bitmap</span>&gt;&gt; cache = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+
+<span class="c">// 存入缓存</span>
+cache.<span class="n">put</span>(<span class="t">"avatar"</span>, <span class="k">new</span> <span class="t">SoftReference</span>&lt;&gt;(bitmap));
+
+<span class="c">// 读取缓存</span>
+<span class="t">SoftReference</span>&lt;<span class="t">Bitmap</span>&gt; ref = cache.<span class="n">get</span>(<span class="t">"avatar"</span>);
+<span class="t">Bitmap</span> bmp = (ref != <span class="k">null</span>) ? ref.<span class="n">get</span>() : <span class="k">null</span>;
+<span class="k">if</span> (bmp == <span class="k">null</span>) {
+    bmp = <span class="n">loadFromDisk</span>(<span class="t">"avatar"</span>);  <span class="c">// 缓存被回收了，重新加载</span>
+}</pre>
+  </div>
+
+  <p>JVM 保证：<strong>在抛出 OutOfMemoryError 之前，所有软引用对象都会被回收</strong>。所以它非常适合做"有就用，没有也能活"的缓存。</p>
+
+  <h3>弱引用：ThreadLocal 的坑与解</h3>
+  <p><code>ThreadLocalMap</code> 的 key 就是 <code>WeakReference&lt;ThreadLocal&gt;</code>。当 ThreadLocal 实例不再有强引用时，下次 GC 就会回收 key，但 value 仍然被线程持有。如果线程长期存活（如线程池），value 就泄漏了——这就是经典的 <strong>ThreadLocal 内存泄漏</strong>。解法是每次用完手动 <code>remove()</code>。</p>
+
+  <h3>虚引用：比 finalize() 更好的替代品</h3>
+  <p><code>PhantomReference</code> 的 <code>get()</code> 永远返回 <code>null</code>，它唯一的用途是配合 <code>ReferenceQueue</code> 来<strong>获知对象何时被回收</strong>，从而执行清理操作。JDK 9 的 <code>Cleaner</code> 底层就是基于虚引用实现的。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话记忆</span>
+    <p>强引用 = 打死不回收；软引用 = 没内存才回收；弱引用 = GC 就回收；虚引用 = 只用来收通知。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>回收方法区：类也能被卸载</h2>
+  </div>
+
+  <p>很多人以为 GC 只管堆，其实方法区（元空间 / Metaspace）也会被回收。回收的对象主要是两类：<strong>废弃的类</strong>和<strong>不再使用的字符串常量</strong>。</p>
+
+  <h3>类卸载的三个条件</h3>
+  <p>一个类要被卸载，必须<strong>同时满足</strong>以下三个条件：</p>
+  <ol>
+    <li>该类的所有实例都已经被回收（堆中不存在该类的任何对象）</li>
+    <li>加载该类的 ClassLoader 已经被回收</li>
+    <li>该类的 <code>java.lang.Class</code> 对象不再被任何地方引用（无法通过反射访问）</li>
+  </ol>
+
+  <div class="think">
+    <p class="think-q">为什么类卸载这么苛刻？</p>
+    <p>因为 Java 的反射机制允许在运行时动态获取类的信息。只要 <code>Class</code> 对象还被引用，就随时可能通过 <code>Class.forName()</code> 或 <code>classObj.newInstance()</code> 创建新实例。JVM 必须确保"真的不可能再用到"才敢卸载。</p>
+  </div>
+
+  <p>在实际场景中，类卸载主要发生在：</p>
+  <ul>
+    <li><strong>大量使用反射生成动态代理类</strong>（如 CGLIB、ByteBuddy）后，旧的代理类可以被卸载</li>
+    <li><strong>OSGi / 热部署</strong>：模块卸载时，对应的 ClassLoader 被回收，类随之卸载</li>
+    <li><strong>JSP 编译</strong>：每次修改 JSP 都会生成新的类，旧的需要被卸载</li>
+  </ul>
+
+  <h3>字符串常量池回收</h3>
+  <p>JDK 7+ 字符串常量池从永久代移到了堆中（JDK 8 彻底移除永久代）。常量池中的字符串如果不再被引用，也可以被 GC 回收。不过实际开发中很少需要关注这一点——除非你在大量使用 <code>String.intern()</code>。</p>
+
+  <div class="crack">
+    <span class="crack-label">面试加分项</span>
+    <p>提到"Metaspace 默认没有上限，可以通过 <code>-XX:MaxMetaspaceSize</code> 限制。如果动态生成大量类（如反射代理），不设置上限可能导致本地内存持续增长。"——这说明你有生产环境的排障经验。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>总结：一张表 + 实战启示</h2>
+  </div>
+
+  <h3>两种方案对比</h3>
+  <table class="nb-table">
+    <thead>
+      <tr><th>维度</th><th>引用计数</th><th>可达性分析</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>循环引用</td><td>无法处理（需额外机制）</td><td>天然免疫</td></tr>
+      <tr><td>实时性</td><td>极好（归零即回收）</td><td>依赖 GC 周期</td></tr>
+      <tr><td>停顿</td><td>几乎无停顿</td><td>标记阶段需 STW 或屏障</td></tr>
+      <tr><td>空间开销</td><td>每个对象多一个计数器</td><td>需要维护 GC Root 集合 + 遍历栈</td></tr>
+      <tr><td>实现复杂度</td><td>低</td><td>高（图遍历、并发标记、写屏障）</td></tr>
+      <tr><td>代表语言</td><td>Python / PHP / Swift</td><td>Java / C# / Go / JavaScript</td></tr>
+    </tbody>
+  </table>
+
+  <h3>面试回答模板</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">推荐回答结构</div>
+    <pre class="srcbox-file"><span class="c">// 1. 先说结论</span>
+"JVM 用可达性分析判定对象是否存活，不是引用计数。"
+
+<span class="c">// 2. 解释为什么</span>
+"引用计数无法处理循环引用——两个对象互相持有引用时，
+ 即使外部没有引用指向它们，计数也不会归零。
+ 可达性分析从 GC Roots 出发做图遍历，
+ 只要从根走不到，不管对象之间怎么互指，都会被回收。"
+
+<span class="c">// 3. 补充 GC Roots</span>
+"GC Roots 包括栈帧局部变量、静态变量、常量引用、JNI 引用等。"
+
+<span class="c">// 4. 延伸到四种引用（如果面试官追问）</span>
+"Java 还提供了软/弱/虚引用来精细控制生命周期，
+ 比如 SoftReference 做缓存、WeakReference 在 ThreadLocal 中的应用。"</pre>
+  </div>
+
+  <h3>实战避坑清单</h3>
+  <table class="nb-table">
+    <thead>
+      <tr><th>场景</th><th>陷阱</th><th>正确做法</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>释放资源</td><td>依赖 finalize() 关闭流/连接</td><td>用 try-with-resources 或 Cleaner</td></tr>
+      <tr><td>ThreadLocal</td><td>用完不调 remove()，value 泄漏</td><td>finally 块中调用 remove()</td></tr>
+      <tr><td>缓存</td><td>用 HashMap 做缓存，只进不出</td><td>用 SoftReference 或 Caffeine</td></tr>
+      <tr><td>动态类生成</td><td>反射/CGLIB 生成大量类不卸载</td><td>设置 MaxMetaspaceSize，复用代理类</td></tr>
+    </tbody>
+  </table>
+
+  <div class="recap">
+    <strong>本站回顾：</strong>
+    <ul>
+      <li>引用计数简单但有循环引用问题；可达性分析天然解决循环引用但需要 STW</li>
+      <li>GC Roots 是可达性分析的起点：栈变量、静态变量、常量、JNI 引用</li>
+      <li>finalize() 已被废弃，用 AutoCloseable 或 Cleaner 替代</li>
+      <li>四种引用（强/软/弱/虚）让你精细控制对象生命周期</li>
+      <li>方法区也可以回收：类卸载需同时满足三个条件</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

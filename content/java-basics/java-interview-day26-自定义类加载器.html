@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自定义类加载器</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>为什么需要自定义类加载器？</h2></div>
+
+<p>面试官靠在椅背上，抛出一个看似简单的问题：</p>
+
+<div class="think"><div class="think-q">"JVM 已经有双亲委派了，为什么还要自己写类加载器？"</div></div>
+
+<p>如果你只回答"可以加载自定义路径的类"，面试官会在心里给你打个六十分——及格，但不出彩。</p>
+
+<p>真正让他眼前一亮的回答至少涵盖三个场景：</p>
+
+<ul>
+  <li><strong>热部署（Hot Deployment）</strong>——不重启 JVM，运行期替换 class 文件。Tomcat、Spring DevTools 背后都是自定义类加载器。</li>
+  <li><strong>插件系统 / 模块化隔离</strong>——同一 JVM 中，不同插件可以使用相同类名但不同版本的类。OSGi、Tomcat 多 Web 应用隔离靠的就是打破双亲委派。</li>
+  <li><strong>加密 / 混淆加载</strong>——商业软件将 class 文件加密分发，运行时由自定义类加载器解密后 defineClass。</li>
+</ul>
+
+<p>发车之前，先问自己：</p>
+<ul>
+  <li>loadClass 和 findClass 有什么区别？重写哪个才正确？</li>
+  <li>同一个类名被两个类加载器各加载一次，它们是同一个 Class 对象吗？</li>
+  <li>热部署时旧的 Class 为什么能被 GC 回收？</li>
+</ul>
+<p>带着这些问题，我们开始。</p>
+</section>
+
+<!-- ═══════════════ 第2站：findClass vs loadClass ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>findClass vs loadClass：该重写谁？</h2></div>
+
+<p><code>ClassLoader.loadClass()</code> 是类加载的入口。它的默认实现就是<strong>双亲委派</strong>逻辑：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ClassLoader.loadClass 伪代码</b></span></div>
+<pre><code><span class="k">protected</span> Class&lt;?&gt; <span class="n">loadClass</span>(String name, <span class="k">boolean</span> resolve)
+        <span class="k">throws</span> ClassNotFoundException {
+
+    <span class="c">// 1. 检查是否已加载</span>
+    Class&lt;?&gt; c = <span class="n">findLoadedClass</span>(name);
+    <span class="k">if</span> (c == <span class="k">null</span>) {
+        <span class="c">// 2. 委托给父加载器</span>
+        <span class="k">if</span> (parent != <span class="k">null</span>)
+            c = parent.<span class="n">loadClass</span>(name, <span class="k">false</span>);
+        <span class="k">else</span>
+            c = <span class="n">findBootstrapClassOrNull</span>(name);
+    }
+    <span class="k">if</span> (c == <span class="k">null</span>) {
+        <span class="c">// 3. 父加载器都找不到 → 自己找</span>
+        c = <span class="n">findClass</span>(name);
+    }
+    <span class="k">if</span> (resolve) <span class="n">resolveClass</span>(c);
+    <span class="k">return</span> c;
+}</code></pre>
+</div>
+
+<p>两条路线，一张图讲清楚：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 340" role="img" aria-label="findClass vs loadClass 委派流程">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="arrow-r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+  </defs>
+
+  <!-- 左：重写 findClass -->
+  <text x="195" y="24" text-anchor="middle" font-size="13" fill="#2D5F2D" font-weight="700">重写 findClass（推荐）</text>
+  <rect x="60" y="40" width="270" height="36" rx="5" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.3"/>
+  <text x="195" y="63" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">loadClass() → 先委派给 parent</text>
+  <line x1="195" y1="76" x2="195" y2="100" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="60" y="100" width="270" height="36" rx="5" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.3"/>
+  <text x="195" y="123" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F">parent 找不到 → 调用 findClass()</text>
+  <line x1="195" y1="136" x2="195" y2="160" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="60" y="160" width="270" height="36" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.3"/>
+  <text x="195" y="183" text-anchor="middle" font-family="monospace" font-size="11" fill="#57544E">你的 findClass：从自定义路径加载</text>
+  <rect x="60" y="220" width="270" height="70" rx="5" fill="#FAFAFA" stroke="#999" stroke-width="1"/>
+  <text x="195" y="242" text-anchor="middle" font-size="11" fill="#2D5F2D">双亲委派保持不变，安全性不受影响</text>
+  <text x="195" y="262" text-anchor="middle" font-size="11" fill="#2D5F2D">java.lang.* 仍由 Bootstrap 加载</text>
+
+  <!-- 右：重写 loadClass -->
+  <text x="585" y="24" text-anchor="middle" font-size="13" fill="#B85450" font-weight="700">重写 loadClass（打破委派）</text>
+  <rect x="450" y="40" width="270" height="36" rx="5" fill="#F5D5D5" stroke="#B85450" stroke-width="1.3"/>
+  <text x="585" y="63" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450">loadClass() → 自己先加载！</text>
+  <line x1="585" y1="76" x2="585" y2="100" stroke="#B85450" stroke-width="1.5" marker-end="url(#arrow-r)"/>
+  <rect x="450" y="100" width="270" height="36" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.3"/>
+  <text x="585" y="123" text-anchor="middle" font-family="monospace" font-size="11" fill="#57544E">找不到 → 才委派给 parent</text>
+  <line x1="585" y1="136" x2="585" y2="160" stroke="#B85450" stroke-width="1.5" marker-end="url(#arrow-r)"/>
+  <rect x="450" y="160" width="270" height="36" rx="5" fill="#F5D5D5" stroke="#B85450" stroke-width="1.3"/>
+  <text x="585" y="183" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450">可实现类隔离 / 热部署</text>
+  <rect x="450" y="220" width="270" height="70" rx="5" fill="#FAFAFA" stroke="#999" stroke-width="1"/>
+  <text x="585" y="242" text-anchor="middle" font-size="11" fill="#B85450">双亲委派被打破，需自行处理安全</text>
+  <text x="585" y="262" text-anchor="middle" font-size="11" fill="#B85450">可能加载到自定义的 java.lang.String</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>重写 findClass 保留双亲委派（安全）；重写 loadClass 打破双亲委派（灵活但需谨慎）</figcaption>
+</figure>
+
+<p>面试时的回答模板：</p>
+
+<div class="crack"><span class="crack-label">金句</span>重写 findClass = 保留双亲委派 + 扩展加载路径；重写 loadClass = 打破双亲委派 + 完全控制加载逻辑。90% 的场景应该重写 findClass，只有需要类隔离（如 OSGi、Tomcat）时才重写 loadClass。</div>
+</section>
+
+<!-- ═══════════════ 第3站：实现 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>动手写：自定义类加载器完整实现</h2></div>
+
+<p>下面这个类加载器可以从指定目录加载 .class 文件，还预留了加密解密的扩展点。</p>
+
+<p><strong>第 1 步：继承 ClassLoader，重写 findClass</strong></p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MyClassLoader.java</b></span></div>
+<pre><code><span class="k">public class</span> <span class="t">MyClassLoader</span> <span class="k">extends</span> <span class="t">ClassLoader</span> {
+
+    <span class="k">private final</span> <span class="t">String</span> classPath; <span class="c">// class 文件根目录</span>
+
+    <span class="k">public</span> <span class="n">MyClassLoader</span>(<span class="t">String</span> classPath) {
+        <span class="k">this</span>.classPath = classPath;
+    }
+
+    <span class="k">protected</span> <span class="t">Class</span>&lt;?&gt; <span class="n">findClass</span>(<span class="t">String</span> name)
+            <span class="k">throws</span> <span class="t">ClassNotFoundException</span> {
+
+        <span class="c">// 1. 将类名转为文件路径：com.example.Foo → com/example/Foo.class</span>
+        <span class="t">String</span> fileName = name.<span class="n">replace</span>(<span class="n">'.'</span>, <span class="n">'/'</span>) + <span class="n">".class"</span>;
+        <span class="t">File</span> file = <span class="k">new</span> <span class="t">File</span>(classPath, fileName);
+
+        <span class="k">if</span> (!file.<span class="n">exists</span>())
+            <span class="k">throw new</span> <span class="t">ClassNotFoundException</span>(name);
+
+        <span class="k">try</span> {
+            <span class="c">// 2. 读取字节数组</span>
+            <span class="k">byte</span>[] bytes = <span class="n">readBytes</span>(file);
+
+            <span class="c">// 3. 可选：解密（商业软件常见）</span>
+            <span class="c">// bytes = decrypt(bytes);</span>
+
+            <span class="c">// 4. 调用 defineClass 将字节转为 Class 对象</span>
+            <span class="k">return</span> <span class="n">defineClass</span>(name, bytes, <span class="n">0</span>, bytes.length);
+        } <span class="k">catch</span> (<span class="t">IOException</span> e) {
+            <span class="k">throw new</span> <span class="t">ClassNotFoundException</span>(name, e);
+        }
+    }
+
+    <span class="k">private byte</span>[] <span class="n">readBytes</span>(<span class="t">File</span> file) <span class="k">throws</span> <span class="t">IOException</span> {
+        <span class="k">return</span> <span class="t">Files</span>.<span class="n">readAllBytes</span>(file.<span class="n">toPath</span>());
+    }
+}</code></pre>
+</div>
+
+<p><strong>第 2 步：使用它</strong></p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Main.java</b></span></div>
+<pre><code><span class="k">public class</span> <span class="t">Main</span> {
+    <span class="k">public static void</span> <span class="n">main</span>(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">MyClassLoader</span> loader = <span class="k">new</span> <span class="t">MyClassLoader</span>(<span class="n">"/opt/myapp/classes"</span>);
+        <span class="t">Class</span>&lt;?&gt; clazz = loader.<span class="n">loadClass</span>(<span class="n">"com.example.HelloService"</span>);
+        <span class="t">Object</span> obj = clazz.<span class="n">getDeclaredConstructor</span>().<span class="n">newInstance</span>();
+        <span class="t">Method</span> say = clazz.<span class="n">getMethod</span>(<span class="n">"say"</span>, <span class="t">String</span>.<span class="k">class</span>);
+        say.<span class="n">invoke</span>(obj, <span class="n">"World"</span>);
+    }
+}</code></pre>
+</div>
+<p>核心 API 就三个：</p>
+<table class="nb-table">
+<thead><tr><th>方法</th><th>作用</th><th>谁调用</th></tr></thead>
+<tbody>
+<tr><td><code>findClass(name)</code></td><td>从自定义来源读取字节并调用 defineClass</td><td>由 loadClass 内部调用（你重写它）</td></tr>
+<tr><td><code>defineClass(name, bytes, off, len)</code></td><td>将字节数组转为 Class 对象（final 方法，不可重写）</td><td>在 findClass 中调用</td></tr>
+<tr><td><code>loadClass(name)</code></td><td>类加载入口，实现双亲委派逻辑</td><td>外部调用（一般不重写）</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">记住</span>findClass 负责"找到字节并 defineClass"，loadClass 负责"委派逻辑"。自定义类加载器的 90% 工作都在 findClass 里。</div>
+</section>
+
+<!-- ═══════════════ 第4站：热部署 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>热部署：不重启 JVM 替换类</h2></div>
+
+<p>面试官追问：</p>
+<div class="think"><div class="think-q">"线上服务不能停，怎么做到替换一个类的新版本？"</div></div>
+<p>关键在于一条 JVM 规则：<strong>同一个 ClassLoader 实例对同一个类名只能加载一次</strong>。想加载新版本，必须<strong>创建新的 ClassLoader 实例</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 300" role="img" aria-label="热部署类加载器替换流程">
+  <defs>
+    <marker id="hda" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <!-- 时间轴 -->
+  <line x1="40" y1="150" x2="740" y2="150" stroke="#999" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="130" y="175" text-anchor="middle" font-size="11" fill="#57544E">T1 运行中</text>
+  <text x="390" y="175" text-anchor="middle" font-size="11" fill="#57544E">T2 检测到新版本</text>
+  <text x="620" y="175" text-anchor="middle" font-size="11" fill="#57544E">T3 切换完成</text>
+
+  <!-- 旧加载器 -->
+  <rect x="60" y="30" width="200" height="90" rx="6" fill="#F5D5D5" stroke="#B85450" stroke-width="1.3"/>
+  <text x="160" y="55" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450" font-weight="700">OldClassLoader @0x1</text>
+  <text x="160" y="78" text-anchor="middle" font-family="monospace" font-size="10" fill="#B85450">HelloService v1.0</text>
+  <text x="160" y="98" text-anchor="middle" font-size="10" fill="#57544E">正在处理请求...</text>
+
+  <!-- 新加载器 -->
+  <rect x="420" y="30" width="200" height="90" rx="6" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.3"/>
+  <text x="520" y="55" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D" font-weight="700">NewClassLoader @0x2</text>
+  <text x="520" y="78" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">HelloService v2.0</text>
+  <text x="520" y="98" text-anchor="middle" font-size="10" fill="#57544E">新实例就绪</text>
+
+  <!-- 箭头 -->
+  <line x1="270" y1="75" x2="410" y2="75" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#hda)"/>
+  <text x="340" y="68" text-anchor="middle" font-size="10" fill="#3E6B8F">创建新加载器</text>
+
+  <!-- 底部说明 -->
+  <rect x="60" y="210" width="660" height="70" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="390" y="235" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">GC 回收旧类的条件</text>
+  <text x="390" y="257" text-anchor="middle" font-size="11" fill="#57544E">① 旧 ClassLoader 实例不再被引用 ② 旧 Class 的所有实例都已销毁 ③ 旧 Class 的 java.lang.Class 对象不再被引用</text>
+  <text x="390" y="272" text-anchor="middle" font-size="11" fill="#B85450">三个条件全部满足 → Metaspace 中的旧类元数据被 GC 回收</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>热部署流程：创建新 ClassLoader 加载新版本，旧的 ClassLoader 连同旧 Class 一起交给 GC</figcaption>
+</figure>
+
+<p>完整的热部署模式如下：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HotDeployer.java</b></span></div>
+<pre><code><span class="k">public class</span> <span class="t">HotDeployer</span> {
+    <span class="k">private volatile</span> <span class="t">MyClassLoader</span> currentLoader; <span class="c">// volatile 保证工作线程读到最新加载器</span>
+
+    <span class="k">public</span> <span class="n">HotDeployer</span>(<span class="t">String</span> classPath) {
+        <span class="k">this</span>.currentLoader = <span class="k">new</span> <span class="t">MyClassLoader</span>(classPath);
+    }
+    <span class="c">// 部署新版本：创建新 ClassLoader，替换引用</span>
+    <span class="k">public void</span> <span class="n">deploy</span>() {
+        <span class="t">MyClassLoader</span> old = <span class="k">this</span>.currentLoader;
+        <span class="k">this</span>.currentLoader = <span class="k">new</span> <span class="t">MyClassLoader</span>(old.classPath);
+        <span class="c">// old 不再被引用 → GC 可回收旧类和旧加载器</span>
+    }
+    <span class="c">// 执行业务方法</span>
+    <span class="k">public void</span> <span class="n">execute</span>(<span class="t">String</span> className, <span class="t">String</span> input) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">Class</span>&lt;?&gt; clazz = currentLoader.<span class="n">loadClass</span>(className);
+        <span class="t">Object</span> svc = clazz.<span class="n">getDeclaredConstructor</span>().<span class="n">newInstance</span>();
+        clazz.<span class="n">getMethod</span>(<span class="n">"handle"</span>, <span class="t">String</span>.<span class="k">class</span>).<span class="n">invoke</span>(svc, input);
+    }
+}</code></pre>
+</div>
+<div class="think"><div class="think-q">为什么旧类可以被 GC 回收？</div></div>
+
+<p>每个 Class 对象都持有对它 ClassLoader 的引用。当旧的 ClassLoader 不再可达时：</p>
+
+<ul>
+  <li>旧 ClassLoader 的所有 Class 对象失去强引用链</li>
+  <li>旧类的所有实例如果被替换/销毁</li>
+  <li>Metaspace 中的类元数据（方法区数据）可以被卸载</li>
+</ul>
+
+<p>这就是 Tomcat 热部署的核心原理——每个 Web 应用有独立的 <code>WebappClassLoader</code>，重新部署时销毁旧加载器即可。</p>
+
+<div class="crack"><span class="crack-label">注意</span>如果旧类的实例还被 static 变量、ThreadLocal、或全局缓存持有，GC 无法回收旧类——这就是内存泄漏的元凶。JVM 会报 <code>java.lang.OutOfMemoryError: Metaspace</code>。</div>
+</section>
+
+<!-- ═══════════════ 第5站：类加载隔离 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>类加载隔离：同一个类名，不同的 Class</h2></div>
+
+<p>JVM 判断"两个类是否相同"不仅看类名，还要看<strong>加载它们的 ClassLoader</strong>。换句话说：</p>
+
+<div class="formula">类的唯一标识 = (类的全限定名, 加载它的 ClassLoader 实例)</div>
+
+<p>这意味着两个不同的 ClassLoader 可以各自加载同一个类名，得到两个互不兼容的 Class 对象：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>IsolationDemo.java</b></span></div>
+<pre><code><span class="t">MyClassLoader</span> loader1 = <span class="k">new</span> <span class="t">MyClassLoader</span>(<span class="n">"/app/plugin-a/classes"</span>);
+<span class="t">MyClassLoader</span> loader2 = <span class="k">new</span> <span class="t">MyClassLoader</span>(<span class="n">"/app/plugin-b/classes"</span>);
+
+<span class="t">Class</span>&lt;?&gt; classA = loader1.<span class="n">loadClass</span>(<span class="n">"com.example.Service"</span>);
+<span class="t">Class</span>&lt;?&gt; classB = loader2.<span class="n">loadClass</span>(<span class="n">"com.example.Service"</span>);
+
+System.out.<span class="n">println</span>(classA == classB);       <span class="c">// false！</span>
+System.out.<span class="n">println</span>(classA.<span class="n">getName</span>());       <span class="c">// com.example.Service</span>
+System.out.<span class="n">println</span>(classB.<span class="n">getName</span>());       <span class="c">// com.example.Service（同名，不同类）</span>
+
+<span class="c">// 下面这行会抛 ClassCastException！</span>
+<span class="t">Object</span> objA = classA.<span class="n">getDeclaredConstructor</span>().<span class="n">newInstance</span>();
+classB.<span class="n">cast</span>(objA);  <span class="c">// ClassCastException: com.example.Service cannot be cast to com.example.Service</span></code></pre>
+</div>
+
+<p>这个特性正是模块系统的基础。来看两个真实框架如何用它：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 350" role="img" aria-label="Tomcat 类加载隔离架构">
+  <defs>
+    <marker id="ia" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <!-- Bootstrap -->
+  <rect x="240" y="10" width="300" height="40" rx="5" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.3"/>
+  <text x="390" y="35" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F" font-weight="700">Bootstrap ClassLoader（JDK 核心类）</text>
+
+  <!-- Common -->
+  <rect x="240" y="70" width="300" height="40" rx="5" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.3"/>
+  <text x="390" y="95" text-anchor="middle" font-family="monospace" font-size="11" fill="#57544E" font-weight="700">Common ClassLoader（Tomcat + 共享 JAR）</text>
+  <line x1="390" y1="50" x2="390" y2="68" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#ia)"/>
+
+  <!-- Webapp A -->
+  <rect x="60" y="150" width="260" height="160" rx="6" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.3"/>
+  <text x="190" y="175" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D" font-weight="700">WebappClassLoader A</text>
+  <text x="190" y="205" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">spring-webmvc 5.3.x / jackson 2.13</text>
+  <text x="190" y="230" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">App A 的 Controller + Service</text>
+  <text x="190" y="260" text-anchor="middle" font-size="10" fill="#57544E">独立加载，与 B 互不可见</text>
+  <line x1="250" y1="110" x2="190" y2="148" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#ia)"/>
+
+  <!-- Webapp B -->
+  <rect x="460" y="150" width="260" height="160" rx="6" fill="#F5D5D5" stroke="#B85450" stroke-width="1.3"/>
+  <text x="590" y="175" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450" font-weight="700">WebappClassLoader B</text>
+  <text x="590" y="205" text-anchor="middle" font-family="monospace" font-size="10" fill="#B85450">spring-webmvc 6.0.x / jackson 2.15</text>
+  <text x="590" y="230" text-anchor="middle" font-family="monospace" font-size="10" fill="#B85450">App B 的 Controller + Service</text>
+  <text x="590" y="260" text-anchor="middle" font-size="10" fill="#57544E">独立加载，与 A 互不可见</text>
+  <line x1="530" y1="110" x2="590" y2="148" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#ia)"/>
+
+  <!-- 分隔线 -->
+  <line x1="380" y1="150" x2="380" y2="320" stroke="#B85450" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="390" y="340" text-anchor="middle" font-size="10" fill="#B85450" font-weight="700">A 和 B 互不可见，各自独立</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>Tomcat 的类加载隔离：每个 Web 应用有自己的 WebappClassLoader，可以加载不同版本的 Spring / Jackson</figcaption>
+</figure>
+
+<p><strong>OSGi 的模块化隔离</strong>走得更远——它不只是隔离，还定义了 Bundle 之间如何"导出 / 导入"包：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>OSGi Bundle MANIFEST.MF</b></span></div>
+<pre><code><span class="c"># Bundle A</span>
+<span class="k">Bundle-SymbolicName</span>: com.example.service-a
+<span class="k">Export-Package</span>: com.example.api;version=<span class="n">"1.0"</span>
+<span class="k">Import-Package</span>: org.slf4j;version=<span class="n">"[1.7,2.0)"</span>
+<span class="c"># Bundle B</span>
+<span class="k">Bundle-SymbolicName</span>: com.example.service-b
+<span class="k">Export-Package</span>: com.example.api;version=<span class="n">"2.0"</span>
+<span class="k">Import-Package</span>: org.slf4j;version=<span class="n">"[2.0,3.0)"</span>
+<span class="c"># 两个 Bundle 各自有独立 ClassLoader，com.example.api 是两个不同的 Class</span>
+<span class="c"># slf4j 1.7 和 2.0 也可以在不同 Bundle 中共存</span></code></pre>
+</div>
+
+<p>OSGi 通过重写 loadClass 实现了一套精细的委派规则：</p>
+
+<ul>
+  <li><strong>java.* 包</strong> → 委派给父加载器（与标准一致）</li>
+  <li><strong>Import-Package 中的包</strong> → 委派给导出该包的 Bundle 的 ClassLoader</li>
+  <li><strong>Bundle 内部的包</strong> → 自己加载（不委派）</li>
+</ul>
+
+<div class="takeaway"><span class="takeaway-label">核心概念</span>类加载隔离的本质：不同 ClassLoader 加载的同名类是不同的 Class 对象，它们之间无法直接转型。这个"限制"恰好成为模块化系统的基石。</div>
+</section>
+
+<!-- ═══════════════ 第6站：总结 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>总结：什么时候用，什么时候不用</h2></div>
+
+<p>先用一张表把自定义类加载器的典型场景收拢：</p>
+
+<table class="nb-table">
+<thead><tr><th>场景</th><th>重写哪个方法</th><th>目的</th><th>代表框架</th></tr></thead>
+<tbody>
+<tr><td>加载非标准路径的 class</td><td>findClass</td><td>从数据库 / 网络 / 加密文件加载</td><td>自定义部署工具</td></tr>
+<tr><td>热部署</td><td>findClass + 每次 new ClassLoader</td><td>加载新版本 class，旧版本交给 GC</td><td>Tomcat, Spring DevTools</td></tr>
+<tr><td>Web 应用隔离</td><td>loadClass（打破委派）</td><td>不同应用可以使用同名不同版本的类</td><td>Tomcat WebappClassLoader</td></tr>
+<tr><td>模块化 / 插件系统</td><td>loadClass + 自定义委派规则</td><td>Bundle 间按需共享或隔离</td><td>OSGi, JPMS</td></tr>
+<tr><td>加密 class 加载</td><td>findClass</td><td>读取加密字节 → 解密 → defineClass</td><td>商业软件保护</td></tr>
+</tbody>
+</table>
+
+<p><strong>常见陷阱：</strong></p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>避坑指南</b></span></div>
+<pre><code><span class="c">// 陷阱 1：忘记设置父加载器 → 系统类都加载不到</span>
+<span class="t">MyClassLoader</span> loader = <span class="k">new</span> <span class="t">MyClassLoader</span>(<span class="n">"/path"</span>);
+<span class="c">// 如果 loadClass 里没委派给 parent，连 java.lang.String 都找不到</span>
+
+<span class="c">// 陷阱 2：热部署后旧类无法 GC → Metaspace OOM</span>
+<span class="c">// 原因：旧类的实例被 static 变量 / ThreadLocal / 全局缓存持有</span>
+<span class="c">// 排查：-verbose:class 或 -XX:+TraceClassUnloading 观察类卸载日志</span>
+
+<span class="c">// 陷阱 3：不同 ClassLoader 加载的类无法直接 cast</span>
+<span class="t">Object</span> obj = loaderA.<span class="n">loadClass</span>(<span class="n">"com.example.Foo"</span>).<span class="n">newInstance</span>();
+<span class="t">Foo</span> foo = (<span class="t">Foo</span>) obj; <span class="c">// ClassCastException！因为 Foo 是当前类加载器加载的</span>
+<span class="c">// 解决：通过公共接口 + 父加载器加载接口类来实现跨加载器通信</span></code></pre>
+</div>
+
+<p><strong>跨加载器通信的正确姿势</strong>——让接口由父加载器加载，实现由子加载器加载：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>PluginBridge.java</b></span></div>
+<pre><code><span class="c">// 接口放在公共 classpath，由父加载器加载</span>
+<span class="k">public interface</span> <span class="t">Plugin</span> { <span class="t">String</span> <span class="n">execute</span>(<span class="t">String</span> input); }
+<span class="c">// 实现类放在插件目录，由子加载器加载</span>
+<span class="k">public class</span> <span class="t">MyPlugin</span> <span class="k">implements</span> <span class="t">Plugin</span> {
+    <span class="k">public</span> <span class="t">String</span> <span class="n">execute</span>(<span class="t">String</span> input) { <span class="k">return</span> <span class="n">"Hello "</span> + input; }
+}
+<span class="c">// 主程序通过接口类型操作插件实例</span>
+<span class="t">Class</span>&lt;?&gt; clazz = pluginLoader.<span class="n">loadClass</span>(<span class="n">"com.example.MyPlugin"</span>);
+<span class="t">Plugin</span> plugin = (<span class="t">Plugin</span>) clazz.<span class="n">getDeclaredConstructor</span>().<span class="n">newInstance</span>();
+<span class="c">// 转型成功！Plugin 接口是父加载器加载的，双方看到的是同一个 Class</span></code></pre>
+</div>
+
+<p>最后，面试回答模板：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>面试回答模板</b></span></div>
+<pre><code><span class="c">"自定义类加载器主要用于三个场景：热部署、模块隔离、加密加载。</span>
+
+<span class="c"> 重写 findClass 保留双亲委派，适合大多数场景——从自定义路径读字节、</span>
+<span class="c"> 调用 defineClass 即可。</span>
+
+<span class="c"> 重写 loadClass 打破双亲委派，用于需要类隔离的场景——Tomcat 的</span>
+<span class="c"> WebappClassLoader 和 OSGi 的 BundleClassLoader 都是这么做的。</span>
+
+<span class="c"> 热部署的原理是：每次部署创建新的 ClassLoader 实例加载新版本 class，</span>
+<span class="c"> 旧 ClassLoader 不再被引用后，旧类和实例可被 GC 从 Metaspace 卸载。</span>
+
+<span class="c"> 类隔离的本质：JVM 用 (类名, ClassLoader) 二元组标识一个类，</span>
+<span class="c"> 不同加载器的同名类是不同的 Class 对象，无法互相转型。"</span></code></pre>
+</div>
+
+<div class="recap">
+<strong>本路线回顾：</strong>
+<ul>
+  <li><strong>第 1 站</strong>——为什么需要自定义类加载器：热部署、插件系统、加密加载</li>
+  <li><strong>第 2 站</strong>——findClass vs loadClass：保留委派 vs 打破委派</li>
+  <li><strong>第 3 站</strong>——完整实现：从目录加载 class 文件，findClass + defineClass</li>
+  <li><strong>第 4 站</strong>——热部署：新 ClassLoader 加载新版本，旧 ClassLoader 交给 GC</li>
+  <li><strong>第 5 站</strong>——类加载隔离：(类名, ClassLoader) 二元组标识类，Tomcat 与 OSGi 实战</li>
+  <li><strong>第 6 站</strong>——总结：场景表、常见陷阱、跨加载器通信的正确姿势</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

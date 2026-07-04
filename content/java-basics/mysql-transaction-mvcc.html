@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MySQL 事务与 MVCC：四种隔离级别与 ReadView</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<section class="hero">
+  <span class="hero-badge">深度 · 面试必问</span>
+  <h1>MySQL 事务与 MVCC：四种隔离级别与 ReadView</h1>
+  <p class="hero-desc">Read Uncommitted → Read Committed → Repeatable Read → Serializable。MVCC 的 undo log + ReadView 机制。RR 级别下怎么防幻读？</p>
+  <div class="hero-tags">
+    <span>ACID</span><span>隔离级别</span><span>MVCC</span><span>ReadView</span><span>Next-Key Lock</span>
+  </div>
+</section>
+
+<!-- ==================== 第 1 站 ==================== -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>ACID 四大特性</h2>
+  </div>
+
+  <p>事务是数据库的核心抽象，它保证一组操作要么全部成功，要么全部回滚。ACID 是事务的四大基石：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>特性</th><th>含义</th><th>实现机制</th><th>被谁破坏</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>A</strong>tomicity 原子性</td><td>事务中的操作不可分割，全部成功或全部回滚</td><td>undo log（回滚日志）</td><td>—</td></tr>
+      <tr><td><strong>C</strong>onsistency 一致性</td><td>事务前后数据库从一个一致状态到另一个一致状态</td><td>A + I + D 共同保证</td><td>—</td></tr>
+      <tr><td><strong>I</strong>solation 隔离性</td><td>并发事务之间互不干扰</td><td>锁 + MVCC</td><td>隔离级别不够时出现脏读/不可重复读/幻读</td></tr>
+      <tr><td><strong>D</strong>urability 持久性</td><td>事务提交后数据永久保存，即使宕机也不丢失</td><td>redo log（重做日志）</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="think">
+    <p class="think-q">为什么 undo log 保证原子性，redo log 保证持久性？</p>
+    <p><strong>undo log</strong> 记录的是"反向操作"（INSERT 的 undo 是 DELETE），用于事务回滚时恢复原状 → 原子性。<strong>redo log</strong> 记录的是"修改后的值"，在 crash 后用 redo log 恢复已提交但未刷盘的数据 → 持久性。这就是"先写日志"（WAL）的核心思想。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>Atomicity 靠 undo log，Durability 靠 redo log，Isolation 靠锁 + MVCC，Consistency 是最终目标由前三者共同保证。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 2 站 ==================== -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>四种隔离级别与并发问题</h2>
+  </div>
+
+  <p>SQL 标准定义了四种隔离级别，从低到高，并发问题越来越少，但性能开销越来越大：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg">
+      <!-- Level bars -->
+      <rect x="40" y="30" width="140" height="50" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1.5"/>
+      <text x="110" y="52" text-anchor="middle" font-size="12" fill="#fca5a5" font-weight="bold">Read Uncommitted</text>
+      <text x="110" y="70" text-anchor="middle" font-size="10" fill="#fca5a5">读未提交</text>
+
+      <rect x="210" y="30" width="140" height="50" rx="8" fill="#78350f" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="280" y="52" text-anchor="middle" font-size="12" fill="#fcd34d" font-weight="bold">Read Committed</text>
+      <text x="280" y="70" text-anchor="middle" font-size="10" fill="#fcd34d">读已提交</text>
+
+      <rect x="380" y="30" width="140" height="50" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="450" y="52" text-anchor="middle" font-size="12" fill="#6ee7b7" font-weight="bold">Repeatable Read</text>
+      <text x="450" y="70" text-anchor="middle" font-size="10" fill="#6ee7b7">可重复读（默认）</text>
+
+      <rect x="550" y="30" width="140" height="50" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="620" y="52" text-anchor="middle" font-size="12" fill="#93c5fd" font-weight="bold">Serializable</text>
+      <text x="620" y="70" text-anchor="middle" font-size="10" fill="#93c5fd">串行化</text>
+
+      <!-- Problem rows -->
+      <text x="110" y="110" text-anchor="middle" font-size="11" fill="#f87171">脏读 ✗</text>
+      <text x="110" y="128" text-anchor="middle" font-size="11" fill="#f87171">不可重复读 ✗</text>
+      <text x="110" y="146" text-anchor="middle" font-size="11" fill="#f87171">幻读 ✗</text>
+
+      <text x="280" y="110" text-anchor="middle" font-size="11" fill="#6ee7b7">脏读 ✓ 解决</text>
+      <text x="280" y="128" text-anchor="middle" font-size="11" fill="#f87171">不可重复读 ✗</text>
+      <text x="280" y="146" text-anchor="middle" font-size="11" fill="#f87171">幻读 ✗</text>
+
+      <text x="450" y="110" text-anchor="middle" font-size="11" fill="#6ee7b7">脏读 ✓</text>
+      <text x="450" y="128" text-anchor="middle" font-size="11" fill="#6ee7b7">不可重复读 ✓</text>
+      <text x="450" y="146" text-anchor="middle" font-size="11" fill="#fbbf24">幻读 部分解决</text>
+
+      <text x="620" y="110" text-anchor="middle" font-size="11" fill="#6ee7b7">脏读 ✓</text>
+      <text x="620" y="128" text-anchor="middle" font-size="11" fill="#6ee7b7">不可重复读 ✓</text>
+      <text x="620" y="146" text-anchor="middle" font-size="11" fill="#6ee7b7">幻读 ✓</text>
+
+      <!-- Arrows -->
+      <text x="185" y="58" text-anchor="middle" font-size="18" fill="#475569">→</text>
+      <text x="355" y="58" text-anchor="middle" font-size="18" fill="#475569">→</text>
+      <text x="525" y="58" text-anchor="middle" font-size="18" fill="#475569">→</text>
+
+      <text x="360" y="190" text-anchor="middle" font-size="12" fill="#94a3b8">隔离级别越高 → 并发能力越低 → 锁等待/死锁概率越高</text>
+      <text x="360" y="215" text-anchor="middle" font-size="12" fill="#e2e8f0">InnoDB 默认 Repeatable Read，通过 MVCC + Next-Key Lock 解决大部分问题</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2-1</span> 四种隔离级别与并发问题的关系</figcaption>
+  </div>
+
+  <p>三种并发问题的精确定义：</p>
+  <table class="nb-table">
+    <thead>
+      <tr><th>问题</th><th>定义</th><th>场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>脏读</strong></td><td>事务 A 读到了事务 B 尚未提交的数据</td><td>B 修改 x=100 但没提交，A 读到 x=100，B 回滚后 A 的数据就"脏"了</td></tr>
+      <tr><td><strong>不可重复读</strong></td><td>事务 A 两次读同一行，结果不同（被别的事务 UPDATE 了）</td><td>A 读 x=50，B 提交 UPDATE x=100，A 再读 x=100</td></tr>
+      <tr><td><strong>幻读</strong></td><td>事务 A 两次按相同条件查，行数不同（别的事务 INSERT/DELETE 了）</td><td>A 查 age=25 有 3 行，B 插入 age=25 的新行并提交，A 再查有 4 行</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">设置隔离级别</div>
+    <pre class="srcbox-file"><span class="c">-- 查看当前隔离级别</span>
+<span class="k">SELECT</span> @@<span class="n">transaction_isolation</span>;
+<span class="c">-- 返回: REPEATABLE-READ</span>
+
+<span class="c">-- 修改当前会话隔离级别</span>
+<span class="k">SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED</span>;
+
+<span class="c">-- 修改全局（新连接生效）</span>
+<span class="k">SET GLOBAL TRANSACTION ISOLATION LEVEL READ COMMITTED</span>;
+
+<span class="c">-- 在 my.cnf 中配置</span>
+<span class="t">[mysqld]</span>
+<span class="n">transaction-isolation</span> = <span class="t">READ-COMMITTED</span></pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">脏读场景演示</div>
+    <pre class="srcbox-file"><span class="c">-- 隔离级别: READ UNCOMMITTED</span>
+
+<span class="c">-- 事务 A:</span>
+<span class="k">BEGIN</span>;
+<span class="k">SELECT</span> <span class="n">balance</span> <span class="k">FROM</span> <span class="n">account</span> <span class="k">WHERE</span> <span class="n">id</span>=<span class="n">1</span>; <span class="c">-- 返回 100</span>
+
+<span class="c">-- 事务 B（此时执行）:</span>
+<span class="k">BEGIN</span>;
+<span class="k">UPDATE</span> <span class="n">account</span> <span class="k">SET</span> <span class="n">balance</span>=<span class="n">200</span> <span class="k">WHERE</span> <span class="n">id</span>=<span class="n">1</span>; <span class="c">-- 未提交!</span>
+
+<span class="c">-- 事务 A（再次查询）:</span>
+<span class="k">SELECT</span> <span class="n">balance</span> <span class="k">FROM</span> <span class="n">account</span> <span class="k">WHERE</span> <span class="n">id</span>=<span class="n">1</span>; <span class="c">-- 返回 200（脏读!）</span>
+
+<span class="c">-- 事务 B 回滚:</span>
+<span class="k">ROLLBACK</span>;
+<span class="c">-- A 看到的 200 是"脏"的，B 根本没提交</span></pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">为什么 InnoDB 默认用 Repeatable Read 而不是 Read Committed？</p>
+    <p>历史原因：MySQL 早期（5.0 之前）binlog 格式只有 STATEMENT，在 RC 级别下主从复制可能出现数据不一致。RR 级别配合 Gap Lock 能保证 STATEMENT 格式 binlog 的安全性。虽然 MySQL 5.1+ 引入了 ROW 格式 binlog 已经解决了这个问题，但默认值保持不变。很多互联网公司实际用的是 RC + ROW binlog。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 3 站 ==================== -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>MVCC 实现机制——undo log 版本链</h2>
+  </div>
+
+  <p><strong>MVCC（Multi-Version Concurrency Control）</strong>多版本并发控制，是 InnoDB 在 RC 和 RR 级别下实现"读写不冲突"的核心机制。它的本质是：<strong>同一行数据保存多个历史版本</strong>，每个事务看到的是自己"应该看到的"版本。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">undo log 版本链</text>
+      <!-- Current row -->
+      <rect x="40" y="45" width="140" height="60" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+      <text x="110" y="66" text-anchor="middle" font-size="11" fill="#93c5fd">当前行（聚簇索引）</text>
+      <text x="110" y="84" text-anchor="middle" font-size="10" fill="#e2e8f0">name='Alice', age=30</text>
+      <text x="110" y="98" text-anchor="middle" font-size="9" fill="#94a3b8">trx_id=100, roll_pointer →</text>
+
+      <!-- Arrow -->
+      <line x1="180" y1="75" x2="230" y2="75" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <defs><marker id="arr3" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#f59e0b"/></marker></defs>
+
+      <!-- Undo version 1 -->
+      <rect x="240" y="45" width="130" height="60" rx="8" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="305" y="66" text-anchor="middle" font-size="11" fill="#d8b4fe">undo log v1</text>
+      <text x="305" y="84" text-anchor="middle" font-size="10" fill="#e2e8f0">name='Alice', age=28</text>
+      <text x="305" y="98" text-anchor="middle" font-size="9" fill="#94a3b8">trx_id=80, roll_pointer →</text>
+
+      <!-- Arrow -->
+      <line x1="370" y1="75" x2="420" y2="75" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+      <!-- Undo version 2 -->
+      <rect x="430" y="45" width="130" height="60" rx="8" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="495" y="66" text-anchor="middle" font-size="11" fill="#d8b4fe">undo log v2</text>
+      <text x="495" y="84" text-anchor="middle" font-size="10" fill="#e2e8f0">name='Alice', age=25</text>
+      <text x="495" y="98" text-anchor="middle" font-size="9" fill="#94a3b8">trx_id=50, roll_pointer →</text>
+
+      <line x1="560" y1="75" x2="610" y2="75" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr3)"/>
+      <text x="640" y="78" text-anchor="middle" font-size="11" fill="#94a3b8">NULL</text>
+
+      <!-- Hidden columns explanation -->
+      <rect x="40" y="130" width="640" height="80" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="152" font-size="12" fill="#fbbf24" font-weight="bold">隐藏列</text>
+      <text x="60" y="172" font-size="11" fill="#e2e8f0">DB_TRX_ID (6字节): 最近修改该行的事务 ID</text>
+      <text x="60" y="190" font-size="11" fill="#e2e8f0">DB_ROLL_PTR (7字节): 回滚指针，指向 undo log 中的上一个版本</text>
+      <text x="60" y="206" font-size="11" fill="#e2e8f0">DB_ROW_ID (6字节): 没有主键时 InnoDB 自动生成的行 ID</text>
+
+      <!-- Timeline -->
+      <text x="360" y="240" text-anchor="middle" font-size="12" fill="#e2e8f0">时间线: trx50(age=25) → trx80(age=28) → trx100(age=30)</text>
+      <text x="360" y="260" text-anchor="middle" font-size="11" fill="#94a3b8">每个版本通过 roll_pointer 串成链表，MVCC 根据 ReadView 决定事务看到哪个版本</text>
+    </svg>
+    <figcaption><span class="fig-no">图 3-1</span> undo log 版本链：每次 UPDATE 产生旧版本的 undo 记录</figcaption>
+  </div>
+
+  <div class="think">
+    <p class="think-q">undo log 什么时候可以清理？</p>
+    <p>当没有任何活跃事务需要访问某个旧版本时，该 undo log 就可以被 purge 线程清理。具体来说，当最老的活跃事务的 trx_id 大于该版本的 trx_id 时，说明没有人需要它了。这就是为什么<strong>长事务</strong>会阻止 undo log 清理，导致磁盘空间膨胀。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">长事务的危害与排查</div>
+    <pre class="srcbox-file"><span class="c">-- 查看当前所有活跃事务</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> <span class="n">information_schema</span>.<span class="n">INNODB_TRX</span>;
+
+<span class="c">-- 关键字段：</span>
+<span class="c">-- trx_id:          事务 ID</span>
+<span class="c">-- trx_state:       RUNNING / LOCK WAIT</span>
+<span class="c">-- trx_started:     事务开始时间（关注运行很久的事务）</span>
+<span class="c">-- trx_rows_locked: 锁住的行数</span>
+<span class="c">-- trx_query:       当前正在执行的 SQL</span>
+
+<span class="c">-- 长事务的危害：</span>
+<span class="c">-- 1. undo log 无法清理 → 磁盘空间膨胀（undo tablespace）</span>
+<span class="c">-- 2. 长时间持锁 → 阻塞其他事务 → 死锁概率增大</span>
+<span class="c">-- 3. 回滚时间长 → 影响数据库整体性能</span>
+
+<span class="c">-- 解决方案：</span>
+<span class="c">-- 1. 设置事务超时：innodb_lock_wait_timeout</span>
+<span class="c">-- 2. 应用端控制事务长度（不要在事务中做 RPC 调用）</span>
+<span class="c">-- 3. 定期监控并 kill 长时间运行的事务</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>undo log 版本链是 MVCC 的数据基础。每次 UPDATE 产生旧版本，通过 roll_pointer 串联。purge 线程在安全时清理旧版本。长事务会阻止清理并导致各种问题。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 4 站 ==================== -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>ReadView 可见性判断</h2>
+  </div>
+
+  <p><strong>ReadView</strong> 是 MVCC 的核心控制器，它在事务执行快照读（普通 SELECT）时生成，决定了当前事务能看到哪些版本的数据。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">ReadView 结构</text>
+      <!-- ReadView box -->
+      <rect x="180" y="40" width="360" height="120" rx="10" fill="#1e293b" stroke="#60a5fa" stroke-width="2"/>
+      <text x="200" y="64" font-size="12" fill="#93c5fd" font-weight="bold">ReadView</text>
+      <text x="200" y="86" font-size="11" fill="#e2e8f0">creator_trx_id: 创建此 ReadView 的事务 ID（如 100）</text>
+      <text x="200" y="106" font-size="11" fill="#e2e8f0">m_ids: 创建时所有活跃（未提交）事务 ID 列表 [80, 95]</text>
+      <text x="200" y="126" font-size="11" fill="#e2e8f0">min_trx_id: m_ids 中的最小值 = 80</text>
+      <text x="200" y="146" font-size="11" fill="#e2e8f0">max_trx_id: 系统即将分配的下一个事务 ID = 101</text>
+
+      <!-- Visibility rules -->
+      <text x="360" y="186" text-anchor="middle" font-size="13" fill="#fbbf24" font-weight="bold">可见性判断规则（针对某行版本的 trx_id）</text>
+      <rect x="40" y="200" width="640" height="90" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="220" font-size="11" fill="#6ee7b7">① trx_id &lt; min_trx_id → 可见（该版本在 ReadView 创建前已提交）</text>
+      <text x="60" y="240" font-size="11" fill="#f87171">② trx_id >= max_trx_id → 不可见（该版本在 ReadView 创建后才出现）</text>
+      <text x="60" y="260" font-size="11" fill="#fcd34d">③ min_trx_id &lt;= trx_id &lt; max_trx_id:</text>
+      <text x="80" y="278" font-size="11" fill="#e2e8f0">→ 如果 trx_id 在 m_ids 中 → 不可见（创建时还没提交）</text>
+      <text x="80" y="294" font-size="11" fill="#e2e8f0">→ 如果 trx_id 不在 m_ids 中 → 可见（创建时已提交）</text>
+    </svg>
+    <figcaption><span class="fig-no">图 4-1</span> ReadView 的四个关键字段与可见性判断规则</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">可见性判断伪代码</div>
+    <pre class="srcbox-file"><span class="k">function</span> <span class="n">isVisible</span>(<span class="n">row_trx_id</span>, <span class="n">readView</span>):
+    <span class="k">if</span> <span class="n">row_trx_id</span> == <span class="n">readView</span>.<span class="n">creator_trx_id</span>:
+        <span class="k">return</span> <span class="t">true</span>   <span class="c">// 自己修改的，当然可见</span>
+    <span class="k">if</span> <span class="n">row_trx_id</span> < <span class="n">readView</span>.<span class="n">min_trx_id</span>:
+        <span class="k">return</span> <span class="t">true</span>   <span class="c">// 在 ReadView 创建前就已提交</span>
+    <span class="k">if</span> <span class="n">row_trx_id</span> >= <span class="n">readView</span>.<span class="n">max_trx_id</span>:
+        <span class="k">return</span> <span class="t">false</span>  <span class="c">// 在 ReadView 创建后才开始的事务</span>
+    <span class="k">if</span> <span class="n">row_trx_id</span> <span class="k">in</span> <span class="n">readView</span>.<span class="n">m_ids</span>:
+        <span class="k">return</span> <span class="t">false</span>  <span class="c">// 创建 ReadView 时该事务还没提交</span>
+    <span class="k">return</span> <span class="t">true</span>       <span class="c">// 创建 ReadView 时该事务已提交</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>ReadView 的可见性判断本质是：<strong>在创建 ReadView 那一刻，哪些事务已经提交了</strong>。已提交的可见，未提交的不可见，之后开始的更不可见。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 5 站 ==================== -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>RR vs RC——ReadView 的创建时机不同</h2>
+  </div>
+
+  <p>Repeatable Read 和 Read Committed 的核心区别，就在于 <strong>ReadView 的创建时机</strong>：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">RC vs RR 的 ReadView 创建时机</text>
+
+      <!-- RC -->
+      <rect x="40" y="40" width="300" height="200" rx="10" fill="#78350f" stroke="#f59e0b" stroke-width="1.5" opacity="0.3"/>
+      <text x="190" y="62" text-anchor="middle" font-size="13" fill="#fcd34d" font-weight="bold">Read Committed</text>
+      <text x="190" y="84" text-anchor="middle" font-size="11" fill="#e2e8f0">每次 SELECT 都创建新的 ReadView</text>
+      <rect x="60" y="100" width="260" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="190" y="120" text-anchor="middle" font-size="10" fill="#94a3b8">SELECT 1 → 创建 ReadView_A → 看到 x=50</text>
+      <rect x="60" y="140" width="260" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="190" y="160" text-anchor="middle" font-size="10" fill="#94a3b8">（别的线程提交 UPDATE x=100）</text>
+      <rect x="60" y="180" width="260" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="190" y="200" text-anchor="middle" font-size="10" fill="#f87171">SELECT 2 → 创建 ReadView_B → 看到 x=100</text>
+      <text x="190" y="230" text-anchor="middle" font-size="11" fill="#f87171">两次读取结果不同 → 不可重复读</text>
+
+      <!-- RR -->
+      <rect x="380" y="40" width="300" height="200" rx="10" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5" opacity="0.3"/>
+      <text x="530" y="62" text-anchor="middle" font-size="13" fill="#6ee7b7" font-weight="bold">Repeatable Read</text>
+      <text x="530" y="84" text-anchor="middle" font-size="11" fill="#e2e8f0">只在第一次 SELECT 时创建 ReadView</text>
+      <rect x="400" y="100" width="260" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="530" y="120" text-anchor="middle" font-size="10" fill="#94a3b8">SELECT 1 → 创建 ReadView_A → 看到 x=50</text>
+      <rect x="400" y="140" width="260" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="530" y="160" text-anchor="middle" font-size="10" fill="#94a3b8">（别的线程提交 UPDATE x=100）</text>
+      <rect x="400" y="180" width="260" height="30" rx="4" fill="#1e293b" stroke="#475569"/>
+      <text x="530" y="200" text-anchor="middle" font-size="10" fill="#6ee7b7">SELECT 2 → 复用 ReadView_A → 看到 x=50</text>
+      <text x="530" y="230" text-anchor="middle" font-size="11" fill="#6ee7b7">两次读取结果相同 → 可重复读 ✓</text>
+    </svg>
+    <figcaption><span class="fig-no">图 5-1</span> RC 每次 SELECT 创建 ReadView，RR 只在第一次 SELECT 时创建</figcaption>
+  </div>
+
+  <div class="think">
+    <p class="think-q">RR 级别下，事务 A 中先 UPDATE 再 SELECT，能看到自己改的值吗？</p>
+    <p>能。MVCC 的可见性判断有一条特殊规则：<strong>row_trx_id == creator_trx_id 时直接可见</strong>。自己的修改永远对自己可见，不受 ReadView 限制。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>RC = 每次快照读创建新 ReadView → 能读到别人刚提交的修改 → 不可重复读。<br>RR = 只在第一次快照读创建 ReadView，后续复用 → 看到的始终是同一快照 → 可重复读。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 6 站 ==================== -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>当前读 vs 快照读</h2>
+  </div>
+
+  <p>MVCC 只作用于<strong>快照读（Snapshot Read）</strong>，即普通的 <code>SELECT ... FROM ...</code>。而<strong>当前读（Current Read）</strong>则直接读取最新已提交的版本，并加锁。</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>读类型</th><th>SQL 示例</th><th>行为</th><th>是否受 MVCC 控制</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>快照读</td><td><code>SELECT * FROM t WHERE id=1</code></td><td>读取 MVCC 版本链中 ReadView 可见的版本</td><td>✅ 是</td></tr>
+      <tr><td>当前读</td><td><code>SELECT ... FOR UPDATE</code></td><td>读取最新已提交数据，加 X 锁</td><td>❌ 否</td></tr>
+      <tr><td>当前读</td><td><code>SELECT ... LOCK IN SHARE MODE</code></td><td>读取最新已提交数据，加 S 锁</td><td>❌ 否</td></tr>
+      <tr><td>当前读</td><td><code>INSERT / UPDATE / DELETE</code></td><td>读取最新数据并修改，加 X 锁</td><td>❌ 否</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">快照读与当前读的行为差异</div>
+    <pre class="srcbox-file"><span class="c">-- 事务 A（RR 级别）</span>
+<span class="k">BEGIN</span>;
+<span class="k">SELECT</span> <span class="n">balance</span> <span class="k">FROM</span> <span class="n">account</span> <span class="k">WHERE</span> <span class="n">id</span>=<span class="n">1</span>;   <span class="c">-- 快照读 → 100（创建 ReadView）</span>
+  <span class="c">-- 此时事务 B 执行: UPDATE account SET balance=200 WHERE id=1; COMMIT;</span>
+<span class="k">SELECT</span> <span class="n">balance</span> <span class="k">FROM</span> <span class="n">account</span> <span class="k">WHERE</span> <span class="n">id</span>=<span class="n">1</span>;   <span class="c">-- 快照读 → 100（复用 ReadView）</span>
+<span class="k">SELECT</span> <span class="n">balance</span> <span class="k">FROM</span> <span class="n">account</span> <span class="k">WHERE</span> <span class="n">id</span>=<span class="n">1</span> <span class="k">FOR UPDATE</span>; <span class="c">-- 当前读 → 200（读最新 + 加锁）</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试关键点</span>
+    <p>MVCC 解决了"读写冲突"——读不阻塞写，写不阻塞读（快照读）。但当前读会加锁，会阻塞其他写操作。所以 MVCC 提升的是<strong>快照读的并发性能</strong>。</p>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">InnoDB 锁类型总览</text>
+
+      <rect x="40" y="45" width="200" height="60" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="1" opacity="0.5"/>
+      <text x="140" y="65" text-anchor="middle" font-size="11" fill="#6ee7b7" font-weight="bold">共享锁 (S Lock)</text>
+      <text x="140" y="83" text-anchor="middle" font-size="10" fill="#e2e8f0">LOCK IN SHARE MODE</text>
+      <text x="140" y="98" text-anchor="middle" font-size="9" fill="#94a3b8">读读共享，读写互斥</text>
+
+      <rect x="260" y="45" width="200" height="60" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1" opacity="0.5"/>
+      <text x="360" y="65" text-anchor="middle" font-size="11" fill="#fca5a5" font-weight="bold">排他锁 (X Lock)</text>
+      <text x="360" y="83" text-anchor="middle" font-size="10" fill="#e2e8f0">FOR UPDATE / INSERT / UPDATE / DELETE</text>
+      <text x="360" y="98" text-anchor="middle" font-size="9" fill="#94a3b8">读写互斥，写写互斥</text>
+
+      <rect x="480" y="45" width="200" height="60" rx="8" fill="#78350f" stroke="#f59e0b" stroke-width="1" opacity="0.5"/>
+      <text x="580" y="65" text-anchor="middle" font-size="11" fill="#fcd34d" font-weight="bold">意向锁 (IS/IX)</text>
+      <text x="580" y="83" text-anchor="middle" font-size="10" fill="#e2e8f0">表级锁，自动加</text>
+      <text x="580" y="98" text-anchor="middle" font-size="9" fill="#94a3b8">加速表锁冲突检测</text>
+
+      <rect x="40" y="125" width="640" height="60" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="147" font-size="11" fill="#fbbf24" font-weight="bold">锁兼容性矩阵</text>
+      <text x="60" y="167" font-size="11" fill="#e2e8f0">S + S = ✅ 兼容 &nbsp;|&nbsp; S + X = ❌ 冲突 &nbsp;|&nbsp; X + X = ❌ 冲突</text>
+      <text x="60" y="183" font-size="11" fill="#e2e8f0">快照读不加锁 → 与任何锁都兼容 → 这就是 MVCC 的威力</text>
+    </svg>
+    <figcaption><span class="fig-no">图 6-1</span> InnoDB 三种行锁：共享锁、排他锁、意向锁</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">死锁排查</div>
+    <pre class="srcbox-file"><span class="c">-- 查看最近一次死锁信息</span>
+<span class="k">SHOW ENGINE INNODB STATUS</span>;
+
+<span class="c">-- 开启死锁日志（记录每次死锁到 error log）</span>
+<span class="k">SET GLOBAL</span> <span class="n">innodb_print_all_deadlocks</span> = <span class="t">ON</span>;
+
+<span class="c">-- 设置锁等待超时</span>
+<span class="k">SET</span> <span class="n">innodb_lock_wait_timeout</span> = <span class="n">10</span>; <span class="c">-- 默认 50 秒</span>
+
+<span class="c">-- 常见死锁场景：</span>
+<span class="c">-- 事务 A: LOCK row1 → 等待 row2</span>
+<span class="c">-- 事务 B: LOCK row2 → 等待 row1</span>
+<span class="c">-- 解决方案: 统一加锁顺序 / 缩短事务 / 降低隔离级别</span></pre>
+  </div>
+</section>
+
+<!-- ==================== 第 7 站 ==================== -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>RR 级别下的幻读防护——Next-Key Lock</h2>
+  </div>
+
+  <p>很多人说"MySQL RR 级别解决了幻读"，这个说法<strong>不完全准确</strong>。准确地说：InnoDB 在 RR 级别下通过 <strong>MVCC 解决了快照读的幻读</strong>，通过 <strong>Next-Key Lock 解决了当前读的幻读</strong>。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">Next-Key Lock = Record Lock + Gap Lock</text>
+
+      <!-- Index entries -->
+      <line x1="60" y1="80" x2="660" y2="80" stroke="#475569" stroke-width="2"/>
+      <circle cx="140" cy="80" r="12" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+      <text x="140" y="84" text-anchor="middle" font-size="10" fill="#93c5fd">10</text>
+      <circle cx="280" cy="80" r="12" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+      <text x="280" y="84" text-anchor="middle" font-size="10" fill="#93c5fd">20</text>
+      <circle cx="420" cy="80" r="12" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+      <text x="420" y="84" text-anchor="middle" font-size="10" fill="#93c5fd">30</text>
+      <circle cx="560" cy="80" r="12" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+      <text x="560" y="84" text-anchor="middle" font-size="10" fill="#93c5fd">40</text>
+
+      <!-- Gap labels -->
+      <text x="80" y="65" text-anchor="middle" font-size="9" fill="#94a3b8">(-∞,10)</text>
+      <text x="210" y="65" text-anchor="middle" font-size="9" fill="#94a3b8">(10,20)</text>
+      <text x="350" y="65" text-anchor="middle" font-size="9" fill="#94a3b8">(20,30)</text>
+      <text x="490" y="65" text-anchor="middle" font-size="9" fill="#94a3b8">(30,40)</text>
+      <text x="630" y="65" text-anchor="middle" font-size="9" fill="#94a3b8">(40,+∞)</text>
+
+      <!-- Next-Key Lock for WHERE age=20 -->
+      <rect x="255" y="100" width="50" height="24" rx="4" fill="#dc2626" stroke="#f87171"/>
+      <text x="280" y="116" text-anchor="middle" font-size="9" fill="#fecaca">Record Lock</text>
+      <rect x="152" y="100" width="100" height="24" rx="4" fill="#92400e" stroke="#f59e0b"/>
+      <text x="202" y="116" text-anchor="middle" font-size="9" fill="#fcd34d">Gap Lock (10,20)</text>
+      <text x="280" y="145" text-anchor="middle" font-size="11" fill="#e2e8f0">Next-Key Lock 锁住了 (10, 20]</text>
+
+      <!-- Explanation -->
+      <rect x="40" y="165" width="640" height="70" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="185" font-size="11" fill="#fbbf24" font-weight="bold">SELECT * FROM t WHERE age = 20 FOR UPDATE;</text>
+      <text x="60" y="205" font-size="11" fill="#e2e8f0">Record Lock: 锁住 age=20 这一行</text>
+      <text x="60" y="223" font-size="11" fill="#e2e8f0">Gap Lock: 锁住 (10, 20) 这个间隙 → 阻止别的事务在这个范围插入新行 → 防止幻读</text>
+    </svg>
+    <figcaption><span class="fig-no">图 7-1</span> Next-Key Lock = 记录锁 + 间隙锁，同时锁住行和间隙</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">幻读防护示例</div>
+    <pre class="srcbox-file"><span class="c">-- 事务 A（RR 级别）</span>
+<span class="k">BEGIN</span>;
+<span class="c">-- 当前读：加 Next-Key Lock</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> <span class="n">user</span> <span class="k">WHERE</span> <span class="n">age</span> = <span class="n">25</span> <span class="k">FOR UPDATE</span>;
+<span class="c">-- 锁住 age=25 的行 + (前一个索引值, 25) 的间隙</span>
+
+<span class="c">-- 事务 B 尝试插入</span>
+<span class="k">INSERT INTO</span> <span class="n">user</span> (<span class="n">name</span>, <span class="n">age</span>) <span class="k">VALUES</span> (<span class="t">'New'</span>, <span class="n">25</span>);
+<span class="c">-- ❌ 被阻塞！因为 age=25 在 Gap Lock 范围内</span>
+
+<span class="c">-- 事务 A 再次查</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> <span class="n">user</span> <span class="k">WHERE</span> <span class="n">age</span> = <span class="n">25</span> <span class="k">FOR UPDATE</span>;
+<span class="c">-- ✅ 结果不变 → 当前读幻读被解决</span></pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">RR 级别下有没有幻读"漏网"的场景？</p>
+    <p>有！如果事务 A 先做快照读，再做当前读（如 UPDATE），就可能"看到"幻行。因为 UPDATE 是当前读，读最新数据。这是一个经典的面试追问点：MVCC 和锁各自解决一半，合起来才完整。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试一招鲜</span>
+    <p>回答幻读问题时，一定要分两层说：<strong>快照读靠 MVCC 解决，当前读靠 Next-Key Lock 解决</strong>。不要简单说"RR 解决了幻读"——这是不够精确的，面试官可能追问具体机制。</p>
+  </div>
+
+  <div class="recap">
+    <h3>全篇回顾</h3>
+    <ol>
+      <li><strong>ACID</strong>：原子性靠 undo log，持久性靠 redo log，隔离性靠锁 + MVCC</li>
+      <li><strong>四种隔离级别</strong>：RU < RC < RR（默认）< Serializable，逐级解决脏读/不可重复读/幻读</li>
+      <li><strong>MVCC 版本链</strong>：每次 UPDATE 产生 undo log 旧版本，通过 roll_pointer 串成链表</li>
+      <li><strong>ReadView</strong>：根据 m_ids、min/max_trx_id 判断版本可见性</li>
+      <li><strong>RC vs RR</strong>：RC 每次 SELECT 创建 ReadView，RR 只在第一次 SELECT 创建并复用</li>
+      <li><strong>快照读 vs 当前读</strong>：普通 SELECT 是快照读走 MVCC，FOR UPDATE/INSERT/UPDATE/DELETE 是当前读加锁</li>
+      <li><strong>Next-Key Lock</strong>：Record Lock + Gap Lock，在 RR 级别下防止当前读的幻读</li>
+    </ol>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

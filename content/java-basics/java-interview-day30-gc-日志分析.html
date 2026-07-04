@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GC 日志分析实战</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "GC 日志分析实战：读懂每一行 GC 输出"
+  difficulty: 高级
+  interviewFreq: 高频
+  desc: "GC 日志里的 Young GC、Full GC、Mixed GC 怎么看？pause 时间、heap 变化、GC cause——用真实日志手把手分析。"
+-->
+
+<!-- ================================================================
+     第 1 站 — 开场
+     ================================================================ -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>面试官：你怎么排查线上 GC 问题？</h2>
+  </div>
+
+  <div class="think">
+    <p class="think-q">"线上服务响应变慢了，你怎么定位是不是 GC 的问题？"</p>
+    <p>大多数候选人会说"看 GC 日志"。但面试官追问一句"GC 日志里具体看什么？每一行代表什么意思？"——能答清楚的人不到 20%。</p>
+  </div>
+
+  <p>当线上服务出现延迟飙升、CPU 打满、甚至 OOM 之前，<strong>GC 日志是最直接的第一手证据</strong>。它忠实地记录了每一次垃圾回收的触发原因、暂停时间、内存变化——但前提是你得读得懂。</p>
+
+  <p>一组真实数据：某电商大促期间，服务 P99 延迟从 50ms 飙到 2s。运维第一反应是加机器，但打开 GC 日志一看——每隔 40 秒就有一次 1.8 秒的 Full GC。问题不在流量，而在内存泄漏导致的频繁 Full GC。</p>
+
+  <p>这篇文章，我们用一个真实的 GC 日志文件，逐行拆解 Young GC、Full GC、Mixed GC 的输出格式，搞清楚每一个字段代表什么。读完之后，你能做到：</p>
+
+  <ul>
+    <li>看懂 GC 日志的每一列含义，不再"凭感觉猜"</li>
+    <li>区分 Young GC / Full GC / Mixed GC 的触发条件</li>
+    <li>用 GC cause 快速定位问题根因</li>
+    <li>掌握 GCViewer、GCEasy 等工具做可视化分析</li>
+  </ul>
+
+  <div class="crack">
+    <span class="crack-label">面试官视角</span>
+    <p>能在白板上手写 GC 参数的人很多，但能把一行 GC 日志逐字段解释清楚的人极少。这篇文章给你的就是"逐字段拆解"的能力。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 2 站 — 开启 GC 日志
+     ================================================================ -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>开启 GC 日志：JDK 8 vs JDK 9+</h2>
+  </div>
+
+  <p>巧妇难为无米之炊。分析 GC 日志的前提是<strong>你得先让它输出</strong>。遗憾的是，很多线上环境压根没开 GC 日志，等到出事时只能干瞪眼。</p>
+
+  <div class="crack">
+    <span class="crack-label">生产环境必开</span>
+    <p>GC 日志的性能开销极低（通常 &lt; 1%），建议所有生产环境默认开启。这不是可选项，而是基本操作规范。</p>
+  </div>
+
+  <h3>JDK 8 及以前</h3>
+  <p>JDK 8 使用 <code>-XX</code> 系列参数控制 GC 日志输出：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>jdk8-gc-flags.sh</b></span></div>
+    <pre><code><span class="c"># JDK 8 GC 日志标准配置</span>
+java <span class="k">-XX</span>:+PrintGCDetails \
+     <span class="k">-XX</span>:+PrintGCDateStamps \
+     <span class="k">-XX</span>:+PrintGCTimeStamps \
+     <span class="k">-XX</span>:+PrintHeapAtGC \
+     <span class="k">-XX</span>:+PrintGCApplicationStoppedTime \
+     <span class="k">-Xloggc</span>:/var/log/gc/gc-%t.log \
+     <span class="k">-XX</span>:+UseGCLogFileRotation \
+     <span class="k">-XX</span>:NumberOfGCLogFiles=<span class="n">10</span> \
+     <span class="k">-XX</span>:GCLogFileSize=<span class="n">20M</span> \
+     <span class="k">-jar</span> app.jar</code></pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>参数</th><th>作用</th><th>建议</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>-XX:+PrintGCDetails</code></td><td>输出 GC 详细信息（分区变化、耗时）</td><td>必开</td></tr>
+      <tr><td><code>-XX:+PrintGCDateStamps</code></td><td>每行日志加日期时间戳</td><td>必开</td></tr>
+      <tr><td><code>-XX:+PrintGCTimeStamps</code></td><td>输出相对 JVM 启动的秒数</td><td>建议开</td></tr>
+      <tr><td><code>-Xloggc:file</code></td><td>GC 日志输出到文件</td><td>必开</td></tr>
+      <tr><td><code>-XX:+UseGCLogFileRotation</code></td><td>日志轮转，防止撑爆磁盘</td><td>生产必开</td></tr>
+    </tbody>
+  </table>
+
+  <h3>JDK 9+ 统一日志框架</h3>
+  <p>JDK 9 引入了统一日志系统（Unified Logging），用一个 <code>-Xlog</code> 参数搞定所有日志配置：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>jdk9-gc-flags.sh</b></span></div>
+    <pre><code><span class="c"># JDK 9+ 统一日志配置</span>
+java <span class="k">-Xlog</span>:gc*,gc+age=trace,safepoint:file=/var/log/gc/gc-%t.log:time,uptime,level,tags:filecount=<span class="n">10</span>,filesize=<span class="n">20M</span> \
+     <span class="k">-jar</span> app.jar</code></pre>
+  </div>
+
+  <p>语法结构是 <code>-Xlog:标签:输出目标:装饰器:轮转参数</code>。相比 JDK 8 的散装参数，统一日志更灵活也更强——但在面试中，<strong>JDK 8 的参数你仍然要记得</strong>，因为大量存量系统还在用。</p>
+
+  <div class="takeaway">
+    <div class="takeaway-label">GC 日志参数速记</div>
+    <ul>
+      <li>JDK 8：<code>-XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xloggc:file</code> 三件套</li>
+      <li>JDK 9+：<code>-Xlog:gc*:file=file</code> 一行搞定</li>
+      <li>生产环境一定要开日志轮转，防止磁盘写满</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 3 站 — Young GC 日志解读
+     ================================================================ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>Young GC 日志解读：逐字段拆解</h2>
+  </div>
+
+  <p>Young GC（Minor GC）是最频繁发生的 GC 类型。我们拿一条真实的 G1 收集器日志来逐字段拆解：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>gc-young.log</b></span></div>
+    <pre><code><span class="n">2024-03-15</span>T<span class="n">14:23:07.392</span>+<span class="n">0800</span>: <span class="n">128.456</span>: [<span class="k">GC pause</span> (<span class="t">G1 Evacuation Pause</span>) (<span class="t">young</span>), <span class="n">0.0234567</span> secs]
+   [<span class="k">Eden</span>: <span class="n">256M</span>(<span class="n">256M</span>)-&gt;<span class="n">0B</span>(<span class="n">224M</span>) <span class="k">Survivors</span>: <span class="n">0B</span>-&gt;<span class="n">32M</span> <span class="k">Heap</span>: <span class="n">512M</span>(<span class="n">1024M</span>)-&gt;<span class="n">288M</span>(<span class="n">1024M</span>)]
+   [<span class="k">Times</span>: user=<span class="n">0.04</span> sys=<span class="n">0.01</span>, real=<span class="n">0.02</span> secs]</code></pre>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 880 420" xmlns="http://www.w3.org/2000/svg" style="max-width:880px">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6366f1"/>
+        </marker>
+      </defs>
+      <!-- 背景 -->
+      <rect width="880" height="420" rx="12" fill="#0f172a"/>
+      <!-- 标题 -->
+      <text x="440" y="36" text-anchor="middle" fill="#e2e8f0" font-size="16" font-weight="bold">GC 日志解剖：Young GC 全字段解析</text>
+
+      <!-- 第1行日志 -->
+      <rect x="30" y="56" width="820" height="44" rx="6" fill="#1e293b"/>
+      <text x="44" y="84" fill="#94a3b8" font-family="monospace" font-size="12">2024-03-15T14:23:07.392+0800: 128.456: [GC pause (G1 Evacuation Pause) (young), 0.0234 secs]</text>
+
+      <!-- 标注线 - 时间戳 -->
+      <line x1="170" y1="100" x2="170" y2="130" stroke="#6366f1" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="100" y="132" width="140" height="42" rx="5" fill="#312e81"/>
+      <text x="170" y="150" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="bold">日期时间戳</text>
+      <text x="170" y="166" text-anchor="middle" fill="#a5b4fc" font-size="10">绝对时间，定位问题时用</text>
+
+      <!-- 标注线 - uptime -->
+      <line x1="290" y1="100" x2="290" y2="190" stroke="#6366f1" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="230" y="192" width="120" height="42" rx="5" fill="#312e81"/>
+      <text x="290" y="210" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="bold">128.456 秒</text>
+      <text x="290" y="226" text-anchor="middle" fill="#a5b4fc" font-size="10">JVM 启动后经过的时间</text>
+
+      <!-- 标注线 - GC cause -->
+      <line x1="500" y1="100" x2="500" y2="130" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="410" y="132" width="180" height="42" rx="5" fill="#78350f"/>
+      <text x="500" y="150" text-anchor="middle" fill="#fde68a" font-size="11" font-weight="bold">G1 Evacuation Pause</text>
+      <text x="500" y="166" text-anchor="middle" fill="#fbbf24" font-size="10">GC 触发原因（GC Cause）</text>
+
+      <!-- 标注线 - young -->
+      <line x1="648" y1="100" x2="648" y2="190" stroke="#10b981" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="600" y="192" width="96" height="42" rx="5" fill="#064e3b"/>
+      <text x="648" y="210" text-anchor="middle" fill="#6ee7b7" font-size="11" font-weight="bold">(young)</text>
+      <text x="648" y="226" text-anchor="middle" fill="#34d399" font-size="10">GC 类型</text>
+
+      <!-- 标注线 - pause -->
+      <line x1="760" y1="100" x2="760" y2="130" stroke="#ef4444" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="700" y="132" width="130" height="42" rx="5" fill="#7f1d1d"/>
+      <text x="765" y="150" text-anchor="middle" fill="#fca5a5" font-size="11" font-weight="bold">0.0234 secs</text>
+      <text x="765" y="166" text-anchor="middle" fill="#f87171" font-size="10">GC 暂停时间 (STW)</text>
+
+      <!-- 第2行日志 -->
+      <rect x="30" y="254" width="820" height="44" rx="6" fill="#1e293b"/>
+      <text x="44" y="282" fill="#94a3b8" font-family="monospace" font-size="12">[Eden: 256M(256M)-&gt;0B(224M) Survivors: 0B-&gt;32M Heap: 512M(1024M)-&gt;288M(1024M)]</text>
+
+      <!-- Eden 标注 -->
+      <line x1="140" y1="298" x2="140" y2="325" stroke="#6366f1" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="52" y="327" width="176" height="58" rx="5" fill="#312e81"/>
+      <text x="140" y="345" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="bold">Eden 区变化</text>
+      <text x="140" y="361" text-anchor="middle" fill="#a5b4fc" font-size="10">256M→0B：使用量变化</text>
+      <text x="140" y="377" text-anchor="middle" fill="#a5b4fc" font-size="10">(256M)→(224M)：容量变化</text>
+
+      <!-- Survivors 标注 -->
+      <line x1="380" y1="298" x2="380" y2="325" stroke="#10b981" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="300" y="327" width="160" height="58" rx="5" fill="#064e3b"/>
+      <text x="380" y="345" text-anchor="middle" fill="#6ee7b7" font-size="11" font-weight="bold">Survivors 区变化</text>
+      <text x="380" y="361" text-anchor="middle" fill="#34d399" font-size="10">0B→32M：存活对象</text>
+      <text x="380" y="377" text-anchor="middle" fill="#34d399" font-size="10">复制到了 Survivor</text>
+
+      <!-- Heap 标注 -->
+      <line x1="640" y1="298" x2="640" y2="325" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ah)"/>
+      <rect x="552" y="327" width="176" height="58" rx="5" fill="#78350f"/>
+      <text x="640" y="345" text-anchor="middle" fill="#fde68a" font-size="11" font-weight="bold">整个堆变化</text>
+      <text x="640" y="361" text-anchor="middle" fill="#fbbf24" font-size="10">512M→288M：回收 224M</text>
+      <text x="640" y="377" text-anchor="middle" fill="#fbbf24" font-size="10">(1024M)：堆最大容量</text>
+
+      <!-- 第3行 -->
+      <rect x="30" y="395" width="820" height="22" rx="4" fill="#1e293b"/>
+      <text x="44" y="412" fill="#64748b" font-family="monospace" font-size="11">[Times: user=0.04 sys=0.01, real=0.02 secs]  ← GC 线程 CPU 耗时 vs 实际挂起时间</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> — Young GC 日志逐字段解剖：每条信息的含义一目了然</figcaption>
+  </div>
+
+  <h3>关键指标解读</h3>
+
+  <p><strong>1) GC Cause — 触发原因</strong></p>
+  <p>日志中的 <code>(G1 Evacuation Pause)</code> 表示这是 G1 的正常 Young GC 疏散暂停。如果是 <code>(Allocation Failure)</code>，说明 Eden 区不够分配新对象了。</p>
+
+  <p><strong>2) Eden 区变化：<code>256M(256M)-&gt;0B(224M)</code></strong></p>
+  <p>格式是 <code>使用量(容量)</code>。GC 前 Eden 用了 256M（容量 256M，已经满了），GC 后清零到 0B。但注意容量从 256M 变成了 224M——G1 会动态调整 Region 数量。</p>
+
+  <p><strong>3) Survivors 变化：<code>0B-&gt;32M</code></strong></p>
+  <p>GC 前 Survivor 区是空的，GC 后存活对象占了 32M。存活率 = 32M / 256M = 12.5%，说明大部分对象都是朝生夕灭的，这是健康状态。</p>
+
+  <p><strong>4) Heap 变化：<code>512M(1024M)-&gt;288M(1024M)</code></strong></p>
+  <p>整个堆从 512M 降到 288M，回收了 224M。堆最大容量是 1024M，还有余量。</p>
+
+  <p><strong>5) Times：<code>user=0.04 sys=0.01, real=0.02</code></strong></p>
+  <p><code>user</code> 是所有 GC 线程的 CPU 时间之和（多线程所以比 real 大），<code>real</code> 是实际挂起用户线程的时间。<strong>real 才是影响响应延迟的那个数字。</strong></p>
+
+  <div class="takeaway">
+    <div class="takeaway-label">Young GC 健康指标</div>
+    <ul>
+      <li>暂停时间 real &lt; 50ms：正常；50~200ms：需关注；&gt; 200ms：必须排查</li>
+      <li>Survivor 存活率 10~30%：健康；&gt; 80%：对象晋升老年代压力大</li>
+      <li>频率 &gt; 10 次/分钟：可能分配速率过高或新生代太小</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 4 站 — Full GC 日志解读
+     ================================================================ -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>Full GC 日志解读：最危险的信号</h2>
+  </div>
+
+  <p>如果说 Young GC 是"例行体检"，Full GC 就是"进了急诊室"。一次 Full GC 的暂停时间通常是 Young GC 的 <strong>10~100 倍</strong>。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>gc-full.log</b></span></div>
+    <pre><code><span class="n">2024-03-15</span>T<span class="n">14:25:12.789</span>+<span class="n">0800</span>: <span class="n">253.853</span>: [<span class="k">Full GC</span> (<span class="t">Ergonomics</span>)
+   [<span class="k">PSYoungGen</span>: <span class="n">65536K</span>-&gt;<span class="n">0K</span>(<span class="n">76288K</span>)]
+   [<span class="k">ParOldGen</span>: <span class="n">173568K</span>-&gt;<span class="n">139264K</span>(<span class="n">175104K</span>)]
+   <span class="n">239104K</span>-&gt;<span class="n">139264K</span>(<span class="n">251392K</span>),
+   [<span class="k">Metaspace</span>: <span class="n">67840K</span>-&gt;<span class="n">67840K</span>(<span class="n">1107968K</span>)],
+   <span class="n">0.8923456</span> secs]
+   [<span class="k">Times</span>: user=<span class="n">3.42</span> sys=<span class="n">0.05</span>, real=<span class="n">0.89</span> secs]</code></pre>
+  </div>
+
+  <p>逐字段分析：</p>
+  <ul>
+    <li><strong><code>Full GC (Ergonomics)</code></strong>：Ergonomics 表示 JVM 自己判断需要 Full GC（通常是 Young GC 后老年代仍然不够）</li>
+    <li><strong><code>PSYoungGen: 65536K-&gt;0K(76288K)</code></strong>：新生代 64M 全部清空</li>
+    <li><strong><code>ParOldGen: 173568K-&gt;139264K(175104K)</code></strong>：老年代从 169M 回收到了 136M，只回收了 33M——说明大部分对象确实还在用</li>
+    <li><strong><code>Metaspace: 67840K-&gt;67840K</code></strong>：元空间没有任何回收，类都还在加载</li>
+    <li><strong><code>real=0.89 secs</code></strong>：用户线程被暂停了 <strong>890 毫秒</strong>！这对在线服务是致命的</li>
+    <li><strong><code>user=3.42</code></strong>：4 个 GC 线程并行工作，总计 3.42 秒 CPU 时间，但实际耗时 0.89 秒</li>
+  </ul>
+
+  <h3>常见 GC Cause 对照表</h3>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>GC Cause</th><th>含义</th><th>严重程度</th><th>排查方向</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Allocation Failure</code></td><td>堆内存不够分配新对象</td><td>中</td><td>增大堆 or 减少分配</td></tr>
+      <tr><td><code>Ergonomics</code></td><td>JVM 自动判断需要 GC</td><td>中</td><td>看是 Young 还是 Full</td></tr>
+      <tr><td><code>System.gc()</code></td><td>代码显式调用</td><td>高</td><td>查谁调了 System.gc()</td></tr>
+      <tr><td><code>Promotion Failed</code></td><td>对象晋升老年代时空间不足</td><td>高</td><td>增大老年代或减少晋升</td></tr>
+      <tr><td><code>Metadata GC Threshold</code></td><td>Metaspace 达到阈值</td><td>中</td><td>检查类加载泄漏</td></tr>
+      <tr><td><code>Last ditch collection</code></td><td>最后手段的 GC</td><td>极高</td><td>即将 OOM</td></tr>
+      <tr><td><code>G1 Humongous Allocation</code></td><td>大对象分配（&gt;Region/2）</td><td>高</td><td>检查大数组/大字符串</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">System.gc() 是坑</span>
+    <p>线上出现 <code>System.gc()</code> 触发的 Full GC，通常是第三方库（如 RMI、NIO DirectByteBuffer）在偷偷调用。可以用 <code>-XX:+DisableExplicitGC</code> 屏蔽，或者用 <code>-XX:+ExplicitGCInvokesConcurrent</code> 改为并发 GC。</p>
+  </div>
+
+  <div class="formula">
+    <p><strong>Full GC 回收效率</strong> = (GC 前堆使用量 − GC 后堆使用量) / GC 暂停时间</p>
+    <p>上例：(239M − 136M) / 0.89s = <strong>115 MB/s</strong>。如果这个值持续走低，说明老年代存活对象越来越多——大概率是内存泄漏。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 5 站 — G1 特有日志
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>G1 特有日志：Mixed GC、并发标记、疏散失败</h2>
+  </div>
+
+  <p>G1 是目前 JDK 的默认收集器（JDK 9+），它的日志比 Parallel GC 复杂得多——因为它引入了 <strong>Mixed GC</strong> 和 <strong>并发标记周期</strong>。</p>
+
+  <h3>Mixed GC — G1 的独门武器</h3>
+  <p>Mixed GC 同时回收新生代和部分老年代 Region，是 G1 避免 Full GC 的关键机制：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>gc-mixed.log</b></span></div>
+    <pre><code><span class="n">2024-03-15</span>T<span class="n">14:30:45.123</span>+<span class="n">0800</span>: <span class="n">586.187</span>: [<span class="k">GC pause</span> (<span class="t">G1 Evacuation Pause</span>) (<span class="t">mixed</span>), <span class="n">0.0456789</span> secs]
+   [<span class="k">Eden</span>: <span class="n">128M</span>(<span class="n">128M</span>)-&gt;<span class="n">0B</span>(<span class="n">112M</span>) <span class="k">Survivors</span>: <span class="n">16M</span>-&gt;<span class="n">32M</span> <span class="k">Heap</span>: <span class="n">896M</span>(<span class="n">2048M</span>)-&gt;<span class="n">544M</span>(<span class="n">2048M</span>)]
+   [<span class="k">Times</span>: user=<span class="n">0.12</span> sys=<span class="n">0.01</span>, real=<span class="n">0.05</span> secs]</code></pre>
+  </div>
+
+  <p>关键区别：日志中的 <code>(mixed)</code> 标记。Mixed GC 比纯 Young GC 多回收了一些老年代 Region，所以暂停时间稍长（50ms vs 23ms），但远小于 Full GC。</p>
+
+  <div class="think">
+    <p class="think-q">为什么 G1 不直接做 Full GC，而是搞出一个 Mixed GC？</p>
+    <p>Full GC 是 STW 全程暂停所有用户线程，堆越大暂停越久。Mixed GC 把老年代回收拆成多次小暂停（每次只回收一部分老年代 Region），用"分期付款"的方式避免一次性长暂停。这就是 G1 的"可预测停顿"设计目标。</p>
+  </div>
+
+  <h3>并发标记周期（Concurrent Cycle）</h3>
+  <p>Mixed GC 不会凭空发生——G1 需要先做一次并发标记，找出哪些老年代 Region 垃圾多、值得回收：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>gc-concurrent.log</b></span></div>
+    <pre><code><span class="c">[GC concurrent-root-region-scan-start]</span>
+<span class="c">[GC concurrent-root-region-scan-end, 0.0045 secs]</span>
+<span class="c">[GC concurrent-mark-start]</span>
+<span class="c">[GC concurrent-mark-end, 0.1234 secs]</span>
+<span class="c">[GC concurrent-cleanup-start]</span>
+<span class="c">[GC concurrent-cleanup-end, 0.0012 secs]</span></code></pre>
+  </div>
+
+  <p>并发标记期间用户线程正常运行（不是 STW），所以日志中没有 pause 时间。整个过程分 4 步：</p>
+  <ol>
+    <li><strong>root-region-scan</strong>：扫描根 Region（初始标记的后续，STW 很短）</li>
+    <li><strong>mark</strong>：并发遍历对象图，标记存活对象（耗时最长，但不暂停）</li>
+    <li><strong>cleanup</strong>：计算每个 Region 的垃圾比例，排序回收价值</li>
+    <li>标记完成后，后续的 Young GC 会变成 <strong>Mixed GC</strong></li>
+  </ol>
+
+  <h3>Evacuation Failure — 疏散失败</h3>
+  <p>当 G1 在 Young/Mixed GC 时找不到空闲 Region 来放置存活对象，就会发生疏散失败，日志里会出现刺眼的 <code>to-space exhausted</code>：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>gc-evacuation-failure.log</b></span></div>
+    <pre><code><span class="n">2024-03-15</span>T<span class="n">15:02:33.456</span>+<span class="n">0800</span>: [<span class="k">GC pause</span> (<span class="t">G1 Evacuation Pause</span>) (<span class="t">young</span>)
+   <span class="k">to-space exhausted</span>, <span class="n">1.2345678</span> secs]
+   [<span class="k">Eden</span>: <span class="n">256M</span>(<span class="n">256M</span>)-&gt;<span class="n">0B</span>(<span class="n">256M</span>) <span class="k">Survivors</span>: <span class="n">32M</span>-&gt;<span class="n">0B</span>
+    <span class="k">Heap</span>: <span class="n">1920M</span>(<span class="n">2048M</span>)-&gt;<span class="n">1890M</span>(<span class="n">2048M</span>)]</code></pre>
+  </div>
+
+  <p>暂停时间飙升到 <strong>1.2 秒</strong>！原因是堆快满了（1920M / 2048M = 93.7%），G1 找不到足够的空闲 Region 来复制存活对象，最终退化成 Full GC。</p>
+
+  <div class="takeaway">
+    <div class="takeaway-label">G1 日志关键词速查</div>
+    <ul>
+      <li><code>(young)</code>：纯新生代回收，正常</li>
+      <li><code>(mixed)</code>：新生代 + 部分老年代，正常</li>
+      <li><code>to-space exhausted</code>：疏散失败，危险信号</li>
+      <li><code>concurrent-mark</code>：并发标记，正常后台操作</li>
+      <li><code>G1 Humongous Allocation</code>：大对象分配，可能引发 Full GC</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — 分析工具
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>分析工具：让 GC 日志可视化</h2>
+  </div>
+
+  <p>人肉看 GC 日志适合快速排查，但要做趋势分析、对比优化，你离不开可视化工具。</p>
+
+  <h3>GCViewer — 本地离线分析利器</h3>
+  <p>开源免费的桌面工具，把 GC 日志拖进去就能看到完整的可视化图表：</p>
+  <ul>
+    <li><strong>堆使用趋势线</strong>：如果 GC 后堆使用量持续上升（锯齿底部不断抬高），基本可以确认内存泄漏</li>
+    <li><strong>暂停时间柱状图</strong>：一眼看到哪些时间点出现了长暂停</li>
+    <li><strong>GC 频率统计</strong>：Young GC / Full GC 各发生了多少次，总暂停多久</li>
+  </ul>
+
+  <h3>GCEasy — 在线分析平台</h3>
+  <p>上传 GC 日志到 <code>gceasy.io</code>，自动生成分析报告。它会给你一个<strong>健康评分</strong>，并标注异常指标：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>GCEasy 关键输出指标</b></span></div>
+    <pre><code><span class="k">GC Health Score</span>:     <span class="t">65/100</span>  <span class="c">← 低于 80 就要关注</span>
+<span class="k">Avg GC Pause</span>:        <span class="n">45ms</span>    <span class="c">← 平均暂停时间</span>
+<span class="k">Max GC Pause</span>:        <span class="n">1.89s</span>   <span class="c">← 最大暂停时间（Full GC）</span>
+<span class="k">GC Throughput</span>:       <span class="n">97.2%</span>   <span class="c">← 应用运行时间占比</span>
+<span class="k">Promoted Avg</span>:        <span class="n">28MB</span>    <span class="c">← 平均每次晋升到老年代的大小</span>
+<span class="k">Created/sec</span>:         <span class="n">120MB</span>   <span class="c">← 对象分配速率</span></code></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">GCEasy 的隐藏功能</span>
+    <p>上传两份日志（优化前 vs 优化后），GCEasy 会生成对比报告，直接看到调整效果。这在写性能优化报告时非常有用。</p>
+  </div>
+
+  <h3>jstat — 实时监控 GC 状态</h3>
+  <p>当你没法拿到 GC 日志文件时，<code>jstat</code> 是最后的武器：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>jstat 实时监控</b></span></div>
+    <pre><code><span class="c"># 每 2 秒输出一次 GC 统计，共 100 次</span>
+<span class="k">jstat</span> -gc <span class="n">&lt;pid&gt;</span> <span class="n">2000</span> <span class="n">100</span>
+
+<span class="c"># 输出示例：</span>
+ S0     S1     E      O      M     CCS    YGC   YGCT   FGC   FGCT    GCT
+<span class="n">0.0</span>   <span class="n">32.0</span>  <span class="n">128.0</span>  <span class="n">512.0</span>  <span class="n">64.0</span>  <span class="n">5.8</span>   <span class="n">156</span>   <span class="n">3.42</span>    <span class="n">3</span>   <span class="n">2.67</span>   <span class="n">6.09</span>
+
+<span class="c"># 关键字段：</span>
+<span class="c"># YGC  = Young GC 次数       YGCT = Young GC 总耗时</span>
+<span class="c"># FGC  = Full GC 次数        FGCT = Full GC 总耗时</span>
+<span class="c"># GCT  = GC 总耗时（YGC + FGC）</span>
+<span class="c"># E    = Eden 使用量(KB)     O    = Old 使用量(KB)</span></code></pre>
+  </div>
+
+  <p>从上面的输出可以算出：</p>
+  <div class="formula">
+    <p>Young GC 平均耗时 = YGCT / YGC = 3.42 / 156 = <strong>21.9ms</strong>（健康）</p>
+    <p>Full GC 平均耗时 = FGCT / FGC = 2.67 / 3 = <strong>890ms</strong>（需要优化）</p>
+    <p>GC 时间占比 = GCT / 应用运行时间 ≈ 6.09 / (uptime) —— 超过 5% 就要警惕</p>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>工具</th><th>类型</th><th>优势</th><th>适用场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>GCViewer</td><td>桌面 / 离线</td><td>免费、功能全、支持离线</td><td>开发环境分析</td></tr>
+      <tr><td>GCEasy</td><td>在线 SaaS</td><td>自动评分、对比分析</td><td>快速诊断、写报告</td></tr>
+      <tr><td>jstat</td><td>CLI / 实时</td><td>无需日志文件、实时</td><td>线上紧急排查</td></tr>
+      <tr><td>GCPause Inspector</td><td>桌面 / 离线</td><td>轻量、启动快</td><td>快速预览</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <div class="takeaway-label">工具选型建议</div>
+    <ul>
+      <li>线上出问题时先用 <code>jstat</code> 实时看，拿到第一手数据</li>
+      <li>拿到日志文件后用 GCViewer 做详细分析</li>
+      <li>写优化报告时用 GCEasy 的对比功能</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 7 站 — 总结
+     ================================================================ -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>总结：GC 问题排查手册与监控体系</h2>
+  </div>
+
+  <p>到这里，你已经能读懂绝大多数 GC 日志了。最后，我们把常见的 GC 问题和解决方案整理成一张速查表，然后聊聊怎么建立 GC 监控体系。</p>
+
+  <h3>常见 GC 问题速查表</h3>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>问题现象</th><th>日志特征</th><th>可能原因</th><th>解决方向</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>频繁 Young GC</td>
+        <td>YGC 频率 &gt; 10次/分钟</td>
+        <td>新生代太小、分配速率高</td>
+        <td>增大 <code>-Xmn</code>；减少临时对象创建</td>
+      </tr>
+      <tr>
+        <td>Young GC 暂停长</td>
+        <td>real &gt; 200ms</td>
+        <td>存活对象太多、Survivor 太小</td>
+        <td>调整 Survivor 比率；检查大对象</td>
+      </tr>
+      <tr>
+        <td>频繁 Full GC</td>
+        <td>FGC 持续增长</td>
+        <td>内存泄漏、老年代过小</td>
+        <td>MAT 分析堆转储；增大 <code>-Xmx</code></td>
+      </tr>
+      <tr>
+        <td>Full GC 后堆不下降</td>
+        <td>GC 后 old 使用量不降</td>
+        <td>内存泄漏（对象一直被引用）</td>
+        <td>dump 堆 → MAT 找 GC Root 链</td>
+      </tr>
+      <tr>
+        <td>Metaspace OOM</td>
+        <td>Metadata GC Threshold + Last ditch</td>
+        <td>动态类加载泄漏（CGLib / Groovy）</td>
+        <td>增大 <code>-XX:MaxMetaspaceSize</code>；排查类加载</td>
+      </tr>
+      <tr>
+        <td>G1 to-space exhausted</td>
+        <td>疏散失败、暂停飙升</td>
+        <td>堆使用率 &gt; 85%、IHOP 设置不合理</td>
+        <td>增大 <code>-Xmx</code>；降低 <code>-XX:InitiatingHeapOccupancyPercent</code></td>
+      </tr>
+      <tr>
+        <td>G1 Humongous Allocation</td>
+        <td>频繁出现大对象分配</td>
+        <td>大数组、大字符串</td>
+        <td>增大 Region 大小 <code>-XX:G1HeapRegionSize</code>；优化分配</td>
+      </tr>
+      <tr>
+        <td>System.gc() 触发</td>
+        <td>GC Cause = System.gc</td>
+        <td>第三方库显式调用</td>
+        <td>加 <code>-XX:+DisableExplicitGC</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>生产环境 GC 监控体系</h3>
+
+  <div class="fig">
+    <svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg" style="max-width:800px">
+      <rect width="800" height="320" rx="12" fill="#0f172a"/>
+      <text x="400" y="32" text-anchor="middle" fill="#e2e8f0" font-size="15" font-weight="bold">生产环境 GC 监控三层体系</text>
+
+      <!-- 第一层：采集 -->
+      <rect x="40" y="56" width="220" height="110" rx="8" fill="#1e3a5f"/>
+      <text x="150" y="82" text-anchor="middle" fill="#60a5fa" font-size="13" font-weight="bold">采集层</text>
+      <text x="150" y="106" text-anchor="middle" fill="#93c5fd" font-size="11">-Xlog:gc* 输出日志</text>
+      <text x="150" y="124" text-anchor="middle" fill="#93c5fd" font-size="11">JMX 暴露 GC MXBean</text>
+      <text x="150" y="142" text-anchor="middle" fill="#93c5fd" font-size="11">Prometheus jmx_exporter</text>
+
+      <!-- 第二层：存储 -->
+      <rect x="290" y="56" width="220" height="110" rx="8" fill="#1e3a5f"/>
+      <text x="400" y="82" text-anchor="middle" fill="#60a5fa" font-size="13" font-weight="bold">存储层</text>
+      <text x="400" y="106" text-anchor="middle" fill="#93c5fd" font-size="11">日志文件 → Filebeat</text>
+      <text x="400" y="124" text-anchor="middle" fill="#93c5fd" font-size="11">指标 → Prometheus TSDB</text>
+      <text x="400" y="142" text-anchor="middle" fill="#93c5fd" font-size="11">保留 30 天历史数据</text>
+
+      <!-- 第三层：告警 -->
+      <rect x="540" y="56" width="220" height="110" rx="8" fill="#1e3a5f"/>
+      <text x="650" y="82" text-anchor="middle" fill="#60a5fa" font-size="13" font-weight="bold">告警层</text>
+      <text x="650" y="106" text-anchor="middle" fill="#93c5fd" font-size="11">Grafana Dashboard 可视化</text>
+      <text x="650" y="124" text-anchor="middle" fill="#93c5fd" font-size="11">AlertManager 阈值告警</text>
+      <text x="650" y="142" text-anchor="middle" fill="#93c5fd" font-size="11">钉钉/飞书 Webhook 通知</text>
+
+      <!-- 箭头 -->
+      <path d="M260 111 L288 111" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#ah2)"/>
+      <path d="M510 111 L538 111" stroke="#60a5fa" stroke-width="2" fill="none" marker-end="url(#ah2)"/>
+      <defs>
+        <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#60a5fa"/>
+        </marker>
+      </defs>
+
+      <!-- 告警规则 -->
+      <rect x="40" y="190" width="720" height="110" rx="8" fill="#1e293b"/>
+      <text x="400" y="216" text-anchor="middle" fill="#f59e0b" font-size="13" font-weight="bold">推荐告警规则</text>
+      <text x="70" y="244" fill="#fde68a" font-family="monospace" font-size="11">jvm_gc_pause_seconds{quantile="0.99"} &gt; 0.5    → P1 告警（长暂停）</text>
+      <text x="70" y="264" fill="#fde68a" font-family="monospace" font-size="11">rate(jvm_gc_full_count[5m]) &gt; 0.5               → P2 告警（Full GC 频繁）</text>
+      <text x="70" y="284" fill="#fde68a" font-family="monospace" font-size="11">jvm_heap_used / jvm_heap_max &gt; 0.85              → P2 告警（堆使用率过高）</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> — 生产环境 GC 监控三层体系：采集 → 存储 → 告警</figcaption>
+  </div>
+
+  <h3>关键监控指标</h3>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>指标</th><th>正常范围</th><th>告警阈值</th><th>PromQL 示例</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Young GC 平均暂停</td>
+        <td>&lt; 50ms</td>
+        <td>&gt; 100ms</td>
+        <td><code>rate(gc_young_time[5m]) / rate(gc_young_count[5m])</code></td>
+      </tr>
+      <tr>
+        <td>Full GC 频率</td>
+        <td>0 次/小时</td>
+        <td>&gt; 1 次/10分钟</td>
+        <td><code>rate(gc_full_count[10m]) * 600</code></td>
+      </tr>
+      <tr>
+        <td>堆使用率</td>
+        <td>&lt; 70%</td>
+        <td>&gt; 85%</td>
+        <td><code>jvm_heap_used / jvm_heap_max</code></td>
+      </tr>
+      <tr>
+        <td>GC 时间占比</td>
+        <td>&lt; 3%</td>
+        <td>&gt; 5%</td>
+        <td><code>rate(gc_total_time[5m])</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="recap">
+    <h3>全文核心要点回顾</h3>
+    <ul>
+      <li><strong>GC 日志是排查 GC 问题的第一手证据</strong>——生产环境必须开启，性能开销可忽略</li>
+      <li><strong>Young GC 日志</strong>看 pause 时间、Eden/Survivor/Heap 变化、存活率</li>
+      <li><strong>Full GC 日志</strong>重点看 GC Cause——Ergonomics、System.gc()、Promotion Failed 各有不同排查方向</li>
+      <li><strong>G1 特有</strong>的 Mixed GC 和并发标记是避免 Full GC 的关键机制；to-space exhausted 是危险信号</li>
+      <li><strong>工具组合</strong>：jstat（实时）+ GCViewer（离线）+ GCEasy（对比报告）</li>
+      <li><strong>监控体系</strong>：采集 → 存储 → 告警，核心关注暂停时间、Full GC 频率、堆使用率</li>
+    </ul>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试满分回答模板</span>
+    <p>"线上 GC 问题我分三步：第一步用 jstat 看实时状态，确认是 Young GC 频繁还是 Full GC 频繁；第二步拿 GC 日志用 GCViewer 分析趋势，看暂停时间和堆使用变化；第三步根据 GC Cause 定位根因——如果是 Promotion Failed 就看大对象，如果是 Ergonomics 就看内存泄漏。同时我们会配 Grafana 监控 GC 暂停时间和 Full GC 频率，做到问题早发现。"</p>
+  </div>
+</section>
+
+</main>
+
+</body>
+</html>

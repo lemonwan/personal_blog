@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redis 五大核心数据结构与应用场景</title>
+</head>
+<body>
+<main class="lesson-body">
+
+<section class="hero">
+  <span class="hero-badge">中级 · 面试必问</span>
+  <h1>Redis 五大核心数据结构与应用场景</h1>
+  <p class="hero-desc">String/List/Hash/Set/ZSet 的底层编码（SDS、ziplist、skiplist、hashtable、intset）。每种结构的典型应用场景。</p>
+  <div class="hero-tags">
+    <span>SDS</span><span>ziplist</span><span>skiplist</span><span>hashtable</span><span>intset</span><span>编码转换</span>
+  </div>
+</section>
+
+<!-- ==================== 第 1 站 ==================== -->
+<section class="station reveal" id="s1">
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>String——SDS 动态字符串</h2>
+  </div>
+
+  <p>Redis 的 String 不是 C 语言的原生字符串，而是自定义的 <strong>SDS（Simple Dynamic String）</strong>。SDS 在 C 字符串基础上增加了长度记录、预分配空间等特性。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">SDS 内存结构（sdshdr8 为例）</text>
+
+      <!-- SDS struct -->
+      <rect x="60" y="45" width="100" height="40" rx="6" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="110" y="62" text-anchor="middle" font-size="10" fill="#d8b4fe">flags: 0x08</text>
+      <text x="110" y="76" text-anchor="middle" font-size="9" fill="#94a3b8">类型=sdshdr8</text>
+
+      <rect x="170" y="45" width="80" height="40" rx="6" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="210" y="62" text-anchor="middle" font-size="10" fill="#93c5fd">len: 5</text>
+      <text x="210" y="76" text-anchor="middle" font-size="9" fill="#94a3b8">已使用长度</text>
+
+      <rect x="260" y="45" width="80" height="40" rx="6" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="300" y="62" text-anchor="middle" font-size="10" fill="#6ee7b7">alloc: 10</text>
+      <text x="300" y="76" text-anchor="middle" font-size="9" fill="#94a3b8">总分配长度</text>
+
+      <rect x="350" y="45" width="200" height="40" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+      <text x="450" y="62" text-anchor="middle" font-size="11" fill="#e2e8f0">buf: "hello\0xxxxx"</text>
+      <text x="450" y="76" text-anchor="middle" font-size="9" fill="#94a3b8">字符数组 + \0 结尾 + 预留空间</text>
+
+      <!-- Advantages -->
+      <rect x="60" y="110" width="600" height="100" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="80" y="132" font-size="12" fill="#fbbf24" font-weight="bold">SDS 相比 C 字符串的优势</text>
+      <text x="80" y="155" font-size="11" fill="#e2e8f0">① O(1) 获取长度 — len 字段直接读取，无需 strlen() 遍历</text>
+      <text x="80" y="175" font-size="11" fill="#e2e8f0">② 二进制安全 — 可以存任意二进制数据（包括 \0），以 len 为准而非 \0 截断</text>
+      <text x="80" y="195" font-size="11" fill="#e2e8f0">③ 预分配 + 惰性释放 — 追加操作不需要每次 realloc，减少内存分配次数</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1-1</span> SDS 内部结构：元信息头 + 字符数组 + 预分配空间</figcaption>
+  </div>
+
+  <div class="think">
+    <p class="think-q">SDS 的预分配策略是什么？</p>
+    <p>当新长度 < 1MB 时，分配 <strong>2 倍</strong>空间；当新长度 >= 1MB 时，多分配 <strong>1MB</strong>。这种策略保证了连续追加 N 次，最多触发 O(logN) 次内存分配。</p>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">String 的三种编码</div>
+    <pre class="srcbox-file"><span class="c">String 底层有三种编码：</span>
+
+<span class="n">int</span>:     <span class="c">当值是整数时（如 SET counter 100）</span>
+         <span class="c">直接存储在 redisObject.val 中，无 SDS 开销</span>
+
+<span class="n">embstr</span>:  <span class="c">当字符串长度 <= 44 字节时</span>
+         <span class="c">redisObject 和 SDS 分配在一次 malloc 中（连续内存）</span>
+         <span class="c">优点: 一次分配一次释放，减少碎片，缓存友好</span>
+         <span class="c">缺点: 不可修改（追加操作会转为 raw）</span>
+
+<span class="n">raw</span>:     <span class="c">当字符串长度 > 44 字节时</span>
+         <span class="c">redisObject 和 SDS 分别分配内存</span>
+         <span class="c">支持修改操作（APPEND、SET 新值等）</span>
+
+<span class="c">OBJECT ENCODING mykey → 返回 "int" / "embstr" / "raw"</span></pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">String 典型应用场景</div>
+    <pre class="srcbox-file"><span class="c">1. 缓存对象</span>
+<span class="n">SET</span> user:<span class="n">1001</span> <span class="t">'{"name":"Alice","age":25}'</span> <span class="n">EX</span> <span class="n">3600</span>
+
+<span class="c">2. 分布式计数器</span>
+<span class="n">INCR</span> article:views:<span class="n">1001</span>        <span class="c">-- 原子递增</span>
+<span class="n">INCRBY</span> stock:<span class="n">1001</span> <span class="n">-1</span>          <span class="c">-- 原子递减（扣库存）</span>
+
+<span class="c">3. 分布式锁</span>
+<span class="n">SET</span> lock:order <span class="n">uuid</span> <span class="n">NX</span> <span class="n">EX</span> <span class="n">30</span>  <span class="c">-- 不存在则设置，30 秒过期</span>
+
+<span class="c">4. 分布式 Session 共享</span>
+<span class="n">SET</span> session:<span class="n">token123</span> <span class="t">'{"userId":1001}'</span> <span class="n">EX</span> <span class="n">1800</span></pre>
+  </div>
+</section>
+
+<!-- ==================== 第 2 站 ==================== -->
+<section class="station reveal" id="s2">
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>List——quicklist = ziplist + 双向链表</h2>
+  </div>
+
+  <p>Redis 3.2+ 的 List 底层使用 <strong>quicklist</strong>，它是 ziplist 和双向链表的混合体：双向链表的每个节点是一个 ziplist。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">quicklist 结构</text>
+
+      <!-- Linked list nodes -->
+      <rect x="40" y="50" width="180" height="80" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="130" y="72" text-anchor="middle" font-size="11" fill="#93c5fd" font-weight="bold">quicklist Node 1</text>
+      <text x="130" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">ziplist [A, B, C, D]</text>
+      <text x="130" y="112" text-anchor="middle" font-size="9" fill="#94a3b8">prev=null, next→Node2</text>
+
+      <line x1="220" y1="90" x2="270" y2="90" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr4)"/>
+      <defs><marker id="arr4" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#f59e0b"/></marker></defs>
+
+      <rect x="270" y="50" width="180" height="80" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="360" y="72" text-anchor="middle" font-size="11" fill="#93c5fd" font-weight="bold">quicklist Node 2</text>
+      <text x="360" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">ziplist [E, F, G, H]</text>
+      <text x="360" y="112" text-anchor="middle" font-size="9" fill="#94a3b8">prev→Node1, next→Node3</text>
+
+      <line x1="450" y1="90" x2="500" y2="90" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr4)"/>
+
+      <rect x="500" y="50" width="180" height="80" rx="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="590" y="72" text-anchor="middle" font-size="11" fill="#93c5fd" font-weight="bold">quicklist Node 3</text>
+      <text x="590" y="92" text-anchor="middle" font-size="10" fill="#e2e8f0">ziplist [I, J, K]</text>
+      <text x="590" y="112" text-anchor="middle" font-size="9" fill="#94a3b8">prev→Node2, next=null</text>
+
+      <!-- Explanation -->
+      <rect x="40" y="155" width="640" height="70" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="177" font-size="12" fill="#fbbf24" font-weight="bold">为什么不用纯链表或纯 ziplist？</text>
+      <text x="60" y="197" font-size="11" fill="#e2e8f0">纯链表：每个节点一个元素 → 指针开销大，内存碎片多，CPU 缓存不友好</text>
+      <text x="60" y="217" font-size="11" fill="#e2e8f0">纯 ziplist：太长时更新操作 O(N) 连锁更新概率增大。quicklist 折中：ziplist 控制大小 + 链表串联</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2-1</span> quicklist：双向链表节点存 ziplist，兼顾内存效率和操作性能</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">ziplist 压缩列表结构</div>
+    <pre class="srcbox-file"><span class="c">ziplist 是一块连续内存：</span>
+<span class="n">zlbytes</span> | <span class="n">zltail</span> | <span class="n">zllen</span> | <span class="n">entry1</span> | <span class="n">entry2</span> | ... | <span class="n">zlend</span>
+
+<span class="c">每个 entry 的结构：</span>
+<span class="n">prevlen</span>  <span class="c">// 前一个 entry 的长度（用于反向遍历）</span>
+<span class="n">encoding</span> <span class="c">// 编码方式（字符串 or 整数）</span>
+<span class="n">data</span>     <span class="c">// 实际数据</span>
+
+<span class="c">优点：连续内存 → CPU cache friendly，无指针开销</span>
+<span class="c">缺点：插入/删除可能引发连锁更新（prevlen 字段从 1 字节变 5 字节）</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>List 底层是 quicklist（Redis 3.2+）。quicklist = 双向链表，每个节点是一个 ziplist。LPUSH/RPUSH 是 O(1)，LINDEX 是 O(N)。ziplist 用连续内存存储，对 CPU 缓存友好。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 3 站 ==================== -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>Hash——ziplist vs hashtable</h2>
+  </div>
+
+  <p>Hash 类型有两种底层编码：<strong>ziplist</strong>（数据少时）和 <strong>hashtable</strong>（数据多时）。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">Hash 的两种编码</text>
+
+      <!-- ziplist encoding -->
+      <rect x="40" y="45" width="300" height="130" rx="8" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5" opacity="0.4"/>
+      <text x="190" y="65" text-anchor="middle" font-size="12" fill="#6ee7b7" font-weight="bold">ziplist 编码（数据少时）</text>
+      <text x="190" y="85" text-anchor="middle" font-size="10" fill="#e2e8f0">field1, value1, field2, value2, ...</text>
+      <text x="190" y="105" text-anchor="middle" font-size="10" fill="#94a3b8">连续内存，field-value 相邻存放</text>
+      <text x="60" y="130" font-size="10" fill="#6ee7b7">优点：内存紧凑，无指针开销</text>
+      <text x="60" y="148" font-size="10" fill="#6ee7b7">优点：适合小数据量（默认 < 512 个 field</text>
+      <text x="60" y="166" font-size="10" fill="#f87171">缺点：查找 O(N)，数据多时性能差</text>
+
+      <!-- hashtable encoding -->
+      <rect x="380" y="45" width="300" height="130" rx="8" fill="#7f1d1d" stroke="#f87171" stroke-width="1.5" opacity="0.4"/>
+      <text x="530" y="65" text-anchor="middle" font-size="12" fill="#f87171" font-weight="bold">hashtable 编码（数据多时）</text>
+      <text x="530" y="85" text-anchor="middle" font-size="10" fill="#e2e8f0">dict 结构，和 Redis 全局 dict 一样</text>
+      <text x="530" y="105" text-anchor="middle" font-size="10" fill="#94a3b8">dictEntry → key SDS + value SDS</text>
+      <text x="400" y="130" font-size="10" fill="#6ee7b7">优点：查找/插入/删除 O(1)</text>
+      <text x="400" y="148" font-size="10" fill="#f87171">缺点：指针开销大（dictEntry 24 字节）</text>
+      <text x="400" y="166" font-size="10" fill="#f87171">缺点：内存碎片，CPU 缓存不友好</text>
+
+      <text x="360" y="200" text-anchor="middle" font-size="11" fill="#fbbf24">hash-max-ziplist-entries 512 / hash-max-ziplist-value 64</text>
+    </svg>
+    <figcaption><span class="fig-no">图 3-1</span> Hash 类型 ziplist 与 hashtable 编码对比</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">编码转换条件</div>
+    <pre class="srcbox-file"><span class="c">ziplist → hashtable 转换条件（满足任一即转换）：</span>
+<span class="n">1</span>. Hash 中 field 数量 > <span class="t">hash-max-ziplist-entries</span>（默认 <span class="n">512</span>）
+<span class="n">2</span>. 任一 field 或 value 长度 > <span class="t">hash-max-ziplist-value</span>（默认 <span class="n">64</span> 字节）
+
+<span class="c">注意：转换是单向的，hashtable 不会退化为 ziplist</span></pre>
+  </div>
+</section>
+
+<!-- ==================== 第 4 站 ==================== -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>Set——intset vs hashtable</h2>
+  </div>
+
+  <p>Set（集合）的底层编码也有两种：<strong>intset</strong>（全是整数且数量少时）和 <strong>hashtable</strong>。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">intset 内部结构</text>
+
+      <!-- intset struct -->
+      <rect x="100" y="45" width="120" height="40" rx="6" fill="#4a1942" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="160" y="62" text-anchor="middle" font-size="10" fill="#d8b4fe">encoding: INTSET_ENC_INT32</text>
+      <text x="160" y="76" text-anchor="middle" font-size="9" fill="#94a3b8">编码类型</text>
+
+      <rect x="230" y="45" width="80" height="40" rx="6" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="270" y="62" text-anchor="middle" font-size="10" fill="#93c5fd">length: 5</text>
+      <text x="270" y="76" text-anchor="middle" font-size="9" fill="#94a3b8">元素个数</text>
+
+      <rect x="320" y="45" width="300" height="40" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+      <text x="470" y="62" text-anchor="middle" font-size="11" fill="#e2e8f0">contents: [3, 7, 15, 42, 99]</text>
+      <text x="470" y="76" text-anchor="middle" font-size="9" fill="#94a3b8">有序整数数组（升序排列）</text>
+
+      <rect x="100" y="110" width="520" height="70" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="120" y="132" font-size="11" fill="#fbbf24" font-weight="bold">intset 的操作复杂度</text>
+      <text x="120" y="152" font-size="11" fill="#e2e8f0">SADD: 二分查找 O(logN) 定位 + 数组移动 O(N)</text>
+      <text x="120" y="172" font-size="11" fill="#e2e8f0">SMEMBERS: O(N) 遍历。整数数组连续存储 → 内存高效、CPU 缓存友好</text>
+    </svg>
+    <figcaption><span class="fig-no">图 4-1</span> intset：有序整数数组，适合全整数的小集合</figcaption>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">intset 的编码升级</div>
+    <pre class="srcbox-file"><span class="c">intset 支持三种整数编码：</span>
+<span class="n">INTSET_ENC_INT16</span>  → 每个元素 <span class="n">2</span> 字节
+<span class="n">INTSET_ENC_INT32</span>  → 每个元素 <span class="n">4</span> 字节
+<span class="n">INTSET_ENC_INT64</span>  → 每个元素 <span class="n">8</span> 字节
+
+<span class="c">当插入一个超出当前编码范围的整数时，intset 会"升级"：</span>
+<span class="c">例如从 INT16 升级到 INT32 → 所有已有元素都要重新编码</span>
+<span class="c">升级是单向的，不会降级</span>
+
+<span class="c">intset → hashtable 转换条件（满足任一）：</span>
+<span class="n">1</span>. 元素个数 > <span class="t">set-max-intset-entries</span>（默认 <span class="n">512</span>）
+<span class="n">2</span>. 插入了非整数元素（如字符串）</pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>Set 全整数且 < 512 个时用 intset（有序数组，紧凑高效），否则用 hashtable（value 为 NULL 的 dict，O(1) 查找）。SISMEMBER 在 intset 中是 O(logN) 二分，在 hashtable 中是 O(1)。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 5 站 ==================== -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>ZSet——ziplist vs skiplist + hashtable</h2>
+  </div>
+
+  <p>有序集合（ZSet）是最复杂的数据结构，有两种编码：<strong>ziplist</strong>（数据少时）和 <strong>skiplist + hashtable</strong>。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">skiplist 跳表结构</text>
+
+      <!-- Header -->
+      <rect x="40" y="40" width="60" height="160" rx="4" fill="#334155" stroke="#60a5fa" stroke-width="1.5"/>
+      <text x="70" y="62" text-anchor="middle" font-size="9" fill="#93c5fd">header</text>
+      <text x="70" y="82" text-anchor="middle" font-size="8" fill="#94a3b8">level 4 →</text>
+      <text x="70" y="102" text-anchor="middle" font-size="8" fill="#94a3b8">level 3 →</text>
+      <text x="70" y="122" text-anchor="middle" font-size="8" fill="#94a3b8">level 2 →</text>
+      <text x="70" y="142" text-anchor="middle" font-size="8" fill="#94a3b8">level 1 →</text>
+
+      <!-- Node A -->
+      <rect x="140" y="100" width="80" height="100" rx="4" fill="#064e3b" stroke="#6ee7b7" stroke-width="1"/>
+      <text x="180" y="120" text-anchor="middle" font-size="9" fill="#6ee7b7">score=1.5</text>
+      <text x="180" y="138" text-anchor="middle" font-size="9" fill="#e2e8f0">member="alice"</text>
+      <text x="180" y="158" text-anchor="middle" font-size="8" fill="#94a3b8">level 2 →</text>
+      <text x="180" y="178" text-anchor="middle" font-size="8" fill="#94a3b8">level 1 →</text>
+      <text x="180" y="194" text-anchor="middle" font-size="8" fill="#94a3b8">backward →</text>
+
+      <!-- Node B -->
+      <rect x="260" y="80" width="80" height="120" rx="4" fill="#064e3b" stroke="#6ee7b7" stroke-width="1"/>
+      <text x="300" y="100" text-anchor="middle" font-size="9" fill="#6ee7b7">score=3.0</text>
+      <text x="300" y="118" text-anchor="middle" font-size="9" fill="#e2e8f0">member="bob"</text>
+      <text x="300" y="138" text-anchor="middle" font-size="8" fill="#94a3b8">level 3 →</text>
+      <text x="300" y="158" text-anchor="middle" font-size="8" fill="#94a3b8">level 2 →</text>
+      <text x="300" y="178" text-anchor="middle" font-size="8" fill="#94a3b8">level 1 →</text>
+
+      <!-- Node C -->
+      <rect x="380" y="120" width="80" height="80" rx="4" fill="#064e3b" stroke="#6ee7b7" stroke-width="1"/>
+      <text x="420" y="140" text-anchor="middle" font-size="9" fill="#6ee7b7">score=5.2</text>
+      <text x="420" y="158" text-anchor="middle" font-size="9" fill="#e2e8f0">member="carol"</text>
+      <text x="420" y="178" text-anchor="middle" font-size="8" fill="#94a3b8">level 1 →</text>
+
+      <!-- Node D -->
+      <rect x="500" y="100" width="80" height="100" rx="4" fill="#064e3b" stroke="#6ee7b7" stroke-width="1"/>
+      <text x="540" y="120" text-anchor="middle" font-size="9" fill="#6ee7b7">score=8.1</text>
+      <text x="540" y="138" text-anchor="middle" font-size="9" fill="#e2e8f0">member="dave"</text>
+      <text x="540" y="158" text-anchor="middle" font-size="8" fill="#94a3b8">level 2 →</text>
+      <text x="540" y="178" text-anchor="middle" font-size="8" fill="#94a3b8">level 1 →</text>
+
+      <!-- Skip lines -->
+      <line x1="100" y1="158" x2="140" y2="158" stroke="#60a5fa" stroke-width="1" stroke-dasharray="3,2"/>
+      <line x1="220" y1="158" x2="260" y2="138" stroke="#60a5fa" stroke-width="1" stroke-dasharray="3,2"/>
+      <line x1="340" y1="158" x2="380" y2="158" stroke="#60a5fa" stroke-width="1" stroke-dasharray="3,2"/>
+      <line x1="460" y1="158" x2="500" y2="158" stroke="#60a5fa" stroke-width="1" stroke-dasharray="3,2"/>
+
+      <line x1="100" y1="82" x2="260" y2="82" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+      <line x1="340" y1="138" x2="500" y2="138" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+      <!-- Footer -->
+      <rect x="40" y="220" width="640" height="70" rx="8" fill="#1e293b" stroke="#334155"/>
+      <text x="60" y="242" font-size="11" fill="#fbbf24" font-weight="bold">ZSet 两种编码</text>
+      <text x="60" y="260" font-size="11" fill="#e2e8f0">ziplist: field-value 相邻存放，按 score 排序。适合 < 128 个元素且 value < 64 字节</text>
+      <text x="60" y="278" font-size="11" fill="#e2e8f0">skiplist + hashtable: skiplist 按 score 排序查范围，hashtable 按 member O(1) 查分数</text>
+    </svg>
+    <figcaption><span class="fig-no">图 5-1</span> skiplist 跳表：多层索引实现 O(logN) 查找，比平衡树更适合范围查询</figcaption>
+  </div>
+
+  <div class="think">
+    <p class="think-q">为什么 ZSet 用 skiplist 而不用红黑树？</p>
+    <p>三个原因：<strong>①</strong> skiplist 实现简单（随机层级，不用旋转）；<strong>②</strong> skiplist 天然支持范围查询（ZRANGEBYSCORE），从高层快速定位起点后沿 level 0 遍历即可，红黑树做范围查询需要中序遍历；<strong>③</strong> skiplist 的并发友好性更好（虽然 Redis 单线程不关心这个）。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">关键结论</span>
+    <p>ZSet 底层：少量数据用 ziplist，大量数据用 skiplist（排序 + 范围查询）+ hashtable（按 member 查 score，O(1)）。skiplist 每个节点随机生成 1~64 层，平均 O(logN) 查找。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 6 站 ==================== -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>编码转换——Redis 什么时候"升级"底层结构？</h2>
+  </div>
+
+  <p>Redis 会根据数据量和元素大小，自动将底层编码从"紧凑"升级到"高效"。转换是<strong>单向</strong>的，不会降级。</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>数据类型</th><th>紧凑编码</th><th>高效编码</th><th>升级触发条件</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>String</td><td>int (embstr)</td><td>raw (SDS)</td><td>值长度 > 44 字节 / 执行追加操作</td></tr>
+      <tr><td>List</td><td>ziplist</td><td>quicklist</td><td>Redis 3.2+ 默认就用 quicklist</td></tr>
+      <tr><td>Hash</td><td>ziplist</td><td>hashtable</td><td>field > 512 或 value > 64 字节</td></tr>
+      <tr><td>Set</td><td>intset</td><td>hashtable</td><td>元素 > 512 或含非整数</td></tr>
+      <tr><td>ZSet</td><td>ziplist</td><td>skiplist + hashtable</td><td>元素 > 128 或 value > 64 字节</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbox">
+    <div class="srcbox-head">查看与调优编码</div>
+    <pre class="srcbox-file"><span class="c">-- 查看 key 的底层编码</span>
+<span class="n">OBJECT ENCODING</span> myhash
+<span class="c">-- 返回 "ziplist" 或 "hashtable"</span>
+
+<span class="c">-- 调优阈值（redis.conf）</span>
+<span class="t">hash-max-ziplist-entries</span> <span class="n">512</span>
+<span class="t">hash-max-ziplist-value</span>   <span class="n">64</span>
+<span class="t">zset-max-ziplist-entries</span> <span class="n">128</span>
+<span class="t">zset-max-ziplist-value</span>   <span class="n">64</span>
+<span class="t">set-max-intset-entries</span>   <span class="n">512</span>
+
+<span class="c">-- 如果业务中 Hash 经常只有少量 field，可以调大阈值来节省内存</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">面试一招鲜</span>
+    <p>"Redis 会自动根据数据量选择最优编码。小数据用连续内存（ziplist/intset）节省空间，大数据用哈希表/跳表保证性能。OBJECT ENCODING 命令可以查看当前编码。"——这段话能展示你对底层的理解。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 7 站 ==================== -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>应用场景总结</h2>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>数据类型</th><th>典型应用场景</th><th>核心命令</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>String</strong></td><td>缓存、计数器、分布式锁、Session 共享、验证码</td><td>SET/GET/INCR/EXPIRE</td></tr>
+      <tr><td><strong>List</strong></td><td>消息队列（LPUSH + BRPOP）、最新列表、朋友圈时间线</td><td>LPUSH/RPUSH/LPOP/RPOP/LRANGE</td></tr>
+      <tr><td><strong>Hash</strong></td><td>用户信息（field-value）、商品属性、配置项</td><td>HSET/HGET/HMSET/HGETALL</td></tr>
+      <tr><td><strong>Set</strong></td><td>标签系统、共同好友、去重、抽奖（SRANDMEMBER）</td><td>SADD/SMEMBERS/SINTER/SUNION</td></tr>
+      <tr><td><strong>ZSet</strong></td><td>排行榜、延迟队列、带权重的任务调度</td><td>ZADD/ZRANGE/ZRANGEBYSCORE/ZRANK</td></tr>
+    </tbody>
+  </table>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
+      <text x="360" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#e2e8f0">选型决策树</text>
+      <text x="360" y="55" text-anchor="middle" font-size="12" fill="#e2e8f0">数据是什么结构？</text>
+      <line x1="360" y1="62" x2="120" y2="90" stroke="#475569" stroke-width="1"/>
+      <line x1="360" y1="62" x2="240" y2="90" stroke="#475569" stroke-width="1"/>
+      <line x1="360" y1="62" x2="360" y2="90" stroke="#475569" stroke-width="1"/>
+      <line x1="360" y1="62" x2="480" y2="90" stroke="#475569" stroke-width="1"/>
+      <line x1="360" y1="62" x2="600" y2="90" stroke="#475569" stroke-width="1"/>
+
+      <rect x="60" y="90" width="120" height="50" rx="8" fill="#6ee7b7" opacity="0.2" stroke="#6ee7b7"/>
+      <text x="120" y="112" text-anchor="middle" font-size="11" fill="#6ee7b7">简单KV</text>
+      <text x="120" y="130" text-anchor="middle" font-size="11" fill="#6ee7b7">→ String</text>
+
+      <rect x="180" y="90" width="120" height="50" rx="8" fill="#60a5fa" opacity="0.2" stroke="#60a5fa"/>
+      <text x="240" y="112" text-anchor="middle" font-size="11" fill="#93c5fd">有序队列</text>
+      <text x="240" y="130" text-anchor="middle" font-size="11" fill="#93c5fd">→ List</text>
+
+      <rect x="300" y="90" width="120" height="50" rx="8" fill="#c084fc" opacity="0.2" stroke="#c084fc"/>
+      <text x="360" y="112" text-anchor="middle" font-size="11" fill="#d8b4fe">对象属性</text>
+      <text x="360" y="130" text-anchor="middle" font-size="11" fill="#d8b4fe">→ Hash</text>
+
+      <rect x="420" y="90" width="120" height="50" rx="8" fill="#f59e0b" opacity="0.2" stroke="#f59e0b"/>
+      <text x="480" y="112" text-anchor="middle" font-size="11" fill="#fcd34d">去重/交并</text>
+      <text x="480" y="130" text-anchor="middle" font-size="11" fill="#fcd34d">→ Set</text>
+
+      <rect x="540" y="90" width="120" height="50" rx="8" fill="#f87171" opacity="0.2" stroke="#f87171"/>
+      <text x="600" y="112" text-anchor="middle" font-size="11" fill="#fca5a5">排序/排名</text>
+      <text x="600" y="130" text-anchor="middle" font-size="11" fill="#fca5a5">→ ZSet</text>
+
+      <text x="360" y="175" text-anchor="middle" font-size="11" fill="#94a3b8">先根据业务语义选型，再根据数据量调整编码阈值</text>
+    </svg>
+    <figcaption><span class="fig-no">图 7-1</span> Redis 数据类型选型决策</figcaption>
+  </div>
+
+  <div class="recap">
+    <h3>全篇回顾</h3>
+    <ol>
+      <li><strong>String</strong>：底层 SDS，O(1) 获取长度，二进制安全，预分配空间</li>
+      <li><strong>List</strong>：底层 quicklist = 双向链表 + ziplist 节点，兼顾内存效率和操作性能</li>
+      <li><strong>Hash</strong>：少量用 ziplist，多用 hashtable。field-value 存储对象属性首选</li>
+      <li><strong>Set</strong>：全整数少量用 intset（有序数组），否则 hashtable。去重/集合运算</li>
+      <li><strong>ZSet</strong>：少量用 ziplist，多用 skiplist + hashtable。排行榜/延迟队列</li>
+      <li><strong>编码转换</strong>：自动单向升级，可通过 redis.conf 调阈值优化内存</li>
+      <li><strong>选型</strong>：按业务语义选类型，按数据量调编码</li>
+    </ol>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

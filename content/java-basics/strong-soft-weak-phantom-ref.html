@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>四种引用类型：强引用、软引用、弱引用、虚引用</title>
+</head>
+<body>
+
+<main class="lesson-body">
+
+<!-- ═══════════════ 第1站：强引用 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><span class="station-no">第 1 站</span><h2>强引用：Java 中最常见的引用，也是 OOM 的元凶</h2></div>
+
+<p>强引用（Strong Reference）是 Java 中最基本的引用类型——你写的几乎每一行代码中的引用都是强引用。它的特性只有一个：<strong>只要强引用存在，GC 绝不回收对象</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StrongRefDemo.java</b> · 强引用的行为</span></div>
+<pre><code><span class="k">public class</span> <span class="t">StrongRefDemo</span> {
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">Object</span> obj = <span class="k">new</span> <span class="t">Object</span>();   <span class="c">// obj 是强引用</span>
+
+        <span class="c">// 即使内存不够，GC 也不会回收 obj 指向的对象</span>
+        <span class="c">// 宁可抛出 OOM，也不会回收强引用对象</span>
+
+        obj = <span class="k">null</span>;  <span class="c">// ★ 显式设为 null 才能断开引用</span>
+        <span class="c">// 此时对象变为不可达，可以被 GC 回收</span>
+    }
+}
+
+<span class="c">// 常见的强引用泄漏场景：</span>
+<span class="c">// ① 集合中对象忘记 remove</span>
+<span class="t">List</span>&lt;<span class="t">Object</span>&gt; cache = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+cache.add(bigObject);    <span class="c">// cache 强引用 bigObject → 永不回收</span>
+
+<span class="c">// ② 静态集合</span>
+<span class="k">static</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Object</span>&gt; globalMap = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+globalMap.put(<span class="s">"key"</span>, bigObject);  <span class="c">// 静态变量生命周期=JVM 生命周期</span>
+
+<span class="c">// ③ ThreadLocal 中的 Value（见 ThreadLocal 那篇）</span></code></pre>
+</div>
+
+<div class="formula">
+<strong>GC 判断标准：</strong><br/>
+从 GC Roots 出发，通过强引用链能到达的对象 = 存活对象。<br/>
+只有当一个对象<strong>没有任何强引用</strong>指向它时，才可能被 GC 回收。
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 320" role="img" aria-label="强引用与 GC 可达性">
+  <text x="360" y="26" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">GC Roots 可达性分析</text>
+
+  <!-- GC Roots -->
+  <rect x="30" y="50" width="140" height="120" rx="10" fill="#E8F4FD" stroke="#3E6B8F" stroke-width="2"/>
+  <text x="100" y="76" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">GC Roots</text>
+  <text x="100" y="98" text-anchor="middle" font-size="10" fill="#57544E">栈帧局部变量</text>
+  <text x="100" y="114" text-anchor="middle" font-size="10" fill="#57544E">静态变量</text>
+  <text x="100" y="130" text-anchor="middle" font-size="10" fill="#57544E">常量引用</text>
+  <text x="100" y="146" text-anchor="middle" font-size="10" fill="#57544E">JNI 引用</text>
+
+  <!-- 强引用链 -->
+  <line x1="170" y1="80" x2="240" y2="80" stroke="#16A34A" stroke-width="2.5" marker-end="url(#refArr)"/>
+  <text x="205" y="73" text-anchor="middle" font-size="9" fill="#16A34A" font-weight="700">强</text>
+
+  <rect x="245" y="60" width="100" height="40" rx="8" fill="#F0FDF4" stroke="#16A34A" stroke-width="2"/>
+  <text x="295" y="84" text-anchor="middle" font-size="12" fill="#16A34A" font-weight="600">User 对象</text>
+
+  <line x1="345" y1="80" x2="415" y2="80" stroke="#16A34A" stroke-width="2.5" marker-end="url(#refArr)"/>
+  <text x="380" y="73" text-anchor="middle" font-size="9" fill="#16A34A" font-weight="700">强</text>
+
+  <rect x="420" y="60" width="100" height="40" rx="8" fill="#F0FDF4" stroke="#16A34A" stroke-width="2"/>
+  <text x="470" y="84" text-anchor="middle" font-size="12" fill="#16A34A" font-weight="600">Address 对象</text>
+
+  <!-- 不可达对象 -->
+  <rect x="245" y="180" width="100" height="40" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="295" y="204" text-anchor="middle" font-size="12" fill="#EF4444" font-weight="600">孤立对象 A</text>
+
+  <rect x="420" y="180" width="100" height="40" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="470" y="204" text-anchor="middle" font-size="12" fill="#EF4444" font-weight="600">孤立对象 B</text>
+
+  <line x1="345" y1="200" x2="415" y2="200" stroke="#EF4444" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#refArr)"/>
+  <text x="380" y="193" text-anchor="middle" font-size="9" fill="#EF4444" font-weight="700">强</text>
+
+  <!-- 说明文字 -->
+  <rect x="550" y="55" width="150" height="170" rx="8" fill="#FFF7ED" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="625" y="80" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">可达性分析</text>
+  <text x="625" y="105" text-anchor="middle" font-size="10" fill="#16A34A" font-weight="600">绿色 = 可达（存活）</text>
+  <text x="625" y="125" text-anchor="middle" font-size="10" fill="#EF4444" font-weight="600">红色虚线 = 不可达</text>
+  <text x="625" y="150" text-anchor="middle" font-size="10" fill="#57544E">不可达对象在</text>
+  <text x="625" y="166" text-anchor="middle" font-size="10" fill="#57544E">下次 GC 时被回收</text>
+  <text x="625" y="190" text-anchor="middle" font-size="10" fill="#57544E">强引用链断裂 =</text>
+  <text x="625" y="206" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="600">对象死亡</text>
+
+  <!-- 底部总结 -->
+  <rect x="30" y="250" width="660" height="50" rx="8" fill="#F0FDF4" stroke="#16A34A" stroke-width="1.5"/>
+  <text x="360" y="272" text-anchor="middle" font-size="12" fill="#16A34A" font-weight="700">核心结论：强引用 = 生命线。只要有一条强引用链从 GC Root 到对象，对象就不会被回收。</text>
+  <text x="360" y="290" text-anchor="middle" font-size="11" fill="#57544E">软引用、弱引用、虚引用的本质区别在于：它们对 GC 可达性的影响程度不同。</text>
+
+  <defs>
+    <marker id="refArr" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#3E6B8F"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption><span class="fig-no">图 1</span>GC Roots 可达性分析：从 GC Roots 出发，沿强引用链可达的对象是存活的；不可达对象即使互相引用也会被回收</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第2站：软引用 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>软引用 SoftReference：内存敏感的缓存利器</h2></div>
+
+<p>软引用（Soft Reference）的特性：<strong>内存充足时不回收，内存不足时回收</strong>。这个特性使它非常适合用来实现内存敏感的缓存。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SoftRefCache.java</b> · 软引用实现图片缓存</span></div>
+<pre><code><span class="k">public class</span> <span class="t">ImageCache</span> {
+    <span class="c">// key=图片路径, value=图片对象的软引用</span>
+    <span class="k">private</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">SoftReference</span>&lt;<span class="t">Image</span>&gt;&gt; cache = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+
+    <span class="k">public</span> <span class="t">Image</span> getImage(<span class="t">String</span> path) {
+        <span class="t">SoftReference</span>&lt;<span class="t">Image</span>&gt; ref = cache.get(path);
+        <span class="k">if</span> (ref != <span class="k">null</span>) {
+            <span class="t">Image</span> img = ref.get();  <span class="c">// ★ 可能返回 null（已被 GC 回收）</span>
+            <span class="k">if</span> (img != <span class="k">null</span>) {
+                <span class="k">return</span> img;  <span class="c">// 缓存命中</span>
+            }
+        }
+        <span class="c">// 缓存未命中或已被回收，重新加载</span>
+        <span class="t">Image</span> img = loadImageFromDisk(path);
+        cache.put(path, <span class="k">new</span> <span class="t">SoftReference</span>&lt;&gt;(img));
+        <span class="k">return</span> img;
+    }
+}
+
+<span class="c">/*
+ * GC 行为：
+ * - 内存充足 → SoftReference 指向的对象不会被回收
+ * - 内存紧张 → GC 会回收 SoftReference 指向的对象（在抛出 OOM 之前）
+ *
+ * JDK 回收策略（近似）：
+ * 软引用对象的存活时间 &lt; (JVM 空闲内存 MB)
+ * 即空闲内存越多，软引用存活越久
+ */</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">软引用什么时候被回收？精确规则是什么？</div>
+<p>JVM 规范只说"在即将发生 OOM 之前回收软引用"。具体实现因 GC 收集器不同：</p>
+<p><strong>-XX:SoftRefLRUPolicyMSPerMB</strong>（默认 1000ms）控制软引用的存活策略：</p>
+<p>如果堆的空闲内存是 10MB，则软引用对象最多存活 10 × 1000 = 10 秒。超过这个时间就会在下一次 GC 时被回收。空闲内存越小，回收越积极。</p>
+</div>
+
+<div class="think"><div class="think-q">SoftReference 做缓存真的可靠吗？有什么坑？<br/><br/>
+<b>坑 1：</b>GC 回收时机不可控。内存充足时可能一直不回收（浪费内存），内存紧张时突然全部回收（缓存击穿）。<br/><br/>
+<b>坑 2：</b>SoftReference 对象本身需要内存开销（每个约 40 字节）。<br/><br/>
+<b>坑 3：</b>现代生产环境更推荐 LRU Cache（如 Guava Cache、Caffeine），淘汰策略可控、可观测。<br/><br/>
+<b>结论：</b>SoftReference 适合做"锦上添花"的二级缓存，不适合作为核心缓存方案。</div></div>
+</section>
+
+<!-- ═══════════════ 第3站：弱引用 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>弱引用 WeakReference：下次 GC 必定回收</h2></div>
+
+<p>弱引用（Weak Reference）的特性：<strong>无论内存是否充足，只要发生 GC，弱引用指向的对象就会被回收</strong>。这使得弱引用适合做"不希望阻止对象被回收"的关联映射。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>WeakRefDemo.java</b> · 弱引用行为演示</span></div>
+<pre><code><span class="t">Object</span> obj = <span class="k">new</span> <span class="t">Object</span>();
+<span class="t">WeakReference</span>&lt;<span class="t">Object</span>&gt; weakRef = <span class="k">new</span> <span class="t">WeakReference</span>&lt;&gt;(obj);
+
+System.out.println(weakRef.get());  <span class="c">// java.lang.Object@xxx</span>
+
+obj = <span class="k">null</span>;   <span class="c">// 断开强引用</span>
+System.gc();   <span class="c">// 建议 GC</span>
+
+System.out.println(weakRef.get());  <span class="c">// null ★ 对象已被回收！</span>
+
+<span class="c">// 对比软引用：</span>
+<span class="t">Object</span> obj2 = <span class="k">new</span> <span class="t">Object</span>();
+<span class="t">SoftReference</span>&lt;<span class="t">Object</span>&gt; softRef = <span class="k">new</span> <span class="t">SoftReference</span>&lt;&gt;(obj2);
+obj2 = <span class="k">null</span>;
+System.gc();
+System.out.println(softRef.get());  <span class="c">// 仍然有值（内存充足不回收）</span></code></pre>
+</div>
+
+<p>弱引用最经典的应用是 <strong>WeakHashMap</strong> 和 <strong>ThreadLocal 的 Entry</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>WeakHashMapDemo.java</b> · WeakHashMap 自动清理</span></div>
+<pre><code><span class="t">WeakHashMap</span>&lt;<span class="t">Object</span>, <span class="t">String</span>&gt; map = <span class="k">new</span> <span class="t">WeakHashMap</span>&lt;&gt;();
+
+<span class="t">Object</span> key1 = <span class="k">new</span> <span class="t">Object</span>();
+<span class="t">Object</span> key2 = <span class="k">new</span> <span class="t">Object</span>();
+
+map.put(key1, <span class="s">"value1"</span>);
+map.put(key2, <span class="s">"value2"</span>);
+
+System.out.println(map.size());  <span class="c">// 2</span>
+
+key1 = <span class="k">null</span>;  <span class="c">// 断开 key1 的强引用</span>
+System.gc();
+
+<span class="c">// ★ key1 对应的 Entry 被自动移除！</span>
+System.out.println(map.size());  <span class="c">// 1</span>
+
+<span class="c">/*
+ * WeakHashMap 原理：
+ * - Entry 继承 WeakReference，key 是弱引用
+ * - 当 key 不再被外部强引用时，GC 回收 key
+ * - WeakHashMap 在下次操作时，通过 ReferenceQueue 感知到 key 被回收
+ * - 自动移除对应的 Entry（包括 value）
+ */</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">ThreadLocal 的 Entry 为什么用弱引用？</div>
+<p>ThreadLocalMap 的 Entry 继承了 WeakReference，其 key（ThreadLocal 实例）是弱引用。这样当外部不再持有 ThreadLocal 变量时，ThreadLocal 实例本身可以被 GC 回收。</p>
+<p>但这只解决了"ThreadLocal 对象泄漏"的一半问题——Entry 中的 value 是强引用，如果线程不销毁，value 仍然泄漏。这就是 ThreadLocal 内存泄漏的核心矛盾（详见 ThreadLocal 专题）。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：虚引用 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>虚引用 PhantomReference：对象死亡前的最后通知</h2></div>
+
+<p>虚引用是四种引用中最特殊的一种：<strong>它不影响对象的生命周期，也无法通过 get() 获取对象</strong>。它的唯一作用是在对象被 GC 回收时，将通知发送到关联的 ReferenceQueue。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>PhantomRefDemo.java</b> · 虚引用的行为</span></div>
+<pre><code><span class="t">ReferenceQueue</span>&lt;<span class="t">Object</span>&gt; queue = <span class="k">new</span> <span class="t">ReferenceQueue</span>&lt;&gt;();
+
+<span class="t">Object</span> obj = <span class="k">new</span> <span class="t">Object</span>();
+<span class="t">PhantomReference</span>&lt;<span class="t">Object</span>&gt; phantom = <span class="k">new</span> <span class="t">PhantomReference</span>&lt;&gt;(obj, queue);
+
+<span class="c">// ★ get() 永远返回 null！虚引用无法获取对象</span>
+System.out.println(phantom.get());  <span class="c">// null</span>
+
+obj = <span class="k">null</span>;  <span class="c">// 断开强引用</span>
+System.gc();
+
+<span class="c">// GC 回收对象后，PhantomReference 被放入队列</span>
+<span class="t">Reference</span>&lt;?&gt; ref = queue.poll();
+System.out.println(ref == phantom);  <span class="c">// true ★ 确认对象已被回收</span>
+
+<span class="c">/*
+ * 虚引用的设计意图：
+ * ① 无法通过虚引用获取对象 → 不会"意外复活"对象
+ * ② 对象被回收时收到通知 → 可以做清理工作（释放堆外内存等）
+ * ③ 比 finalize() 更安全 → 不会导致对象复活或性能问题
+ */</span></code></pre>
+</div>
+
+<p>虚引用最典型的真实应用是 JDK 9+ 的 <strong>Cleaner</strong> 机制和 <code>DirectByteBuffer</code> 的清理。</p>
+
+<table class="nb-table">
+<thead><tr><th>特性</th><th>finalize()</th><th>PhantomReference + Cleaner</th></tr></thead>
+<tbody>
+  <tr><td><strong>复活对象</strong></td><td>可以在 finalize() 中重新建立强引用（危险！）</td><td>不可能——get() 永远返回 null</td></tr>
+  <tr><td><strong>执行线程</strong></td><td>Finalizer 线程（单线程，可能阻塞）</td><td>Cleaner 专用线程池</td></tr>
+  <tr><td><strong>异常处理</strong></td><td>异常被吞掉，后续 finalize 不再执行</td><td>异常不影响其他清理任务</td></tr>
+  <tr><td><strong>性能影响</strong></td><td>对象至少多存活一个 GC 周期</td><td>无额外 GC 开销</td></tr>
+  <tr><td><strong>JDK 态度</strong></td><td>JDK 9 起标记为 @Deprecated</td><td>官方推荐的替代方案</td></tr>
+</tbody>
+</table>
+
+<div class="crack"><div class="crack-label">为什么 finalize() 被废弃？</div>
+<p>finalize() 有三个致命问题：</p>
+<p><strong>1. 对象复活：</strong>在 finalize() 中可以 <code>SomeClass.instance = this;</code> 将自身赋给静态变量，对象重新可达——但 finalize() 只会调用一次，第二次 GC 直接回收，不做清理。</p>
+<p><strong>2. 性能灾难：</strong>需要 finalize 的对象会被放入 Finalizer 队列，由单个 Finalizer 线程依次执行。如果 finalize() 执行慢，整个回收流程被阻塞，对象堆积导致 OOM。</p>
+<p><strong>3. 不确定性：</strong>JVM 不保证 finalize() 何时被调用，甚至不保证会被调用（程序退出时可能跳过）。依赖 finalize() 释放资源是极其危险的。</p>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CleanerDemo.java</b> · Cleaner 替代 finalize()</span></div>
+<pre><code><span class="k">import</span> java.lang.ref.Cleaner;
+
+<span class="k">public class</span> <span class="t">ResourceHolder</span> <span class="k">implements</span> <span class="t">AutoCloseable</span> {
+    <span class="k">private static final</span> <span class="t">Cleaner</span> cleaner = <span class="t">Cleaner</span>.create();
+
+    <span class="c">// ★ 清理逻辑必须放在独立的静态内部类中</span>
+    <span class="c">// 不能持有外部类的引用（否则阻止回收）</span>
+    <span class="k">private static class</span> <span class="t">CleanAction</span> <span class="k">implements</span> <span class="t">Runnable</span> {
+        <span class="k">private final long</span> nativeHandle;
+
+        <span class="t">CleanAction</span>(<span class="k">long</span> handle) { <span class="k">this</span>.nativeHandle = handle; }
+
+        <span class="k">@Override</span>
+        <span class="k">public void</span> run() {
+            <span class="c">// ★ 对象被 GC 后，Cleaner 会调用此方法</span>
+            freeNativeResource(nativeHandle);
+        }
+    }
+
+    <span class="k">private final</span> <span class="t">Cleaner.Cleanable</span> cleanable;
+
+    <span class="k">public</span> <span class="t">ResourceHolder</span>(<span class="k">long</span> handle) {
+        <span class="c">// 注册清理动作：当 this 被 GC 时，执行 CleanAction</span>
+        <span class="k">this</span>.cleanable = cleaner.register(<span class="k">this</span>, <span class="k">new</span> <span class="t">CleanAction</span>(handle));
+    }
+
+    <span class="k">@Override</span>
+    <span class="k">public void</span> close() {
+        cleanable.clean();  <span class="c">// 主动清理（不必等 GC）</span>
+    }
+}
+
+<span class="c">/*
+ * Cleaner 底层使用 PhantomReference + ReferenceQueue
+ * JDK 内部 DirectByteBuffer 的 Cleaner 就是这样实现的：
+ * 当 DirectByteBuffer 被 GC 时，Cleaner 负责释放堆外内存
+ */</span></code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：ReferenceQueue ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>ReferenceQueue：引用回收的通知机制</h2></div>
+
+<p>ReferenceQueue 是软引用、弱引用、虚引用的"回收通知队列"。当引用指向的对象被 GC 回收后，引用本身会被加入队列，应用程序可以从队列中获取通知并做清理。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ReferenceQueueDemo.java</b> · ReferenceQueue 使用模式</span></div>
+<pre><code><span class="t">ReferenceQueue</span>&lt;<span class="t">Object</span>&gt; queue = <span class="k">new</span> <span class="t">ReferenceQueue</span>&lt;&gt;();
+<span class="t">Map</span>&lt;<span class="t">WeakReference</span>&lt;<span class="t">Object</span>&gt;, <span class="t">String</span>&gt; metadata = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+
+<span class="c">// 创建对象并注册弱引用</span>
+<span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">5</span>; i++) {
+    <span class="t">Object</span> obj = <span class="k">new</span> <span class="t">Object</span>();
+    <span class="t">WeakReference</span>&lt;<span class="t">Object</span>&gt; ref = <span class="k">new</span> <span class="t">WeakReference</span>&lt;&gt;(obj, queue);
+    metadata.put(ref, <span class="s">"metadata-"</span> + i);
+    <span class="c">// obj 局部变量，循环结束后无强引用</span>
+}
+
+System.gc();
+
+<span class="c">// ★ 从队列中取出被回收的引用，做清理</span>
+<span class="t">Reference</span>&lt;? <span class="k">extends</span> <span class="t">Object</span>&gt; ref;
+<span class="k">while</span> ((ref = queue.poll()) != <span class="k">null</span>) {
+    <span class="t">String</span> meta = metadata.remove(ref);
+    System.out.println(<span class="s">"清理元数据: "</span> + meta);
+}
+
+<span class="c">/*
+ * 各引用类型的入队时机：
+ * 软引用：对象被 GC 回收后入队
+ * 弱引用：对象被 GC 回收后入队
+ * 虚引用：★ 对象被 GC 回收后，从 Finalizer 队列移除后才入队
+ *         （即对象真的"死透了"才入队，不像 finalize 可能复活对象）
+ */</span></code></pre>
+</div>
+
+<table class="nb-table">
+<thead><tr><th>引用类型</th><th>get() 返回值</th><th>必须配合 Queue？</th><th>入队时机</th></tr></thead>
+<tbody>
+  <tr><td><strong>强引用</strong></td><td>N/A（不适用）</td><td>N/A</td><td>N/A</td></tr>
+  <tr><td><strong>软引用</strong></td><td>存活对象 或 null</td><td>可选</td><td>对象被回收后</td></tr>
+  <tr><td><strong>弱引用</strong></td><td>存活对象 或 null</td><td>可选</td><td>对象被回收后</td></tr>
+  <tr><td><strong>虚引用</strong></td><td>永远返回 null</td><td><strong>必须</strong></td><td>对象 finalize 后入队</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第6站：总结 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>总结：四种引用全景对比与使用建议</h2></div>
+
+<table class="nb-table">
+<thead><tr><th>引用类型</th><th>GC 回收条件</th><th>典型用途</th><th>get() 返回值</th><th>生产案例</th></tr></thead>
+<tbody>
+  <tr><td><strong>强引用</strong></td><td>永不回收（只要引用存在）</td><td>一切正常业务对象</td><td>N/A</td><td>所有 Java 代码</td></tr>
+  <tr><td><strong>软引用</strong></td><td>内存不足时回收</td><td>内存敏感的缓存</td><td>对象 / null</td><td>Android BitmapCache</td></tr>
+  <tr><td><strong>弱引用</strong></td><td>下次 GC 必定回收</td><td>关联映射、防泄漏</td><td>对象 / null</td><td>WeakHashMap、ThreadLocal</td></tr>
+  <tr><td><strong>虚引用</strong></td><td>随时回收（等同无引用）</td><td>堆外内存清理</td><td>永远 null</td><td>DirectByteBuffer Cleaner</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway">
+<div class="takeaway-label">面试要点速记</div>
+<ul>
+  <li><strong>"四种引用的区别？"</strong>——按 GC 回收的"积极程度"排序：强引用（永不） &gt; 软引用（内存不足时） &gt; 弱引用（下次 GC） &gt; 虚引用（随时）</li>
+  <li><strong>"软引用做缓存靠谱吗？"</strong>——不够可控，回收时机取决于 JVM 内存状态。生产推荐 Caffeine / Guava Cache</li>
+  <li><strong>"WeakHashMap 和 HashMap 的区别？"</strong>——WeakHashMap 的 key 是弱引用，当 key 无外部强引用时，Entry 会被自动清理</li>
+  <li><strong>"ThreadLocal 为什么用弱引用？"</strong>——Entry 的 key 用弱引用指向 ThreadLocal 实例，当外部不再引用 ThreadLocal 时，实例可被回收。但 value 仍是强引用，必须手动 remove()</li>
+  <li><strong>"虚引用有什么用？"</strong>——跟踪对象被 GC 的时机，用于替代 finalize() 做资源清理。JDK 的 DirectByteBuffer 用 Cleaner（基于 PhantomReference）释放堆外内存</li>
+</ul>
+</div>
+
+<div class="recap">
+<p><strong>面试回答模板：</strong></p>
+<p>"Java 有四种引用类型。强引用是最常见的，GC 绝不回收。软引用在内存不足时被回收，适合做内存敏感的缓存。弱引用在下次 GC 时必定被回收，用于不希望阻止对象回收的关联场景，典型如 WeakHashMap 和 ThreadLocalMap 的 Entry。虚引用无法获取对象，只在对象被回收时通过 ReferenceQueue 通知，JDK 内部用它实现 Cleaner 来释放 DirectByteBuffer 的堆外内存。"</p>
+</div>
+
+</section>
+
+</main>
+</body>
+</html>

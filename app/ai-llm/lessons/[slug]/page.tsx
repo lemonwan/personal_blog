@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getLessonContent, getLessonBySlug, AI_LESSONS, getLessonsByVolume, VOLUMES } from "@/lib/content";
 import { LessonClient } from "./LessonClient";
+import ReadingProgress from "./ReadingProgress";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -33,13 +34,8 @@ export default async function LessonPage({ params }: Props) {
 
   return (
     <div className="ai-llm-scope">
-      {/* ── Reading progress bar（对标源站 reading-bar）── */}
-      <div className="reading-bar" style={{
-        position: "fixed", top: "64px", left: 0, right: 0, height: "3px",
-        background: "var(--line)", zIndex: 40
-      }}>
-        <div id="reading-progress" style={{ height: "100%", width: "0%", background: "var(--accent)", transition: "width 0.1s linear" }} />
-      </div>
+      {/* ── Reading progress bar（客户端组件）── */}
+      <ReadingProgress />
 
       {/* ── Lesson layout ── */}
       <div className="lesson-layout" style={{ maxWidth: "1280px", margin: "0 auto", padding: "0 48px" }}>
@@ -161,17 +157,7 @@ export default async function LessonPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Reading progress JS */}
-      <script dangerouslySetInnerHTML={{ __html: `
-        (function(){
-          var bar=document.getElementById('reading-progress');
-          if(!bar)return;
-          window.addEventListener('scroll',function(){
-            var h=document.documentElement.scrollHeight-window.innerHeight;
-            bar.style.width=h>0?(window.scrollY/h*100)+'%':'0%';
-          });
-        })();
-      `}} />
+
     </div>
   );
 }
