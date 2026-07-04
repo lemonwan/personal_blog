@@ -40,38 +40,61 @@ export default async function JavaArticlePage({ params }: Props) {
       <div className="article-shell">
         <div className="article-grid">
           <aside className="article-side">
-            <div style={{ position: "sticky", top: "80px" }}>
-              {vol && (
-                <div style={{ marginBottom: "24px" }}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: "12.5px", fontWeight: 700, letterSpacing: "0.12em", color: "var(--ink-faint)", marginBottom: "14px" }}>
-                    卷{ZH[vol.num]} · {vol.title}
+            <div style={{ position: "sticky", top: "80px", maxHeight: "calc(100vh - 100px)", overflowY: "auto", paddingRight: "4px" }}>
+              <div style={{ fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, letterSpacing: "0.18em", color: "var(--ink-faint)", marginBottom: "16px", textTransform: "uppercase" }}>
+                Java 面试笔记 · 全部卷
+              </div>
+
+              {JAVA_VOLUMES.map((v) => {
+                const isCurrent = v.num === meta.volume;
+                const articles = getJavaArticlesByVolume(v.num);
+                const header = (
+                  <div style={{
+                    fontFamily: "var(--mono)", fontSize: "12.5px", fontWeight: 700, letterSpacing: "0.08em",
+                    color: isCurrent ? "var(--accent)" : "var(--ink-soft)",
+                    padding: "6px 0",
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px",
+                    cursor: isCurrent ? "default" : "pointer",
+                  }}>
+                    <span>卷{getZH(v.num)} · {v.title}</span>
+                    <span style={{ fontSize: "11px", opacity: 0.5, fontWeight: 400 }}>{articles.length} 篇</span>
                   </div>
-                  <ul style={{ listStyle: "none" }}>
-                    {getJavaArticlesByVolume(meta.volume).map((a) => {
-                      const aReady = hasJavaContent(a.slug);
-                      return (
-                        <li key={a.slug}>
-                          <Link href={`/java-interview/${encodeURIComponent(a.slug)}/`} style={{
-                            display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", borderRadius: "6px",
-                            fontSize: "15px", textDecoration: "none", lineHeight: 1.4,
-                            color: a.slug === decoded ? "var(--accent)" : "var(--ink-soft)",
-                            fontWeight: a.slug === decoded ? 700 : 400,
-                            background: a.slug === decoded ? "var(--accent-wash)" : "transparent",
-                            opacity: aReady ? 1 : 0.5,
-                          }}>
-                            <span style={{ fontFamily: "var(--mono)", fontSize: "13px", minWidth: "24px", opacity: a.slug === decoded ? 1 : 0.6 }}>
-                              {String(a.lessonNum).padStart(2, "0")}
-                            </span>
-                            <span style={{ lineHeight: 1.4 }}>{a.title.length > 14 ? a.title.slice(0, 14) + "…" : a.title}</span>
-                          </Link>
-                        </li>
-                      );
-                    })}
+                );
+                const list = (
+                  <ul style={{ listStyle: "none", marginTop: "4px", marginBottom: "16px" }}>
+                    {articles.map((a) => (
+                      <li key={a.slug}>
+                        <Link href={`/java-interview/${encodeURIComponent(a.slug)}/`} style={{
+                          display: "flex", alignItems: "center", gap: "10px", padding: "7px 10px", borderRadius: "6px",
+                          fontSize: "14px", textDecoration: "none", lineHeight: 1.4,
+                          color: a.slug === decoded ? "var(--accent)" : "var(--ink-soft)",
+                          fontWeight: a.slug === decoded ? 700 : 400,
+                          background: a.slug === decoded ? "var(--accent-wash)" : "transparent",
+                        }}>
+                          <span style={{ fontFamily: "var(--mono)", fontSize: "12px", minWidth: "24px", opacity: a.slug === decoded ? 1 : 0.55 }}>
+                            {String(a.lessonNum).padStart(2, "0")}
+                          </span>
+                          <span style={{ lineHeight: 1.4 }}>{a.title.length > 14 ? a.title.slice(0, 14) + "…" : a.title}</span>
+                        </Link>
+                      </li>
+                    ))}
                   </ul>
-                </div>
-              )}
-              <div style={{ borderTop: "1px solid var(--line)", margin: "20px 0" }} />
-              <Link href="/java-basics/" style={{ fontSize: "14px", color: "var(--ink-faint)", textDecoration: "none" }}>← 返回 Java 笔记</Link>
+                );
+                return isCurrent ? (
+                  <div key={v.num} style={{ borderLeft: "2px solid var(--accent)", paddingLeft: "10px", marginBottom: "8px" }}>
+                    {header}
+                    {list}
+                  </div>
+                ) : (
+                  <details key={v.num} style={{ borderLeft: "2px solid var(--line)", paddingLeft: "10px", marginBottom: "8px" }}>
+                    <summary style={{ listStyle: "none", cursor: "pointer" }}>{header}</summary>
+                    {list}
+                  </details>
+                );
+              })}
+
+              <div style={{ borderTop: "1px solid var(--line)", margin: "16px 0" }} />
+              <Link href="/java-basics/" style={{ fontSize: "13px", color: "var(--ink-faint)", textDecoration: "none" }}>← 返回 Java 笔记</Link>
             </div>
           </aside>
 
@@ -157,8 +180,6 @@ export default async function JavaArticlePage({ params }: Props) {
           </article>
         </div>
       </div>
-
-      {/* 回顶按钮由全局 layout 中的 BackToTop 组件统一渲染 */}
     </div>
   );
 }
