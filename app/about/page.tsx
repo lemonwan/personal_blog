@@ -160,7 +160,7 @@ export default function AboutPage() {
             <h2 className="section-title">一起交流</h2>
             <div className="mt-8" style={{ display: "grid", gap: "16px", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
               <a
-                href="https://github.com/yourname"
+                href="https://github.com/lemonwan"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="about-cta"
@@ -168,17 +168,17 @@ export default function AboutPage() {
                 <span style={{ fontSize: "22px" }}>⌥</span>
                 <span>
                   <span style={{ display: "block", fontFamily: "var(--mono)", fontSize: "13px", fontWeight: 800 }}>GitHub</span>
-                  <span style={{ display: "block", fontSize: "13px", color: "var(--ink-faint)" }}>代码 & 项目</span>
+                  <span style={{ display: "block", fontSize: "13px", color: "var(--ink-faint)" }}>@lemonwan</span>
                 </span>
               </a>
               <a
-                href="mailto:wan@example.com"
+                href="mailto:1173816592@qq.com"
                 className="about-cta"
               >
                 <span style={{ fontSize: "22px" }}>✉</span>
                 <span>
                   <span style={{ display: "block", fontFamily: "var(--mono)", fontSize: "13px", fontWeight: 800 }}>Email</span>
-                  <span style={{ display: "block", fontSize: "13px", color: "var(--ink-faint)" }}>邮件联系</span>
+                  <span style={{ display: "block", fontSize: "13px", color: "var(--ink-faint)" }}>1173816592@qq.com</span>
                 </span>
               </a>
             </div>
