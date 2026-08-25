@@ -605,3 +605,19 @@ html, body { overflow-x: clip; max-width: 100%; }
   .ai-llm-scope .family-guide .card-title { font-size: 16px; }
 }
 
+/* ── About 页·联系卡片（硬阴影 + 按压 hover）── */
+.ai-llm-scope .about-cta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 22px;
+  border-radius: 0;
+  background: var(--paper-card);
+  border: 3px solid #1C1C1C;
+  box-shadow: 4px 4px 0 #1C1C1C;
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.ai-llm-scope .about-cta:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #1C1C1C; }
+
