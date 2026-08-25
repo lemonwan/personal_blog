@@ -22,7 +22,7 @@ export default function HeaderNav() {
             key={l.href}
             href={l.href}
             className={
-              "whitespace-nowrap text-xs sm:text-sm font-black transition-colors " +
+              "relative whitespace-nowrap text-xs sm:text-sm font-black transition-colors " +
               (active
                 ? "text-[#FAC94A]"
                 : "text-white/70 hover:text-white")
@@ -30,6 +30,12 @@ export default function HeaderNav() {
             aria-current={active ? "page" : undefined}
           >
             {l.label}
+            {active && (
+              <span
+                className="absolute -bottom-1.5 left-0 right-0 h-0.5 bg-[#FAC94A] rounded-full"
+                aria-hidden="true"
+              />
+            )}
           </a>
         );
       })}
