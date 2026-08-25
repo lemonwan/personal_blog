@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSX 详解：它到底是模板还是代码？</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：JSX 到底是个啥 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>JSX 到底是不是 HTML？</h2></div>
+
+<p>上一篇文章里，这个 <code>Counter</code> 组件的 <code>return</code> 后面写了一段「很像 HTML」的东西。这段东西叫 <strong>JSX</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>JSX 示例</b></span></div>
+  <pre><code>const el = &lt;h1 className="title"&gt;Hello, {name}&lt;/h1&gt;;</code></pre>
+</div>
+
+<p>你第一反应可能是：「这不就是 HTML 吗？」——<strong>但不是</strong>。它写在 <code>.tsx</code>/<code>.jsx</code> 文件里，是 <strong>JavaScript 代码</strong>，不是字符串，也不是服务器端模板。</p>
+
+<div class="think">
+  <div class="think-q">看到 <code>className</code> 而不是 <code>class</code> 了吗？这是第一个线索：JSX 并不是原封不动的 HTML，它有自己的规则。为什么？因为它本质上是 JavaScript 表达式。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：JSX 的编译真相 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>Babel 把 JSX 编译成了什么？</h2></div>
+
+<p>浏览器根本不认识 JSX。写好的 <code>.tsx</code> 文件经过 Babel（或 esbuild/tsc）编译后，上面的 JSX 会变成普通的 JS 函数调用：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>编译前 → 编译后</b></span></div>
+  <pre><code><span class="c">// 你写的 JSX</span>
+const el = &lt;h1 className="title"&gt;Hello, {name}&lt;/h1&gt;;
+
+<span class="c">// 编译后（简化）</span>
+const el = React.createElement(
+  "h1",                <span class="c">// 元素名</span>
+  { className: "title" }, <span class="c">// 属性对象</span>
+  "Hello, ", name       <span class="c">// 子节点</span>
+);</code></pre>
+</div>
+
+<p>这揭示了一个重要事实：<strong>JSX 是 <code>React.createElement</code> 的语法糖</strong>。React 17 之后换成了 <code>react/jsx-runtime</code> 的 <code>jsx()</code> 函数，但本质完全一样——一段「描述界面结构」的 JavaScript 表达式。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比</div>
+  <p>这和你熟悉的 <strong>JSP / Thymeleaf</strong> 是两种完全不同的东西：</p>
+  <ul>
+    <li><strong>JSP/Thymeleaf</strong>：在 HTML 里嵌入少量代码，本质还是<strong>模板字符串</strong>，运行时靠字符串拼接生成 HTML。</li>
+    <li><strong>JSX</strong>：整段都是<strong>代码</strong>，编译成对象（称为「React 元素」），最终由 React 转成真实 DOM。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：JSX 的语法规则 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>必须掌握的 4 条规则</h2></div>
+
+<h3>规则 1：用 <code>{}</code> 嵌入任意 JS 表达式</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>嵌入表达式</b></span></div>
+  <pre><code>const user = { name: "wan", age: 26 };
+
+&lt;div&gt;
+  {"名字: " + user.name}          <span class="c">{/* 字符串拼接 */}</span>
+  {"年龄: " + user.age + 1}        <span class="c">{/* 结果是 "年龄: 261"，字符串拼接 */}</span>
+  {"年龄: " + (user.age + 1)}      <span class="c">{/* 结果是 "年龄: 27"，括号先算 */}</span>
+&lt;/div&gt;</code></pre>
+</div>
+<p><strong>注意</strong>：<code>{}</code> 里只能放<strong>表达式</strong>，不能放语句。你可以放 <code>user.name</code>、三目运算、<code>map()</code>，但不能写 <code>if</code>、<code>for</code>（这些要挪到 JSX 外面或换成表达式）。</p>
+
+<h3>规则 2：返回时必须有一个「根」</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>错误 vs 正确</b></span></div>
+  <pre><code><span class="c">// ❌ 错误：两个并列的根</span>
+return (
+  &lt;h1&gt;标题&lt;/h1&gt;
+  &lt;p&gt;正文&lt;/p&gt;
+);
+
+<span class="c">// ✅ 正确：包一层，或用空标签</span>
+return (
+  &lt;&gt;
+    &lt;h1&gt;标题&lt;/h1&gt;
+    &lt;p&gt;正文&lt;/p&gt;
+  &lt;/&gt;   <span class="c">{/* Fragment：编译后不产生任何 DOM 节点 */}</span>
+);</code></pre>
+</div>
+
+<h3>规则 3：属性名用「驼峰」</h3>
+<table>
+  <thead><tr><th>HTML 写法</th><th>JSX 写法</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr><td><code>class</code></td><td><code>className</code></td><td><code>class</code> 是 JS 保留字</td></tr>
+    <tr><td><code>for</code></td><td><code>htmlFor</code></td><td><code>for</code> 也是 JS 保留字</td></tr>
+    <tr><td><code>onclick</code></td><td><code>onClick</code></td><td>React 事件系统，统一驼峰</td></tr>
+    <tr><td><code>tabindex</code></td><td><code>tabIndex</code></td><td>遵循 DOM 属性驼峰规范</td></tr>
+  </tbody>
+</table>
+
+<h3>规则 4：注释要写在 <code>{}</code> 里</h3>
+<p>JSX 里直接 <code>&lt;!-- --&gt;</code> 是无效的，要用 <code>{/* 注释 */}</code>。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>JSX 是<strong>代码</strong>，不是字符串模板，编译成 <code>createElement</code>/<code>jsx()</code> 调用。</li>
+    <li><code>{}</code> 里放任意 JS 表达式（不能放语句），用来「插值」。</li>
+    <li>属性名驼峰、单个根、注释用 <code>{/* */}</code>。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>一句话 + 一个动作</h2></div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>JSX 的本质是「用 HTML 的壳，写 JavaScript 的骨」。理解这一点，你就不会再把 JSX 当成模板语言去死记它的「限制」，而是会用 JavaScript 的思维去驾驭它——因为 <code>{}</code> 里本来就是一个完整的 JS 表达式世界。</p>
+</div>
+
+<p>动手试一遍最能建立手感：把上一节那个 <code>Counter</code> 组件里的 <code>{count}</code> 换成 <code>{count % 2 === 0 ? "偶数" : "奇数"}</code>，看看会发生什么。</p>
+</section>
+
+</body>
+</html>

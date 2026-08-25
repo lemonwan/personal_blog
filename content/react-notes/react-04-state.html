@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State 与 useState：数据驱动的视图更新</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：state 是组件的记忆 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>state：组件自己的「实例字段」</h2></div>
+
+<p>上一篇说 Props 是「从外部传入、不可变的参数」。那组件内部的数据呢？答案是 <strong>state（状态）</strong>。</p>
+
+<p>用 Java 类比最直观：</p>
+
+<table>
+  <thead><tr><th>React</th><th>Java 类比</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>props</code></td><td>构造器/方法参数</td><td>外部传入，只读</td></tr>
+    <tr><td><code>state</code></td><td>实例字段（field）</td><td>内部持有，可变化</td></tr>
+    <tr><td><code>setState</code></td><td>字段的 <code>setter</code></td><td>改字段，并触发界面更新</td></tr>
+  </tbody>
+</table>
+
+<p>看一个具体例子——一个「点赞按钮」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>LikeButton.tsx</b></span></div>
+  <pre><code>import { useState } from "react";
+
+function LikeButton() {
+  <span class="c">// 声明一个 state：初始值为 0</span>
+  const [likes, setLikes] = useState(0);
+
+  return (
+    &lt;button onClick={() =&gt; setLikes(likes + 1)}&gt;
+      点赞 {likes}
+    &lt;/button&gt;
+  );
+}</code></pre>
+</div>
+
+<p><code>useState(0)</code> 返回一个长度为 2 的数组，我们用解构语法拆成两个：</p>
+<ul>
+  <li><code>likes</code> —— 当前状态值（初始 0）；</li>
+  <li><code>setLikes</code> —— 更新状态的函数，调用它 React 就会<strong>重新渲染</strong>组件。</li>
+</ul>
+
+<p>这里 <code>useState</code> 就是 React 的 <strong>Hook</strong>（钩子）之一。Hook 是一类特殊的函数，只能在组件或其它 Hook 里调用，它们让函数组件「记住」数据。</p>
+</section>
+
+<!-- ═══════════════ 第2站：setState 触发重渲染 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>关键：改 state 的「正确姿势」——不可变更新</h2></div>
+
+<p>这是后端转 React <strong>最容易踩的坑</strong>。看这段经典错误：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ 错误：直接修改（mutate）</b></span></div>
+  <pre><code>function List() {
+  const [items, setItems] = useState([1, 2, 3]);
+
+  function addWrong() {
+    items.push(4);        <span class="c">// ❌ 直接改了原数组</span>
+    setItems(items);      <span class="c">// ❌ 传入的还是同一个引用</span>
+  }
+}</code></pre>
+</div>
+
+<p>为什么不行？因为 React 判断「状态有没有变」用的是 <strong>引用相等</strong>（<code>Object.is</code>）。你 <code>push</code> 后数组引用没变，React 会认为「没变」，于是<strong>跳过重渲染</strong>——界面纹丝不动。</p>
+
+<p>正确做法是<strong>不可变更新</strong>：生成一个<strong>新</strong>的数组/对象，再传进去：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>✅ 正确：不可变更新</b></span></div>
+  <pre><code>function addRight() {
+  setItems([...items, 4]);        <span class="c">// 展开旧数组 + 新元素 = 新数组</span>
+}
+
+function updateObj() {
+  setUser({ ...user, age: 27 });  <span class="c">// 展开旧对象 + 覆盖字段 = 新对象</span>
+}</code></pre>
+</div>
+
+<div class="think">
+  <div class="think-q">「不可变」听着反直觉，但换个角度想：Java 里 <code>String</code> 为什么设计成不可变？——因为不可变让多线程共享、缓存、比较都变得安全。React 的不可变 state 带来同样的好处：可预测、易追踪、好优化（能配合 <code>memo</code> 做浅比较）。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：批处理与函数式更新 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>进阶点：批处理与「函数式更新」</h2></div>
+
+<p>两个高频进阶问题，面试常考，工作中也真的会碰到。</p>
+
+<h3>问题 1：同一个函数里多次 setState，会渲染几次？</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>批处理示例</b></span></div>
+  <pre><code>function App() {
+  const [count, setCount] = useState(0);
+
+  function handle() {
+    setCount(count + 1);   <span class="c">// count 还是 0</span>
+    setCount(count + 1);   <span class="c">// count 还是 0！</span>
+  }
+  <span class="c">// 结果：count 只变成 1，不是 2。两次 set 被「批处理」合并了</span>
+}</code></pre>
+</div>
+<p>React 会把同一事件里的多次 <code>setState</code> <strong>合并成一次重渲染</strong>，并且每次读取的 <code>count</code> 都是「本次渲染时」的旧值（这叫<strong>闭包快照</strong>）。</p>
+
+<h3>问题 2：想基于「最新值」连续累加，怎么办？</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>函数式更新</b></span></div>
+  <pre><code>function handle() {
+  setCount(c =&gt; c + 1);   <span class="c">// 用「更新函数」接收上一次的值</span>
+  setCount(c =&gt; c + 1);   <span class="c">// 基于最新值再 +1</span>
+}
+<span class="c">// 结果：count 变成 2 ✅</span></code></pre>
+</div>
+<p>当你需要基于<strong>上一次 state</strong> 计算新值时，把「值」换成「函数」——<code>setCount(c =&gt; c + 1)</code>。React 会按顺序把更新函数依次应用。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li><code>state</code> 是组件的「实例字段」，<code>setState</code> 是触发重渲染的「setter」。</li>
+    <li><strong>不可变更新</strong>：永远生成新对象/新数组，再传给 setState。</li>
+    <li>基于旧值更新，用<strong>函数式</strong> <code>setState(c =&gt; c + 1)</code>，避免闭包陷阱。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>State 与 Props 如何配合</h2></div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>到这一篇，React 数据模型的两块积木就齐了：<strong>Props</strong>（外部只读参数）+ <strong>State</strong>（内部可变字段）。记住一条经验法则：</p>
+  <p><strong>「数据能推出来，就不要放进 state」</strong>——state 越少，组件越好维护。这和 Java 里「字段尽量少、能局部变量就别用实例字段」是同一个道理。</p>
+</div>
+
+<p>下一篇文章我们退后一步，看看 React 到底是怎么在 state 变化时，高效地把新界面「画」出来的——虚拟 DOM 与 diff。</p>
+</section>
+
+</body>
+</html>

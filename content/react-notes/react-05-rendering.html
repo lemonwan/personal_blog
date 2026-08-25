@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>渲染模型：虚拟 DOM 与协调 diff</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：真实 DOM 有多贵 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>先说结论：真实 DOM 操作很「贵」</h2></div>
+
+<p>浏览器里的「真实 DOM」是一个庞大而复杂的对象。随便一个 <code>&lt;div&gt;</code> 节点，背后都挂着一堆属性和方法，而且它牵扯到浏览器的<strong>布局（layout）和绘制（paint）</strong>——改一次 DOM，可能触发整棵树的回流。</p>
+
+<p>如果每次状态变化都直接改真实 DOM，就会像这样低效：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>命令式更新：改 100 次，回流 100 次</b></span></div>
+  <pre><code>for (let i = 0; i &lt; 100; i++) {
+  document.getElementById("item" + i).textContent = newData[i];
+  <span class="c">// 每一次赋值都可能触发一次 reflow/repaint</span>
+}</code></pre>
+</div>
+
+<p>任务其实只是「更新 100 个列表项」，却可能引发上百次昂贵的布局计算。<strong>虚拟 DOM 就是为了「少碰真实 DOM」而生的。</strong></p>
+</section>
+
+<!-- ═══════════════ 第2站：虚拟 DOM 是什么 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>虚拟 DOM：一份轻量的「界面快照」</h2></div>
+
+<p>虚拟 DOM 本质上就是一个<strong>普通的 JavaScript 对象</strong>，用来描述「界面长什么样」。它不渲染任何东西，只是一份内存里的数据结构，所以创建和比较都极快：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>JSX 编译出来的「虚拟 DOM」对象</b></span></div>
+  <pre><code><span class="c">// &lt;h1 className="title"&gt;Hello&lt;/h1&gt; 大概长这样：</span>
+{
+  type: "h1",
+  props: {
+    className: "title",
+    children: "Hello"
+  }
+}</code></pre>
+</div>
+
+<p>React 的工作流程是这样的（<strong>三阶段</strong>）：</p>
+
+<ol>
+  <li><strong>渲染（Render）</strong>：状态变了 → React 重新调用你的组件函数，得到一份<strong>新的</strong>虚拟 DOM 树；</li>
+  <li><strong>协调（Reconcile）/ diff</strong>：拿新树和旧树对比，找出「哪些地方真的变了」；</li>
+  <li><strong>提交（Commit）</strong>：只把「变了的」部分同步到真实 DOM。</li>
+</ol>
+
+<p>注意第 2 步——这就是俗称的 <strong>diff 算法</strong>。它的价值在于：<strong>在虚拟 DOM 里算完差异，再一次性、最小化地操作真实 DOM。</strong></p>
+
+<div class="crack">
+  <div class="crack-label">后端类比</div>
+  <p>这很像数据库的<strong>「索引 + 只更新脏页」</strong>的思路：不是每条数据变更都立刻刷盘，而是先在内存里算清楚，再批量落盘。虚拟 DOM 就是在内存里「批量对比 + 最小化刷屏」。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：diff 的三条规则 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>diff 为什么快：三条「偷懒」规则</h2></div>
+
+<p>理论上，两棵树做精确对比的复杂度是 <strong>O(n³)</strong>（n 是节点数），对一棵几百节点的树来说太慢了。React 靠三条<strong>启发式假设</strong>把复杂度降到 <strong>O(n)</strong>：</p>
+
+<table>
+  <thead><tr><th>规则</th><th>含义</th><th>你该怎么做</th></tr></thead>
+  <tbody>
+    <tr><td><strong>同层比较</strong></td><td>只比较同一层级的节点，不跨层</td><td>避免把节点在层级间搬来搬去</td></tr>
+    <tr><td><strong>类型不同 → 重建</strong></td><td><code>&lt;div&gt;</code> 换成 <code>&lt;span&gt;</code>，整个子树直接重建</td><td>别频繁切换节点类型</td></tr>
+    <tr><td><strong>key 标识稳定性</strong></td><td>列表项靠 <code>key</code> 判断是「新增/删除/移动」</td><td>列表务必给<strong>稳定且唯一</strong>的 key</td></tr>
+  </tbody>
+</table>
+
+<p>第三条 <code>key</code> 尤其重要，下一篇（第 7 篇）会专门展开。先看一个对比，建立直觉：</p>
+
+<figure class="fig">
+  <svg viewBox="0 0 620 320" role="img" aria-label="无 key 与有 key 的 diff 对比示意图">
+    <text x="30" y="40" font-weight="800" font-size="15" fill="#1C1C1C">无 key（或不稳定 key）</text>
+    <g font-size="13">
+      <rect x="40" y="65" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#8C8676"/><text x="85" y="87" text-anchor="middle" fill="#1C1C1C">A</text>
+      <rect x="150" y="65" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#8C8676"/><text x="195" y="87" text-anchor="middle" fill="#1C1C1C">B</text>
+      <rect x="260" y="65" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#8C8676"/><text x="305" y="87" text-anchor="middle" fill="#1C1C1C">C</text>
+    </g>
+    <text x="30" y="150" font-size="12" fill="#C2410C">在头部插入 X → React 认为 A/B/C 全都「变了」</text>
+    <g font-size="13">
+      <rect x="40" y="170" width="90" height="34" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/><text x="85" y="192" text-anchor="middle" fill="#1C1C1C">X</text>
+      <rect x="150" y="170" width="90" height="34" rx="6" fill="#FFFFFF" stroke="#C2410C"/><text x="195" y="192" text-anchor="middle" fill="#C2410C">B</text>
+      <rect x="260" y="170" width="90" height="34" rx="6" fill="#FFFFFF" stroke="#C2410C"/><text x="305" y="192" text-anchor="middle" fill="#C2410C">C</text>
+    </g>
+
+    <text x="330" y="40" font-weight="800" font-size="15" fill="#1C1C1C">稳定 key</text>
+    <g font-size="13">
+      <rect x="360" y="65" width="90" height="34" rx="6" fill="#fff"/><text x="405" y="87" text-anchor="middle" fill="#1C1C1C">A</text>
+      <rect x="470" y="65" width="90" height="34" rx="6" fill="#fff"/><text x="515" y="87" text-anchor="middle" fill="#1C1C1C">B</text>
+      <rect x="360" y="115" width="90" height="34" rx="6" fill="#fff"/><text x="405" y="137" text-anchor="middle" fill="#1C1C1C">C</text>
+    </g>
+    <text x="340" y="188" font-size="12" fill="#177245">同位置插入 X → 只需新增 X，A/B/C 复用不走样</text>
+  </svg>
+  <figcaption class="figcaption"><span class="fig-no">图 2</span>没有稳定 key 时，列表头部插入会让 React 误判所有项都变化；有了 key，React 能精准识别「只新增了 X」。主动画原因见第 7 篇。</figcaption>
+</figure>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>虚拟 DOM 是<strong>内存里的界面快照</strong>，创建/比较极快。</li>
+    <li>「渲染 → 协调（diff）→ 提交」三阶段，只在最后一步碰真实 DOM。</li>
+    <li>diff 的三条规则（同层、类型重建、key 稳定）把复杂度从 O(n³) 降到 O(n)。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>为什么这跟你（后端）有关</h2></div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>很多后端同学把 React 当「魔法」，其实它的渲染模型非常工程化：<strong>用一层轻量对象隔离昂贵的 DOM，再通过 diff 最小化副作用</strong>。这和你熟悉的「缓存 + 只刷脏数据」「连接池复用」是同一类工程智慧——先理解它、再利用它，而不是敬畏它。</p>
+</div>
+
+<p>学完这篇，你已经能理解 React 性能问题的根源了：<strong>组件重渲染 ≠ 真实 DOM 更新</strong>。真正的性能瓶颈往往在「渲染阶段算得太多」，后面第 6 卷会深入。</p>
+</section>
+
+</body>
+</html>

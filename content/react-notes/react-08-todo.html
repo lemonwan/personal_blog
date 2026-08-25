@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第一章实战：手写一个待办清单组件</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：需求拆解 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>用「后端思维」先拆需求</h2></div>
+
+<p>第一章学了这么多概念，是时候把它们拧成一股绳了。我们要写一个<strong>待办清单（Todo）</strong>，功能不花哨，但恰好覆盖本章全部知识点：</p>
+
+<ul>
+  <li>一个输入框，可以<strong>新增</strong>待办；</li>
+  <li>每条待办可以<strong>勾选完成</strong>、<strong>删除</strong>；</li>
+  <li>底部显示<strong>剩余未完成数</strong>。</li>
+</ul>
+
+<p>用你熟悉的「后端拆接口」套路，先想清楚<strong>数据模型和状态</strong>，别急着写 UI：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>先建模，再写视图（对应先建表，再写接口）</b></span></div>
+  <pre><code><span class="c">// 一条待办的数据结构</span>
+type Todo = {
+  id: number;        <span class="c">// 唯一标识（就是 list 的 key）</span>
+  text: string;      <span class="c">// 内容</span>
+  done: boolean;     <span class="c">// 是否完成</span>
+};
+
+<span class="c">// 组件需要的 state</span>
+<span class="c">// 1. todos: Todo[]   —— 待办列表</span>
+<span class="c">// 2. input: string   —— 输入框当前文字</span></code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">关键心法</div>
+  <p>「先定 state、再写 JSX」是最重要的分水岭动作。就像后端「先建表结构、再写 Controller」——state 就是前端的「表结构」。state 定清楚了，界面只是它的投影（还记得第 1 篇的 <code>UI = f(state)</code> 吗？）。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：逐步实现 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>五个动作，逐个攻破</h2></div>
+
+<p>整个组件其实就是 5 个「状态操作」，每个都对应一个知识点：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoApp.tsx · 完整实现</b></span></div>
+  <pre><code>import { useState } from "react";
+
+function TodoApp() {
+  <span class="c">// ── 状态（先定 state）──</span>
+  const [todos, setTodos] = useState([]);
+  const [input, setInput] = useState("");
+  let nextId = 1;   <span class="c">// 演示用；真实项目建议用自增/时间戳/uuid</span>
+
+  <span class="c">// ── ① 新增：不可变更新，append 新项 ──</span>
+  function addTodo() {
+    const text = input.trim();
+    if (!text) return;              <span class="c">// 空输入拦截（对应后端参数校验）</span>
+    setTodos([...todos, { id: nextId++, text, done: false }]);
+    setInput("");                   <span class="c">// 清空输入框</span>
+  }
+
+  <span class="c">// ── ② 勾选完成：map 置换目标项 ──</span>
+  function toggle(id) {
+    setTodos(todos.map(t =&gt;
+      t.id === id ? { ...t, done: !t.done } : t
+    ));
+  }
+
+  <span class="c">// ── ③ 删除：filter 过滤目标项 ──</span>
+  function remove(id) {
+    setTodos(todos.filter(t =&gt; t.id !== id));
+  }
+
+  <span class="c">// ── ④ 派生值：不要存进 state，直接算 ──</span>
+  const remaining = todos.filter(t =&gt; !t.done).length;
+
+  <span class="c">// ── ⑤ 视图：状态 → 界面 ──</span>
+  return (
+    &lt;div className="todo"&gt;
+      &lt;input
+        value={input}
+        onChange={e =&gt; setInput(e.target.value)}
+        placeholder="输入待办…"
+      /&gt;
+      &lt;button onClick={addTodo}&gt;添加&lt;/button&gt;
+
+      &lt;ul&gt;
+        {todos.map(t =&gt; (
+          &lt;li key={t.id}&gt;
+            &lt;label&gt;
+              &lt;input
+                type="checkbox"
+                checked={t.done}
+                onChange={() =&gt; toggle(t.id)}
+              /&gt;
+              &lt;span style={{ textDecoration: t.done ? "line-through" : "none" }}&gt;
+                {t.text}
+              &lt;/span&gt;
+            &lt;/label&gt;
+            &lt;button onClick={() =&gt; remove(t.id)}&gt;删除&lt;/button&gt;
+          &lt;/li&gt;
+        ))}
+      &lt;/ul&gt;
+
+      &lt;p&gt;剩余 {remaining} 项&lt;/p&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：代码背后的 5 个知识点 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>这段代码里藏着的「第一章全部精华」</h2></div>
+
+<p>把它和前面 7 篇一一对应，你会看到每一篇都不是白学的：</p>
+
+<table>
+  <thead><tr><th>代码位置</th><th>对应知识点</th><th>来源章节</th></tr></thead>
+  <tbody>
+    <tr><td><code>return (&lt;div&gt;...&lt;/div&gt;)</code></td><td><strong>声明式</strong>：只写「状态 → 界面」的映射</td><td>第 1 篇</td></tr>
+    <tr><td><code>&lt;input value={input} onChange=...&gt;</code></td><td><strong>JSX</strong>：<code>{}</code> 插值、驼峰属性、<strong>受控组件</strong></td><td>第 2 篇</td></tr>
+    <tr><td><code>function TodoApp()</code> / 无任何 props</td><td><strong>组件</strong>：一个函数</td><td>第 3 篇</td></tr>
+    <tr><td><code>useState</code> + <code>[...todos, x]</code> 不可变更新</td><td><strong>State</strong>：不直接 mutate，返回新数组</td><td>第 4 篇</td></tr>
+    <tr><td><code>remaining = todos.filter(...)</code></td><td><strong>派生值不存 state</strong>（渲染模型的「纯函数」思想）</td><td>第 5 篇</td></tr>
+    <tr><td><code>onChange={() =&gt; toggle(t.id)}</code> 箭头函数传参</td><td><strong>事件</strong>：传函数引用/箭头包装</td><td>第 6 篇</td></tr>
+    <tr><td><code>key={t.id}</code></td><td><strong>列表 + key</strong>：稳定唯一标识</td><td>第 7 篇</td></tr>
+  </tbody>
+</table>
+
+<div class="think">
+  <div class="think-q">有没有发现一个「后遗症」：<code>let nextId = 1</code> 写在组件函数里，每次重渲染都会被重置，所以 id 可能重复。这是我这句「演示用」注释在回避的问题——真实项目里，id 应该来自后端数据库、<code>Date.now()</code>、或 <code>crypto.randomUUID()</code>。发现问题、意识到边界，正是后端工程师「抠细节」的好习惯。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：扩展练习 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>给自己留三道「课后题」</h2></div>
+
+<p>把这个 Todo 组件在你自己的项目里跑起来，然后依次完成三个小目标：</p>
+
+<ol>
+  <li><strong>加「全部完成」按钮</strong>：一键把所有 <code>done</code> 设为 <code>true</code>（练 <code>map</code> 批量置换）；</li>
+  <li><strong>加「编辑」功能</strong>：双击待办文字变成输入框，回车保存（练「受控组件 + 局部状态」）；</li>
+  <li><strong>拆成子组件</strong>：把 <code>TodoItem</code> 抽出来，通过 props 接收 <code>todo</code> 和数据回调（练<strong>组合 + 单向数据流 + 状态提升</strong>，正好接上第 2 卷）。</li>
+</ol>
+
+<div class="recap">
+  <h3>第一章总结</h3>
+  <p>你已经完成了从「后端思维」到「React 心智」的第一次完整跨越：</p>
+  <ul>
+    <li><strong>声明式</strong>：<code>UI = f(state)</code>；</li>
+    <li><strong>JSX</strong>：HTML 的外壳、JavaScript 的骨；</li>
+    <li><strong>组件 + Props</strong>：函数 + 不可变单向参数；</li>
+    <li><strong>State</strong>：组件字段，不可变更新；</li>
+    <li><strong>渲染模型</strong>：虚拟 DOM 三阶段 diff；</li>
+    <li><strong>事件 + 列表 key</strong>：委托分发 + 稳定身份。</li>
+  </ul>
+  <p>这些就是 React 的「地基」。第 2 卷开始，我们进入真正让 React 强大的部分——<strong>Hooks 与状态管理</strong>。</p>
+</div>
+</section>
+
+</body>
+</html>

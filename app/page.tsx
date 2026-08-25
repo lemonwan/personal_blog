@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { JAVA_ARTICLES } from "@/lib/content";
+import { JAVA_ARTICLES, REACT_ARTICLES } from "@/lib/content";
 
 export default function Home() {
   return (
@@ -42,7 +42,7 @@ export default function Home() {
           <p className="mb-2 text-sm font-black uppercase tracking-widest text-[#1C1C1C]/40">Featured · 精选</p>
           <h2 className="text-3xl font-black text-[#1C1C1C]">从这里开始探索</h2>
 
-          <div className="mt-10 grid gap-6 sm:grid-cols-2">
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <FeatureCard
               href="/ai-llm/"
               vol="Vol. I"
@@ -62,6 +62,16 @@ export default function Home() {
               subtitle="知识沉淀与源码解读"
               desc="从集合框架到 JVM 调优，每篇从高频面试题出发，配套 JDK 源码解读、图解与生产最佳实践。"
               meta={[`${JAVA_ARTICLES.length} 篇文章`, "7 卷内容", "持续更新"]}
+            />
+            <FeatureCard
+              href="/react-notes/"
+              vol="Vol. III"
+              cover="#FBE6C7"
+              status="更新中"
+              title="React 学习"
+              subtitle="后端转型全栈"
+              desc="为 Java 后端量身设计，从核心原语到 AI 时代进阶。用后端思维类比，快速上手全栈开发。"
+              meta={[`${REACT_ARTICLES.length} 篇文章`, "7 卷内容", "第一章已完成"]}
             />
           </div>
         </div>

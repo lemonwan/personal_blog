@@ -6,6 +6,7 @@ const LINKS = [
   { href: "/", label: "首页", match: (p: string) => p === "/" },
   { href: "/ai-llm/", label: "LLM笔记", match: (p: string) => p.startsWith("/ai-llm") },
   { href: "/java-basics/", label: "Java笔记", match: (p: string) => p.startsWith("/java-basics") || p.startsWith("/java-interview") },
+  { href: "/react-notes/", label: "React笔记", match: (p: string) => p.startsWith("/react-notes") },
   { href: "/about/", label: "关于我", match: (p: string) => p.startsWith("/about") },
 ];
 

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>事件处理与合成事件系统</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：给按钮绑个事件 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>一个 onClick 就够了</h2></div>
+
+<p>React 里处理用户交互极其简单——给元素加一个 <code>onXxx</code> 属性，传一个函数：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>EventDemo.tsx</b></span></div>
+  <pre><code>function EventDemo() {
+  function handleClick() {
+    alert("点到了！");
+  }
+
+  return (
+    &lt;button onClick={handleClick}&gt;点我&lt;/button&gt;
+  );
+}</code></pre>
+</div>
+
+<p>对比原生 JS 的事件绑定：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>原生 vs React</b></span></div>
+  <pre><code><span class="c">// 原生：addEventListener</span>
+btn.addEventListener("click", handleClick);
+
+<span class="c">// React：直接在 JSX 上声明</span>
+&lt;button onClick={handleClick}&gt;...&lt;/button&gt;</code></pre>
+</div>
+
+<p>看起来只是语法糖，但背后有个重要区别——<strong>React 用的不是浏览器原生事件对象，而是「合成事件（SyntheticEvent）」</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第2站：合成事件与事件委托 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>合成事件：跨浏览器 + 事件委托</h2></div>
+
+<p>你给每个按钮都写了 <code>onClick</code>，但 React <strong>并不会真的给每个按钮都绑定一个原生监听器</strong>。它利用了浏览器的事件冒泡机制，把监听器统一挂到 React 应用的根容器上，用「<strong>事件委托</strong>」统一分发：</p>
+
+<figure class="fig">
+  <svg viewBox="0 0 620 280" role="img" aria-label="React 事件委托示意图">
+    <rect x="230" y="20" width="160" height="46" rx="10" fill="#1C1C1C"/>
+    <text x="310" y="48" text-anchor="middle" font-weight="800" font-size="13" fill="#FAC94A">根容器（唯一监听）</text>
+
+    <rect x="260" y="100" width="100" height="40" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="2"/>
+    <text x="310" y="125" text-anchor="middle" font-size="12" fill="#1C1C1C">按钮 A</text>
+
+    <rect x="140" y="180" width="100" height="40" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="2"/>
+    <text x="190" y="205" text-anchor="middle" font-size="12" fill="#1C1C1C">按钮 B</text>
+
+    <rect x="380" y="180" width="100" height="40" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="2"/>
+    <text x="430" y="205" text-anchor="middle" font-size="12" fill="#1C1C1C">按钮 C</text>
+
+    <path d="M300,120 L240,178" stroke="#C2410C" stroke-width="2" fill="none" stroke-dasharray="6,4" marker-end="url(#evt)"/>
+    <path d="M320,120 L410,178" stroke="#C2410C" stroke-width="2" fill="none" stroke-dasharray="6,4" marker-end="url(#evt)"/>
+    <defs><marker id="evt" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker></defs>
+
+    <text x="310" y="255" text-anchor="middle" font-size="12" fill="#57544E">事件冒泡到根容器，React 按「谁被点的」分发到对应 handler</text>
+  </svg>
+  <figcaption class="figcaption"><span class="fig-no">图 3</span>事件冒泡到根容器后，由 React 统一调度，再派发给实际的 onClick 处理函数。</figcaption>
+</figure>
+
+<p>这样做的好处：</p>
+<ul>
+  <li><strong>性能更好</strong>：几百个按钮也只有一个真实监听器；</li>
+  <li><strong>跨浏览器</strong>：React 抹平了各浏览器事件对象的差异；</li>
+  <li><strong>自动清理</strong>：组件卸载时不用手动 <code>removeEventListener</code>，避免内存泄漏。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比：从「每个类自己处理」到「DispatcherServlet 统一分发」</div>
+  <p>你写过 Servlet 就知道：早期一个 URL 一个 Servlet，后来 Spring MVC 用 <code>DispatcherServlet</code> 统一拦截所有请求，再按注解分发给具体的 <code>@Controller</code>。React 的合成事件就是前端版的 DispatcherServlet。</p>
+</div>
+
+<p>注意一个小点：React 事件对象是<strong>被池化复用的</strong>（旧版本行为，React 17 起已废弃事件池但 API 仍兼容）。所以如果你要<strong>异步</strong>访问事件对象（比如 <code>setTimeout</code> 里），先做同步取出或调用 <code>e.persist()</code>（后者旧版才需要）。</p>
+</section>
+
+<!-- ═══════════════ 第3站：this、闭包与传参 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>函数组件没有 this，但有个「闭包」</h2></div>
+
+<p>老 React（类组件）里，事件处理最大的坑是 <code>this</code> 指向问题，需要 <code>.bind(this)</code> 或箭头函数。而现在的<strong>函数组件</strong>彻底没有 <code>this</code>，你直接写函数即可——但这引出了一个「新的坑」：<strong>闭包</strong>（第 2 卷第 10 篇细讲）。这里先扫一眼。</p>
+
+<h3>需要传参时：用箭头函数包装</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>传参的几种写法</b></span></div>
+  <pre><code>function List({ users }) {
+  function del(id) { console.log("删除", id); }
+
+  return (
+    &lt;div&gt;
+      {/* ❌ 错误：渲染时立刻执行了 del(id)，而不是点击时 */}
+      &lt;button onClick={del(user.id)}&gt;删&lt;/button&gt;
+
+      {/* ✅ 正确：返回一个新函数，点击时才调用 */}
+      &lt;button onClick={() =&gt; del(user.id)}&gt;删&lt;/button&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>记一条铁律：<strong><code>onClick</code> 需要的是一个「函数」，而不是「函数的调用结果」</strong>。所以要么传函数引用 <code>onClick={handleClick}</code>，要么用箭头函数包一层 <code>onClick={() =&gt; handleClick(id)}</code>。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>React 事件是<strong>合成事件</strong>，靠<strong>事件委托</strong>统一分发——类比 DispatcherServlet。</li>
+    <li>事件处理器传<strong>函数引用</strong>，需要参数就用<strong>箭头函数包装</strong>，别写 <code>onClick={fn()}</code>。</li>
+    <li>函数组件无 <code>this</code>，但要注意闭包读取旧 state 的问题（第 2 卷展开）。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>这一篇的关键动作</h2></div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>事件处理本身不难，难的是理解「合成事件 + 事件委托」这层封装。它解释了为什么 React 能优雅地管理几百个事件的绑定和清理——<strong>把重复、易错的底层细节，交给框架统一收口</strong>，这正是 React 一贯的设计哲学。</p>
+</div>
+</section>
+
+</body>
+</html>
