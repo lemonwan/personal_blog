@@ -1,16 +1,24 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getJavaContent, getJavaArticle, JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume } from "@/lib/content";
+import { getReactContent, getReactArticle, REACT_ARTICLES, REACT_VOLUMES, getReactArticlesByVolume } from "@/lib/content";
+import type { ReactLevel } from "@/lib/content";
 import CommentSection from "../../CommentSection";
 
 type Props = { params: Promise<{ slug: string }> };
 
 const ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII"];
 
+/* ── 难度分级 → 颜色映射 ── */
+const LEVEL_COLORS: Record<ReactLevel, string> = {
+  "入门": "#FAC94A",
+  "进阶": "#C2410C",
+  "实战": "#1C1C1C",
+};
+
 export function generateStaticParams() {
   const seen = new Set<string>();
-  return JAVA_ARTICLES
+  return REACT_ARTICLES
     .filter((a) => { if (seen.has(a.slug)) return false; seen.add(a.slug); return true; })
     .map((a) => ({ slug: encodeURIComponent(a.slug) }));
 }
@@ -18,27 +26,26 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const decoded = decodeURIComponent(slug);
-  const meta = getJavaArticle(decoded);
-  return { title: meta ? `${meta.title} | Java 面试笔记` : "Java 笔记" };
+  const meta = getReactArticle(decoded);
+  return { title: meta ? `${meta.title} | React 学习笔记` : "React 笔记" };
 }
 
-export default async function JavaArticlePage({ params }: Props) {
+export default async function ReactArticlePage({ params }: Props) {
   const { slug } = await params;
   const decoded = decodeURIComponent(slug);
-  const meta = getJavaArticle(decoded);
+  const meta = getReactArticle(decoded);
   if (!meta) notFound();
 
-  const content = getJavaContent(decoded);
+  const content = getReactContent(decoded);
   const ready = content !== null;
 
-  const vol = JAVA_VOLUMES.find((v) => v.num === meta.volume);
-  const idx = JAVA_ARTICLES.findIndex((a) => a.slug === decoded);
-  const prev = idx > 0 ? JAVA_ARTICLES[idx - 1] : null;
-  const next = idx < JAVA_ARTICLES.length - 1 ? JAVA_ARTICLES[idx + 1] : null;
+  const vol = REACT_VOLUMES.find((v) => v.num === meta.volume);
+  const idx = REACT_ARTICLES.findIndex((a) => a.slug === decoded);
+  const prev = idx > 0 ? REACT_ARTICLES[idx - 1] : null;
+  const next = idx < REACT_ARTICLES.length - 1 ? REACT_ARTICLES[idx + 1] : null;
 
-  /* ── 统计当前卷信息 ── */
-  const volArticles = getJavaArticlesByVolume(meta.volume);
-  const mustAskInVol = volArticles.filter((a) => a.interviewFreq === "必问").length;
+  const volArticles = getReactArticlesByVolume(meta.volume);
+  const coreInVol = volArticles.filter((a) => a.focus).length;
 
   return (
     <div className="ai-llm-scope">
@@ -50,13 +57,13 @@ export default async function JavaArticlePage({ params }: Props) {
             <div style={{ position: "sticky", top: "80px", maxHeight: "calc(100vh - 100px)", overflowY: "auto", paddingRight: "4px" }}>
 
               <div style={{ fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, letterSpacing: "0.18em", color: "var(--ink-faint)", marginBottom: "16px" }}>
-                Java 面试笔记
+                React 学习笔记
               </div>
 
-              {JAVA_VOLUMES.map((v) => {
+              {REACT_VOLUMES.map((v) => {
                 const isCurrent = v.num === meta.volume;
-                const articles = getJavaArticlesByVolume(v.num);
-                const countMustAsk = articles.filter((a) => a.interviewFreq === "必问").length;
+                const articles = getReactArticlesByVolume(v.num);
+                const countCore = articles.filter((a) => a.focus).length;
 
                 return (
                   <div key={v.num} style={{ marginBottom: isCurrent ? "4px" : "16px" }}>
@@ -75,7 +82,7 @@ export default async function JavaArticlePage({ params }: Props) {
                     <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
                       {articles.map((a) => (
                         <li key={a.slug}>
-                          <Link href={`/java-interview/${encodeURIComponent(a.slug)}/`} style={{
+                          <Link href={`/react-notes/${encodeURIComponent(a.slug)}/`} style={{
                             display: "flex", alignItems: "center", gap: "10px",
                             padding: "6px 8px", borderRadius: "6px",
                             fontSize: "14px", textDecoration: "none", lineHeight: 1.4,
@@ -87,9 +94,9 @@ export default async function JavaArticlePage({ params }: Props) {
                               {String(a.lessonNum).padStart(2, "0")}
                             </span>
                             <span style={{ lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{a.title}</span>
-                            {a.interviewFreq === "必问" && (
+                            {a.focus && (
                               <span style={{ fontSize: "9px", fontWeight: 900, color: "var(--brand)", background: "#1C1C1C", padding: "1px 5px", borderRadius: "999px", lineHeight: "1.3", flexShrink: 0 }}>
-                                MQ
+                                核心
                               </span>
                             )}
                           </Link>
@@ -103,7 +110,7 @@ export default async function JavaArticlePage({ params }: Props) {
               <div style={{ borderTop: "1px solid var(--line)", margin: "20px 0" }} />
 
               {/* 返回链接 */}
-              <Link href="/java-basics/" style={{ fontSize: "13px", color: "var(--ink-faint)", textDecoration: "none" }}>
+              <Link href="/react-notes/" style={{ fontSize: "13px", color: "var(--ink-faint)", textDecoration: "none" }}>
                 ← 返回目录
               </Link>
             </div>
@@ -115,19 +122,19 @@ export default async function JavaArticlePage({ params }: Props) {
             <div className="lesson-breadcrumb" style={{ fontSize: "14px", color: "var(--ink-faint)", marginBottom: "28px" }}>
               <Link href="/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>首页</Link>
               {" / "}
-              <Link href="/java-basics/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>Java 面试笔记</Link>
+              <Link href="/react-notes/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>React 学习笔记</Link>
               {" / "}第 {String(meta.lessonNum).padStart(2, "0")} 篇
             </div>
 
             {/* 文章头部 */}
             <header style={{ marginBottom: "36px" }}>
-              {/* Meta 行：VOL · DAY · 主题 */}
+              {/* Meta 行：REACT · VOL · LESSON · 主题 */}
               <p style={{
                 display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "6px",
                 fontFamily: "var(--mono)", fontSize: "12px", fontWeight: 700,
                 letterSpacing: "0.15em", color: "var(--accent)", marginBottom: "14px",
               }}>
-                JAVA · Vol.{ROMAN[meta.volume]} · DAY {String(meta.lessonNum).padStart(2, "0")} · {vol?.title || ""}
+                REACT · Vol.{ROMAN[meta.volume]} · LESSON {String(meta.lessonNum).padStart(2, "0")} · {vol?.title || ""}
               </p>
 
               {/* 标题 */}
@@ -138,27 +145,19 @@ export default async function JavaArticlePage({ params }: Props) {
                 {meta.title}
               </h1>
 
-              {/* 难度 + 面试频率标签 */}
+              {/* 难度分级 + 标签 */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 <span style={{
                   fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em",
-                  padding: "3px 12px", borderRadius: "999px",
-                  border: "2px solid var(--ink-faint)", color: "var(--ink-faint)",
+                  padding: "3px 14px", borderRadius: "999px",
+                  backgroundColor: `${LEVEL_COLORS[meta.level]}18`, color: LEVEL_COLORS[meta.level],
+                  border: `2px solid ${LEVEL_COLORS[meta.level]}`,
                 }}>
-                  {meta.difficulty}
+                  {meta.level}
                 </span>
-                {meta.interviewFreq === "必问" ? (
+                {meta.focus && (
                   <span className="chip chip-ready" style={{ fontSize: "11px", padding: "3px 14px" }}>
-                    必问
-                  </span>
-                ) : (
-                  <span style={{
-                    fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em",
-                    padding: "3px 12px", borderRadius: "999px",
-                    backgroundColor: "var(--accent-wash)", color: "var(--accent-deep)",
-                    border: "1px solid transparent",
-                  }}>
-                    {meta.interviewFreq}
+                    核心
                   </span>
                 )}
                 {meta.tags.slice(0, 3).map((t) => (
@@ -177,10 +176,8 @@ export default async function JavaArticlePage({ params }: Props) {
             {ready ? (
               <div className="lesson-body" dangerouslySetInnerHTML={{ __html: content }} />
             ) : (
-              /* ─── 即将更新占位 —— neo-brutalism 卡片 ─── */
-              <div className="nb-card" style={{
-                padding: "40px 36px", marginTop: "8px",
-              }}>
+              /* ─── 内容编写中占位 —— neo-brutalism 卡片 ─── */
+              <div className="nb-card" style={{ padding: "40px 36px", marginTop: "8px" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: "20px", marginBottom: "20px" }}>
                   <div style={{
                     width: "48px", height: "48px", borderRadius: "12px",
@@ -189,7 +186,7 @@ export default async function JavaArticlePage({ params }: Props) {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: "22px", flexShrink: 0,
                   }}>
-                    📝
+                    ⚛️
                   </div>
                   <div>
                     <h2 style={{ fontFamily: "'AlimamaShuHeiTi', var(--sans)", fontSize: "18px", fontWeight: 900, color: "var(--ink)", marginBottom: "4px" }}>
@@ -207,18 +204,18 @@ export default async function JavaArticlePage({ params }: Props) {
                     backgroundColor: "var(--brand)", color: "var(--ink)", border: "2px solid #1C1C1C",
                     boxShadow: "1.5px 1.5px 0 #1C1C1C",
                   }}>
-                    面试频率：{meta.interviewFreq}
+                    分级：{meta.level}
                   </span>
                   <span style={{
                     fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, padding: "4px 14px", borderRadius: "999px",
                     backgroundColor: "var(--paper-deep)", color: "var(--ink-soft)", border: "1px solid var(--line)",
                   }}>
-                    难度：{meta.difficulty}
+                    本卷已整理 {coreInVol} 篇核心内容
                   </span>
                 </div>
 
                 <div style={{ marginTop: "28px" }}>
-                  <Link href="/java-basics/" style={{
+                  <Link href="/react-notes/" style={{
                     display: "inline-flex", alignItems: "center", gap: "6px",
                     padding: "10px 22px", borderRadius: "999px",
                     fontFamily: "var(--sans)", fontSize: "13px", fontWeight: 700,
@@ -238,7 +235,7 @@ export default async function JavaArticlePage({ params }: Props) {
               paddingTop: "24px", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: "12px",
             }}>
               {prev ? (
-                <Link href={`/java-interview/${encodeURIComponent(prev.slug)}/`} style={{
+                <Link href={`/react-notes/${encodeURIComponent(prev.slug)}/`} style={{
                   display: "inline-flex", alignItems: "center", gap: "8px",
                   padding: "10px 20px", borderRadius: "999px",
                   border: "2px solid var(--line)", color: "var(--ink-soft)",
@@ -249,7 +246,7 @@ export default async function JavaArticlePage({ params }: Props) {
                 </Link>
               ) : <span />}
               {next ? (
-                <Link href={`/java-interview/${encodeURIComponent(next.slug)}/`} className="btn btn-dark" style={{ padding: "10px 24px", color: "#fff", textDecoration: "none" }}>
+                <Link href={`/react-notes/${encodeURIComponent(next.slug)}/`} className="btn btn-dark" style={{ padding: "10px 24px", color: "#fff", textDecoration: "none" }}>
                   {next.title.length > 18 ? next.title.slice(0, 18) + "…" : next.title} →
                 </Link>
               ) : <span />}

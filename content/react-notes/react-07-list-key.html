@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>列表渲染与 key：diff 的正确打开方式</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：map 渲染列表 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>用 map 把数组变成界面</h2></div>
+
+<p>后端程序员对「从集合生成一堆东西」再熟悉不过了。React 里渲染列表，就是用你天天写的 <code>map</code>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserList.tsx</b></span></div>
+  <pre><code>const users = [
+  { id: 1, name: "Alice" },
+  { id: 2, name: "Bob" },
+  { id: 3, name: "Carol" },
+];
+
+function UserList() {
+  return (
+    &lt;ul&gt;
+      {users.map(user =&gt; (
+        &lt;li key={user.id}&gt;{user.name}&lt;/li&gt;   <span class="c">{/* 注意 key */}</span>
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>等价于 Java 里的：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Java 类比</b></span></div>
+  <pre><code>List&lt;String&gt; names = users.stream()
+    .map(u -&gt; "&lt;li&gt;" + u.name + "&lt;/li&gt;")
+    .collect(Collectors.toList());</code></pre>
+</div>
+
+<p>同样的「把集合映射成另一个集合」，只不过 React 里映射出来的是一堆<strong>JSX 元素</strong>。这里唯一的「新东西」，就是每个元素上的那个 <code>key</code> —— 而它恰恰是这一篇的重点。</p>
+</section>
+
+<!-- ═══════════════ 第2站：key 是 diff 的「身份证」 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>key：React 识别「谁是谁」的唯一凭据</h2></div>
+
+<p>回顾第 5 篇：列表更新时，React 要拿新旧两个虚拟 DOM 树做 diff，判断哪些项是「新增、删除、还是移动」。问题来了——<strong>它靠什么把「旧的 A」和「新的 A」对应起来？</strong></p>
+
+<p>答案就是 <code>key</code>。没有 key，React 只能<strong>按位置（下标）</strong>比对：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>头部插入带来的灾难</b></span></div>
+  <pre><code><span class="c">// 旧列表（下标是隐式 key）</span>
+[0] A   [1] B   [2] C
+
+<span class="c">// 在头部插入 X 之后</span>
+[0] X   [1] A   [2] B   [3] C
+
+<span class="c">// React 按下标比对：</span>
+<span class="c">//   [0] A → X     （认为 A 变成了 X）</span>
+<span class="c">//   [1] B → A     （认为 B 变成了 A）</span>
+<span class="c">//   [2] C → B     （认为 C 变成了 B）</span>
+<span class="c">//   还要新建 C     （新增）</span></code></pre>
+</div>
+
+<p>结果：只是「插入一个 X」，React 却误以为<strong>每一项都变了</strong>，于是重新构建整个列表——性能浪费，而且更糟的是：如果列表项里含有<strong>内部状态</strong>（比如输入框里用户正在输入的文字、或一个展开/收起的状态），这种「错位匹配」会把这些状态错误地张冠李戴。</p>
+
+<p>而有了正确的 key：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>稳定 key 的正确结果</b></span></div>
+  <pre><code><span class="c">// 用 id 做 key</span>
+&lt;li key="a"&gt;A&lt;/li&gt;  &lt;li key="b"&gt;B&lt;/li&gt;  &lt;li key="c"&gt;C&lt;/li&gt;
+
+<span class="c">// 插入 X（key="x"）后，React 一眼看出：</span>
+<span class="c">//   a/b/c 都在，只是多了个 x → 只新增 x，其余全部复用 ✅</span></code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：key 的三条铁律 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>key 该怎么选：记住「稳定 + 唯一」</h2></div>
+
+<table>
+  <thead><tr><th>做法</th><th>评价</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr><td><code>key={user.id}</code>（数据库主键）</td><td>✅ 最佳</td><td>稳定、唯一，完美的身份标识</td></tr>
+    <tr><td><code>key={user.name}</code>（业务唯一字段）</td><td>✅ 可用</td><td>唯一即可，但确保不会重复</td></tr>
+    <tr><td><code>key={index}</code>（数组下标）</td><td>⚠️ 谨慎</td><td>列表一旦增删/排序就会错位，见上面</td></tr>
+    <tr><td><code>key={Math.random()}</code></td><td>❌ 禁止</td><td>每次渲染都变，等于让 React 全部重建</td></tr>
+  </tbody>
+</table>
+
+<div class="think">
+  <div class="think-q">什么时候 <code>index</code> 做 key 也算「凑合能用」？——当一个列表<strong>永远不会增删、排序、重排</strong>（纯静态展示），且项内没有内部状态时。<code>index</code> 才勉强安全。但为了省心，能用业务唯一 id 就永远用唯一 id。</div>
+</div>
+
+<p>把 key 放在<strong>哪一层</strong>也有讲究：key 应该写在 <code>map</code> 直接生成的那个元素上，而不是元素内部的某个子元素上：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>key 的位置</b></span></div>
+  <pre><code><span class="c">// ✅ key 加在 map 出来的最外层元素</span>
+users.map(u =&gt; &lt;li key={u.id}&gt;&lt;b&gt;{u.name}&lt;/b&gt;&lt;/li&gt;)
+
+<span class="c">// ❌ 别加在里面</span>
+users.map(u =&gt; &lt;li&gt;&lt;b key={u.id}&gt;{u.name}&lt;/b&gt;&lt;/li&gt;)</code></pre>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>列表用 <code>map</code> 渲染——后端最熟悉的集合映射。</li>
+    <li><code>key</code> 让 React 在 diff 时精准识别「谁是谁」，避免错位与全量重建。</li>
+    <li>key 三原则：<strong>稳定、唯一、加在 map 的最外层元素</strong>，优先用业务主键，慎用 index。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>一句话总结</h2></div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p><code>key</code> 别看只是个属性，它是「虚拟 DOM diff 是否正确高效」的关键。一个列表因为缺了正确 key 而导致的性能问题和状态错乱 bug，是前端面试和线上事故里的高频常客。下一篇我们把本章所有知识串起来，写一个完整的 Todo 组件实战。</p>
+</div>
+</section>
+
+</body>
+</html>

@@ -7,6 +7,8 @@ import { useEffect, useRef } from "react";
  *  giscus 评论组件（评论数据存入 GitHub Discussions）
  *  - repo 需为公开仓库
  *  - 修改配置后需 `npm run build` 重新生成静态站
+ *  - 通过 data-mapping="pathname" 自动为每篇文章创建独立讨论线程
+ *     （Java 笔记、React 笔记等所有详情页通用）
  * ═══════════════════════════════════════════════════════════
  */
 const GISCUS = {

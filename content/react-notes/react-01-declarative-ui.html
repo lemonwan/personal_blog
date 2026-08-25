@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>声明式 UI：从命令式 DOM 到 React 的心智转变</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：一段命令式代码 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>先从一段你「熟悉」的命令式代码说起</h2></div>
+
+<p>如果你写过一点点原生 JavaScript 或 jQuery，下面这段代码你一定不陌生——点击按钮，让数字加一：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>imperative.html</b> · 命令式写法</span></div>
+  <pre><code>// 1. 先找到 DOM 节点
+const countEl = document.getElementById("count");
+
+// 2. 自己手动维护一个「当前值」
+let count = 0;
+
+// 3. 点击时：改数据 + 手动更新视图
+button.addEventListener("click", () =&gt; {
+  count = count + 1;              <span class="c">// 改数据</span>
+  countEl.textContent = count;    <span class="c">// 别忘了同步视图！</span>
+});</code></pre>
+</div>
+
+<p>这段代码的问题藏在最后一行注释里——<strong>「别忘了同步视图」</strong>。数据（<code>count</code>）和界面（<code>countEl.textContent</code>）是两件事，你必须自己记得每当数据变化时，去手动改一次 DOM。</p>
+
+<div class="think">
+  <div class="think-q">现在想象一下：如果这个界面有 100 个地方依赖 <code>count</code>——计数徽章、进度条、列表数量、统计图表……你每次改 <code>count</code>，都要记得去更新这 100 个 DOM 节点。漏掉一个，界面就和数据「不同步」了。</div>
+</div>
+
+<p>这就是<strong>命令式（Imperative）</strong>编程的代价：你要一步步告诉计算机「怎么做」，包括每一个 DOM 操作的细节。界面越复杂，这份心智负担越重。</p>
+</section>
+
+<!-- ═══════════════ 第2站：React 的答案 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>React：你只管「是什么」，别管「怎么变」</h2></div>
+
+<p>React 把这件事彻底调了个头。同样的计数器，在 React 里长这样：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Counter.tsx</b> · React 声明式写法</span></div>
+  <pre><code>function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    &lt;button onClick={() =&gt; setCount(count + 1)}&gt;
+      点击了 {count} 次
+    &lt;/button&gt;
+  );
+}</code></pre>
+</div>
+
+<p>注意看，这里<strong>没有一句「找到节点、改文字」</strong>。你只写了两件事：</p>
+
+<ul>
+  <li><code>count</code> 是当前状态；</li>
+  <li>界面上显示「点击了 <code>{count}</code> 次」，点击时把 <code>count + 1</code>。</li>
+</ul>
+
+<p>至于「当 <code>count</code> 变成 1、2、3 时，DOM 具体要怎么改」，<strong>React 全包了</strong>。你描述的是「每个状态对应的界面长什么样」，React 负责在状态变化时，把界面更新成新的样子。</p>
+
+<div class="crack">
+  <div class="crack-label">一句话点破</div>
+  <p>这就是 React 最核心的心智模型，一行伪代码记一辈子：</p>
+  <p><strong><code>UI = f(state)</code></strong> —— 界面是状态的<strong>函数</strong>。状态定了，界面长什么样就定了。</p>
+</div>
+
+<p>这种「描述结果、而非描述过程」的编程方式，就叫做<strong>声明式（Declarative）</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第3站：后端程序员的熟悉感 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>其实你早就写过「声明式」了</h2></div>
+
+<p>别被「声明式」这个词唬住。作为后端程序员，你每天都在写声明式代码，只是没这么叫它。回想一下你熟悉的场景：</p>
+
+<table>
+  <thead>
+    <tr><th>你熟悉的（声明式）</th><th>它们帮你隐藏的「命令式细节」</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>SQL</strong>：<code>SELECT * FROM user WHERE age &gt; 18</code></td><td>你描述「要什么」，数据库自己决定走哪个索引、怎么扫描——你不管过程。</td></tr>
+    <tr><td><strong>Spring + Thymeleaf</strong>：模板里写 <code>${user.name}</code></td><td>你描述「数据放哪」，渲染引擎自己负责生成 HTML。</td></tr>
+    <tr><td><strong>MyBatis Mapper</strong>：<code>List&lt;User&gt; selectByAge(int age)</code></td><td>你描述「接口 + 结果」，框架帮你执行 SQL、映射结果集。</td></tr>
+  </tbody>
+</table>
+
+<p>这三样东西的共同点是：<strong>你描述「目标」，框架负责「执行」</strong>。你不会去手写 JDBC 的每一步连接、预编译、遍历 ResultSet——那正是命令式。</p>
+
+<p>React 在 <strong>前端</strong> 做了同样的事：你描述「每个状态下的界面」，React 负责「把界面从旧状态变到新状态」的所有 DOM 操作。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li><strong>命令式</strong>：你写「怎么一步步改 DOM」——细节多、易漏、难维护。</li>
+    <li><strong>声明式</strong>：你写「状态 → 界面」的映射——清晰、可预测、可复用。</li>
+    <li>React 的核心承诺：<code>UI = f(state)</code>。你负责定义 <code>f</code>，React 负责在 <code>state</code> 变化时重算并更新界面。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：为什么值得？ ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>声明式到底「赢」在哪里</h2></div>
+
+<p>听完可能还是有个疑问：React 底层不也得做 DOM 操作吗？是的，但关键在于<strong>「谁来做」</strong>——是每个开发者各自手写，还是集中由一套成熟的引擎来做。</p>
+
+<p>就像你写 SQL 时，不用关心数据库内部用 B+ 树还是哈希索引；React 声明式带来的三个直接好处：</p>
+
+<ol>
+  <li><strong>可预测</strong>：给定相同的 state，渲染结果永远相同。排查问题时，你只需要看 state，不用追踪一堆 DOM 操作的历史。</li>
+  <li><strong>可维护</strong>：增改界面时，改「状态的映射」就行，不用在代码里大海捞针找那 100 处 <code>textContent =</code>。</li>
+  <li><strong>可优化</strong>：因为界面是状态的纯函数，React 可以在背后做虚拟 DOM 对比（下一篇第 5 篇专门讲），只更新真正变化的部分。</li>
+</ol>
+
+<div class="think">
+  <div class="think-q">回忆一下你自己写过的最乱的前端代码：是不是满屏的 <code>$("#xxx").html(...)</code> 或 <code>element.style.display = "none"</code>？那种「改了一处、别处就不同步」的恐惧，就是声明式要消灭的东西。</div>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>后端转 React 的第一课，不是记住什么语法，而是完成一次<strong>心智转变</strong>：从「手动指挥 DOM 怎么变」切换到「声明状态和界面之间的映射」。这个模型一旦建立，后面所有 React 知识——JSX、组件、State、Hooks——都只是在为「定义这个 <code>f</code>」提供更优雅的写法而已。</p>
+</div>
+</section>
+
+</body>
+</html>

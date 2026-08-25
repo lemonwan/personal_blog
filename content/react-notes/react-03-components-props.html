@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>组件与 Props：前端的「方法」和「参数」</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：组件就是函数 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>组件就是「函数」，Props 就是「参数」</h2></div>
+
+<p>如果你上一篇文章理解到位了，这一篇会非常轻松。React 里最基本的概念「组件」，用 Java 的话说就是——<strong>一个函数</strong>。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserCard.tsx</b> · 一个函数组件</span></div>
+  <pre><code>function UserCard(props) {
+  return (
+    &lt;div className="card"&gt;
+      &lt;h3&gt;{props.name}&lt;/h3&gt;
+      &lt;p&gt;{props.title}&lt;/p&gt;
+    &lt;/div&gt;
+  );
+}
+
+// 使用：就像调用一个函数
+&lt;UserCard name="wan" title="后端工程师" /&gt;</code></pre>
+</div>
+
+<p>它和这个 Java 方法本质上是同一件事：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserCard.java</b> · 一个 Java 方法</span></div>
+  <pre><code>String userCard(String name, String title) {
+    return "&lt;h3&gt;" + name + "&lt;/h3&gt;&lt;p&gt;" + title + "&lt;/p&gt;";
+}</code></pre>
+</div>
+
+<p>一个接收「数据」（参数），返回「界面描述」（JSX）的函数，就是 React 组件。就这么简单。</p>
+
+<div class="think">
+  <div class="think-q">如果组件是函数、Props 是参数，那组件的「返回值」是什么？——是 JSX（界面描述）。所以 React 应用的整个界面，本质是「一堆接收数据、返回界面的函数」层层嵌套组成的树。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：Props 是不可变参数 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>Props 只读：前端的「不可变参数」约定</h2></div>
+
+<p>React 有一条铁律：<strong>组件绝不能修改自己的 Props</strong>。对应到 Java，就是「方法参数应当是不可变的」。看这个反例：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ 反例：试图修改 props</b></span></div>
+  <pre><code>function UserCard(props) {
+  props.name = "hacker";   <span class="c">// ❌ 绝对禁止！</span>
+  return &lt;div&gt;{props.name}&lt;/div&gt;;
+}</code></pre>
+</div>
+
+<p>为什么不可以？Java 里我们也有过同样的一课——如果方法 A 调方法 B 时把参数传进去，B 却偷偷改了这个参数，A 内部的其它逻辑就会被「看不见地污染」。这种隐性的数据耦合，是所有大型系统的噩梦。</p>
+
+<p>React 用「Props 只读」这条约定，强制数据流保持<strong>单向</strong>：数据从父组件流向子组件，永远清晰、可追踪。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：构造注入 vs 可变字段</div>
+  <p>你可以把 Props 理解为 Spring 的<strong>构造器注入</strong>：依赖（数据）在创建时传入，之后不可变更；而组件自己的 <code>state</code>（下一篇讲）则对应<strong>实例字段</strong>——它是组件内部自持、可以变化的数据。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：单向数据流与组合 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>单向数据流 + 组合，拼出整个应用</h2></div>
+
+<p>既然数据只能从父流向子，那整个应用就是一棵「数据流动的树」：</p>
+
+<figure class="fig">
+  <svg viewBox="0 0 620 300" role="img" aria-label="组件树与单向数据流示意图">
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+    </defs>
+    <rect x="240" y="20" width="140" height="52" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/>
+    <text x="310" y="50" text-anchor="middle" font-weight="800" font-size="14" fill="#1C1C1C">App</text>
+    <text x="310" y="66" text-anchor="middle" font-size="10" fill="#57544E">state: user</text>
+
+    <rect x="60" y="150" width="150" height="52" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="2"/>
+    <text x="135" y="180" text-anchor="middle" font-weight="700" font-size="13" fill="#1C1C1C">Header</text>
+    <text x="135" y="196" text-anchor="middle" font-size="10" fill="#8C8676">&lt;Header user={user}/&gt;</text>
+
+    <rect x="235" y="150" width="150" height="52" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="2"/>
+    <text x="310" y="180" text-anchor="middle" font-weight="700" font-size="13" fill="#1C1C1C">Profile</text>
+    <text x="310" y="196" text-anchor="middle" font-size="10" fill="#8C8676">&lt;Profile user={user}/&gt;</text>
+
+    <rect x="410" y="150" width="150" height="52" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="2"/>
+    <text x="485" y="180" text-anchor="middle" font-weight="700" font-size="13" fill="#1C1C1C">Footer</text>
+    <text x="485" y="196" text-anchor="middle" font-size="10" fill="#8C8676">&lt;Footer /&gt;</text>
+
+    <line x1="280" y1="72" x2="140" y2="148" stroke="#C2410C" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="310" y1="72" x2="310" y2="148" stroke="#C2410C" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="340" y1="72" x2="480" y2="148" stroke="#C2410C" stroke-width="2" marker-end="url(#arr)"/>
+
+    <text x="310" y="280" text-anchor="middle" font-size="12" fill="#57544E">数据沿树自上而下单向流动，绝不逆向</text>
+  </svg>
+  <figcaption class="figcaption"><span class="fig-no">图 1</span>组件树与单向数据流：state 集中在父组件，通过 Props 分发给子组件。</figcaption>
+</figure>
+
+<p>组装（Composition）也简单直接——组件里嵌套组件，像拼积木：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>App.tsx</b> · 组合</span></div>
+  <pre><code>function App() {
+  const user = { name: "wan", title: "后端工程师" };
+  return (
+    &lt;div&gt;
+      &lt;Header user={user} /&gt;
+      &lt;Profile user={user} /&gt;
+      &lt;Footer /&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>组件 = 接收 Props、返回 JSX 的<strong>函数</strong>。</li>
+    <li>Props 是<strong>只读</strong>的「参数」，数据沿组件树<strong>单向</strong>流动。</li>
+    <li>组合（嵌套）是拼出整棵界面树的唯一方式，没有继承那套包袱。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>这一篇要背下来的东西</h2></div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <ul>
+    <li><strong>组件 = 函数</strong>：输入 Props，输出 JSX。</li>
+    <li><strong>Props = 不可变参数</strong>：只能读，不能改（对应构造注入）。</li>
+    <li><strong>单向数据流</strong>：父 → 子，永远自上而下——这会让你的程序好调试、好推理。</li>
+  </ul>
+</div>
+
+<p>下一篇我们讲 <code>state</code>——组件自己的「实例字段」，以及它和 Props 这对「一对多 / 多对一」搭档如何用数据驱动整个界面。</p>
+</section>
+
+</body>
+</html>
