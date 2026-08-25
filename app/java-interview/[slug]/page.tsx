@@ -56,7 +56,7 @@ export default async function JavaArticlePage({ params }: Props) {
                     display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px",
                     cursor: isCurrent ? "default" : "pointer",
                   }}>
-                    <span>卷{getZH(v.num)} · {v.title}</span>
+                    <span>卷{["", "一", "二", "三", "四", "五"][v.num] || v.num} · {v.title}</span>
                     <span style={{ fontSize: "11px", opacity: 0.5, fontWeight: 400 }}>{articles.length} 篇</span>
                   </div>
                 );

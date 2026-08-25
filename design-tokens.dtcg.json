@@ -1,0 +1,419 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "$description": "Neo-brutalist personal blog styled like an independent print journal — thick borders, hard shadows, warm-paper canvas, journal volume/lesson structure.",
+  "color": {
+    "$type": "color",
+    "primary": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.98,
+          0.788,
+          0.29
+        ],
+        "hex": "#fac94a"
+      }
+    },
+    "paper": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.961,
+          0.929,
+          0.859
+        ],
+        "hex": "#f5eddb"
+      }
+    },
+    "paper-deep": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.929,
+          0.89,
+          0.769
+        ],
+        "hex": "#ede3c4"
+      }
+    },
+    "paper-card": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          1,
+          1,
+          1
+        ],
+        "hex": "#ffffff"
+      }
+    },
+    "paper-warm": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          1,
+          0.973,
+          0.941
+        ],
+        "hex": "#fff8f0"
+      }
+    },
+    "ink": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.11,
+          0.11,
+          0.11
+        ],
+        "hex": "#1c1c1c"
+      }
+    },
+    "ink-soft": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.341,
+          0.329,
+          0.306
+        ],
+        "hex": "#57544e"
+      }
+    },
+    "ink-faint": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.549,
+          0.525,
+          0.463
+        ],
+        "hex": "#8c8676"
+      }
+    },
+    "line": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.847,
+          0.808,
+          0.714
+        ],
+        "hex": "#d8ceb6"
+      }
+    },
+    "brand": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.98,
+          0.788,
+          0.29
+        ],
+        "hex": "#fac94a"
+      }
+    },
+    "brand-hover": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.961,
+          0.753,
+          0.2
+        ],
+        "hex": "#f5c033"
+      }
+    },
+    "brand-alt": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.957,
+          0.827,
+          0.369
+        ],
+        "hex": "#f4d35e"
+      }
+    },
+    "accent": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.761,
+          0.255,
+          0.047
+        ],
+        "hex": "#c2410c"
+      }
+    },
+    "accent-deep": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.604,
+          0.188,
+          0.063
+        ],
+        "hex": "#9a3010"
+      }
+    },
+    "accent-warm": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.878,
+          0.337,
+          0.122
+        ],
+        "hex": "#e0561f"
+      }
+    },
+    "accent-wash": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.984,
+          0.902,
+          0.78
+        ],
+        "hex": "#fbe6c7"
+      }
+    },
+    "chart-blue": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.243,
+          0.42,
+          0.561
+        ],
+        "hex": "#3e6b8f"
+      }
+    },
+    "footer-text": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [
+          0.961,
+          0.929,
+          0.859
+        ],
+        "hex": "#f5eddb"
+      }
+    }
+  },
+  "spacing": {
+    "$type": "dimension",
+    "xs": {
+      "$value": {
+        "value": 4,
+        "unit": "px"
+      }
+    },
+    "sm": {
+      "$value": {
+        "value": 8,
+        "unit": "px"
+      }
+    },
+    "md": {
+      "$value": {
+        "value": 16,
+        "unit": "px"
+      }
+    },
+    "lg": {
+      "$value": {
+        "value": 24,
+        "unit": "px"
+      }
+    },
+    "xl": {
+      "$value": {
+        "value": 32,
+        "unit": "px"
+      }
+    },
+    "2xl": {
+      "$value": {
+        "value": 48,
+        "unit": "px"
+      }
+    },
+    "3xl": {
+      "$value": {
+        "value": 68,
+        "unit": "px"
+      }
+    },
+    "4xl": {
+      "$value": {
+        "value": 80,
+        "unit": "px"
+      }
+    }
+  },
+  "rounded": {
+    "$type": "dimension",
+    "none": {
+      "$value": {
+        "value": 0,
+        "unit": "px"
+      }
+    },
+    "sm": {
+      "$value": {
+        "value": 4,
+        "unit": "px"
+      }
+    },
+    "md": {
+      "$value": {
+        "value": 8,
+        "unit": "px"
+      }
+    },
+    "lg": {
+      "$value": {
+        "value": 12,
+        "unit": "px"
+      }
+    },
+    "xl": {
+      "$value": {
+        "value": 20,
+        "unit": "px"
+      }
+    },
+    "pill": {
+      "$value": {
+        "value": 999,
+        "unit": "px"
+      }
+    }
+  },
+  "typography": {
+    "h1": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "AlimamaShuHeiTi",
+        "fontSize": {
+          "value": 3,
+          "unit": "rem"
+        },
+        "fontWeight": 900,
+        "letterSpacing": {
+          "value": -0.01,
+          "unit": "em"
+        }
+      }
+    },
+    "h2": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "AlimamaShuHeiTi",
+        "fontSize": {
+          "value": 1.4,
+          "unit": "rem"
+        },
+        "fontWeight": 800
+      }
+    },
+    "h3": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "AlimamaShuHeiTi",
+        "fontSize": {
+          "value": 1.15,
+          "unit": "rem"
+        },
+        "fontWeight": 800
+      }
+    },
+    "section-title": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "AlimamaShuHeiTi",
+        "fontSize": {
+          "value": 2.25,
+          "unit": "rem"
+        },
+        "fontWeight": 900
+      }
+    },
+    "section-kicker": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "JetBrains Mono",
+        "fontSize": {
+          "value": 12,
+          "unit": "px"
+        },
+        "fontWeight": 700,
+        "letterSpacing": {
+          "value": 0.28,
+          "unit": "em"
+        }
+      }
+    },
+    "body": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "Noto Sans SC",
+        "fontSize": {
+          "value": 17,
+          "unit": "px"
+        },
+        "fontWeight": 400
+      }
+    },
+    "body-sm": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "Noto Sans SC",
+        "fontSize": {
+          "value": 15,
+          "unit": "px"
+        },
+        "fontWeight": 400
+      }
+    },
+    "nav": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "Noto Sans SC",
+        "fontSize": {
+          "value": 14,
+          "unit": "px"
+        },
+        "fontWeight": 900
+      }
+    },
+    "code-inline": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "JetBrains Mono",
+        "fontSize": {
+          "value": 0.88,
+          "unit": "em"
+        },
+        "fontWeight": 500
+      }
+    },
+    "mono-label": {
+      "$type": "typography",
+      "$value": {
+        "fontFamily": "JetBrains Mono",
+        "fontSize": {
+          "value": 12,
+          "unit": "px"
+        },
+        "fontWeight": 800,
+        "letterSpacing": {
+          "value": 0.15,
+          "unit": "em"
+        }
+      }
+    }
+  }
+}
