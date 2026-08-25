@@ -5,24 +5,15 @@ import { useEffect, useRef } from "react";
 /*
  * ═══════════════════════════════════════════════════════════
  *  giscus 评论组件（评论数据存入 GitHub Discussions）
- *
- *  ── 一次性配置步骤（只需做一次）──
- *  1. 打开 https://github.com/apps/giscus →「Install」安装到
- *     lemonwan/personal_blog
- *  2. 打开仓库 → Settings → General → Features → 勾选 Discussions
- *  3. 打开 https://giscus.app，在「仓库」填 lemonwan/personal_blog，
- *     下方「启用 giscus」区域会给出三个值：
- *       - data-repo-id        （照抄到 GISCUS.repoId）
- *       - data-category       （照抄到 GISCUS.category）
- *       - data-category-id    （照抄到 GISCUS.categoryId）
- *  4. 填好后重新 `npm run build` 即可生效
+ *  - repo 需为公开仓库
+ *  - 修改配置后需 `npm run build` 重新生成静态站
  * ═══════════════════════════════════════════════════════════
  */
 const GISCUS = {
   repo: "lemonwan/personal_blog",
-  repoId: "",            // ← 待填（giscus.app 生成）
-  category: "Announcements", // ← 待填（giscus.app 生成，或选 General）
-  categoryId: "",        // ← 待填（giscus.app 生成）
+  repoId: "R_kgDOTJWZuw",
+  category: "General",
+  categoryId: "DIC_kwDOTJWZu84DEIde",
 };
 
 export default function CommentSection() {
