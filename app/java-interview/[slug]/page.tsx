@@ -11,7 +11,7 @@ export function generateStaticParams() {
   const seen = new Set<string>();
   return JAVA_ARTICLES
     .filter((a) => { if (seen.has(a.slug)) return false; seen.add(a.slug); return true; })
-    .map((a) => ({ slug: a.slug }));
+    .map((a) => ({ slug: encodeURIComponent(a.slug) }));
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
