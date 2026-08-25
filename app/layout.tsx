@@ -26,7 +26,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" className="h-full antialiased">
-      <body className="min-h-full bg-[#FFF8F0] text-[#1C1C1C] flex flex-col">
+      <body className="min-h-full bg-[#F5EDDB] text-[#1C1C1C] flex flex-col">
         {/* ── Header（深色毛玻璃）── */}
         <header className="fixed left-0 right-0 top-0 z-50">
           <div className="absolute inset-0 border-b border-white/10" style={{ background: "rgba(28,28,28,0.96)", backdropFilter: "blur(12px)" }} />

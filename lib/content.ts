@@ -114,14 +114,6 @@ export function getGenericContent(relPath: string): string | null {
   }
 }
 
-export function getArticleSlugs(dir: string): string[] {
-  try {
-    return fs.readdirSync(path.join(BACKUP_DIR, dir))
-      .filter(f => f.endsWith('.html') && !f.startsWith('index') && f !== 'family-guide.html')
-      .map(f => f.replace(/\.html$/, ''));
-  } catch { return []; }
-}
-
 /* ── Java 面试笔记 元数据（对标阿里 P6+ 高级工程师面试标准） ── */
 export type Difficulty = "初级" | "中级" | "高级" | "深度";
 export type InterviewFreq = "必问" | "极高" | "高频" | "中高" | "常考";
@@ -135,8 +127,6 @@ export interface JavaArticleMeta {
   difficulty: Difficulty;
   interviewFreq: InterviewFreq;
   desc: string;
-  /** false = 内容文件尚未创建 */
-  hasContent?: boolean;
 }
 
 export const JAVA_VOLUMES = [
@@ -155,11 +145,6 @@ export const JAVA_VOLUMES = [
   { num: 7, title: "分布式系统设计", subtitle: "CAP·一致性·高可用·实战", emoji: "🌐",
     desc: "分布式锁四种实现、事务 2PC/TCC/Saga、限流熔断降级、高可用架构设计——从工程师到架构师的跃迁之路。" },
 ];
-
-/* eslint-disable @typescript-eslint/no-unused-vars */
-const D: Record<string, Difficulty> = { P: "初级", M: "中级", H: "高级", X: "深度" };
-const F: Record<string, InterviewFreq> = { A: "必问", B: "极高", C: "高频", D: "中高", E: "常考" };
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 export const JAVA_ARTICLES: JavaArticleMeta[] = [
   // ═══════════════════════════════════════════════════════════════
@@ -619,14 +604,7 @@ export function getJavaArticle(slug: string): JavaArticleMeta | undefined {
   return JAVA_ARTICLES.find((a) => a.slug === slug);
 }
 
-/** 检查文章是否有实际内容文件 */
-export function hasJavaContent(slug: string): boolean {
-  const article = getJavaArticle(slug);
-  if (article?.hasContent === false) return false;
-  return getJavaContent(slug) !== null;
-}
-
-// Get content from either root or java-basics backup
+/** 加载 Java 文章内容（content/java-basics/{slug}.html） */
 export function getJavaContent(slug: string): string | null {
-  return getGenericContent(`java-basics/${slug}`) || getGenericContent(slug);
+  return getGenericContent(`java-basics/${slug}`);
 }

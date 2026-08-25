@@ -7,7 +7,7 @@ export default function Home() {
       {/* ═══ Hero：金底 + 个人定位 ═══ */}
       <section className="relative overflow-hidden px-6" style={{ background: "#F4D35E", borderBottom: "3px solid #1C1C1C", padding: "48px 24px 56px" }}>
         {/* 装饰：右上角阶梯 SVG */}
-        <div className="pointer-events-none absolute -right-8 -top-8 opacity-8">
+        <div className="pointer-events-none absolute -right-8 -top-8 opacity-10">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-72 w-72 text-[#1C1C1C]" aria-hidden="true">
             <path d="M3 21h4v-4h4v-4h4v-4h4V5" />
           </svg>
@@ -28,18 +28,16 @@ export default function Home() {
           </p>
 
           {/* 技能标签 */}
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="mt-6 flex flex-wrap gap-2">
             {["Java", "Spring Boot", "JVM", "并发编程", "MySQL", "Redis", "系统设计", "AI / LLM"].map((t) => (
-              <span key={t} className="inline-block px-3 py-1 rounded-full border border-[#1C1C1C]/25 text-xs font-bold text-[#1C1C1C]/50">{t}</span>
+              <span key={t} className="font-mono text-[11px] font-bold px-3 py-1 rounded-full border border-[#1C1C1C]/30 text-[#1C1C1C]/65" style={{ letterSpacing: "0.05em" }}>{t}</span>
             ))}
           </div>
-
-          {/* 顶部 CTA 按钮已移除——精选卡片承担入口 */}
         </div>
       </section>
 
       {/* ═══ 精选内容 ═══ */}
-      <section className="px-6 py-20" style={{ background: "#FFF8F0" }}>
+      <section className="px-6 py-20">
         <div className="mx-auto max-w-7xl">
           <p className="mb-2 text-sm font-black uppercase tracking-widest text-[#1C1C1C]/40">Featured · 精选</p>
           <h2 className="text-3xl font-black text-[#1C1C1C]">从这里开始探索</h2>
@@ -53,7 +51,7 @@ export default function Home() {
               title="LLM 基础"
               subtitle="概念学习笔记"
               desc="从向量到 Transformer，零基础入门。每课从一个你一眼就懂的问题出发，亲手把注意力机制推导出来。"
-              meta={["30 节课", "5 卷内容", "沉浸式讲解"]}
+              meta={["32 节课", "5 卷内容", "沉浸式讲解"]}
             />
             <FeatureCard
               href="/java-basics/"
@@ -63,7 +61,7 @@ export default function Home() {
               title="Java 面试"
               subtitle="知识沉淀与源码解读"
               desc="从集合框架到 JVM 调优，每篇从高频面试题出发，配套 JDK 源码解读、图解与生产最佳实践。"
-              meta={[`${JAVA_ARTICLES.length} 篇文章`, "4 大主题", "更新中"]}
+              meta={[`${JAVA_ARTICLES.length} 篇文章`, "7 卷内容", "持续更新"]}
             />
           </div>
         </div>

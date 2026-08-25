@@ -94,9 +94,9 @@ body {
   border: 2px solid #1C1C1C;
   background: #1C1C1C;
   color: #fff;
-  box-shadow: 3px 3px 0 rgba(0,0,0,0.25);
+  box-shadow: 3px 3px 0 #1C1C1C;
 }
-.ai-llm-scope .btn-dark:hover { background: #333; transform: translateY(-1px); }
+.ai-llm-scope .btn-dark:hover { background: var(--accent); border-color: var(--accent); transform: translate(1px,1px); box-shadow: 2px 2px 0 #1C1C1C; }
 .ai-llm-scope .btn-white {
   border: 2px solid #1C1C1C;
   background: #fff;
@@ -561,4 +561,63 @@ html, body { overflow-x: clip; max-width: 100%; }
 @media (max-width: 640px) {
   .ai-llm-scope .allm-hero h1 { font-size: 28px !important; line-height: 1.25 !important; }
 }
+
+/* ── 全局细节 ── */
+::selection { background: #FAC94A; color: #1C1C1C; }
+:focus-visible { outline: 3px solid #C2410C; outline-offset: 2px; border-radius: 2px; }
+
+/* ── Family Guide · 亲子攻略（neo-brutalist 暖纸卡片）── */
+.ai-llm-scope .family-guide h1 {
+  font-family: "AlimamaShuHeiTi", var(--sans);
+  font-size: clamp(26px, 4vw, 36px);
+  font-weight: 900; color: var(--ink); margin-bottom: 36px; line-height: 1.2;
+}
+.ai-llm-scope .family-guide .section-title {
+  font-family: var(--mono); font-size: 12px; font-weight: 800; letter-spacing: 0.15em;
+  color: var(--accent); margin: 44px 0 16px; padding-bottom: 12px; border-bottom: 2px solid var(--line);
+}
+.ai-llm-scope .family-guide .card {
+  background: var(--paper-card); border: 2px solid var(--ink); border-radius: 0;
+  box-shadow: 4px 4px 0 var(--ink); padding: 24px 26px; margin-bottom: 20px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.ai-llm-scope .family-guide .card:hover { transform: translate(2px,2px); box-shadow: 2px 2px 0 var(--ink); }
+.ai-llm-scope .family-guide .card-header {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.ai-llm-scope .family-guide .card-title { font-family: "AlimamaShuHeiTi", var(--sans); font-size: 18px; font-weight: 900; color: var(--ink); }
+.ai-llm-scope .family-guide .stars { color: #F5C033; font-size: 15px; letter-spacing: 2px; }
+.ai-llm-scope .family-guide .card-content { list-style: none; margin: 0; padding: 0; }
+.ai-llm-scope .family-guide .card-content li {
+  position: relative; padding: 6px 0 6px 24px; color: var(--ink-soft); font-size: 15px; line-height: 1.7;
+}
+.ai-llm-scope .family-guide .card-content li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 800; }
+.ai-llm-scope .family-guide .tag {
+  display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 700;
+  padding: 3px 12px; border-radius: 999px; border: 1.5px solid var(--ink); color: var(--ink); margin: 0 6px 6px 0;
+}
+.ai-llm-scope .family-guide .tag.free { background: var(--brand); border-color: var(--ink); }
+.ai-llm-scope .family-guide .tag.paid { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+@media (max-width: 900px) {
+  .ai-llm-scope .family-guide .card { padding: 18px 16px; }
+  .ai-llm-scope .family-guide .card-title { font-size: 16px; }
+}
+
+/* ── About 页·联系卡片（硬阴影 + 按压 hover）── */
+.ai-llm-scope .about-cta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 22px;
+  border-radius: 0;
+  background: var(--paper-card);
+  border: 3px solid #1C1C1C;
+  box-shadow: 4px 4px 0 #1C1C1C;
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.ai-llm-scope .about-cta:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #1C1C1C; }
 
