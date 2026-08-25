@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getJavaContent, getJavaArticle, JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume } from "@/lib/content";
+import CommentSection from "./CommentSection";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -253,6 +254,9 @@ export default async function JavaArticlePage({ params }: Props) {
                 </Link>
               ) : <span />}
             </nav>
+
+            {/* 评论区（giscus → GitHub Discussions） */}
+            <CommentSection />
           </article>
 
         </div>
