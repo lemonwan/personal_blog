@@ -34,6 +34,9 @@ export default async function LessonPage({ params }: Props) {
 
   return (
     <div className="ai-llm-scope">
+      {/* ── KaTeX 公式样式（React 19 会提升到 <head>）── */}
+      <link rel="stylesheet" href="/katex/katex.min.css" precedence="default" />
+
       {/* ── Reading progress bar（客户端组件）── */}
       <ReadingProgress />
 
