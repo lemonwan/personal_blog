@@ -20,7 +20,12 @@ export function generateStaticParams() {
   const seen = new Set<string>();
   return REACT_ARTICLES
     .filter((a) => { if (seen.has(a.slug)) return false; seen.add(a.slug); return true; })
-    .map((a) => ({ slug: encodeURIComponent(a.slug) }));
+    .map((a) => ({
+      // 生产构建（静态导出给 nginx 托管）：返回原始 slug，导出目录名为解码后的中文名，
+      // nginx 收到 %E7%BA%BF... 这类 URL 时会先解码再找文件，才能命中。
+      // dev 模式：Next 校验的是 URL 中的 encoded 形态，须返回 encodeURIComponent 结果。
+      slug: process.env.NODE_ENV === "production" ? a.slug : encodeURIComponent(a.slug),
+    }));
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
