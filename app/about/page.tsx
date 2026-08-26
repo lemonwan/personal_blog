@@ -73,7 +73,7 @@ export default function AboutPage() {
               </p>
               <p style={{ fontSize: "17px", lineHeight: 1.9, color: "var(--ink-soft)", margin: 0 }}>
                 这个网站就是我的公开笔记本：左边是「LLM 基础」——从向量一路推到 Transformer；
-                右边是「Java 面试」——几年的功底沉淀。一个往未来走，一个把过去钉牢。
+                右边是「Java 学习笔记」——几年的功底沉淀。一个往未来走，一个把过去钉牢。
               </p>
             </div>
           </section>

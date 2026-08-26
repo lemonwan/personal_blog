@@ -58,7 +58,7 @@ export default function Home() {
               vol="Vol. II"
               cover="#EDE3C4"
               status="持续更新"
-              title="Java 面试"
+              title="Java 学习笔记"
               subtitle="知识沉淀与源码解读"
               desc="从集合框架到 JVM 调优，每篇从高频面试题出发，配套 JDK 源码解读、图解与生产最佳实践。"
               meta={[`${JAVA_ARTICLES.length} 篇文章`, "7 卷内容", "持续更新"]}

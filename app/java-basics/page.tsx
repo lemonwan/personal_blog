@@ -63,7 +63,7 @@ export default function JavaBasicsPage() {
       {/* ═══ Route Map：全宽路线卡片 ═══ */}
       <section className="map-section" id="map">
         <p className="section-kicker reveal">LEARNING PATH · 学习路径</p>
-        <h2 className="section-title reveal">{ROMAN[7]} 卷完整体系，一次搞定 Java 面试</h2>
+        <h2 className="section-title reveal">{ROMAN[7]} 卷完整体系，一次吃透 Java 核心</h2>
         <div className="routemap reveal">
           <div className="routemap-lines">
             {JAVA_VOLUMES.map((vol) => {
