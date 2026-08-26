@@ -65,7 +65,7 @@ export default function AboutPage() {
             <div className="mt-6" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <p style={{ fontSize: "17px", lineHeight: 1.9, color: "var(--ink-soft)", margin: 0 }}>
                 做了很多年 Java 后端，熟悉集合框架、并发编程、JVM 调优那一整套东西——它们是我的基本盘，
-                也是这个博客里「Java 面试笔记」板块的来源。
+                也是这个博客里「Java 学习笔记」板块的来源。
               </p>
               <p style={{ fontSize: "17px", lineHeight: 1.9, color: "var(--ink-soft)", margin: 0 }}>
                 现在，AI Agent 正在重写「应用工程师」的定义。我不想只做一个调用 API 的人，

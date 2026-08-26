@@ -114,7 +114,7 @@ export function getGenericContent(relPath: string): string | null {
   }
 }
 
-/* ── Java 面试笔记 元数据（对标阿里 P6+ 高级工程师面试标准） ── */
+/* ── Java 学习笔记 元数据（对标阿里 P6+ 高级工程师面试标准） ── */
 export type Difficulty = "初级" | "中级" | "高级" | "深度";
 export type InterviewFreq = "必问" | "极高" | "高频" | "中高" | "常考";
 

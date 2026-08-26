@@ -42,7 +42,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const decoded = decodeURIComponent(slug);
   const meta = getJavaArticle(decoded);
-  return { title: meta ? `${meta.title} | Java 面试笔记` : "Java 笔记" };
+  return { title: meta ? `${meta.title} | Java 学习笔记` : "Java 笔记" };
 }
 
 export default async function JavaArticlePage({ params }: Props) {
@@ -74,7 +74,7 @@ export default async function JavaArticlePage({ params }: Props) {
             <div style={{ position: "sticky", top: "80px", maxHeight: "calc(100vh - 100px)", overflowY: "auto", paddingRight: "4px" }}>
 
               <div style={{ fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, letterSpacing: "0.18em", color: "var(--ink-faint)", marginBottom: "16px" }}>
-                Java 面试笔记
+                Java 学习笔记
               </div>
 
               {JAVA_VOLUMES.map((v) => {
@@ -139,7 +139,7 @@ export default async function JavaArticlePage({ params }: Props) {
             <div className="lesson-breadcrumb" style={{ fontSize: "14px", color: "var(--ink-faint)", marginBottom: "28px" }}>
               <Link href="/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>首页</Link>
               {" / "}
-              <Link href="/java-basics/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>Java 面试笔记</Link>
+              <Link href="/java-basics/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>Java 学习笔记</Link>
               {" / "}第 {String(meta.lessonNum).padStart(2, "0")} 篇
             </div>
 

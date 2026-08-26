@@ -3,7 +3,7 @@ import { JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume } from "@/lib/cont
 import type { JavaArticleMeta, Difficulty, InterviewFreq } from "@/lib/content";
 
 export const metadata = {
-  title: "Java 面试笔记 · 系统整理 Java 核心知识",
+  title: "Java 学习笔记 · 系统整理 Java 核心知识",
   description: "系统整理 Java 核心知识，覆盖集合框架、并发编程、JVM、设计模式等高频面试主题。70 篇文章从源码到原理，逐篇攻克面试难关。",
 };
 
@@ -42,7 +42,7 @@ export default function JavaBasicsPage() {
               </svg>
             </div>
             <h1 style={{ fontFamily: "'AlimamaShuHeiTi', sans-serif" }} className="text-4xl font-black text-[#1C1C1C] sm:text-5xl">
-              Java 面试笔记，从集合框架到
+              Java 学习笔记，从集合框架到
               <span style={{ marginLeft: "6px", padding: "4px 12px" }} className="inline-block rounded-xl border-2 border-[#1C1C1C] bg-[#1C1C1C] text-[#FAC94A]">JVM 调优</span>
             </h1>
             <p style={{ marginTop: "14px" }} className="max-w-2xl text-base font-semibold text-[#1C1C1C]/60">
