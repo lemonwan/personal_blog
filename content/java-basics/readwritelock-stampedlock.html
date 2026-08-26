@@ -11,24 +11,75 @@
 
 <!-- ═══════════════ 第1站：开场 ═══════════════ -->
 <section class="station reveal" id="s1">
-<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：读多写少，用什么锁效率最高？</h2></div>
+<div class="station-head"><span class="station-no">第 1 站</span><h2>读多写少：什么锁才是正解？</h2></div>
 
-<p>面试官问："一个配置中心，99% 的操作是读配置，只有 1% 是更新配置。用什么锁来保证线程安全？"</p>
+<p>先看一个真实的线上场景：订单服务的<strong>配置中心</strong>，99% 的流量是「读配置」，只有 1% 是「更新配置」。某次大促前的压测里，负责人发现：读请求的 P99 从 2ms 一路涨到 200ms，CPU 没打满，线程却全在排队。</p>
 
-<p>如果你的回答是 <code>ReentrantLock</code>——那所有的读操作也会被串行化。明明两个线程只是<em>看看</em>数据、根本没修改，却还要排队拿锁。这就像高速公路只有一个 ETC 通道，所有车都得停下来刷卡。</p>
+<p>根因很典型——代码里用 <code>ReentrantLock</code> 保护配置对象。它的锁是<strong>互斥锁</strong>：两个线程只是<em>看看</em>数据、根本没修改，也得排队拿锁。这就像高速公路只有一个 ETC 通道，所有车都得停下来刷卡——明明是「读多写少」，却把读请求全部串行化了。</p>
 
-<div class="think"><div class="think-q">有没有一种锁，允许多个线程<em>同时读</em>，但写的时候仍然互斥？——这就是<strong>读写锁（ReadWriteLock）</strong>的核心思想。</div></div>
+<div class="think"><div class="think-q">有没有一种锁，允许多个线程<em>同时读</em>，但写的时候仍然互斥？</div></div>
 
-<p>读写锁把锁分成两把：<strong>读锁（共享锁）</strong>和<strong>写锁（排他锁）</strong>。读与读之间不互斥，读与写互斥，写与写互斥。对于读多写少的场景，吞吐量可以提升一个数量级。</p>
+<p>有，这就是<strong>读写锁（Read-Write Lock）</strong>，是今天这篇的主角之一；而 JDK 8 又带来了一把更激进的 <code>StampedLock</code>，用<strong>乐观读（Optimistic Read）</strong>把读路径的锁开销压到接近零。先给你一个 30 秒版答案，后面每一站都是在给这句话「上细节」：</p>
 
-<p>今天我们从 <code>ReentrantReadWriteLock</code> 的源码讲起，再看 JDK 8 引入的 <code>StampedLock</code> 如何用<strong>乐观读</strong>进一步突破性能天花板。</p>
+<div class="crack"><div class="crack-label">一句话点破</div>
+<p>读多写少场景，用 <strong>ReentrantReadWriteLock</strong>：读锁是共享锁（Shared Lock），多个读者并发；写锁是排他锁（Exclusive Lock），写者独占。若读流量压倒性占优（读:写 &gt; 10:1）且不需要可重入，用 <strong>StampedLock</strong> 的乐观读，读路径连 CAS 都省了。写多为王时，两者都别用，老老实实 <code>ReentrantLock</code>。</p>
+</div>
+
+<p>在正式开始之前，先抛几个面试官最爱挖的坑，带着问题读效率更高：</p>
+
+<ul>
+  <li>读写锁的读锁到底能不能「同时被多线程持有」？写锁拿到后，别的线程还能读吗？</li>
+  <li>「锁降级」是什么？为什么允许写锁转读锁，却绝对禁止读锁转写锁？</li>
+  <li>读写锁会不会把写者饿死？非公平模式真的「完全不看队列」吗？</li>
+  <li>StampedLock 的 <code>stamp</code> 到底是个什么东西？为什么它不支持重入？</li>
+</ul>
+
+<p>带着这些问题，我们从 ReadWriteLock 的规则讲起，一路拆到 StampedLock 的源码。</p>
 </section>
 
-<!-- ═══════════════ 第2站：ReentrantReadWriteLock 原理 ═══════════════ -->
+<!-- ═══════════════ 第2站：读写锁规则 ═══════════════ -->
 <section class="station reveal" id="s2">
-<div class="station-head"><span class="station-no">第 2 站</span><h2>ReentrantReadWriteLock：一个 int 拆成两把锁</h2></div>
+<div class="station-head"><span class="station-no">第 2 站</span><h2>读写锁的三条规则与 ReadWriteLock 接口</h2></div>
 
-<p>ReentrantLock 用 AQS 的一个 <code>int state</code> 表示锁状态。<code>ReentrantReadWriteLock</code> 更巧妙——<strong>把同一个 int 拆成高 16 位和低 16 位</strong>，高 16 位存读锁计数，低 16 位存写锁计数：</p>
+<p>把锁拆成两把——<strong>读锁</strong>（共享锁，Shared Lock）和<strong>写锁</strong>（排他锁，Exclusive Lock）——规则其实只有三条：</p>
+
+<div class="takeaway"><div class="takeaway-label">读写锁三条规则</div>
+<table class="nb-table">
+  <thead><tr><th>组合</th><th>是否互斥</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>读 — 读</td><td><strong>不互斥</strong></td><td>多个读者可同时持有读锁，读锁计数 +1</td></tr>
+    <tr><td>读 — 写</td><td><strong>互斥</strong></td><td>有读者时写者阻塞；有写者时读者阻塞</td></tr>
+    <tr><td>写 — 写</td><td><strong>互斥</strong></td><td>同一时刻只有一个写者</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>用图书馆类比记这三条规则：读者们各自看书互不打扰（读读共享）；管理员要<em>整理书架</em>时，所有读者都得先让开（读写互斥），而且一次只能有一个管理员在整理（写写互斥）。只要把「整理书架」想成「写数据」，这三条规则就永远忘不掉。</p>
+
+<p><code>ReadWriteLock</code> 是 JDK 5 就有的接口，极其简单，只有两个方法：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ReadWriteLock.java</b> · 接口定义</span></div>
+<pre><code><span class="k">public interface</span> <span class="t">ReadWriteLock</span> {
+    <span class="t">Lock</span> readLock();    <span class="c">// 返回读锁（共享锁）</span>
+    <span class="t">Lock</span> writeLock();   <span class="c">// 返回写锁（排他锁）</span>
+}</code></pre>
+</div>
+
+<p>注意：<strong>锁是由同一个 ReadWriteLock 实例绑定的</strong>。A 线程拿着 <code>readLock()</code> 的锁、B 线程拿着 <code>writeLock()</code> 的锁，它们之间互斥与否，取决于这两个 Lock 对象是否出自同一个 ReadWriteLock。就像同一扇门的两把钥匙，只有配套的那把才能开——不同实例的锁互不干涉。</p>
+
+<div class="crack"><div class="crack-label">面试破题：为什么要把锁拆成两把？</div>
+<p>因为<strong>读操作之间天然无冲突</strong>。互斥锁把「读读」也挡在门外，是拿吞吐量换简单。读写锁把冲突矩阵从「全互斥」放宽成「读读共享」，在读多写少的场景下，吞吐量可以提升一个数量级——这是它存在的全部意义。面试答到这一层，面试官就知道你理解的是「为什么」，而不是「是什么」。</p>
+</div>
+
+<p>读写锁最经典的实现是 <code>ReentrantReadWriteLock</code>，它也是 AQS 家族的一员。下一站看它如何用一个 int 同时管理两把锁。</p>
+</section>
+
+<!-- ═══════════════ 第3站：state 位拆分 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>ReentrantReadWriteLock：一个 int 拆成两把锁</h2></div>
+
+<p>上一站讲过 AQS 用一个 <code>int state</code> 表示锁状态。ReentrantReadWriteLock 更巧妙——<strong>把同一个 int 拆成高 16 位和低 16 位</strong>：高 16 位存读锁计数，低 16 位存写锁计数：</p>
 
 <figure class="fig">
 <svg viewBox="0 0 700 160" role="img" aria-label="ReadWriteLock 状态位拆分">
@@ -60,7 +111,7 @@
 <figcaption><span class="fig-no">图 1</span>AQS state 的高 16 位存储读锁计数，低 16 位存储写锁计数——一个 int 同时管理两把锁</figcaption>
 </figure>
 
-<p>来看源码中的位运算常量和核心方法：</p>
+<p>来看源码中的位运算常量和提取方法：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ReentrantReadWriteLock.Sync</b> · 状态拆分与位运算</span></div>
@@ -81,38 +132,41 @@
 }</code></pre>
 </div>
 
-<p>三条核心规则：</p>
+<p>从这里能读出两个硬数字，面试常考：</p>
+<ul>
+  <li><strong>最大并发读者 65535</strong>：高 16 位最多表示 2^16 - 1 个读者，再想进会抛 <code>Error("Maximum lock count exceeded")</code>；</li>
+  <li><strong>写锁最大重入 65535 次</strong>：低 16 位同理，同一个线程反复拿写锁最多 65535 次。</li>
+</ul>
 
-<div class="takeaway"><div class="takeaway-label">读写锁三条规则</div>
-<table class="nb-table">
-  <thead><tr><th>组合</th><th>是否互斥</th><th>说明</th></tr></thead>
-  <tbody>
-    <tr><td>读 — 读</td><td><strong>不互斥</strong></td><td>多个读者可同时持有读锁，sharedCount +1</td></tr>
-    <tr><td>读 — 写</td><td><strong>互斥</strong></td><td>有读者时写者阻塞，有写者时读者阻塞</td></tr>
-    <tr><td>写 — 写</td><td><strong>互斥</strong></td><td>同一时刻只有一个写者</td></tr>
-  </tbody>
-</table>
+<div class="crack"><div class="crack-label">为什么用位拆分而不是两个 int？</div>
+<p>因为 AQS 的 <code>compareAndSetState()</code> 只能原子更新<strong>一个 int</strong>。如果把读计数和写计数放在两个变量里，就需要两次 CAS 才能同时更新——两次 CAS 之间就有竞态窗口，读者写者同时改各自变量，锁的一致性就破了。塞进一个 int 的两个半区，一次 CAS 就能原子地更新读写两个状态。</p>
 </div>
+</section>
+
+<!-- ═══════════════ 第4站：写锁获取 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>写锁获取：tryAcquire 逐行拆解</h2></div>
+
+<p>写锁是排他锁，走 AQS 的独占模式。看 <code>tryAcquire()</code>：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>tryAcquire()</b> · 写锁获取的关键判断</span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>ReentrantReadWriteLock.Sync.tryAcquire()</b> · 写锁获取</span></div>
 <pre><code><span class="k">protected final boolean</span> tryAcquire(<span class="k">int</span> acquires) {
     <span class="t">Thread</span> current = <span class="t">Thread</span>.currentThread();
     <span class="k">int</span> c = getState();
     <span class="k">int</span> w = exclusiveCount(c); <span class="c">// 提取低 16 位：写锁计数</span>
 
-    <span class="k">if</span> (c != <span class="n">0</span>) {
-        <span class="c">// c != 0 说明有人持锁（读或写）</span>
+    <span class="k">if</span> (c != <span class="n">0</span>) {   <span class="c">// 有人持锁（读或写）</span>
         <span class="c">// w == 0 说明写锁计数为 0 → 那就是有读者 → 写者必须等</span>
         <span class="c">// current != getExclusiveOwnerThread() → 不是自己重入 → 也等</span>
         <span class="k">if</span> (w == <span class="n">0</span> || current != getExclusiveOwnerThread())
             <span class="k">return false</span>;
         <span class="k">if</span> (w + exclusiveCount(acquires) &gt; MAX_COUNT)
-            <span class="k">throw new</span> <span class="t">Error</span>(<span class="n">"Maximum lock count exceeded"</span>);
-        setState(c + acquires); <span class="c">// 写锁重入</span>
+            <span class="k">throw new</span> <span class="t">Error</span>(<span class="t">"Maximum lock count exceeded"</span>);
+        setState(c + acquires); <span class="c">// 写锁重入：state +1（低 16 位计数 +1）</span>
         <span class="k">return true</span>;
     }
-    <span class="c">// c == 0 → 无人持锁，尝试 CAS 抢占写锁</span>
+    <span class="c">// c == 0 → 无人持锁，尝试抢占写锁</span>
     <span class="k">if</span> (writerShouldBlock() || !compareAndSetState(c, c + acquires))
         <span class="k">return false</span>;
     setExclusiveOwnerThread(current);
@@ -120,149 +174,330 @@
 }</code></pre>
 </div>
 
-<div class="crack"><div class="crack-label">为什么用位拆分而不是两个 int？</div>
-<p>因为 AQS 的 <code>compareAndSetState()</code> 只能原子更新<strong>一个 int</strong>。如果把读计数和写计数存在两个变量里，就需要两次 CAS 才能保证一致性，这在并发环境下会产生竞态条件。用一个 int 的两个半区，一次 CAS 就能同时更新读写状态。</p>
+<p>四个分支对应四种情况：</p>
+<ul>
+  <li><strong>c != 0 且 w == 0</strong>：有人持有读锁 → 写者必须等待。这是「读写互斥」在代码里的落点；</li>
+  <li><strong>c != 0 且写锁属于自己</strong>：写锁重入，低 16 位计数 +1（最多 65535 次）；</li>
+  <li><strong>c == 0 且 writerShouldBlock() 为 false</strong>：无人持锁，非公平模式下直接 CAS 抢锁（<strong>插队</strong>）；</li>
+  <li><strong>CAS 失败</strong>：有人抢先一步，返回 false 走 AQS 排队。</li>
+</ul>
+
+<div class="crack"><div class="crack-label">非公平 vs 公平，只在 writerShouldBlock 上做文章</div>
+<p>非公平（默认）的 <code>writerShouldBlock()</code> 直接返回 <code>false</code>——写者来了先 CAS 抢一次，抢不到再排队（这和 ReentrantLock 非公平锁「先抢一次」是同一个套路）；公平模式的 <code>writerShouldBlock()</code> 返回 <code>hasQueuedPredecessors()</code>——只要队列里有人排在我前面，就老老实实排队。读锁那边的对应判断在下一站。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第3站：锁降级 ═══════════════ -->
-<section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>锁降级：写锁 → 读锁 → 释放写锁</h2></div>
+<!-- ═══════════════ 第5站：读锁获取 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>读锁获取：tryAcquireShared 与读者插队</h2></div>
 
-<p>面试中有一个高频追问："持有写锁的线程，能不能不释放写锁就直接获取读锁？"</p>
-
-<p>答案是：<strong>可以</strong>。这叫<strong>锁降级（Lock Downgrade）</strong>——从权限更高的写锁降级到权限更低的读锁。Javadoc 中明确说明这是被允许的。</p>
+<p>读锁是共享锁，走 AQS 的共享模式 <code>tryAcquireShared()</code>。核心逻辑是把 state 的高 16 位加 1：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>锁降级的正确顺序</b></span></div>
-<pre><code><span class="t">ReentrantReadWriteLock</span> rwl = <span class="k">new</span> <span class="t">ReentrantReadWriteLock</span>();
-
-<span class="c">// ① 获取写锁</span>
-rwl.writeLock().lock();
-<span class="k">try</span> {
-    <span class="c">// 修改共享数据</span>
-    data.update(newValue);
-} <span class="k">finally</span> {
-    <span class="c">// ③ 释放写锁（在此之前必须先获取读锁！）</span>
-    rwl.writeLock().unlock();
-}
-
-<span class="c">// ② 在释放写锁之前获取读锁</span>
-rwl.readLock().lock();
-<span class="k">try</span> {
-    <span class="c">// 以只读方式使用刚写入的数据</span>
-    <span class="k">return</span> data.get();
-} <span class="k">finally</span> {
-    rwl.readLock().unlock(); <span class="c">// ④ 最终释放读锁</span>
-}</code></pre>
-</div>
-
-<div class="think"><div class="think-q">为什么要先拿读锁再释放写锁，而不是反过来？</div></div>
-
-<p>如果在释放写锁之后、获取读锁之前，有另一个写线程抢到了写锁并修改了数据，那当前线程读到的就是<strong>被别人改过的数据</strong>，不是自己刚写入的值。先拿读锁，等于在释放写权限的同时仍然"占住"读权限，保证数据的连续性。</p>
-
-<p>但反过来——<strong>锁升级（读锁 → 写锁）是不允许的</strong>：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>tryAcquire()</b> · 写锁获取时读锁计数的判断</span></div>
-<pre><code><span class="c">// 在 tryAcquire 中有这个判断：</span>
-<span class="k">if</span> (c != <span class="n">0</span>) {
-    <span class="k">if</span> (w == <span class="n">0</span> || current != getExclusiveOwnerThread())
-        <span class="k">return false</span>; <span class="c">// ← 如果有读者（w==0 但 c!=0），直接失败</span>
-}
-<span class="c">// 即使当前线程持有读锁，w == 0 依然成立 → 获取写锁失败</span></code></pre>
-</div>
-
-<div class="crack"><div class="crack-label">为什么不允许锁升级？</div>
-<p>假设允许锁升级，考虑两个线程 T1、T2 都持有读锁，然后同时尝试升级为写锁——两个线程都在等对方释放读锁，<strong>死锁</strong>。即使只有一个读者，升级也需要先释放读锁，而释放和获取之间有一个"窗口期"，其他写线程可能趁虚而入修改数据。所以 JDK 的设计是：<strong>想从读变成写？先释放读锁，再竞争写锁。</strong></p>
-</div>
-</section>
-
-<!-- ═══════════════ 第4站：写锁饥饿问题 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>写锁饥饿：读者源源不断，写者永远排队</h2></div>
-
-<p>读写锁引入了一个新问题——<strong>写者饥饿（Writer Starvation）</strong>。</p>
-
-<p>设想一个场景：缓存系统每秒有 1000 个读请求，每 10 秒才来一个写请求。在非公平模式下，只要有读锁被持有，新的读请求就能不断获取读锁。写锁？永远排不上号——因为读锁从来不为空。</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>NonfairSync.tryReadLock()</b> · 非公平模式下的读者获取</span></div>
-<pre><code><span class="k">final boolean</span> tryReadLock() {
+<div class="srcbox-head"><span class="srcbox-file"><b>ReentrantReadWriteLock.Sync.tryAcquireShared()</b> · 读锁获取（简化）</span></div>
+<pre><code><span class="k">protected final int</span> tryAcquireShared(<span class="k">int</span> unused) {
     <span class="t">Thread</span> current = <span class="t">Thread</span>.currentThread();
     <span class="k">for</span> (;;) {
         <span class="k">int</span> c = getState();
-        <span class="c">// 关键判断：写锁被别的线程持有时，读者才需要排队</span>
-        <span class="k">if</span> (exclusiveCount(c) != <span class="n">0</span> &amp;&amp;
-            getExclusiveOwnerThread() != current)
-            <span class="k">return false</span>; <span class="c">// 有写者 → 读者阻塞</span>
-
+        <span class="c">// ① 写锁被<strong>别的线程</strong>持有时，读者必须阻塞（读写互斥）</span>
+        <span class="k">if</span> (exclusiveCount(c) != <span class="n">0</span> &amp;&amp; getExclusiveOwnerThread() != current)
+            <span class="k">return -1</span>;
+        <span class="c">// ② 读者数量达到上限 65535 → 抛错</span>
         <span class="k">int</span> r = sharedCount(c);
         <span class="k">if</span> (r == MAX_COUNT)
-            <span class="k">throw new</span> <span class="t">Error</span>(<span class="n">"Maximum lock count exceeded"</span>);
-        <span class="k">if</span> (compareAndSetState(c, c + SHARED_UNIT)) {
-            <span class="c">// CAS 成功，读锁 +1</span>
-            ...
-            <span class="k">return true</span>;
+            <span class="k">throw new</span> <span class="t">Error</span>(<span class="t">"Maximum lock count exceeded"</span>);
+        <span class="c">// ③ 读者要不要让路？readerShouldBlock 决定（第 7 站细讲）</span>
+        <span class="k">if</span> (readerShouldBlock() ||
+            !compareAndSetState(c, c + SHARED_UNIT))  <span class="c">// 高 16 位 +1</span>
+            <span class="k">return -1</span>;
+        <span class="c">// ④ 记录持有读锁的线程（可重入读锁统计用，见第 8 站）</span>
+        ...
+        <span class="k">return</span> <span class="n">1</span>; <span class="c">// &gt;0 表示获取成功</span>
+    }
+}</code></pre>
+</div>
+
+<p>注意 ① 的判断是「<strong>别的线程</strong>的写锁」——如果是<em>自己</em>持有写锁，当前线程依然可以获取读锁。这正是第 6 站「锁降级」得以成立的前提。</p>
+
+<p>这里的 <code>SHARED_UNIT = 1 &lt;&lt; 16 = 65536</code>：读锁每次 +65536，正好在 state 的高 16 位上进一位；释放时 -65536。「1 个读者」在 state 里就是 65536，和写锁的 1 完美错开——这就是位拆分的优雅之处，读和写各占各的位段，互不干扰。</p>
+
+<div class="takeaway"><div class="takeaway-label">核心要点</div>
+<ul>
+  <li>写锁走 AQS 独占模式（tryAcquire），读锁走共享模式（tryAcquireShared），两条路径共用一个 int state；</li>
+  <li>「读写互斥」「读读共享」的本质：读者只要发现写锁位不为 0（且不是自己持有）就让路，否则直接 CAS 累加读计数；</li>
+  <li>读锁最大并发读者 65535，写锁最大重入 65535，超出抛 Error。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：锁降级 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>锁降级：写锁 → 读锁 → 释放写锁</h2></div>
+
+<p>面试高频追问来了：「持有写锁的线程，能不能不释放写锁就直接获取读锁？」</p>
+
+<p>答案是：<strong>可以</strong>。这叫<strong>锁降级（Lock Downgrade）</strong>——从权限更高的写锁降级到权限更低的读锁。ReentrantReadWriteLock 的 Javadoc 白纸黑字允许这么做，还给了标准示例。它解决的是<strong>缓存更新</strong>里最经典的问题：「写完数据，我还要用一下刚写入的值」。看 Javadoc 的 CachedData 示例：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Javadoc 标准示例</b> · CachedData：更新后降级读回</span></div>
+<pre><code><span class="k">class</span> <span class="t">CachedData</span> {
+    <span class="t">Object</span> data;
+    <span class="k">volatile boolean</span> cacheValid;
+    <span class="k">final</span> <span class="t">ReentrantReadWriteLock</span> rwl = <span class="k">new</span> <span class="t">ReentrantReadWriteLock</span>();
+
+    <span class="k">void</span> processCachedData() {
+        rwl.readLock().lock();
+        <span class="k">if</span> (!cacheValid) {
+            <span class="c">// 必须先把读锁释放掉，才能获取写锁（锁升级被禁止）</span>
+            rwl.readLock().unlock();
+            rwl.writeLock().lock();
+            <span class="k">try</span> {
+                <span class="c">// 双检：可能别的线程已经抢先更新了</span>
+                <span class="k">if</span> (!cacheValid) {
+                    data = loadFromDB();   <span class="c">// 写数据</span>
+                    cacheValid = <span class="k">true</span>;
+                }
+                <span class="hl">// 降级：在释放写锁之前，先拿到读锁</span>
+                rwl.readLock().lock();
+            } <span class="k">finally</span> {
+                rwl.writeLock().unlock();   <span class="c">// 释放写锁，但还持着读锁</span>
+            }
+        }
+        <span class="k">try</span> {
+            use(data);                      <span class="c">// 以只读方式使用刚写入的数据</span>
+        } <span class="k">finally</span> {
+            rwl.readLock().unlock();        <span class="c">// 最后释放读锁</span>
         }
     }
 }</code></pre>
 </div>
 
-<p>注意看：非公平模式下，读者<strong>不会检查是否有写者在排队</strong>。只要没有活跃的写锁，读者就直接拿锁。这就导致写者可能被无限延迟。</p>
+<p>关键就是中间那两行：<strong>先获取读锁，再释放写锁</strong>。这个顺序不能反，为什么？</p>
 
-<p>公平模式如何解决？</p>
+<div class="think"><div class="think-q">为什么必须先拿读锁再释放写锁，而不是先释放写锁再拿读锁？</div></div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 250" role="img" aria-label="锁降级时序对比">
+  <defs>
+    <marker id="arrD" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+  </defs>
+
+  <!-- 左：错误 -->
+  <rect x="20" y="10" width="330" height="220" rx="6" fill="#FEE2E2" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="185" y="38" text-anchor="middle" font-size="13" fill="#991B1B" font-weight="700">✗ 错误：先释放写锁，再拿读锁</text>
+
+  <rect x="60" y="52" width="250" height="28" rx="4" fill="#F97316" opacity="0.2" stroke="#F97316" stroke-width="1.2"/>
+  <text x="185" y="70" text-anchor="middle" font-size="11" fill="#1C1C1C">T1 持有写锁，写完数据</text>
+  <line x1="185" y1="80" x2="185" y2="98" stroke="#EF4444" stroke-width="1.3" marker-end="url(#arrD)"/>
+
+  <rect x="60" y="100" width="250" height="28" rx="4" fill="#fff" stroke="#EF4444" stroke-width="1.2"/>
+  <text x="185" y="118" text-anchor="middle" font-size="11" fill="#1C1C1C">T1 释放写锁 —— 无锁窗口！</text>
+  <line x1="185" y1="128" x2="185" y2="146" stroke="#EF4444" stroke-width="1.3" marker-end="url(#arrD)"/>
+
+  <rect x="60" y="148" width="250" height="28" rx="4" fill="#FEE2E2" stroke="#EF4444" stroke-width="1.2"/>
+  <text x="185" y="166" text-anchor="middle" font-size="11" fill="#991B1B">W2 抢到写锁，改掉了数据</text>
+  <line x1="185" y1="176" x2="185" y2="194" stroke="#EF4444" stroke-width="1.3" marker-end="url(#arrD)"/>
+
+  <rect x="60" y="196" width="250" height="28" rx="4" fill="#fff" stroke="#EF4444" stroke-width="1.2"/>
+  <text x="185" y="214" text-anchor="middle" font-size="11" fill="#991B1B">T1 拿读锁 → 读到别人改过的数据</text>
+
+  <!-- 右：正确 -->
+  <rect x="370" y="10" width="330" height="220" rx="6" fill="#DCFCE7" stroke="#22C55E" stroke-width="1.5"/>
+  <text x="535" y="38" text-anchor="middle" font-size="13" fill="#166534" font-weight="700">✓ 正确：锁降级，先拿读锁再释放写锁</text>
+
+  <rect x="410" y="52" width="250" height="28" rx="4" fill="#F97316" opacity="0.2" stroke="#F97316" stroke-width="1.2"/>
+  <text x="535" y="70" text-anchor="middle" font-size="11" fill="#1C1C1C">T1 持有写锁，写完数据</text>
+  <line x1="535" y1="80" x2="535" y2="98" stroke="#22C55E" stroke-width="1.3" marker-end="url(#arrD)"/>
+
+  <rect x="410" y="100" width="250" height="28" rx="4" fill="#DCFCE7" stroke="#22C55E" stroke-width="1.2"/>
+  <text x="535" y="118" text-anchor="middle" font-size="11" fill="#166534">T1 直接获取读锁（必然成功）</text>
+  <line x1="535" y1="128" x2="535" y2="146" stroke="#22C55E" stroke-width="1.3" marker-end="url(#arrD)"/>
+
+  <rect x="410" y="148" width="250" height="28" rx="4" fill="#fff" stroke="#22C55E" stroke-width="1.2"/>
+  <text x="535" y="166" text-anchor="middle" font-size="11" fill="#1C1C1C">T1 释放写锁，仍持有读锁</text>
+  <line x1="535" y1="176" x2="535" y2="194" stroke="#22C55E" stroke-width="1.3" marker-end="url(#arrD)"/>
+
+  <rect x="410" y="196" width="250" height="28" rx="4" fill="#DCFCE7" stroke="#22C55E" stroke-width="1.2"/>
+  <text x="535" y="214" text-anchor="middle" font-size="11" fill="#166534">读到自己写入的数据，全程无窗口期</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>锁降级：先在写锁内拿读锁，再释放写锁，中间不留任何「无锁窗口」给其它写者</figcaption>
+</figure>
+
+<p><strong>先释放写锁、后拿读锁</strong>的版本：释放写锁和获取读锁之间有一个<strong>无锁窗口</strong>。另一个写线程 W2 可能在这个窗口里抢到写锁、改掉数据——当前线程随后拿到读锁读到的，就是<strong>被别人改过的数据</strong>，不是自己刚写入的值，「写完立即用」的语义就破了。</p>
+
+<p><strong>先拿读锁、再释放写锁</strong>的版本：拿读锁时自己还持有写锁，任何其它线程既不能读也不能写，读锁必然获取成功；释放写锁后，当前线程依然持有读锁，保证「自己刚写入的数据」在接下来的读临界区里<strong>不会被任何写者改动</strong>。这也回答了「锁降级为什么能保证可见性」：数据在写锁临界区内写入、在读锁临界区内读取，两个临界区由同一个线程无缝衔接，中间没有其它写者插入，读到的必然是最新值。</p>
+
+<h3>为什么锁升级（读锁 → 写锁）是绝对禁止的？</h3>
+
+<div class="crack"><div class="crack-label">锁升级的死锁现场</div>
+<p>假设允许升级，两个线程 T1、T2 都持有读锁，然后同时想升级成写锁：T1 等 T2 释放读锁，T2 等 T1 释放读锁——<strong>互相等待，死锁</strong>。即使只有一个读者，升级也要求先释放读锁，释放与获取之间的窗口期照样会被其它写者插足。所以 JDK 的设计是一刀切：<strong>想从读变写？先释放读锁，再重新竞争写锁</strong>（CachedData 示例里就是这么干的：unlock 读锁 → lock 写锁 → 双检）。</p>
+</div>
+
+<p>顺便记一个反直觉的事实：<strong>写锁可以降级为读锁，读锁永远不能升级为写锁</strong>。这是读写锁设计里最常考的考点，也是它与 StampedLock 的一大差异（StampedLock 支持「尝试式」升级，见第 12 站）。</p>
+</section>
+
+<!-- ═══════════════ 第7站：写锁饥饿 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>写者饥饿：读者源源不断，写者永远排队？</h2></div>
+
+<p>读写锁引入了一个新问题——<strong>写者饥饿（Writer Starvation）</strong>。</p>
+
+<p>设想一个缓存系统：每秒 1000 个读请求，每 10 秒才来一个写请求。读者们发现读锁空闲就蜂拥而入，写者却迟迟拿不到写锁——因为<strong>只要有读者持锁，写者就必须等；而读者来得太快，读锁几乎从未空下来</strong>。</p>
+
+<p>先纠正一个流传很广的误解：<strong>JDK 8 的非公平模式并不是「完全不看队列」</strong>。看源码：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>FairSync</b> · 公平模式的 writerWaiting 检查</span></div>
-<pre><code><span class="c">// 公平模式的写锁获取 —— 前面有人排队就阻塞</span>
-<span class="k">final boolean</span> writerShouldBlock() {
-    <span class="k">return</span> hasQueuedPredecessors(); <span class="c">// AQS 队列中有人在我前面</span>
+<div class="srcbox-head"><span class="srcbox-file"><b>ReentrantReadWriteLock.NonfairSync</b> · JDK 8 的非公平判断</span></div>
+<pre><code><span class="k">final boolean</span> writerShouldBlock() {
+    <span class="k">return false</span>; <span class="c">// 写者：先 CAS 抢一次再说（允许插队）</span>
 }
 
-<span class="c">// 公平模式的读锁获取 —— 前面有写者在排队就阻塞</span>
 <span class="k">final boolean</span> readerShouldBlock() {
-    <span class="k">return</span> hasQueuedPredecessors(); <span class="c">// 队列中有写者排在我前面 → 读者也让路</span>
+    <span class="c">// 启发式：如果等待队列头部的线程是<strong>写者</strong>，读者就让路</span>
+    <span class="c">// 目的：缓解（但无法根治）写者饥饿</span>
+    <span class="k">return</span> apparentlyFirstQueuedIsExclusive();
 }</code></pre>
 </div>
+
+<p><code>apparentlyFirstQueuedIsExclusive()</code> 的意思是：队列<strong>头部</strong>若已有一个写者在排队，新来的读者就不许插队，乖乖排队。这比「完全不看队列」好——写者一旦入队，后面的读者会让路，写者最终能拿到锁。</p>
+
+<p>但饥饿仍然会发生，因为存在时间差：读者 A 拿到读锁的瞬间，写者 W 还没入队（它还在自旋 / 唤醒的路上）；读者 B、C 趁这个窗口接连拿锁，每个新读者都把读锁的「空窗期」无限后移……极端情况下，写者可能被延迟很久。所以：</p>
+
+<ul>
+  <li><strong>想要彻底不饿死写者</strong> → 用公平模式 <code>new ReentrantReadWriteLock(true)</code>：<code>readerShouldBlock()</code> 变成 <code>hasQueuedPredecessors()</code>，只要队列里有任何线程排队，读者和写者都让路；</li>
+  <li><strong>想要吞吐优先</strong> → 默认非公平，接受「写者可能被延迟」的风险；</li>
+  <li><strong>对写延迟零容忍</strong> → 上 StampedLock（它内部是<strong>写优先</strong>策略，见第 13 站），或干脆用 ReentrantLock。</li>
+</ul>
 
 <div class="takeaway"><div class="takeaway-label">公平 vs 非公平 对比</div>
 <table class="nb-table">
   <thead><tr><th>模式</th><th>读者行为</th><th>写者饥饿</th><th>吞吐量</th></tr></thead>
   <tbody>
-    <tr><td>非公平（默认）</td><td>直接尝试获取，不看队列</td><td>可能饥饿</td><td><strong>高</strong>（减少线程切换）</td></tr>
-    <tr><td>公平</td><td>检查队列前面是否有写者</td><td>不会饥饿</td><td>低（频繁线程切换）</td></tr>
+    <tr><td>非公平（默认）</td><td>队列头部无写者时直接插队</td><td>可能延迟（有启发式缓解）</td><td><strong>高</strong>（减少线程切换）</td></tr>
+    <tr><td>公平</td><td>队列中有人排队就让路</td><td>不会饥饿</td><td>低（频繁线程切换）</td></tr>
   </tbody>
 </table>
 </div>
 
-<p>如果你的业务场景中写操作不能丢、不能无限延迟，可以选择公平模式：<code>new ReentrantReadWriteLock(true)</code>。但公平模式的代价是<strong>吞吐量下降 30%~50%</strong>，因为频繁地在读者和写者之间切换。</p>
+<p>如果业务里写操作「不能无限延迟」（比如配置必须及时下发），公平模式是兜底方案，但代价是吞吐下降——读者/写者频繁切换，AQS 队列频繁进出。这就是「公平」与「吞吐」的经典二选一，和 ReentrantLock 的选择逻辑完全一致。</p>
 </section>
 
-<!-- ═══════════════ 第5站：StampedLock ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>StampedLock：乐观读——先读后验，零开销读</h2></div>
+<!-- ═══════════════ 第8站：API 全景与可重入 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>完整 API 与可重入：读锁写锁各有一份</h2></div>
 
-<p>ReentrantReadWriteLock 的读锁虽然允许多个读者并发，但每个读者仍然需要<strong>CAS 修改 state 的高 16 位</strong>——这意味着读操作本身也有锁竞争的开销。</p>
+<p>读写锁继承了 Lock 的全部能力：<code>lock()</code>、<code>lockInterruptibly()</code>、<code>tryLock()</code>、<code>tryLock(timeout)</code>、<code>unlock()</code>——读锁和写锁各有一份。先看可重入：</p>
 
-<p>JDK 8 引入的 <code>StampedLock</code> 提供了一种更激进的模式：<strong>乐观读（Optimistic Read）</strong>——读的时候<em>根本不加锁</em>，只是记住一个"版本号"（stamp），读完之后验证版本号是否变化。如果没变，说明读到的数据是一致的；如果变了，再升级为悲观读锁。</p>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>可重入示例</b> · 同一线程反复拿锁</span></div>
+<pre><code><span class="t">ReentrantReadWriteLock</span> rwl = <span class="k">new</span> <span class="t">ReentrantReadWriteLock</span>();
+
+<span class="c">// 写锁可重入：同一个线程可以连续拿写锁，计数累加</span>
+rwl.writeLock().lock();
+rwl.writeLock().lock();   <span class="c">// 低 16 位计数 1 → 2</span>
+rwl.writeLock().unlock(); <span class="c">// 2 → 1（还没释放干净）</span>
+rwl.writeLock().unlock(); <span class="c">// 1 → 0，锁才真正释放</span>
+
+<span class="c">// 读锁可重入：同一个线程可以连续拿读锁，计数也累加</span>
+rwl.readLock().lock();
+rwl.readLock().lock();    <span class="c">// 高 16 位计数 +2</span>
+rwl.readLock().unlock();
+rwl.readLock().unlock();</code></pre>
+</div>
+
+<p>这里有个读者容易踩的坑：<strong>可重入 ≠ 自动配平</strong>。每次 lock() 都要配一次 unlock()，少放一次，计数就滞留一次——在长事务、递归方法里尤其容易漏，建议一律用 try/finally 包裹。</p>
+
+<p>再看锁降级后的计数叠加。CachedData 里同一线程在释放写锁前拿了读锁，此时 state 的两个半区<strong>同时非零</strong>（写计数 1 + 读计数 1）——这是读写锁里唯一的「读写并存」合法状态，且只可能发生在同一线程身上。释放时按 Javadoc 的惯例：<strong>先释放写锁，读锁留到最后</strong>，让数据在尽可能长的读保护期内不被其它写者触碰。</p>
+
+<p>最后把读写锁的 API 全景列全，注意一个容易被忽略的差异：</p>
+
+<table class="nb-table">
+  <thead><tr><th>API</th><th>读锁</th><th>写锁</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>lock()</code></td><td>✅</td><td>✅</td><td>获取锁，拿不到就阻塞</td></tr>
+    <tr><td><code>lockInterruptibly()</code></td><td>✅</td><td>✅</td><td>阻塞期间响应中断</td></tr>
+    <tr><td><code>tryLock()</code></td><td>✅</td><td>✅</td><td>立即返回，拿不到返回 false</td></tr>
+    <tr><td><code>tryLock(timeout)</code></td><td>✅</td><td>✅</td><td>限时等待，超时返回 false</td></tr>
+    <tr><td><code>unlock()</code></td><td>✅</td><td>✅</td><td>释放，注意与 lock 配平</td></tr>
+    <tr><td><code>newCondition()</code></td><td>❌</td><td>✅</td><td>只有写锁支持条件队列，读锁会抛 UnsupportedOperationException</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway"><div class="takeaway-label">落点</div>
+<p>工作中<strong>读锁不支持 newCondition()</strong> 是很多人第一次用就踩的坑：想在读路径里等一个条件（比如缓存未就绪时等待），读锁给不了，只能拆成写锁的 Condition 或换 ReentrantLock。API 越全，用起来越要小心。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第9站：为什么需要 StampedLock ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>还不够：读锁也要 CAS，于是 StampedLock 登场</h2></div>
+
+<p>ReentrantReadWriteLock 已经让读者们「并行读书」了，为什么还要 StampedLock？因为<strong>读锁本身仍有锁开销</strong>：每来一个读者，都要对 state 做一次 <code>CAS(c, c + SHARED_UNIT)</code>——CAS 是原子指令，要写内存、要竞争缓存行，并发读者一多，<strong>读者的 CAS 之间也会互相争抢</strong>。读路径的竞争只是从「抢整把锁」变成了「抢一个计数器」，并没有消失。</p>
+
+<p>JDK 8 引入的 <code>StampedLock</code> 想得更激进：<strong>读的时候干脆不加锁</strong>，只记一个「版本号」，读完之后验证版本号有没有变——没变说明读到的数据是一致的，变了再回头加锁重读。这就是<strong>乐观读（Optimistic Read）</strong>，与之相对的普通加锁读叫<strong>悲观读（Pessimistic Read）</strong>。</p>
+
+<div class="crack"><div class="crack-label">乐观读的类比：拍照取证</div>
+<p>想象你在事故现场拍照取证：先「咔」拍一张（<code>tryOptimisticRead()</code> 拿到一个戳），然后放心大胆地记录现场情况（不加锁直接读数据），记录完再核对一眼：<strong>现场有没有在我拍照之后被破坏过？</strong>（<code>validate(stamp)</code>）。没动过 → 我记的东西完全可信；动过了 → 照片作废，回去重拍（升级成悲观读锁重读）。拍照本身不占用现场，谁来拍都行——这就是乐观读「零锁开销」的本质。</p>
+</div>
+
+<p>另一个角度：乐观读就是<strong>乐观锁思想</strong>在锁实现上的应用——先干活、后验证，冲突了再重来；悲观读则是悲观锁思想——先拿锁、再干活，彻底排除冲突。数据库的 MVCC 快照读、Redis 的 WATCH、Git 的提交哈希，全是同一套「版本号验证」思想。</p>
+
+<div class="think"><div class="think-q">乐观读是不是永远更快？——不是。先记着这个结论，第 14 站讲它的代价。</div></div>
+</section>
+
+<!-- ═══════════════ 第10站：三种模式 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>StampedLock 三种模式：写锁 / 悲观读 / 乐观读</h2></div>
+
+<p>StampedLock 把锁拆成三种模式，比读写锁多了一个「乐观读」：</p>
+
+<div class="takeaway"><div class="takeaway-label">StampedLock 的三种模式</div>
+<table class="nb-table">
+  <thead><tr><th>模式</th><th>获取 API</th><th>释放 API</th><th>互斥性</th><th>读路径开销</th></tr></thead>
+  <tbody>
+    <tr><td>写锁（Write）</td><td><code>writeLock()</code></td><td><code>unlockWrite(stamp)</code></td><td>与读、写都互斥</td><td>—</td></tr>
+    <tr><td>悲观读锁（Read）</td><td><code>readLock()</code></td><td><code>unlockRead(stamp)</code></td><td>与写互斥，读之间不互斥</td><td>CAS + 共享</td></tr>
+    <tr><td>乐观读（Optimistic）</td><td><code>tryOptimisticRead()</code></td><td>无需释放，用 <code>validate(stamp)</code> 验证</td><td>不加锁，仅事后验证</td><td><strong>零锁开销</strong>（成功时）</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>三个细节值得注意：</p>
+<ul>
+  <li><strong>所有获取方法都返回一个 <code>long stamp</code></strong>，释放时必须把当初那个 stamp 原样传回（<code>unlockWrite(stamp)</code> / <code>unlockRead(stamp)</code>）。因为 StampedLock 没有重入、没有「当前线程」的持有记录，<strong>stamp 就是锁的唯一凭证</strong>——丢了 stamp，锁就放不掉了；</li>
+  <li><strong>乐观读不需要释放</strong>，它压根没占锁，只留了一个 stamp 待会儿验证；</li>
+  <li>写锁 / 悲观读锁拿不到时同样会阻塞排队，这点和读写锁一致；区别在<strong>读路径的默认选择</strong>：读写锁的读是「必须加锁」，StampedLock 的读是「能不加就不加」。</li>
+</ul>
+
+<p>再强调一次 stamp 的语义：<strong>stamp 不是锁，是「快照版本号」</strong>。拿写锁 / 读锁时，它是这把锁的凭证；拿乐观读时，它是一张「拍照时的版本戳」。三种模式的完整用法，下一站用官方示例讲透。</p>
+</section>
+
+<!-- ═══════════════ 第11站：乐观读标准用法 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>乐观读标准用法：Point 示例逐行拆解</h2></div>
+
+<p>先看乐观读的完整流程：</p>
 
 <figure class="fig">
 <svg viewBox="0 0 700 280" role="img" aria-label="StampedLock 乐观读流程">
+  <defs>
+    <marker id="arrowG" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#57544E"/></marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#22C55E"/></marker>
+    <marker id="arrowRed" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#EF4444"/></marker>
+  </defs>
+
   <text x="350" y="20" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">StampedLock 乐观读流程：先读后验，失败再升级</text>
 
   <!-- 起始 -->
   <rect x="270" y="40" width="160" height="36" rx="18" fill="#22C55E" opacity="0.2" stroke="#22C55E" stroke-width="1.5"/>
   <text x="350" y="63" text-anchor="middle" font-size="12" fill="#166534" font-weight="600">tryOptimisticRead()</text>
 
-  <!-- 箭头 -->
   <line x1="350" y1="76" x2="350" y2="96" stroke="#57544E" stroke-width="1.5" marker-end="url(#arrowG)"/>
 
   <!-- 读取数据 -->
   <rect x="270" y="96" width="160" height="36" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
   <text x="350" y="119" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">不加锁，直接读数据</text>
 
-  <!-- 箭头 -->
   <line x1="350" y1="132" x2="350" y2="152" stroke="#57544E" stroke-width="1.5" marker-end="url(#arrowG)"/>
 
   <!-- 验证 -->
@@ -284,53 +519,44 @@ rwl.readLock().lock();
   <rect x="530" y="172" width="140" height="36" rx="6" fill="#FEE2E2" stroke="#EF4444" stroke-width="1.5"/>
   <text x="600" y="195" text-anchor="middle" font-size="11" fill="#991B1B" font-weight="600">readLock() 悲观读</text>
 
-  <!-- 下方：重试 -->
   <line x1="600" y1="208" x2="600" y2="248" stroke="#57544E" stroke-width="1.5" marker-end="url(#arrowG)"/>
   <rect x="530" y="248" width="140" height="28" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
   <text x="600" y="267" text-anchor="middle" font-size="11" fill="#1C1C1C">重新读取 + 返回</text>
-
-  <!-- 箭头标记 -->
-  <defs>
-    <marker id="arrowG" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#57544E"/></marker>
-    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#22C55E"/></marker>
-    <marker id="arrowRed" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#EF4444"/></marker>
-  </defs>
 </svg>
-<figcaption><span class="fig-no">图 2</span>StampedLock 乐观读：无锁读取 → 验证版本号 → 成功直接返回，失败升级为悲观读锁</figcaption>
+<figcaption><span class="fig-no">图 3</span>StampedLock 乐观读：无锁读取 → 验证版本号 → 成功直接返回，失败升级为悲观读锁</figcaption>
 </figure>
 
-<p>来看标准用法：</p>
+<p>这是 StampedLock Javadoc 里的标准示例（略有精简）——一个二维坐标点，写操作 <code>move()</code>，读操作 <code>distanceFromOrigin()</code>：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>StampedLock 乐观读用法</b> · 一个坐标点示例</span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>Point.java</b> · StampedLock 三种模式完整示例</span></div>
 <pre><code><span class="k">public class</span> <span class="t">Point</span> {
     <span class="k">private double</span> x, y;
     <span class="k">private final</span> <span class="t">StampedLock</span> sl = <span class="k">new</span> <span class="t">StampedLock</span>();
 
-    <span class="c">// 写操作</span>
+    <span class="c">// 写操作：写锁（排他）</span>
     <span class="k">public void</span> move(<span class="k">double</span> deltaX, <span class="k">double</span> deltaY) {
-        <span class="k">long</span> stamp = sl.writeLock(); <span class="c">// 获取写锁</span>
+        <span class="k">long</span> stamp = sl.writeLock();
         <span class="k">try</span> {
             x += deltaX;
             y += deltaY;
         } <span class="k">finally</span> {
-            sl.unlockWrite(stamp); <span class="c">// 释放写锁</span>
+            sl.unlockWrite(stamp);
         }
     }
 
-    <span class="c">// 乐观读 —— 零锁开销</span>
+    <span class="c">// 读操作：乐观读 → 验证失败再升级悲观读</span>
     <span class="k">public double</span> distanceFromOrigin() {
-        <span class="k">long</span> stamp = sl.tryOptimisticRead(); <span class="c">// ① 获取版本号，不加锁</span>
-        <span class="k">double</span> currentX = x, currentY = y; <span class="c">// ② 直接读数据</span>
+        <span class="k">long</span> stamp = sl.tryOptimisticRead(); <span class="c">// ① 拍照：拿版本戳，不加锁</span>
+        <span class="k">double</span> currentX = x, currentY = y;   <span class="c">// ② 放心读（此刻无锁）</span>
 
-        <span class="k">if</span> (!sl.validate(stamp)) { <span class="c">// ③ 验证：期间是否有写操作？</span>
-            <span class="c">// 验证失败 → 升级为悲观读锁</span>
-            stamp = sl.readLock(); <span class="c">// ④ 加悲观读锁</span>
+        <span class="k">if</span> (!sl.validate(stamp)) {           <span class="c">// ③ 验证：期间有写操作吗？</span>
+            stamp = sl.readLock();               <span class="c">// ④ 有 → 升级为悲观读锁</span>
             <span class="k">try</span> {
-                currentX = x;
-                currentY = y; <span class="c">// ⑤ 重新读取</span>
+                currentX = x;                    <span class="c">// ⑤ 加锁状态下重读</span>
+                currentY = y;
             } <span class="k">finally</span> {
-                sl.unlockRead(stamp); <span class="c">// ⑥ 释放读锁</span>
+                sl.unlockRead(stamp);            <span class="c">// ⑥ 释放读锁</span>
             }
         }
         <span class="k">return</span> <span class="t">Math</span>.sqrt(currentX * currentX + currentY * currentY);
@@ -338,113 +564,346 @@ rwl.readLock().lock();
 }</code></pre>
 </div>
 
-<p>关键要点：<code>tryOptimisticRead()</code> 返回的 stamp 不是锁，只是一个"快照版本号"。如果在此期间有写操作修改了 state，版本号就会变化，<code>validate()</code> 返回 false，此时需要升级为悲观读锁重新读取。</p>
+<p>执行顺序 ①→⑥，理解三个关键点：</p>
 
-<div class="crack"><div class="crack-label">StampedLock 的三种模式</div>
-<table class="nb-table">
-  <thead><tr><th>模式</th><th>API</th><th>互斥</th><th>开销</th></tr></thead>
-  <tbody>
-    <tr><td>写锁（Write）</td><td><code>writeLock()</code></td><td>与读、写都互斥</td><td>CAS + 排他</td></tr>
-    <tr><td>悲观读锁（Read）</td><td><code>readLock()</code></td><td>与写互斥，读之间不互斥</td><td>CAS + 共享</td></tr>
-    <tr><td>乐观读（Optimistic）</td><td><code>tryOptimisticRead()</code></td><td>不加锁，仅事后验证</td><td><strong>零开销</strong>（成功时）</td></tr>
-  </tbody>
-</table>
+<ul>
+  <li><strong>为什么要「先读后验证」而不是「先验证后读」</strong>：验证必须覆盖整个读取窗口。先拍照（①）再读（②）再验证（③），只要 ② 期间有任何写锁发生，③ 就能发现；如果先验证再读，验证之后、读取之前照样可能有写者插入，验证就白做了；</li>
+  <li><strong>validate(stamp) 什么时候返回 false</strong>：从拍照到验证之间，只要发生过一次写锁的获取或释放，stamp 对应的版本号就变了，验证失败。所以乐观读的一致性<strong>是事后确认的</strong>——要么证明没被写过，要么重读；</li>
+  <li><strong>双字段的一致性</strong>：x、y 是两个独立字段，乐观读读它们「可能读到一半被写」——这正是 validate 要兜底的：写者一旦动过任何一个字段，整个快照作废重读。这也是为什么乐观读要求<strong>读操作快、写操作少</strong>，否则重读频繁，反而更慢。</li>
+</ul>
+
+<div class="crack"><div class="crack-label">面试追问：乐观读的 stamp 会不会是 0？</div>
+<p>会。<code>tryOptimisticRead()</code> 在「当前有写锁被持有」时会返回 <strong>0</strong>（0 是无效戳），此时 <code>validate(0)</code> 一定返回 false，代码自然走悲观读分支——这是设计好的兜底，不是 bug。所以标准写法里不需要单独判断 stamp 是否为 0，直接交给 validate 即可。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：对比 ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>StampedLock vs ReentrantReadWriteLock</h2></div>
+<!-- ═══════════════ 第12站：锁模式转换 ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>锁模式转换：tryConvert 三兄弟</h2></div>
 
-<p>既然 StampedLock 的乐观读性能这么好，是不是可以全面替换 ReentrantReadWriteLock？先看一张完整对比表：</p>
+<p>StampedLock 比读写锁多了一大能力：<strong>三种模式之间可以互相「尝试转换」</strong>，而且是原子操作。三个方法：</p>
 
-<div class="takeaway"><div class="takeaway-label">核心差异一览</div>
 <table class="nb-table">
-  <thead><tr><th>特性</th><th>ReentrantReadWriteLock</th><th>StampedLock</th></tr></thead>
+  <thead><tr><th>方法</th><th>语义</th><th>成功</th><th>失败</th></tr></thead>
   <tbody>
-    <tr><td>JDK 版本</td><td>JDK 5</td><td>JDK 8</td></tr>
-    <tr><td>乐观读</td><td>不支持</td><td><strong>支持</strong>（tryOptimisticRead）</td></tr>
-    <tr><td>可重入</td><td><strong>是</strong></td><td><strong>否</strong>（最大限制）</td></tr>
-    <tr><td>公平模式</td><td>支持</td><td>不支持（只有非公平）</td></tr>
-    <tr><td>Condition</td><td>支持</td><td>不支持</td></tr>
-    <tr><td>读锁 → 写锁升级</td><td>不支持</td><td><strong>支持</strong>（tryConvertToWrite）</td></tr>
-    <tr><td>读操作开销</td><td>CAS 修改 state</td><td>乐观读时<strong>零开销</strong></td></tr>
-    <tr><td>API 复杂度</td><td>简单</td><td>较复杂（需要管理 stamp）</td></tr>
+    <tr><td><code>tryConvertToWriteLock(stamp)</code></td><td>读锁 / 乐观读 → 写锁</td><td>返回新 stamp</td><td>返回 0</td></tr>
+    <tr><td><code>tryConvertToReadLock(stamp)</code></td><td>写锁 / 乐观读 → 读锁（降级）</td><td>返回新 stamp</td><td>返回 0</td></tr>
+    <tr><td><code>tryConvertToOptimisticRead(stamp)</code></td><td>写锁 / 读锁 → 乐观读</td><td>返回新 stamp</td><td>返回 0</td></tr>
   </tbody>
 </table>
-</div>
 
-<p><strong>性能差距</strong>：在读多写少（读:写 &gt; 10:1）的场景下，StampedLock 的乐观读比 ReentrantReadWriteLock 快 <strong>5~10 倍</strong>，因为完全避免了 CAS 竞争。但如果写操作频繁，乐观读频繁失败，反而会因为反复升级而变慢。</p>
+<p>重点来了：<strong>tryConvertToWriteLock 让「读 → 写」升级成为可能</strong>，而 ReentrantReadWriteLock 是绝对禁止升级的。为什么 StampedLock 敢？因为它是「尝试式」的，绝不阻塞：</p>
 
-<p><strong>StampedLock 最大的坑</strong>——不可重入：</p>
+<ul>
+  <li>当前线程持有<strong>写锁</strong>，想转读锁：必然成功（降级本来就是写锁的权限）；</li>
+  <li>当前线程持有<strong>读锁</strong>，想升级写锁：只有此刻<strong>没有其它读者</strong>（读计数恰好只有自己）才成功，否则返回 0；</li>
+  <li>返回 0 意味着转换失败，锁还维持原状态，调用方<strong>自己决定下一步</strong>（比如释放旧锁后重新获取）。</li>
+</ul>
+
+<p>它天然避开了升级死锁：升级不成功就返回 0，绝不阻塞等待——不会出现「两个读者互相等对方释放读锁」的场面。</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>StampedLock 不可重入的陷阱</b></span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>生产场景</b> · 缓存刷新：先乐观读，发现过期再尝试升级</span></div>
+<pre><code><span class="k">private final</span> <span class="t">StampedLock</span> sl = <span class="k">new</span> <span class="t">StampedLock</span>();
+<span class="k">private</span> <span class="t">String</span> config = <span class="t">"v1"</span>;
+
+<span class="k">public</span> <span class="t">String</span> getConfig() {
+    <span class="k">long</span> stamp = sl.tryOptimisticRead();
+    <span class="t">String</span> cur = config;
+    <span class="k">if</span> (!sl.validate(stamp)) {
+        <span class="c">// 乐观读失败：尝试直接把「乐观读」升级成「写锁」</span>
+        stamp = sl.tryConvertToWriteLock(stamp);
+        <span class="k">if</span> (stamp != <span class="n">0L</span>) {
+            <span class="c">// 升级成功：此刻没有其它读者，安全重算</span>
+            <span class="k">try</span> {
+                config = reloadFromRemote(); <span class="c">// 重新加载</span>
+                <span class="k">return</span> config;
+            } <span class="k">finally</span> {
+                sl.unlockWrite(stamp);
+            }
+        } <span class="k">else</span> {
+            <span class="c">// 升级失败：有其它读者，退回标准「读锁重读」流程</span>
+            stamp = sl.readLock();
+            <span class="k">try</span> { <span class="k">return</span> config; }
+            <span class="k">finally</span> { sl.unlockRead(stamp); }
+        }
+    }
+    <span class="k">return</span> cur;
+}</code></pre>
+</div>
+
+<p>这个模式把「读 → 写」的升级成本降到了最低：绝大多数请求乐观读一把梭，只有版本失效且恰好无竞争时才升级成写锁重算。对照读写锁：它只能「释放读锁 → 竞争写锁 → 双检」，多一步释放和竞争，还可能在窗口期被别人抢先。</p>
+
+<div class="takeaway"><div class="takeaway-label">落点</div>
+<p>StampedLock 的转换方法很适合<strong>「读为主、偶尔需要就地升级写」的缓存 / 配置场景</strong>。但要记住：转换是「尝试」，必须检查返回值是否为 0，并准备好降级路径——这是 StampedLock 比读写锁 API 复杂、容易写错的地方。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第13站：内部原理 ═══════════════ -->
+<section class="station reveal" id="s13">
+<div class="station-head"><span class="station-no">第 13 站</span><h2>StampedLock 内部原理：一个 long 里装版本号</h2></div>
+
+<p>StampedLock 没有复用 AQS（它自己实现了一套 CLH 队列），核心是一个 <strong>64 位的 <code>long state</code></strong>。JDK 8 的实现把 state 拆成三部分：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 240" role="img" aria-label="StampedLock state 位布局">
+  <text x="350" y="25" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">StampedLock 的 state（64 位 long）</text>
+
+  <!-- 三段 -->
+  <rect x="40" y="50" width="620" height="56" rx="6" fill="none" stroke="#3E6B8F" stroke-width="2"/>
+
+  <rect x="40" y="50" width="140" height="56" rx="6" fill="#F97316" opacity="0.18" stroke="#F97316" stroke-width="1.5"/>
+  <text x="110" y="74" text-anchor="middle" font-size="11" fill="#F97316" font-weight="700">低 7 位</text>
+  <text x="110" y="94" text-anchor="middle" font-size="10" fill="#57544E">读锁计数 0~126</text>
+
+  <rect x="180" y="50" width="80" height="56" rx="6" fill="#EF4444" opacity="0.15" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="220" y="74" text-anchor="middle" font-size="11" fill="#EF4444" font-weight="700">bit 7</text>
+  <text x="220" y="94" text-anchor="middle" font-size="10" fill="#57544E">写锁位（值128）</text>
+
+  <rect x="260" y="50" width="400" height="56" rx="6" fill="#0EA5E9" opacity="0.12" stroke="#0EA5E9" stroke-width="1.5"/>
+  <text x="460" y="74" text-anchor="middle" font-size="11" fill="#0EA5E9" font-weight="700">高 56 位：版本号（每发生一次写锁获取/释放，就 +128）</text>
+  <text x="460" y="94" text-anchor="middle" font-size="10" fill="#57544E">validate 就是比较高 57 位（bit7 及以上）有没有变</text>
+
+  <!-- 运算 -->
+  <text x="60" y="140" font-size="12" fill="#1C1C1C">读锁获取：state += 1（低 7 位计数 +1，最多 126，超出走 readerOverflow 溢出字段）</text>
+  <text x="60" y="162" font-size="12" fill="#1C1C1C">写锁获取：state += 128（bit7 置 1）；写锁释放：state += 128（bit7 复位并进位，版本号 +1）</text>
+  <text x="60" y="184" font-size="12" fill="#1C1C1C">validate(stamp)：<tspan font-family="monospace">(stamp &amp; ~127) == (state &amp; ~127)</tspan> —— 只比较高 57 位</text>
+  <text x="60" y="206" font-size="12" fill="#57544E">读者只动低 7 位，validate 不受影响；任何写锁动作都会让高 57 位变化，validate 立刻失效</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>StampedLock 的 state：低 7 位是读锁计数、bit7 是写锁位、高 56 位是版本号——乐观读的「验证」本质上是版本号比较</figcaption>
+</figure>
+
+<p>为什么乐观读验证这么快？因为 <code>validate()</code> 里就是一次 <strong>volatile 读 + 位与比较</strong>，没有任何原子指令、没有锁。对比一下三种读路径的成本：</p>
+
+<table class="nb-table">
+  <thead><tr><th>读路径</th><th>核心操作</th><th>开销量级</th></tr></thead>
+  <tbody>
+    <tr><td>乐观读（成功）</td><td>volatile 读 state + 位比较</td><td><strong>最轻</strong>（几纳秒）</td></tr>
+    <tr><td>悲观读锁</td><td>CAS 修改 state + 排队检查</td><td>中等（原子指令 + 缓存行竞争）</td></tr>
+    <tr><td>ReentrantReadWriteLock 读锁</td><td>CAS 修改 state 高 16 位</td><td>与悲观读锁同量级</td></tr>
+  </tbody>
+</table>
+
+<p>另外 StampedLock 的排队策略是<strong>写优先（writer preference）</strong>：新来的读者如果发现等待队列头部是写者，会让路排队，而不是插队——这是它比 ReentrantReadWriteLock 非公平模式「对写者更友好」的原因，也是官方文档建议优先考虑它的底气之一。</p>
+
+<div class="crack"><div class="crack-label">一个小数字</div>
+<p>低 7 位只能数到 127，所以读锁计数到 126（RFULL）后，再多出来的读者会进入一个单独的 <code>readerOverflow</code> 字段——它用一个小自旋锁保护，只在极端并发读者下才被触达。面试提到这个细节，说明你真的读过源码。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第14站：StampedLock 的坑 ═══════════════ -->
+<section class="station reveal" id="s14">
+<div class="station-head"><span class="station-no">第 14 站</span><h2>StampedLock 的四大坑：为什么它「不好用」</h2></div>
+
+<p>性能这么香，为什么生产里 StampedLock 用得不算多？因为它有一堆限制，每一个都是坑：</p>
+
+<h3>坑 1：不可重入——重入就是死锁</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>不可重入陷阱</b></span></div>
 <pre><code><span class="t">StampedLock</span> sl = <span class="k">new</span> <span class="t">StampedLock</span>();
 
 <span class="k">long</span> stamp = sl.writeLock();
 <span class="k">try</span> {
-    doSomething(); <span class="c">// 这个方法内部又调用了 sl.writeLock()</span>
-    <span class="c">// → 死锁！StampedLock 不支持重入！</span>
+    helper(); <span class="c">// helper 内部又调用了 sl.writeLock()</span>
+    <span class="c">// → 同一个线程第二次拿写锁，直接阻塞 → 死锁！</span>
 } <span class="k">finally</span> {
     sl.unlockWrite(stamp);
 }
 
-<span class="k">void</span> doSomething() {
-    <span class="k">long</span> s = sl.writeLock(); <span class="c">// 同一个线程再次获取写锁 → 阻塞</span>
+<span class="k">void</span> helper() {
+    <span class="k">long</span> s = sl.writeLock(); <span class="c">// 同一线程再次获取 → 永远等不到自己释放</span>
     <span class="k">try</span> { ... } <span class="k">finally</span> { sl.unlockWrite(s); }
 }</code></pre>
 </div>
 
-<div class="think"><div class="think-q">选择决策：什么时候用哪种锁？</div></div>
+<p>ReentrantReadWriteLock 同一线程可以反复拿锁、计数累加；StampedLock <strong>完全没有重入计数</strong>，第二次获取就把自己阻塞住了。这要求写代码时必须保证「锁内不再调用需要同一把锁的方法」——方法嵌套深了非常容易踩。</p>
 
-<p>记住一个简单的判断框架：</p>
+<h3>坑 2：不支持 Condition</h3>
 
-<div class="formula">
-<strong>锁选择决策树</strong><br/><br/>
-1. 写操作为主（写:读 &gt; 1:1）→ <code>ReentrantLock</code>（读写锁没有意义）<br/>
-2. 读多写少，且需要<strong>可重入 / Condition / 公平模式</strong> → <code>ReentrantReadWriteLock</code><br/>
-3. 读多写少，追求<strong>极致读性能</strong>，不需要可重入 → <code>StampedLock</code>
+<p>StampedLock 没有 <code>newCondition()</code>。需要「条件等待 / 唤醒」的场景（比如队列空时等待生产者），它直接出局，只能用 ReentrantLock 或 ReentrantReadWriteLock（注意后者也只有<strong>写锁</strong>支持 Condition，读锁不支持，见第 8 站）。</p>
+
+<h3>坑 3：不支持公平模式，且 lock() 不可中断</h3>
+
+<p>StampedLock 只有一种排队策略（写优先），无法像 ReentrantReadWriteLock 那样构造时选公平 / 非公平。另外 <code>readLock()</code> / <code>writeLock()</code> 是<strong>不可中断</strong>的——阻塞期间响应不了中断；要可中断必须显式用 <code>readLockInterruptibly()</code> / <code>writeLockInterruptibly()</code>。</p>
+
+<h3>坑 4：乐观读不是万能的——它读的是「快照一致性」</h3>
+
+<p>乐观读保证的是「读取窗口内没有写锁发生过」，但有两个前提你得自己把握：</p>
+
+<ul>
+  <li><strong>多字段快照</strong>：Point 例子里 x、y 一起读没问题（validate 兜底）；但如果读的是<strong>引用对象的内部可变状态</strong>（比如一个 HashMap 里的多个条目），乐观读只保护「引用本身」，不保护对象内部——这种场景要么用悲观读锁，要么把对象设计成不可变快照；</li>
+  <li><strong>写频繁时乐观读反而更慢</strong>：validate 频繁失败 → 频繁升级悲观读 → 锁开销 + 重读开销双重叠加。乐观读的甜区是<strong>读:写 &gt; 10:1 且读操作快</strong>；写多场景老老实实用悲观锁。</li>
+</ul>
+
+<div class="takeaway"><div class="takeaway-label">落点</div>
+<p>StampedLock 适合：本地缓存、配置中心、统计值等<strong>读压倒性多于写、不需要重入和 Condition</strong> 的场合；不适合：方法嵌套深的业务代码、需要条件等待的队列场景、写频繁的热点数据。用之前先问自己三句话：需要重入吗？需要 Condition 吗？写流量够少吗？</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：场景 → 锁 决策表</h2></div>
+<!-- ═══════════════ 第15站：四种锁大对比 ═══════════════ -->
+<section class="station reveal" id="s15">
+<div class="station-head"><span class="station-no">第 15 站</span><h2>四种锁大对比：一张表说清全部差异</h2></div>
 
-<p>面试官问"读多写少用什么锁"，你的回答应该是：<strong>先看场景特征，再选锁。</strong></p>
+<p>把 Java 里最常见的四把锁放一起对比——<code>synchronized</code>、<code>ReentrantLock</code>、<code>ReentrantReadWriteLock</code>、<code>StampedLock</code>：</p>
 
-<div class="takeaway"><div class="takeaway-label">场景 → 锁 决策表</div>
+<div class="takeaway"><div class="takeaway-label">四种锁对比表</div>
 <table class="nb-table">
-  <thead><tr><th>场景</th><th>推荐锁</th><th>原因</th></tr></thead>
+  <thead><tr><th>维度</th><th>synchronized</th><th>ReentrantLock</th><th>ReentrantReadWriteLock</th><th>StampedLock</th></tr></thead>
   <tbody>
-    <tr><td>本地缓存（配置中心、元数据）</td><td><strong>StampedLock</strong></td><td>读远多于写，乐观读零开销，性能最优</td></tr>
-    <tr><td>简单的读写共享资源</td><td><strong>ReentrantReadWriteLock</strong></td><td>API 简单，支持可重入和 Condition</td></tr>
-    <tr><td>写操作为主</td><td><strong>ReentrantLock</strong></td><td>读写锁的读锁反而增加开销</td></tr>
-    <tr><td>需要公平调度</td><td><strong>ReentrantReadWriteLock(fair)</strong></td><td>StampedLock 不支持公平模式</td></tr>
-    <tr><td>读 + 偶尔批量更新</td><td><strong>StampedLock</strong></td><td>乐观读 + tryConvertToWrite 原子升级</td></tr>
+    <tr><td><strong>出现版本</strong></td><td>JDK 1.0</td><td>JDK 5</td><td>JDK 5</td><td>JDK 8</td></tr>
+    <tr><td><strong>锁模式</strong></td><td>互斥（Monitor）</td><td>互斥（AQS）</td><td>读共享 + 写互斥</td><td>写互斥 + 读共享 + 乐观读</td></tr>
+    <tr><td><strong>读并发度</strong></td><td>串行</td><td>串行</td><td>多读者并行</td><td>多读者并行，乐观读无锁</td></tr>
+    <tr><td><strong>可重入</strong></td><td>✅ 是</td><td>✅ 是</td><td>✅ 是</td><td>❌ 否</td></tr>
+    <tr><td><strong>公平模式</strong></td><td>❌ 否</td><td>✅ 可选</td><td>✅ 可选</td><td>❌ 否（写优先）</td></tr>
+    <tr><td><strong>锁降级（写→读）</strong></td><td>—</td><td>—</td><td>✅ 支持</td><td>✅ 支持（tryConvertToReadLock）</td></tr>
+    <tr><td><strong>锁升级（读→写）</strong></td><td>—</td><td>—</td><td>❌ 禁止（会死锁）</td><td>⚠️ 尝试式（tryConvertToWriteLock，失败返 0）</td></tr>
+    <tr><td><strong>Condition</strong></td><td>wait/notify（单个）</td><td>✅ 多个</td><td>✅ 仅写锁</td><td>❌ 无</td></tr>
+    <tr><td><strong>可中断 / 超时</strong></td><td>❌ 否</td><td>✅ 是</td><td>✅ 是</td><td>⚠️ 需用 Interruptibly 变体</td></tr>
+    <tr><td><strong>读路径开销</strong></td><td>阻塞</td><td>阻塞</td><td>CAS</td><td>乐观读 ≈ volatile 读</td></tr>
+    <tr><td><strong>适用场景</strong></td><td>简单互斥、代码块级</td><td>需要公平 / 超时 / 多条件</td><td>读多写少且需可重入</td><td>读极多写极少、极致读性能</td></tr>
   </tbody>
 </table>
 </div>
 
+<p>几个容易记错的重点：</p>
+<ul>
+  <li><strong>synchronized 也能「读写分离」？不能。</strong>它只有互斥，没有共享读；</li>
+  <li><strong>只有 ReentrantReadWriteLock 和 StampedLock 支持锁降级</strong>，且只有 StampedLock 提供尝试式升级；</li>
+  <li><strong>「公平」开关只在 ReentrantLock / ReentrantReadWriteLock 上可选</strong>，synchronized 与 StampedLock 都没有（StampedLock 用写优先近似公平）。</li>
+</ul>
+
+<div class="formula">
+<strong>选型口诀</strong><br/>
+写多 → synchronized / ReentrantLock<br/>
+读多写少 + 要重入/条件 → ReentrantReadWriteLock<br/>
+读极多写极少 + 极致读性能 → StampedLock（乐观读）
+</div>
+</section>
+
+<!-- ═══════════════ 第16站：生产实战 ═══════════════ -->
+<section class="station reveal" id="s16">
+<div class="station-head"><span class="station-no">第 16 站</span><h2>生产实战：配置中心的本地缓存怎么上锁</h2></div>
+
+<p>回到开头的场景：配置中心，99% 读、1% 写。落地一个完整可运行的「本地配置缓存」——配一把 StampedLock：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LocalConfig.java</b> · 完整可运行示例</span></div>
+<pre><code><span class="k">import</span> <span class="t">java.util.concurrent.locks</span>.<span class="t">StampedLock</span>;
+
+<span class="k">public class</span> <span class="t">LocalConfig</span> {
+    <span class="k">private</span> <span class="t">String</span> version = <span class="t">"v0"</span>;
+    <span class="k">private</span> <span class="t">String</span> data    = <span class="t">"{}"</span>;
+    <span class="k">private final</span> <span class="t">StampedLock</span> sl = <span class="k">new</span> <span class="t">StampedLock</span>();
+
+    <span class="c">// 写：配置更新（低频）</span>
+    <span class="k">public void</span> update(<span class="t">String</span> newData) {
+        <span class="k">long</span> stamp = sl.writeLock();
+        <span class="k">try</span> {
+            data = newData;
+            version = <span class="t">"v"</span> + (<span class="t">Integer</span>.parseInt(version.substring(<span class="n">1</span>)) + <span class="n">1</span>);
+        } <span class="k">finally</span> {
+            sl.unlockWrite(stamp);
+        }
+    }
+
+    <span class="c">// 读：乐观读，失败升级悲观读（高频路径）</span>
+    <span class="k">public</span> <span class="t">String</span>[] get() {
+        <span class="k">long</span> stamp = sl.tryOptimisticRead();
+        <span class="t">String</span> v = version, d = data;              <span class="c">// 快照</span>
+        <span class="k">if</span> (!sl.validate(stamp)) {
+            stamp = sl.readLock();                          <span class="c">// 升级</span>
+            <span class="k">try</span> { v = version; d = data; } <span class="k">finally</span> { sl.unlockRead(stamp); }
+        }
+        <span class="k">return new</span> <span class="t">String</span>[]{ v, d };
+    }
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="k">final</span> <span class="t">LocalConfig</span> cfg = <span class="k">new</span> <span class="t">LocalConfig</span>();
+        <span class="c">// 10 个读者线程狂读 + 1 个写者线程偶尔更新</span>
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">10</span>; i++) {
+            <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+                <span class="k">for</span> (<span class="k">int</span> j = <span class="n">0</span>; j &lt; <span class="n">1_000_000</span>; j++) cfg.get();
+            }, <span class="t">"reader-"</span> + i).start();
+        }
+        <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+            <span class="k">for</span> (<span class="k">int</span> j = <span class="n">0</span>; j &lt; <span class="n">100</span>; j++) { cfg.update(<span class="t">"{n:"</span> + j + <span class="t">"}"</span>); }
+        }, <span class="t">"writer"</span>).start();
+        <span class="t">System</span>.out.<span class="n">println</span>(<span class="t">"demo started"</span>);
+    }
+}</code></pre>
+</div>
+
+<p>这个示例可以直接跑：10 个读者线程各读 100 万次，1 个写者线程更新 100 次。把 <code>StampedLock</code> 换成 <code>ReentrantReadWriteLock</code> 再跑一遍，读路径的耗时差异就是乐观读的价值（读者越多、写者越少，差距越明显）。</p>
+
+<p>生产里还有几条实打实的经验：</p>
+
+<div class="takeaway"><div class="takeaway-label">✅ 生产 Checklist</div>
+<ul>
+  <li><strong>「读」也要快</strong>：乐观读适合「读一个短小快照」；如果一次读要遍历一个大集合，validate 失败重读的成本高，不如直接悲观读锁；</li>
+  <li><strong>写操作不要长时间持锁</strong>：StampedLock 内部有自旋，写锁持有过久会拖累所有读者和 CPU；</li>
+  <li><strong>宁可多一个 validate，也不要少一个</strong>：乐观读后忘记 validate，等于把「未确认一致的数据」直接返回——这是最常见的低级 bug；</li>
+  <li><strong>需要重入 / 条件 / 公平时，别硬上 StampedLock</strong>：ReentrantReadWriteLock 或 ReentrantLock 才是正解；</li>
+  <li><strong>「版本号 + 乐观读」是配置 / 元数据缓存的黄金组合</strong>：读无锁、写低频，性能与一致性兼得。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第17站：面试追问 ═══════════════ -->
+<section class="station reveal" id="s17">
+<div class="station-head"><span class="station-no">第 17 站</span><h2>面试追问拆解：六连问一次答穿</h2></div>
+
+<h3>追问 1：读写锁的读锁会饿死写者吗？</h3>
+<p>非公平模式下可能延迟（JDK 8 有 <code>apparentlyFirstQueuedIsExclusive()</code> 启发式缓解：队列头部有写者时读者让路，但仍有窗口期）；公平模式完全不会；StampedLock 则是写优先策略，对写者最友好。答完再补一句「写操作不能无限延迟的场景，用公平模式或 StampedLock」就完整了。</p>
+
+<h3>追问 2：stamp 到底是什么？</h3>
+<p>stamp 是 StampedLock 的「版本戳 / 凭证」：拿写锁、读锁时，它是释放锁必须回传的凭证；乐观读时，它是拍照时刻的版本号，<code>validate(stamp)</code> 就是比较高 57 位版本号有没有变。它不是一个锁，锁的状态在内部的 long state 里。</p>
+
+<h3>追问 3：为什么乐观读比读写锁的读快？</h3>
+<p>读写锁的读锁要 CAS 修改 state（原子指令 + 缓存行竞争）；乐观读只是 volatile 读一次 state 再位比较，没有原子指令、没有写内存。读者越多，CAS 竞争越激烈，差距越明显。但乐观读快的前提是 validate 大概率成功——写越少越快。</p>
+
+<h3>追问 4：乐观读一定比悲观读好吗？</h3>
+<p>不是。写频繁时 validate 频繁失败，每次失败都要升级悲观读 + 重读，双重开销，反而比直接用悲观读锁慢。乐观读的甜区是「读:写 &gt; 10:1 且读操作快」。面试主动说出这个反面，比只会背优点加分得多。</p>
+
+<h3>追问 5：为什么 ReentrantReadWriteLock 禁止锁升级？</h3>
+<p>两个读者都想升级写锁时，互相等待对方释放读锁——死锁。即使单个读者升级，释放读锁到获取写锁之间也有窗口期。所以设计上一刀切禁止；StampedLock 用「尝试式转换」绕开了死锁——升级不成功就返回 0，绝不阻塞。</p>
+
+<h3>追问 6：ReentrantReadWriteLock 最多支持多少并发读者？</h3>
+<p>65535。因为读锁计数占 state 高 16 位，最多 2^16 - 1。这也是位拆分方案的天花板。</p>
+
+<div class="crack"><div class="crack-label">面试组织答案的三段式</div>
+<p>被问到「读多写少用什么锁」，按这个顺序讲：<strong>① 规则</strong>（读读共享、读写互斥、写写互斥，这是 ReadWriteLock 的思想）→ <strong>② 实现</strong>（ReentrantReadWriteLock 用 state 高 16 位 / 低 16 位管理读写计数，支持锁降级、禁止锁升级；StampedLock 用 long state 做版本号，乐观读先读后验）→ <strong>③ 选型</strong>（写多用 ReentrantLock；读多写少要可重入用 ReentrantReadWriteLock；读极多写极少用 StampedLock 乐观读，注意它不可重入、无 Condition）。三句话把「是什么、为什么、怎么选」全讲完，就是 30 秒满分答案。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
+
 <div class="recap"><h3>核心知识点回顾</h3>
 <ul>
-  <li><strong>ReentrantReadWriteLock</strong>：AQS state 高 16 位存读计数，低 16 位存写计数；一次 CAS 管理两把锁</li>
-  <li><strong>锁降级</strong>：写锁 → 读锁 → 释放写锁——被允许；锁升级（读 → 写）——不允许，因为有死锁风险</li>
-  <li><strong>写者饥饿</strong>：非公平模式下读者持续进入会饿死写者，公平模式通过队列检查解决</li>
-  <li><strong>StampedLock 乐观读</strong>：tryOptimisticRead() 不加锁、零开销，validate() 事后验证</li>
-  <li><strong>StampedLock 限制</strong>：不可重入、不支持 Condition、不支持公平模式</li>
-  <li><strong>选型口诀</strong>：缓存用 StampedLock，通用读写用 ReadWriteLock，写多不用读写锁</li>
+  <li><strong>读写锁规则</strong>：读读共享、读写互斥、写写互斥；ReadWriteLock 接口只有 readLock() / writeLock()，读锁共享、写锁排他；</li>
+  <li><strong>ReentrantReadWriteLock 实现</strong>：AQS state 高 16 位存读锁计数、低 16 位存写锁计数，一次 CAS 管理两把锁；最大并发读者 / 写锁重入都是 65535；</li>
+  <li><strong>锁降级</strong>：先获取读锁、再释放写锁，中间不留窗口期，保证读到自己的写入；读 → 写升级被禁止（会死锁）；</li>
+  <li><strong>写者饥饿</strong>：非公平模式读者可能挤占写者（JDK 8 有 apparentlyFirstQueuedIsExclusive 启发式缓解），公平模式根治但吞吐下降；</li>
+  <li><strong>StampedLock 三种模式</strong>：写锁 / 悲观读锁 / 乐观读；乐观读 tryOptimisticRead() + validate(stamp) 先读后验，成功时零锁开销；</li>
+  <li><strong>StampedLock 特性</strong>：long state 做版本号（低 7 位读计数、bit7 写锁位、高 56 位版本号）；写优先；支持 tryConvert 系列尝试式转换（含读 → 写升级）；</li>
+  <li><strong>StampedLock 限制</strong>：不可重入、无 Condition、无公平模式、lock() 不可中断、写频繁时乐观读反而慢；</li>
+  <li><strong>选型</strong>：写多用 ReentrantLock，读多写少要可重入用 ReentrantReadWriteLock，读极多写极少的缓存 / 配置中心用 StampedLock 乐观读。</li>
 </ul>
 </div>
 
-<div class="formula">
-<strong>"读多写少用什么锁？"</strong> —— 面试标准回答框架：<br/><br/>
-1. <strong>读写锁思想</strong>：读锁共享、写锁排他，读多写少场景大幅提升并发度<br/>
-2. <strong>ReentrantReadWriteLock</strong>：AQS state 位拆分实现，支持锁降级但不支持锁升级<br/>
-3. <strong>StampedLock</strong>：JDK 8 引入，乐观读零锁开销，读多写少性能最优，但不可重入<br/>
-4. <strong>选型建议</strong>：缓存场景优先 StampedLock，需要可重入或 Condition 时用 ReentrantReadWriteLock
+<div class="recap"><h3>一句话总结</h3>
+<p>读多写少的本质是「把读操作从互斥中解放出来」：<strong>ReentrantReadWriteLock 用位拆分实现读写分离，StampedLock 用版本号实现「读不加锁」</strong>。前者换来了读并发，后者换来了读零开销——代价分别是禁止锁升级、不可重入。锁的世界没有银弹，每次「放开」都对应一次「牺牲」。</p>
 </div>
+
+<div class="takeaway"><div class="takeaway-label">面试 30 秒总结</div>
+<p>"读多写少场景优先考虑读写锁：ReentrantReadWriteLock 把 AQS 的 state 拆成高 16 位读计数和低 16 位写计数，读读共享、读写互斥，支持写锁降级为读锁、禁止读锁升级为写锁（会死锁）；写者可能被读者挤占，需要公平模式兜底。若读流量压倒性占优且不需要可重入，用 JDK 8 的 StampedLock：乐观读先读后验，tryOptimisticRead 拿版本戳、validate 校验，成功时零锁开销，还能 tryConvertToWriteLock 尝试式升级；但它不可重入、不支持 Condition。写多为王时别用读写锁，直接用 ReentrantLock。"</p>
+</div>
+
+<p style="margin-top:28px;text-align:center;font-size:18px;font-weight:700;color:var(--ink)">
+  👉 下一篇预告：ThreadLocal 深挖——从线程私有存储到内存泄漏，为什么线程池里必须 remove()。
+</p>
 </section>
 
 </main>

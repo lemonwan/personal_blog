@@ -19,8 +19,15 @@
 <section class="station reveal" id="s1">
   <div class="station-head">
     <span class="station-no">第 1 站</span>
-    <h2>线程安全不只是加锁——而是设计</h2>
+    <h2>一场订单状态错乱的事故：线程安全是设计出来的</h2>
   </div>
+
+  <div class="crack">
+    <span class="crack-label">线上事故</span>
+    <p>某电商系统上线后，运营发现偶发"订单状态错乱"：一笔<strong>已支付（PAID）</strong>的订单，几分钟后竟变成了<strong>已取消（CANCELLED）</strong>。排查发现，订单对象是一个<strong>共享的可变对象</strong>，被多个线程同时读写——线程 A 把状态改成"已支付"后还没写完，线程 B 又把状态改成别的值，最后写回的顺序完全失控。更常见的还有两起：DCL 单例忘了写 <code>volatile</code>，线上偶发 NPE，重启才能恢复；<code>SimpleDateFormat</code> 被声明成 <code>static</code> 共享，多线程解析日期，解析出来的时间错乱。</p>
+  </div>
+
+  <p>这三类事故的根子都不是"锁没用好"，而是<strong>设计上允许了共享可变状态（Shared Mutable State）存在</strong>。真正的并发高手，第一反应不是"哪里要加锁"，而是"能不能让这里根本没有共享、没有可变"。</p>
 
   <div class="think">
     <p class="think-q">"面试问到线程安全，很多人第一反应就是 synchronized。但真正的高手知道——最好的线程安全，是从设计上就不需要加锁。"</p>
@@ -28,11 +35,53 @@
 
   <p>加锁（<code>synchronized</code>、<code>ReentrantLock</code>）只是解决线程安全的"最后手段"。锁意味着竞争，竞争意味着上下文切换和性能损耗，用不好还会带来死锁。Doug Lea 说过：<strong>"线程安全的最高境界不是把锁用好，而是让共享可变状态尽量少出现。"</strong></p>
 
-  <p>本文将覆盖 5 种核心模式：不可变对象、单例 5 种写法、生产者-消费者、线程安全集合选型、编码军规。</p>
+  <p>把"线程安全"的手段按成本从低到高排成一座金字塔，这就是本文的路线图：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 640 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="线程安全金字塔" style="max-width:640px;width:100%">
+      <defs>
+        <linearGradient id="py1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        <linearGradient id="py2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient>
+        <linearGradient id="py3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+        <linearGradient id="py4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+        <marker id="pya" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/></marker>
+      </defs>
+
+      <text x="320" y="22" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">线程安全金字塔：越往下越优先，加锁永远放最后</text>
+
+      <!-- 第 4 层：加锁（最窄） -->
+      <polygon points="280,70 360,70 340,105 300,105" fill="url(#py4)" opacity="0.85"/>
+      <text x="320" y="92" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">加锁</text>
+
+      <!-- 第 3 层：并发容器 -->
+      <polygon points="230,110 410,110 380,150 260,150" fill="url(#py3)" opacity="0.85"/>
+      <text x="320" y="134" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">并发容器 CHM / COW / BlockingQueue</text>
+
+      <!-- 第 2 层：线程局部 -->
+      <polygon points="170,155 470,155 430,195 210,195" fill="url(#py2)" opacity="0.85"/>
+      <text x="320" y="179" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">线程局部 ThreadLocal（隔离）</text>
+
+      <!-- 第 1 层：不可变（最宽） -->
+      <polygon points="90,200 550,200 500,240 140,240" fill="url(#py1)" opacity="0.85"/>
+      <text x="320" y="224" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">不可变对象 Immutable（无状态，零成本）</text>
+
+      <!-- 右侧成本箭头 -->
+      <line x1="590" y1="90" x2="590" y2="235" stroke="#64748b" stroke-width="1.5" marker-end="url(#pya)"/>
+      <text x="606" y="130" font-size="10" fill="#64748b" transform="rotate(90 606 130)">成本越来越高、越少用越好</text>
+
+      <text x="320" y="272" text-anchor="middle" font-size="11" fill="#64748b">读到这里先记住一句话：能用不可变，就别上锁。</text>
+      <text x="320" y="292" text-anchor="middle" font-size="11" fill="#64748b">本文 5 大块：不可变对象 → 单例 → 生产者-消费者 → 并发容器 → 军规与落地</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> 线程安全金字塔：不可变打底，加锁垫顶</figcaption>
+  </div>
+
+  <p>用餐厅后厨打个比方：<strong>一把公共菜刀</strong>（共享可变状态），三个厨师抢着用，就得排队等锁、还可能打架；<strong>给每个厨师发一把自己的刀</strong>（线程局部），互不干扰；而<strong>"切好的配菜"</strong>（不可变快照）谁都能随手拿，完全不用抢。本文的每一站，都是在教你少造"公共菜刀"、多造"配菜"。</p>
+
+  <p>本文将覆盖：<strong>不可变对象</strong>、<strong>单例 5 种写法</strong>、<strong>生产者-消费者（Producer-Consumer）</strong>、<strong>并发容器（ConcurrentHashMap / CopyOnWriteArrayList / ThreadLocal）</strong>、<strong>编码军规与生产落地</strong>。</p>
 
   <div class="crack">
     <span class="crack-label">面试官真正在考什么？</span>
-    <p>不是考你会不会写 <code>synchronized</code>，而是考你有没有<strong>设计并发程序的思维</strong>：能否从架构层面减少共享状态？能否选择合适的工具而不是万物皆锁？</p>
+    <p>不是考你会不会写 <code>synchronized</code>，而是考你有没有<strong>设计并发程序的思维</strong>：能否从架构层面减少共享状态？能否在"不可变 / 隔离 / 并发容器 / 加锁"之间做对选择？本文每一站都按这个思路展开。</p>
   </div>
 </section>
 
@@ -40,10 +89,10 @@
 <section class="station reveal" id="s2">
   <div class="station-head">
     <span class="station-no">第 2 站</span>
-    <h2>不可变对象：天生线程安全的设计</h2>
+    <h2>不可变对象：零开销的线程安全</h2>
   </div>
 
-  <p>如果对象创建后状态永远不能改变，那么无论多少线程同时访问它都不会有线程安全问题——没有"写"操作，就不存在数据竞争。JDK 中 <code>String</code>、<code>Integer</code>、<code>LocalDate</code> 都是不可变类。</p>
+  <p>如果对象创建后状态永远不能改变，那么无论多少线程同时访问它都不会有线程安全问题——没有"写"操作，就不存在数据竞争（Data Race）。这种对象叫<strong>不可变对象（Immutable Object）</strong>。JDK 里 <code>String</code>、<code>Integer</code>、<code>BigDecimal</code>、<code>LocalDate</code>、<code>DateTimeFormatter</code> 都是不可变类——它们能被 <code>static final</code> 挂在类上供所有线程随便读，正是这个原因。</p>
 
   <div class="srcbox">
     <div class="srcbox-head">自定义不可变类——四条规则</div>
@@ -51,26 +100,33 @@
     <span class="k">private final</span> <span class="t">String</span> orderId;                <span class="c">// 规则 2：所有字段 private final</span>
     <span class="k">private final</span> <span class="t">BigDecimal</span> totalAmount;
     <span class="k">private final</span> <span class="t">LocalDateTime</span> createTime;
-    <span class="k">private final</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; items;
+    <span class="k">private final</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; items;         <span class="c">// 可变引用字段！规则 3 的重点</span>
 
     <span class="k">public</span> <span class="t">OrderSnapshot</span>(<span class="t">String</span> id, <span class="t">BigDecimal</span> amt,
                         <span class="t">LocalDateTime</span> time, <span class="t">List</span>&lt;<span class="t">String</span>&gt; items) {
         <span class="k">this</span>.orderId = id;
         <span class="k">this</span>.totalAmount = amt;
         <span class="k">this</span>.createTime = time;
-        <span class="k">this</span>.items = <span class="t">List</span>.copyOf(items);     <span class="c">// 规则 3：防御性拷贝</span>
+        <span class="k">this</span>.items = <span class="t">List</span>.copyOf(items);     <span class="c">// 规则 3：防御性拷贝（Defensive Copy）</span>
     }
 
     <span class="c">// 规则 4：只提供 getter，不提供 setter</span>
     <span class="k">public</span> <span class="t">String</span> <span class="n">getOrderId</span>()          { <span class="k">return</span> orderId; }
     <span class="k">public</span> <span class="t">BigDecimal</span> <span class="n">getTotalAmount</span>()  { <span class="k">return</span> totalAmount; }
-    <span class="k">public</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; <span class="n">getItems</span>()     { <span class="k">return</span> items; } <span class="c">// List.copyOf 返回不可变 List</span>
+    <span class="k">public</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; <span class="n">getItems</span>()     { <span class="k">return</span> items; } <span class="c">// copyOf 返回的就是不可变 List</span>
 }</pre>
   </div>
 
   <div class="takeaway">
     <span class="takeaway-label">不可变 = 线程安全的本质原因</span>
-    <p>线程安全的本质是防止多线程同时修改共享状态。如果状态<strong>根本不能修改</strong>，就不存在"同时修改"的问题。不可变对象可被任意多线程同时读取，无需任何同步——这是零开销的线程安全。</p>
+    <p>线程安全的本质是防止多线程<strong>同时修改</strong>共享状态。如果状态<strong>根本不能修改</strong>，就不存在"同时修改"的问题。不可变对象可被任意多线程同时读取，无需任何同步——这是<strong>零开销（Zero-Cost）</strong>的线程安全，比任何锁都快。</p>
+  </div>
+
+  <p>注意一个容易混淆的点：<strong>不可变 ≠ 字段不改变，而是"对外不可变"</strong>。比如 <code>String</code> 的 <code>substring()</code> 返回的是新对象，原对象纹丝不动；<code>BigDecimal.add()</code> 返回新值，不会改掉自己。约定是：<strong>任何"修改"都返回新对象，绝不改动自身</strong>。</p>
+
+  <div class="crack">
+    <span class="crack-label">工作里怎么用</span>
+    <p>DTO / VO / 快照 / 事件对象 / 配置项，这些"只读一次、到处分发"的数据都应该设计成不可变：① 天然线程安全，随便放缓存、随便被并行读；② 值语义稳定，做 <code>equals()/hashCode()</code> 安全；③ 配合函数式风格（如 <code>Stream</code>、<code>CompletableFuture</code>）时不会产生并发副作用。这也是为什么 <code>LocalDate</code> 替代 <code>Date</code>、<code>DateTimeFormatter</code> 替代 <code>SimpleDateFormat</code>——后者就是吃了"可变 + 非线程安全"的亏。</p>
   </div>
 </section>
 
@@ -78,22 +134,90 @@
 <section class="station reveal" id="s3">
   <div class="station-head">
     <span class="station-no">第 3 站</span>
-    <h2>单例模式 5 种写法：从入门到最佳实践</h2>
+    <h2>防御性拷贝：可变引用字段怎么防</h2>
   </div>
 
-  <p><strong>写法一：饿汉式</strong></p>
+  <p>上一站的 <code>List&lt;String&gt; items</code> 是个<strong>可变引用字段</strong>——它本身是 <code>final</code>，指向的却是别人传进来的 <code>ArrayList</code>。如果不做防御性拷贝（Defensive Copy），外部改这个 <code>List</code>，就等于改了你"不可变"对象里的状态，"不可变"就名存实亡了。</p>
+
+  <div class="think">
+    <p class="think-q">追问：<code>private final List&lt;String&gt; list</code> 字段，为什么对象还不是不可变的？</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">点破</span>
+    <p><code>final</code> 保证的是"<strong>引用不能换</strong>"，不保证"<strong>引用指向的东西不能被改</strong>"。外面的人把同一个 <code>ArrayList</code> 传进来，再通过 <code>getItems()</code> 拿回去，两边拿着同一个数组，任意一方 <code>add/remove</code>，另一方立刻"被修改"。要防住，就得在<strong>两个口子</strong>都做拷贝：进（构造时拷贝）和出（getter 时拷贝/返回不可变视图）。</p>
+  </div>
+
   <div class="srcbox">
-    <div class="srcbox-head">Eager——类加载即创建</div>
+    <div class="srcbox-head">错误写法 vs 正确写法：两个口子都要堵</div>
+    <pre class="srcbox-file"><span class="c">// ✗ 错误：入口没拷贝，getter 直接泄漏内部引用</span>
+<span class="k">public class</span> <span class="t">BadConfig</span> {
+    <span class="k">private final</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; blackList;
+    <span class="k">public</span> <span class="t">BadConfig</span>(<span class="t">List</span>&lt;<span class="t">String</span>&gt; list) { <span class="k">this</span>.blackList = list; } <span class="c">// 外部还能改！</span>
+    <span class="k">public</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; <span class="n">getBlackList</span>()   { <span class="k">return</span> blackList; }      <span class="c">// 内部被泄漏！</span>
+}
+
+<span class="c">// ✓ 正确：入口 copyOf，getter 返回的本来就是不可变 List</span>
+<span class="k">public class</span> <span class="t">SafeConfig</span> {
+    <span class="k">private final</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; blackList;
+    <span class="k">public</span> <span class="t">SafeConfig</span>(<span class="t">List</span>&lt;<span class="t">String</span>&gt; list) {
+        <span class="k">this</span>.blackList = <span class="t">List</span>.copyOf(list);      <span class="c">// 入口拷贝一份，与外部彻底切断</span>
+    }
+    <span class="k">public</span> <span class="t">List</span>&lt;<span class="t">String</span>&gt; <span class="n">getBlackList</span>()   { <span class="k">return</span> blackList; }  <span class="c">// 内部本身就是不可变 List</span>
+}</pre>
+  </div>
+
+  <p>数组字段同理，<strong>getter 用 <code>clone()</code> 返回副本</strong>；Date / 集合这类可变引用字段，标准做法就是"进也拷、出也拷"。</p>
+
+  <div class="crack">
+    <span class="crack-label">一个大坑：unmodifiableList 不是不可变</span>
+    <p><code>Collections.unmodifiableList(list)</code> 只是给原 <code>list</code> 套了一层<strong>只读视图（View）</strong>——通过视图调 <code>add</code> 会抛异常，但<strong>持有原 list 的人仍然能改它</strong>，改了视图也能"看到"。真正不可变的是 Java 9+ 的 <code>List.of()</code> / <code>List.copyOf()</code>（以及 <code>Set.of</code>、<code>Map.of</code>），它们拷贝后连底层引用都不留。所以别拿 unmodifiable 冒充不可变。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">踩坑记录</span>
+    <p>真实案例：路由配置类把 <code>List&lt;Route&gt;</code> 直接塞进字段，结果另一个线程在"热更新配置"时往这个 List 里 add，正在遍历路由的请求线程立刻 <code>ConcurrentModificationException</code>，网关 502 了一分钟。修法就是上面这版 <code>copyOf</code> + 不可变视图，一行改动根治。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 4 站 ==================== -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>单例：并发面试的常青树，从饿汉式开始</h2>
+  </div>
+
+  <p>单例（Singleton）是并发面试的必考题，因为<strong>单例 = 全局共享 = 并发访问点</strong>。考单例，本质是考"你怎么管理共享状态"。单例有 5 种主流写法，我们一站一种，从最简单的开始。</p>
+
+  <p><strong>写法一：饿汉式（Eager Initialization）——类加载即创建</strong></p>
+  <div class="srcbox">
+    <div class="srcbox-head">Eager——线程安全靠 ClassLoader</div>
     <pre class="srcbox-file"><span class="k">public class</span> <span class="t">EagerSingleton</span> {
     <span class="k">private static final</span> <span class="t">EagerSingleton</span> INSTANCE = <span class="k">new</span> <span class="t">EagerSingleton</span>();
     <span class="k">private</span> <span class="t">EagerSingleton</span>() {}
     <span class="k">public static</span> <span class="t">EagerSingleton</span> <span class="n">getInstance</span>() { <span class="k">return</span> INSTANCE; }
-}  <span class="c">// 优点：简单可靠 | 缺点：可能浪费内存</span></pre>
+}  <span class="c">// 优点：简单可靠、天然线程安全 | 缺点：类一加载就创建，可能白占内存</span></pre>
   </div>
 
-  <p><strong>写法二：懒汉式</strong></p>
+  <p>为什么它线程安全？因为 <code>static final</code> 字段在<strong>类初始化阶段</strong>创建，而 JVM 保证类的 <code>&lt;clinit&gt;</code> 只执行一次、且对并发访问有锁保护（同一时刻只有一个线程能执行类的初始化）。所以饿汉式的线程安全是 <strong>JVM 层面白送的</strong>，一行同步代码都不用写。</p>
+
+  <div class="crack">
+    <span class="crack-label">饿汉式的代价</span>
+    <p>代价是<strong>没有延迟加载</strong>：只要类被引用（哪怕只是 <code>EagerSingleton.class</code>），实例就创建了。如果这个单例很重（连接池、加载大配置），而程序启动后根本没用它，就白白浪费了内存和启动时间。但反过来说，如果实例很轻、又几乎必用，饿汉式反而是最稳妥的选择——比如常量类、工具类。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 5 站 ==================== -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>懒汉式：synchronized 的代价</h2>
+  </div>
+
+  <p>想要延迟加载，最直接的想法是"用到才建"，但直接写会有竞态，于是给方法加 <code>synchronized</code>——这就是<strong>懒汉式（Lazy Initialization）</strong>：</p>
+
   <div class="srcbox">
-    <div class="srcbox-head">Lazy——每次都加锁</div>
+    <div class="srcbox-head">Lazy——每次调用都加锁</div>
     <pre class="srcbox-file"><span class="k">public class</span> <span class="t">LazySingleton</span> {
     <span class="k">private static</span> <span class="t">LazySingleton</span> instance;
     <span class="k">private</span> <span class="t">LazySingleton</span>() {}
@@ -101,19 +225,35 @@
         <span class="k">if</span> (instance == <span class="k">null</span>) instance = <span class="k">new</span> <span class="t">LazySingleton</span>();
         <span class="k">return</span> instance;
     }
-}  <span class="c">// 优点：延迟加载 | 缺点：每次调用都加锁，性能差</span></pre>
+}  <span class="c">// 优点：延迟加载 | 缺点：每次调用都过锁，高并发下是热点</span></pre>
   </div>
 
-  <p><strong>写法三：双重检查锁（DCL）</strong></p>
+  <p>问题在于 <code>synchronized</code> 加在了<strong>整个方法</strong>上：实例早就创建好了，后面每次 <code>getInstance()</code> 依然要排队过锁。<strong>读一个已经存在的引用，本来是无锁操作，却被锁串行化了</strong>——一百个线程同时取单例，就是一个接一个排队，吞吐量直线下降。</p>
+
+  <div class="crack">
+    <span class="crack-label">版本事实要准确</span>
+    <p>注意别说过时结论：现代 JVM 对 <code>synchronized</code> 做了大量优化（锁升级、偏向锁等），方法级加锁并不是"慢成狗"。但偏向锁从 JDK 15 起默认关闭、JDK 18 起废弃移除，锁的语义开销回归现实；更关键的是——<strong>锁住一个本不需要锁的操作，是设计问题，不是性能问题</strong>。后面几站都是在解决"怎么把锁去掉"。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 6 站 ==================== -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>DCL：volatile 与半初始化对象</h2>
+  </div>
+
+  <p><strong>双重检查锁（Double-Checked Locking，DCL）</strong>的思路：先无锁检查一次，非空直接返回（快路径）；为空才进锁，进锁后再检查一次（慢路径）。这样只有"第一次创建"才加锁：</p>
+
   <div class="srcbox">
-    <div class="srcbox-head">DCL——面试最常考</div>
+    <div class="srcbox-head">DCL——面试最常考，也最容易写错</div>
     <pre class="srcbox-file"><span class="k">public class</span> <span class="t">DclSingleton</span> {
     <span class="k">private static volatile</span> <span class="t">DclSingleton</span> instance; <span class="c">// 必须 volatile！</span>
     <span class="k">private</span> <span class="t">DclSingleton</span>() {}
     <span class="k">public static</span> <span class="t">DclSingleton</span> <span class="n">getInstance</span>() {
-        <span class="k">if</span> (instance == <span class="k">null</span>) {                     <span class="c">// 第一次检查（无锁）</span>
+        <span class="k">if</span> (instance == <span class="k">null</span>) {                     <span class="c">// 第一次检查（无锁，快路径）</span>
             <span class="k">synchronized</span> (<span class="t">DclSingleton</span>.<span class="k">class</span>) {
-                <span class="k">if</span> (instance == <span class="k">null</span>)                 <span class="c">// 第二次检查（有锁）</span>
+                <span class="k">if</span> (instance == <span class="k">null</span>)                 <span class="c">// 第二次检查（有锁，慢路径）</span>
                     instance = <span class="k">new</span> <span class="t">DclSingleton</span>();
             }
         }
@@ -122,12 +262,37 @@
 }</pre>
   </div>
 
-  <div class="crack">
-    <span class="crack-label">为什么 DCL 必须用 volatile？</span>
-    <p><code>new DclSingleton()</code> 字节码层面分三步：① 分配内存 → ② 构造函数初始化 → ③ 引用指向地址。JIT 可能将 ②③ 重排为 ①③②。线程 A 执行到 ③（引用非 null）但还没 ②（未初始化），线程 B 直接返回半初始化对象——<strong>NPE</strong>。<code>volatile</code> 禁止此重排序。</p>
+  <p>为什么必须双重检查？因为两个线程可能<strong>同时</strong>通过第一层检查（都看到 null），如果第二层不检查，就会创建出两个实例。为什么第二层要在锁内？因为不加锁的 <code>instance = new ...</code> 不是原子的，会被重排。</p>
+
+  <div class="formula">
+    <code>new DclSingleton()</code> 在字节码层面拆成三步：<br/>
+    ① <code>new</code>：分配内存（此时对象是"半成品"）<br/>
+    ② <code>invokespecial</code>：调用构造器，完成初始化<br/>
+    ③ <code>putstatic</code>：把引用赋值给 <code>instance</code>
   </div>
 
-  <p><strong>写法四：静态内部类</strong></p>
+  <p>JIT 允许把 ②③ 重排成 ①③②：先让引用"指过去"，再回头初始化。于是出现经典事故——</p>
+
+  <div class="crack">
+    <span class="crack-label">半初始化对象（Partially-Constructed Object）</span>
+    <p>线程 A 执行到 ③（<code>instance</code> 已经非 null，但构造器还没跑完）；线程 B 第一层检查发现 <code>instance != null</code>，<strong>直接返回这个半成品</strong>——字段还是默认值，用的时候 NPE。解决：字段加 <code>volatile</code>，利用 volatile 写-读的 happens-before 语义，禁止构造器相关指令重排到赋值之后（JSR-133 之后 <code>volatile</code> 才具备这个能力，所以 <strong>DCL 在 JDK 5+ 才真正成立</strong>，这是个常被追问的版本事实）。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">DCL 的位置</span>
+    <p>DCL 是"既要延迟加载、又不想每次加锁"的经典解，但有两个短板：<strong>① volatile 容易忘写</strong>，忘写就埋雷；<strong>② 代码读起来绕</strong>。所以很多团队（包括阿里规约的思路）在生产里更推荐后面两种写法——静态内部类或枚举，它们把同样的事情交给 JVM 做，一行锁都不用写。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 7 站 ==================== -->
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>静态内部类：无锁的延迟加载</h2>
+  </div>
+
+  <p><strong>静态内部类（Static Nested Class Holder）</strong>写法，业界也叫 Holder 模式：把实例放在一个私有的静态内部类里，让 <strong>JVM 的类加载机制</strong>同时搞定"延迟"和"线程安全"：</p>
+
   <div class="srcbox">
     <div class="srcbox-head">Holder Pattern——优雅推荐</div>
     <pre class="srcbox-file"><span class="k">public class</span> <span class="t">HolderSingleton</span> {
@@ -139,16 +304,65 @@
 }  <span class="c">// 延迟加载 + ClassLoader 保证线程安全 + 无锁</span></pre>
   </div>
 
-  <p><strong>写法五：枚举（Joshua Bloch 推荐）</strong></p>
-  <div class="srcbox">
-    <div class="srcbox-head">Enum——Effective Java 推荐</div>
-    <pre class="srcbox-file"><span class="k">public enum</span> <span class="t">EnumSingleton</span> {
-    INSTANCE;
-    <span class="k">public void</span> <span class="n">doSomething</span>() { System.out.println(<span class="t">"Working..."</span>); }
-}
-<span class="c">// EnumSingleton.INSTANCE.doSomething();</span>
-<span class="c">// 线程安全 + 防反射 + 防序列化 + 代码极简</span></pre>
+  <p>原理一句话：<strong>静态内部类只有在被引用时才会被加载</strong>。<code>HolderSingleton</code> 加载时，<code>Holder</code> 什么都不做；只有第一次调用 <code>getInstance()</code>，才触发 <code>Holder</code> 的类加载，此时 JVM 执行 <code>Holder</code> 的类初始化（创建 INSTANCE），而<strong>类初始化天然线程安全</strong>（同一类只会被初始化一次，多个线程会阻塞等待初始化完成）。</p>
+
+  <div class="crack">
+    <span class="crack-label">和饿汉式对比</span>
+    <p>饿汉式是"类加载就创建"，Holder 是"<strong>用到才触发创建</strong>"——同样是 ClassLoader 白送的线程安全，Holder 多了一个"延迟"能力，而且<strong>没有锁、没有 volatile</strong>。延迟加载 + 线程安全 + 零同步代码，这就是它被生产环境偏爱的原因。</p>
   </div>
+</section>
+
+<!-- ==================== 第 8 站 ==================== -->
+<section class="station reveal" id="s8">
+  <div class="station-head">
+    <span class="station-no">第 8 站</span>
+    <h2>枚举单例：为什么它是综合最优</h2>
+  </div>
+
+  <p><strong>枚举（Enum）单例</strong>是 Joshua Bloch 在《Effective Java》里力荐的写法，也是面试里"你推荐哪种单例"的标准答案：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">Enum——一行代码搞定单例</div>
+    <pre class="srcbox-file"><span class="k">public enum</span> <span class="t">ConfigSingleton</span> {
+    <span class="t">INSTANCE</span>;                                    <span class="c">// 唯一的实例，JVM 保证</span>
+
+    <span class="k">private final</span> <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; cache =
+            <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();            <span class="c">// 单例里可以带自己的状态</span>
+
+    <span class="k">public</span> <span class="t">String</span> <span class="n">get</span>(<span class="t">String</span> key)  { <span class="k">return</span> cache.get(key); }
+    <span class="k">public void</span> <span class="n">put</span>(<span class="t">String</span> key, <span class="t">String</span> value) { cache.put(key, value); }
+}
+<span class="c">// 使用：ConfigSingleton.INSTANCE.get("timeout");</span></pre>
+  </div>
+
+  <p>为什么它最推荐？四个"天然"：</p>
+
+  <ul>
+    <li><strong>天然唯一</strong>：枚举常量在类加载时由 JVM 创建且只创建一次，多线程并发取 <code>INSTANCE</code> 绝对只有一个实例；</li>
+    <li><strong>天然防反射</strong>：反射 <code>Constructor.newInstance()</code> 创建枚举会直接抛 <code>IllegalArgumentException: Cannot reflectively create enum objects</code>——JDK 在语言层面禁止了这条路；</li>
+    <li><strong>天然防序列化破坏</strong>：枚举的序列化只写出枚举<strong>名字</strong>，反序列化时走 <code>Enum.valueOf()</code> 找回 JVM 里已有的那个常量，绝不会 new 出第二个实例；</li>
+    <li><strong>天然线程安全</strong>：同样由类加载机制保证，且实例化时机可控（首次访问枚举常量时）。</li>
+  </ul>
+
+  <div class="crack">
+    <span class="crack-label">前四种写法都挡不住的两个破坏手段</span>
+    <p>饿汉 / 懒汉 / DCL / 静态内部类，本质都是"普通类 + 静态字段"，都能被两个手段打破单例：<strong>① 反射</strong>：<code>setAccessible(true)</code> 后调私有构造器，new 出第二个实例；<strong>② 序列化</strong>：实现 <code>Serializable</code> 后反序列化会绕过构造器生成新实例（需要 <code>readResolve()</code> 才能兜住）。枚举把这两条路都在语言层面堵死了——这就是"枚举最推荐"的底气。代价只有一个：枚举不能继承其它类（单继承限制），需要继承的场景才退回去用静态内部类。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">生产选型一句话</span>
+    <p>不需要继承 → 用<strong>枚举</strong>；框架限制不能用枚举（如部分老代码风格）→ 用<strong>静态内部类</strong>；实例极轻且必用 → <strong>饿汉式</strong>也完全没问题；DCL 只在面试题里当主角，生产慎写。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 9 站 ==================== -->
+<section class="station reveal" id="s9">
+  <div class="station-head">
+    <span class="station-no">第 9 站</span>
+    <h2>五种写法对比总表与生产选型</h2>
+  </div>
+
+  <p>把 5 种写法放在一张图里，面试时"从入门到最佳实践"一口气讲完：</p>
 
   <div class="fig">
     <svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
@@ -208,8 +422,21 @@
       <text x="720" y="291" text-anchor="middle" font-size="12" fill="#059669">&#9733;&#9733;&#9733;&#9733;&#9733;</text>
       <text x="410" y="328" text-anchor="middle" font-size="11" fill="#64748b">&#9733; = Joshua Bloch《Effective Java》推荐</text>
     </svg>
-    <figcaption><span class="fig-no">图 1</span> 单例模式 5 种写法多维度对比——枚举是综合最优解</figcaption>
+    <figcaption><span class="fig-no">图 2</span> 单例模式 5 种写法多维度对比——枚举是综合最优解</figcaption>
   </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>写法</th><th>线程安全</th><th>延迟加载</th><th>防反射</th><th>防序列化</th><th>适用场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>饿汉式</strong></td><td>✅ ClassLoader</td><td>❌ 类加载即建</td><td>❌</td><td>❌</td><td>实例轻、几乎必用（常量/工具类）</td></tr>
+      <tr><td><strong>懒汉式</strong></td><td>✅ 方法级 synchronized</td><td>✅</td><td>❌</td><td>❌</td><td>几乎不推荐，每次调用过锁</td></tr>
+      <tr><td><strong>DCL</strong></td><td>✅ volatile + 锁</td><td>✅</td><td>❌</td><td>❌</td><td>面试常考；生产慎用（易忘 volatile）</td></tr>
+      <tr><td><strong>静态内部类</strong></td><td>✅ ClassLoader</td><td>✅</td><td>❌</td><td>❌</td><td>需要延迟加载且不能用枚举时</td></tr>
+      <tr><td><strong>枚举</strong></td><td>✅ JVM 保证</td><td>✅（首次访问常量时）</td><td>✅ 语言层面禁止</td><td>✅ 反序列化返回同实例</td><td><strong>默认首选</strong></td></tr>
+    </tbody>
+  </table>
 
   <div class="takeaway">
     <span class="takeaway-label">面试回答策略</span>
@@ -217,14 +444,78 @@
   </div>
 </section>
 
-<!-- ==================== 第 4 站 ==================== -->
-<section class="station reveal" id="s4">
+<!-- ==================== 第 10 站 ==================== -->
+<section class="station reveal" id="s10">
   <div class="station-head">
-    <span class="station-no">第 4 站</span>
-    <h2>生产者-消费者：BlockingQueue 的经典协作</h2>
+    <span class="station-no">第 10 站</span>
+    <h2>单例的坑：有状态单例、反射与序列化破坏</h2>
   </div>
 
-  <p>生产者负责生产数据放入缓冲区，消费者从缓冲区取出处理。缓冲区满时生产者阻塞，空时消费者阻塞。<code>BlockingQueue</code> 把这个同步逻辑封装好了：</p>
+  <p>选型只是第一步，单例真正在线上出问题，往往是下面这几个坑。</p>
+
+  <h3>坑 1：有状态单例 = 定时炸弹</h3>
+
+  <p>单例是全 JVM 共享的，如果单例里放了<strong>可变字段</strong>，就等于把共享可变状态做成了全局的——多线程一读写就竞态。最典型的就是 <code>static SimpleDateFormat</code>（内部有可变 Calendar 字段，非线程安全）和"全局计数器"。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">有状态单例的反面教材</div>
+    <pre class="srcbox-file"><span class="c">// ✗ 定时炸弹：单例里的可变字段被多线程乱改</span>
+<span class="k">public enum</span> <span class="t">Counter</span> {
+    <span class="t">INSTANCE</span>;
+    <span class="k">private int</span> count;                        <span class="c">// 可变状态！多个线程 ++count 会丢更新</span>
+    <span class="k">public int</span> <span class="n">incr</span>() { <span class="k">return</span> ++count; }
+}
+
+<span class="c">// ✓ 正确：状态要么外移，要么用并发原子工具</span>
+<span class="k">public enum</span> <span class="t">Counter</span> {
+    <span class="t">INSTANCE</span>;
+    <span class="k">private final</span> <span class="t">AtomicLong</span> count = <span class="k">new</span> <span class="t">AtomicLong</span>();  <span class="c">// 原子自增，无锁且安全</span>
+    <span class="k">public long</span> <span class="n">incr</span>() { <span class="k">return</span> count.incrementAndGet(); }
+}</pre>
+  </div>
+
+  <h3>坑 2：反射 / 序列化破坏（非枚举写法）</h3>
+
+  <p>普通类单例都能被反射绕过私有构造器，new 出第二份：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">反射破坏单例 + 防御手段</div>
+    <pre class="srcbox-file"><span class="c">// 攻击：反射调用私有构造器，绕过 getInstance</span>
+<span class="t">Constructor</span>&lt;<span class="t">EagerSingleton</span>&gt; c =
+        <span class="t">EagerSingleton</span>.<span class="k">class</span>.getDeclaredConstructor();
+c.setAccessible(<span class="k">true</span>);
+<span class="t">EagerSingleton</span> second = c.newInstance();   <span class="c">// 第二个实例诞生！</span>
+
+<span class="c">// 防御：构造器里加一道"只允许创建一次"的检查（加锁保证并发安全）</span>
+<span class="k">private static boolean</span> created;
+<span class="k">private</span> <span class="t">EagerSingleton</span>() {
+    <span class="k">synchronized</span> (<span class="t">EagerSingleton</span>.<span class="k">class</span>) {
+        <span class="k">if</span> (created) <span class="k">throw new</span> <span class="t">IllegalStateException</span>(<span class="s">"单例已被创建！"</span>);
+        created = <span class="k">true</span>;
+    }
+}</pre>
+  </div>
+
+  <p>序列化破坏同理：对象实现 <code>Serializable</code> 后，反序列化会绕过构造器生成新实例，需要在类里补一个 <code>readResolve()</code> 返回原实例。这些补丁代码写多了，你就明白为什么枚举单例最省心——<strong>它把这些防御都做进了语言里</strong>。</p>
+
+  <h3>坑 3：单例 ≠ 全 JVM 唯一</h3>
+
+  <p>面试追问："什么情况下单例会变成多例？"答案至少三个：<strong>① 多 ClassLoader</strong>（如 Tomcat 每个 WebApp 一个 ClassLoader，同一个类各加载一份）；<strong>② 反射/序列化</strong>（上面讲的）；<strong>③ 分布式部署</strong>——每台 JVM 一个实例，跨进程的"全局唯一"必须靠数据库唯一键、Redis 锁、ZooKeeper 之类的分布式手段，单例模式管不到。</p>
+
+  <div class="crack">
+    <span class="crack-label">Spring 的单例 ≠ 单例模式</span>
+    <p>Spring 容器里 <code>@Bean</code> 默认是"单例"（Singleton Scope），含义是"<strong>每个容器一个实例</strong>"，不是 JVM 级单例——两个 Spring 容器 / 两个 ClassLoader 下会有多份。另外 Spring 单例 Bean 默认<strong>无状态</strong>（stateful 要小心），这和单例模式的"全局唯一"是两码事，别混为一谈。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 11 站 ==================== -->
+<section class="station reveal" id="s11">
+  <div class="station-head">
+    <span class="station-no">第 11 站</span>
+    <h2>生产者-消费者：BlockingQueue 完整可运行示例</h2>
+  </div>
+
+  <p><strong>生产者-消费者（Producer-Consumer）</strong>是最经典的并发协作模式：生产者负责生产数据放入缓冲区，消费者从缓冲区取出处理。缓冲区满时生产者阻塞，空时消费者阻塞——这个"满/空"的同步逻辑，<code>BlockingQueue</code>（阻塞队列）已经全部封装好了，你不需要写一行 <code>wait/notify</code>。</p>
 
   <div class="fig">
     <svg viewBox="0 0 780 200" xmlns="http://www.w3.org/2000/svg" style="max-width:780px;width:100%">
@@ -239,7 +530,7 @@
       <text x="95" y="118" text-anchor="middle" font-size="10" fill="#93c5fd">满时阻塞</text>
       <line x1="175" y1="90" x2="270" y2="90" stroke="#64748b" stroke-width="2" marker-end="url(#ah)"/>
       <rect x="270" y="30" width="240" height="120" rx="12" fill="#f59e0b" opacity="0.12" stroke="#f59e0b" stroke-width="2"/>
-      <text x="390" y="55" text-anchor="middle" font-size="13" fill="#92400e" font-weight="bold">ArrayBlockingQueue(100)</text>
+      <text x="390" y="55" text-anchor="middle" font-size="13" fill="#92400e" font-weight="bold">ArrayBlockingQueue(10)</text>
       <rect x="290" y="68" width="28" height="22" rx="4" fill="#f59e0b" opacity="0.7"/>
       <rect x="322" y="68" width="28" height="22" rx="4" fill="#f59e0b" opacity="0.7"/>
       <rect x="354" y="68" width="28" height="22" rx="4" fill="#f59e0b" opacity="0.5"/>
@@ -256,93 +547,153 @@
       <text x="685" y="118" text-anchor="middle" font-size="10" fill="#86efac">空时阻塞</text>
       <text x="390" y="185" text-anchor="middle" font-size="11" fill="#64748b">put() 满时阻塞 | take() 空时阻塞 | 线程安全，无需额外同步</text>
     </svg>
-    <figcaption><span class="fig-no">图 2</span> 生产者-消费者模型——BlockingQueue 作为线程安全缓冲区</figcaption>
+    <figcaption><span class="fig-no">图 3</span> 生产者-消费者模型——BlockingQueue 作为线程安全缓冲区</figcaption>
   </div>
 
+  <p>下面是<strong>可以直接复制运行的完整示例</strong>（含 main 和优雅退出）：2 个生产者各产 5 条消息，2 个消费者并行消费，生产者干完投"毒丸（Poison Pill）"通知消费者下班：</p>
+
   <div class="srcbox">
-    <div class="srcbox-head">完整生产者-消费者示例</div>
-    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">ProducerConsumerDemo</span> {
-    <span class="k">private static final</span> <span class="t">BlockingQueue</span>&lt;<span class="t">String</span>&gt; queue =
-            <span class="k">new</span> <span class="t">ArrayBlockingQueue</span>&lt;&gt;(<span class="n">100</span>);  <span class="c">// 有界队列！</span>
+    <div class="srcbox-head">完整可运行：ProducerConsumerDemo</div>
+    <pre class="srcbox-file"><span class="k">import</span> <span class="t">java.util.concurrent</span>.*;
 
-    <span class="k">static class</span> <span class="t">Producer</span> <span class="k">implements</span> <span class="t">Runnable</span> {
-        <span class="k">private final</span> <span class="t">String</span> name;
-        <span class="t">Producer</span>(<span class="t">String</span> name) { <span class="k">this</span>.name = name; }
-        <span class="k">@Override public void</span> <span class="n">run</span>() {
-            <span class="k">try</span> {
-                <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">50</span>; i++) {
-                    queue.put(name + <span class="t">"-item-"</span> + i);  <span class="c">// 满时阻塞</span>
-                }
-            } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) { <span class="t">Thread</span>.currentThread().interrupt(); }
-        }
-    }
+<span class="k">public class</span> <span class="t">ProducerConsumerDemo</span> {
+    <span class="k">private static final</span> <span class="t">String</span> POISON = <span class="s">"POISON"</span>;  <span class="c">// 毒丸：通知消费者下班</span>
 
-    <span class="k">static class</span> <span class="t">Consumer</span> <span class="k">implements</span> <span class="t">Runnable</span> {
-        <span class="k">@Override public void</span> <span class="n">run</span>() {
-            <span class="k">try</span> {
-                <span class="k">while</span> (<span class="k">true</span>) {
-                    <span class="t">String</span> data = queue.take();  <span class="c">// 空时阻塞</span>
-                    <span class="c">// process(data)...</span>
+    <span class="k">public static void</span> <span class="n">main</span>(<span class="t">String</span>[] args) <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">BlockingQueue</span>&lt;<span class="t">String</span>&gt; queue = <span class="k">new</span> <span class="t">ArrayBlockingQueue</span>&lt;&gt;(<span class="n">10</span>); <span class="c">// 有界队列</span>
+        <span class="t">ExecutorService</span> pool = <span class="t">Executors</span>.newFixedThreadPool(<span class="n">4</span>);
+
+        <span class="c">// 2 个生产者：各产 5 条，产完投一颗毒丸</span>
+        <span class="k">for</span> (<span class="k">int</span> p = <span class="n">1</span>; p &lt;= <span class="n">2</span>; p++) {
+            <span class="k">final int</span> no = p;
+            pool.submit(() -&gt; {
+                <span class="k">try</span> {
+                    <span class="k">for</span> (<span class="k">int</span> i = <span class="n">1</span>; i &lt;= <span class="n">5</span>; i++) {
+                        queue.put(<span class="s">"P"</span> + no + <span class="s">"-item-"</span> + i); <span class="c">// 满时阻塞</span>
+                    }
+                    queue.put(POISON);  <span class="c">// 告诉消费者：没有更多数据了</span>
+                } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {
+                    <span class="t">Thread</span>.currentThread().interrupt();  <span class="c">// 恢复中断标志</span>
                 }
-            } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) { <span class="t">Thread</span>.currentThread().interrupt(); }
+            });
         }
+
+        <span class="c">// 2 个消费者：吃到毒丸就退出</span>
+        <span class="k">for</span> (<span class="k">int</span> c = <span class="n">1</span>; c &lt;= <span class="n">2</span>; c++) {
+            <span class="k">final int</span> no = c;
+            pool.submit(() -&gt; {
+                <span class="k">try</span> {
+                    <span class="k">while</span> (<span class="k">true</span>) {
+                        <span class="t">String</span> data = queue.take();       <span class="c">// 空时阻塞</span>
+                        <span class="k">if</span> (POISON.equals(data)) <span class="k">break</span>; <span class="c">// 下班！</span>
+                        System.out.println(<span class="s">"C"</span> + no + <span class="s">" 消费: "</span> + data);
+                    }
+                } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {
+                    <span class="t">Thread</span>.currentThread().interrupt();
+                }
+            });
+        }
+
+        pool.shutdown();                              <span class="c">// 不再接收新任务</span>
+        pool.awaitTermination(<span class="n">10</span>, <span class="t">TimeUnit</span>.SECONDS); <span class="c">// 等全部任务跑完</span>
     }
 }</pre>
   </div>
 
+  <div class="crack">
+    <span class="crack-label">毒丸（Poison Pill）是什么</span>
+    <p><code>take()</code> 是阻塞的，生产者干完活后消费者会永远等下去，程序退不掉。毒丸就是<strong>一条约定好的"结束信号"消息</strong>：生产者发完数据后补发一颗毒丸，消费者收到就 break。多少个消费者就发多少颗毒丸（这里是 2 颗）。这是生产环境常用的优雅停机技巧，比 <code>shutdownNow</code> 硬中断更平滑。</p>
+  </div>
+
+  <p>别忘了 <code>InterruptedException</code> 的处理规范：<strong>捕获后要 <code>Thread.currentThread().interrupt()</code> 恢复中断标志</strong>，不能吞掉——否则上层代码无法感知中断。这是阿里规约明确要求的一条。</p>
+</section>
+
+<!-- ==================== 第 12 站 ==================== -->
+<section class="station reveal" id="s12">
+  <div class="station-head">
+    <span class="station-no">第 12 站</span>
+    <h2>阻塞队列家族与反压</h2>
+  </div>
+
+  <p>选队列先看懂 <code>BlockingQueue</code> 的<strong>四组 API</strong>，它们的区别就是"队列满/空时怎么办"：</p>
+
   <table class="nb-table">
     <thead>
-      <tr><th>BlockingQueue 实现</th><th>有界/无界</th><th>适用场景</th></tr>
+      <tr><th>方法组</th><th>队列满/空时的行为</th><th>适用场景</th></tr>
     </thead>
     <tbody>
-      <tr><td><strong>ArrayBlockingQueue</strong></td><td>有界</td><td>通用生产者-消费者，首选</td></tr>
-      <tr><td><strong>LinkedBlockingQueue</strong></td><td>可选（默认无界）</td><td>高吞吐，但一定要指定容量！</td></tr>
-      <tr><td><strong>SynchronousQueue</strong></td><td>容量 0</td><td>线程间直接交接（CachedThreadPool）</td></tr>
-      <tr><td><strong>DelayQueue</strong></td><td>无界</td><td>定时任务、延迟重试</td></tr>
+      <tr><td><code>add() / remove()</code></td><td>直接抛 <code>IllegalStateException</code> / <code>NoSuchElementException</code></td><td>不允许失败、立即报错</td></tr>
+      <tr><td><code>offer() / poll()</code></td><td>返回 <code>false</code> / <code>null</code>（非阻塞探测）</td><td>不想等待，失败就下次再来</td></tr>
+      <tr><td><code>put() / take()</code></td><td><strong>阻塞等待</strong>，直到有空间/有数据</td><td>生产者-消费者（最常用）</td></tr>
+      <tr><td><code>offer(e, t, unit) / poll(t, unit)</code></td><td>等待最多 t 时间，超时返回 <code>false</code>/<code>null</code></td><td>带超时上限的等待，防无限阻塞</td></tr>
+    </tbody>
+  </table>
+
+  <p>再看主流实现怎么选：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>实现</th><th>有界/无界</th><th>特点</th><th>适用场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>ArrayBlockingQueue</strong></td><td>有界（必须指定容量）</td><td>数组实现，一把锁，公平可配</td><td>通用生产者-消费者，<strong>首选</strong></td></tr>
+      <tr><td><strong>LinkedBlockingQueue</strong></td><td>可选（默认无界）</td><td>链表实现，两把锁（put/take 分离）</td><td>高吞吐，但生产<strong>必须指定容量</strong></td></tr>
+      <tr><td><strong>SynchronousQueue</strong></td><td>容量 0</td><td>不存数据，生产者和消费者<strong>直接交接</strong></td><td><code>newCachedThreadPool</code> 底层用它</td></tr>
+      <tr><td><strong>PriorityBlockingQueue</strong></td><td>无界</td><td>按优先级出队</td><td>任务带优先级</td></tr>
+      <tr><td><strong>DelayQueue</strong></td><td>无界</td><td>元素到延迟时间才能取出</td><td>定时任务、延迟重试</td></tr>
     </tbody>
   </table>
 
   <div class="crack">
     <span class="crack-label">有界 vs 无界：为什么生产环境推荐有界？</span>
-    <p>无界队列在生产者速度远大于消费者时会无限增长，最终 OOM。有界队列<strong>天然形成反压</strong>：队列满时生产者阻塞，被迫降速，系统自动达到平衡。</p>
+    <p>无界队列在生产者速度远大于消费者时会无限增长，最终 <strong>OOM</strong>——这是 <code>new LinkedBlockingQueue()</code> 不带容量参数的常见事故。有界队列<strong>天然形成反压（Backpressure）</strong>：队列满时生产者阻塞、被迫降速，系统自动达到"生产速率 = 消费速率"的平衡。就像高速公路收费站：车流太大时，排队让车辆自然限速，而不是让车全部挤进高速（内存）里爆掉。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">工作里怎么用</span>
+    <p>日志异步落盘（Logback 的 <code>AsyncAppender</code> 底层就是有界 <code>ArrayBlockingQueue</code>，默认容量 256，满了丢弃告警）、任务分发队列、消息推送缓冲、削峰填谷——这些场景统一模板：<strong>有界队列 + put/take + 毒丸停机</strong>。别自己用 <code>wait/notify</code> 重造轮子，JDK 封装的队列在"锁粒度、条件队列、性能"上都比手写可靠。</p>
   </div>
 </section>
 
-<!-- ==================== 第 5 站 ==================== -->
-<section class="station reveal" id="s5">
+<!-- ==================== 第 13 站 ==================== -->
+<section class="station reveal" id="s13">
   <div class="station-head">
-    <span class="station-no">第 5 站</span>
-    <h2>线程安全集合选型：别再用错容器了</h2>
+    <span class="station-no">第 13 站</span>
+    <h2>分段锁与读写分离：ConcurrentHashMap 简述</h2>
   </div>
+
+  <p>前面的模式都是在"减少共享"，但有些数据必须共享（缓存、注册表、计数器）。这时候的思路从"消灭共享"变成"<strong>精细地管理共享</strong>"——<code>ConcurrentHashMap</code>（CHM）就是教科书。</p>
+
+  <p>CHM 的演进本身就是一道高频面试题：</p>
 
   <table class="nb-table">
     <thead>
-      <tr><th>场景</th><th>推荐</th><th>避免</th><th>原因</th></tr>
+      <tr><th>版本</th><th>锁策略</th><th>读操作</th><th>粒度</th></tr>
     </thead>
     <tbody>
-      <tr><td><strong>并发 Map</strong></td><td><code>ConcurrentHashMap</code></td><td><code>synchronizedMap</code></td><td>CHM 读不加锁；syncMap 全表加锁，差 5-10x</td></tr>
-      <tr><td><strong>并发 List</strong></td><td><code>CopyOnWriteArrayList</code></td><td><code>Vector</code></td><td>COW 读无锁（读多写少）；Vector 每方法 synchronized</td></tr>
-      <tr><td><strong>并发 Queue</strong></td><td><code>ConcurrentLinkedQueue</code></td><td><code>synchronizedList</code> 当队列</td><td>无锁 CAS，高并发性能远优于包装</td></tr>
-      <tr><td><strong>并发 Set</strong></td><td><code>ConcurrentHashMap.newKeySet()</code></td><td><code>synchronizedSet</code></td><td>底层就是 CHM</td></tr>
-      <tr><td><strong>阻塞队列</strong></td><td><code>ArrayBlockingQueue</code></td><td>自己 wait/notify</td><td>JDK 已封装好，自写易出 Bug</td></tr>
+      <tr><td><strong>JDK 7</strong></td><td><strong>分段锁（Segment Locking）</strong>：整表切成若干 Segment（默认 16 段，每段继承 <code>ReentrantLock</code>），写操作只锁所在的段</td><td>需要加锁/加 volatile 保证可见性</td><td>段级（默认 16 个锁）</td></tr>
+      <tr><td><strong>JDK 8</strong></td><td>放弃分段锁：插入用 <strong>CAS</strong>，冲突时才 <code>synchronized</code> 锁<strong>单个桶头节点</strong></td><td><strong>完全无锁</strong>（Node 的 val/next 是 volatile）</td><td>桶级（几百个锁）</td></tr>
     </tbody>
   </table>
 
+  <p>类比一下：JDK 7 像"图书馆按楼层锁门"——借一层楼的书，整层锁上；JDK 8 像"每个书架独立管理"——多数时候读者直接拿书（CAS 无锁），只有同一本书被抢着借（哈希冲突）才排队。锁粒度从"段"细化到"桶"，并发度从 16 提到接近数组长度。</p>
+
+  <div class="crack">
+    <span class="crack-label">读写分离（Read-Write Separation）思想</span>
+    <p>CHM 背后有个普适思想：<strong>读操作尽量不加锁，写操作才互斥</strong>——也就是读写分离。同样思想的还有 <code>ReentrantReadWriteLock</code>（读读共享、读写互斥，详见卷二读写锁那一篇）和"缓存 + DB"架构（读走缓存无锁，写落库加锁）。面试聊到 CHM，能顺带说出"读无锁 + 写锁桶 + 读写分离"这三点，段位就出来了。</p>
+  </div>
+
   <div class="srcbox">
-    <div class="srcbox-head">核心差异速览</div>
+    <div class="srcbox-head">核心差异速览：synchronizedMap vs CHM</div>
     <pre class="srcbox-file"><span class="c">// synchronizedMap：读和读之间也互斥！100 线程读也要排队</span>
 <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; syncMap = <span class="t">Collections</span>.synchronizedMap(<span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;());
 
 <span class="c">// ConcurrentHashMap：100 线程可以同时读，互不影响</span>
 <span class="t">ConcurrentMap</span>&lt;<span class="t">String</span>, <span class="t">String</span>&gt; chm = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();
 <span class="c">// get()  → 无锁读取（volatile 保证可见性）</span>
-<span class="c">// put()  → CAS + synchronized(只锁单个桶节点)</span>
+<span class="c">// put()  → CAS + synchronized（只锁单个桶节点）</span>
 
-<span class="c">// CopyOnWriteArrayList：写时复制整个数组</span>
-<span class="t">List</span>&lt;<span class="t">String</span>&gt; cow = <span class="k">new</span> <span class="t">CopyOnWriteArrayList</span>&lt;&gt;();
-cow.add(<span class="t">"hello"</span>); <span class="c">// 加锁 → 复制数组 → 修改 → 替换引用</span>
-cow.get(<span class="n">0</span>);       <span class="c">// 无锁读 volatile 数组</span>
-<span class="c">// 适合：读 10000 次才写 1 次（配置、监听器列表）</span></pre>
+<span class="c">// 注意：CHM 的 size()/isEmpty() 是弱一致的，别拿来做精确判断</span></pre>
   </div>
 
   <div class="takeaway">
@@ -351,10 +702,96 @@ cow.get(<span class="n">0</span>);       <span class="c">// 无锁读 volatile �
   </div>
 </section>
 
-<!-- ==================== 第 6 站 ==================== -->
-<section class="station reveal" id="s6">
+<!-- ==================== 第 14 站 ==================== -->
+<section class="station reveal" id="s14">
   <div class="station-head">
-    <span class="station-no">第 6 站</span>
+    <span class="station-no">第 14 站</span>
+    <h2>CopyOnWrite 模式：读多写少的利器</h2>
+  </div>
+
+  <p><strong>写时复制（Copy-On-Write，COW）</strong>的思路：读操作永远无锁，写操作"<strong>复制一份新的再改，改完整体换掉引用</strong>"——读线程看到的永远是某个一致时刻的完整快照，永远不会读到"改了一半"的数据。代表性实现是 <code>CopyOnWriteArrayList</code>：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">CopyOnWriteArrayList 的写路径（简化）</div>
+    <pre class="srcbox-file"><span class="k">public boolean</span> <span class="n">add</span>(E e) {
+    <span class="k">synchronized</span> (lock) {                    <span class="c">// ① 写才加锁</span>
+        <span class="t">Object</span>[] es = getArray();             <span class="c">// ② 拿到当前数组</span>
+        <span class="t">Object</span>[] newElements = <span class="t">Arrays</span>.copyOf(es, es.length + <span class="n">1</span>);
+        newElements[es.length] = e;              <span class="c">// ③ 复制 + 修改（原数组不动）</span>
+        setArray(newElements);                   <span class="c">// ④ volatile 替换引用，读线程立刻可见</span>
+        <span class="k">return true</span>;
+    }
+}
+<span class="c">// get(i) 无锁：直接读 volatile 数组的某个下标</span></pre>
+  </div>
+
+  <p>类比：文档的"另存为新版本"——写的人复制一份改，读者手里还是旧版本，谁都不会看到涂改到一半的稿子。或者像 Git：提交（写）生成新快照，所有历史快照不可变，任何时刻 checkout 出来的都是完整一致的状态。</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>维度</th><th>CopyOnWriteArrayList</th><th>ArrayList + 手动加锁</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>读</td><td>无锁，O(1)</td><td>每次读都要抢锁</td></tr>
+      <tr><td>写</td><td>加锁 + 复制整个数组 O(n) + 内存翻倍</td><td>加锁直接改，O(1)</td></tr>
+      <tr><td>迭代器</td><td>弱一致性（看到创建时的快照），<strong>不抛 ConcurrentModificationException</strong></td><td>可能抛异常/读到中间状态</td></tr>
+      <tr><td>适合</td><td><strong>读多写极少</strong>（配置、黑白名单、监听器列表）</td><td>写频繁或数据量大</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">COW 的代价与适用边界</span>
+    <p>COW 不是万能药：<strong>写一次要复制整个数组</strong>，如果数组有 10 万元素、每秒写 100 次，就是每秒复制 1000 万次引用——GC 压力爆炸。所以它只适合<strong>"读 10000 次才写 1 次"</strong>的场景：网关黑白名单、路由规则、监听器注册表、配置快照。另外它的迭代器是弱一致的（Weakly Consistent），遍历期间看不到并发写，这是设计取舍，不是 bug。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">工作里怎么用</span>
+    <p>典型落地：网关的热更新黑白名单用 <code>CopyOnWriteArrayList</code> 或 <code>CopyOnWriteArraySet</code>——配置中心推送新名单时整份换掉，正在校验的请求用旧名单，<strong>永不阻塞、永不错乱</strong>。记住判断标准：写频率 <code> &lt; 读频率的千分之一</code> 才值得上 COW。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 15 站 ==================== -->
+<section class="station reveal" id="s15">
+  <div class="station-head">
+    <span class="station-no">第 15 站</span>
+    <h2>ThreadLocal 存储模式：每线程一个私有储物柜</h2>
+  </div>
+
+  <p>如果一份数据<strong>本来就只属于当前线程</strong>（请求号、事务上下文、数据库连接），那根本不用共享——用<strong>线程局部存储（Thread-Local Storage）</strong>，也就是 <code>ThreadLocal</code>。它让每个线程持有自己的副本，读自己的、写自己的，零竞争。</p>
+
+  <p>原理一句话（细节见卷二 ThreadLocal 深剖那一篇）：每个 <code>Thread</code> 内部有一个 <code>ThreadLocalMap</code>，以 <code>ThreadLocal</code> 实例为 key、你的数据为 value。<code>set</code> 存进当前线程的 map，<code>get</code> 从当前线程的 map 取——<strong>天然隔离</strong>。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">请求链路透传 traceId：最经典的用法</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">TraceContext</span> {
+    <span class="k">private static final</span> <span class="t">ThreadLocal</span>&lt;<span class="t">String</span>&gt; TRACE_ID = <span class="k">new</span> <span class="t">ThreadLocal</span>&lt;&gt;();
+
+    <span class="k">public static void</span> <span class="n">set</span>(<span class="t">String</span> id)  { TRACE_ID.set(id); }
+    <span class="k">public static</span> <span class="t">String</span> <span class="n">get</span>()       { <span class="k">return</span> TRACE_ID.get(); }
+    <span class="k">public static void</span> <span class="n">clear</span>()     { TRACE_ID.remove(); }   <span class="c">// 必须清理！</span>
+}
+
+<span class="c">// 拦截器里：进入请求时 set，处理完 finally 里 remove</span>
+<span class="k">try</span> {
+    <span class="t">TraceContext</span>.set(requestId);   <span class="c">// 本线程往后的日志都能带上 traceId</span>
+    <span class="n">handle</span>(request);
+} <span class="k">finally</span> {
+    <span class="t">TraceContext</span>.clear();          <span class="c">// 防止线程池复用后"串号"</span>
+}</pre>
+  </div>
+
+  <p>生产里 <code>ThreadLocal</code> 的典型位置：<strong>日志 MDC 的 traceId</strong>（链路追踪）、<strong>Spring 事务上下文</strong>（<code>TransactionSynchronizationManager</code>）、<strong>请求级用户信息</strong>、<strong>数据库连接复用</strong>。</p>
+
+  <div class="crack">
+    <span class="crack-label">线程池复用 + 不 remove() = 串号事故</span>
+    <p><code>ThreadLocal</code> 配线程池有个大坑：线程池的线程是<strong>复用的</strong>，上一次请求在这个线程里 set 的值，下次请求还<strong>赖在这个线程的 map 里</strong>。于是 A 请求的 traceId 出现在 B 请求的日志里（串号）、A 的登录用户信息泄漏给 B（越权）。所以规范只有一条：<strong>用 ThreadLocal 必须成对写 try/finally + remove()</strong>。另外线程池场景要"父线程值传给子线程"，用 <code>InheritableThreadLocal</code>；要跨线程池透传，用阿里的 <code>TransmittableThreadLocal</code>（都详见 ThreadLocal 深剖篇）。</p>
+  </div>
+</section>
+
+<!-- ==================== 第 16 站 ==================== -->
+<section class="station reveal" id="s16">
+  <div class="station-head">
+    <span class="station-no">第 16 站</span>
     <h2>线程安全编码六大军规</h2>
   </div>
 
@@ -398,26 +835,7 @@ cow.get(<span class="n">0</span>);       <span class="c">// 无锁读 volatile �
 
   <div class="crack">
     <span class="crack-label">SimpleDateFormat 的坑</span>
-    <p><code>SimpleDateFormat</code> 非线程安全！定义为 <code>static</code> 共享，多线程 <code>format()</code>/<code>parse()</code> 会日期错乱。方案：用 Java 8 的 <code>DateTimeFormatter</code>（不可变，线程安全，推荐）。</p>
-  </div>
-</section>
-
-<!-- ==================== 第 7 站 ==================== -->
-<section class="station reveal" id="s7">
-  <div class="station-head">
-    <span class="station-no">第 7 站</span>
-    <h2>总结：模式选型与常见陷阱</h2>
-  </div>
-
-  <div class="recap">
-    <p><strong>线程安全设计模式选型指南：</strong></p>
-    <ul>
-      <li><strong>状态不变</strong> → 不可变对象，零开销线程安全</li>
-      <li><strong>全局唯一实例</strong> → 枚举（最佳）或静态内部类（需延迟加载）</li>
-      <li><strong>生产-消费解耦</strong> → ArrayBlockingQueue（有界）</li>
-      <li><strong>并发 Map</strong> → ConcurrentHashMap</li>
-      <li><strong>读多写少 List</strong> → CopyOnWriteArrayList</li>
-    </ul>
+    <p><code>SimpleDateFormat</code> 非线程安全（内部有可变 Calendar 字段）！定义为 <code>static</code> 共享，多线程 <code>format()</code>/<code>parse()</code> 会日期错乱。方案：用 Java 8 的 <code>DateTimeFormatter</code>（不可变，线程安全，推荐），或 <code>ThreadLocal&lt;SimpleDateFormat&gt;</code> 兜底。</p>
   </div>
 
   <table class="nb-table">
@@ -431,15 +849,117 @@ cow.get(<span class="n">0</span>);       <span class="c">// 无锁读 volatile �
       <tr><td>手动 new Thread()</td><td>线程数失控 OOM</td><td>使用线程池</td></tr>
       <tr><td>HashMap 多线程使用</td><td>数据丢失（JDK 8+）</td><td>换 ConcurrentHashMap</td></tr>
       <tr><td>synchronized 里做 IO</td><td>吞吐量暴跌</td><td>IO 移到锁外</td></tr>
+      <tr><td>ThreadLocal 不 remove()</td><td>traceId 串号、内存泄漏</td><td>try/finally + remove()</td></tr>
+      <tr><td>内部可变 List 不防御拷贝</td><td>不可变对象被外部改穿</td><td>进/出双向拷贝（copyOf）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ==================== 第 17 站 ==================== -->
+<section class="station reveal" id="s17">
+  <div class="station-head">
+    <span class="station-no">第 17 站</span>
+    <h2>模式落地地图：每个模式在真实系统里的位置</h2>
+  </div>
+
+  <p>把本文所有模式放进一张"生产地图"，面试时能说出"我在哪儿见过它"才是真懂：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>模式</th><th>真实系统里的位置</th><th>具体例子</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>不可变对象</strong></td><td>DTO / VO / 快照 / 事件 / 配置项</td><td>订单快照、路由规则、接口出参对象</td></tr>
+      <tr><td><strong>单例（枚举/静态内部类）</strong></td><td>工具类、常量池、全局客户端</td><td>配置加载器、Redis 客户端、注册中心连接</td></tr>
+      <tr><td><strong>生产者-消费者</strong></td><td>异步落盘、任务队列、削峰</td><td>Logback AsyncAppender、日志采集、消息推送</td></tr>
+      <tr><td><strong>ConcurrentHashMap</strong></td><td>本地缓存、注册表、统计</td><td>Spring BeanDefinition 存储、接口频控计数</td></tr>
+      <tr><td><strong>CopyOnWrite</strong></td><td>黑白名单、监听器、路由表</td><td>网关白名单、配置中心热更新</td></tr>
+      <tr><td><strong>ThreadLocal</strong></td><td>请求上下文、链路追踪、连接复用</td><td>日志 MDC traceId、Spring 事务上下文</td></tr>
+      <tr><td><strong>读写分离</strong></td><td>缓存 + 配置中心、读多写少存储</td><td>本地缓存 + 数据库、配置快照</td></tr>
+      <tr><td><strong>加锁（最后手段）</strong></td><td>必须互斥的写操作</td><td>库存扣减、账户余额变动</td></tr>
     </tbody>
   </table>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试终极回答框架</span>
-    <p>"线程安全的核心是<strong>减少共享可变状态</strong>。首先用不可变对象，其次用并发集合（ConcurrentHashMap、BlockingQueue），配合线程池管理生命周期。单例用枚举或静态内部类。真正需要锁时，优先 <code>ReentrantLock</code> 或 <code>ReadWriteLock</code>，且锁范围尽可能小。"</p>
+  <div class="crack">
+    <span class="crack-label">把模式映射到分布式系统</span>
+    <p>这套思维在分布式系统里完全复用：不可变对象 ≈ 事件溯源里不可变的 Event；ThreadLocal ≈ 线程/租户隔离；CopyOnWrite ≈ 不可变基础设施（配置全量下发、蓝绿发布）；分段锁 ≈ 分库分表（把一把大锁拆成 N 把小锁）；反压 ≈ 消息队列的消费限速。<strong>并发模式从来不是 Java 独有，是"共享状态管理"的通用解法</strong>——这句话说出口，面试官会高看你一眼。</p>
   </div>
 
-  <p><strong>下一篇预告：</strong><code>CompletableFuture</code> 异步编程——用链式 API 编排复杂的异步任务流。</p>
+  <div class="takeaway">
+    <span class="takeaway-label">模式选型速查</span>
+    <ul>
+      <li><strong>状态不变</strong> → 不可变对象，零开销线程安全</li>
+      <li><strong>全局唯一实例</strong> → 枚举（最佳）或静态内部类（需延迟加载）</li>
+      <li><strong>生产-消费解耦</strong> → ArrayBlockingQueue（有界）</li>
+      <li><strong>并发 Map</strong> → ConcurrentHashMap</li>
+      <li><strong>读多写少 List</strong> → CopyOnWriteArrayList</li>
+      <li><strong>线程私有数据</strong> → ThreadLocal + finally remove()</li>
+      <li><strong>万不得已才上锁</strong>，且锁范围越小越好</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ==================== 第 18 站 ==================== -->
+<section class="station reveal" id="s18">
+  <div class="station-head">
+    <span class="station-no">第 18 站</span>
+    <h2>面试 30 秒总结</h2>
+  </div>
+
+  <p>如果面试官问"<strong>你怎么保证线程安全？</strong>"，用下面这段 30 秒版答案（背下来，然后按他的追问展开对应站点）：</p>
+
+  <div class="formula">
+    "保证线程安全，我的第一原则是<strong>减少共享可变状态</strong>：<br/>
+    ① 能用不可变对象就不用可变对象——DTO、配置、快照做成 Immutable，零同步开销；<br/>
+    ② 必须共享的，优先用并发容器——ConcurrentHashMap、CopyOnWriteArrayList、BlockingQueue；<br/>
+    ③ 线程私有数据用 ThreadLocal，但必须 try/finally remove()；<br/>
+    ④ 单例优先枚举（JVM 保证唯一、防反射、防序列化）或静态内部类；<br/>
+    ⑤ 最后才考虑加锁，且锁范围越小越好、绝不在锁里做 IO。"
+  </div>
+
+  <p>面试官顺着往下追的四个高频追问，一站一个答案：</p>
+
+  <ul>
+    <li><strong>Q1：单例有哪几种写法？</strong> → 第 4–9 站：饿汉 / 懒汉 / DCL / 静态内部类 / 枚举，重点讲 DCL 的 volatile 和枚举为什么最优。</li>
+    <li><strong>Q2：DCL 为什么要 volatile？</strong> → 第 6 站：<code>new</code> 三步可能重排成"先赋引用后初始化"，volatile 靠 happens-before 禁重排，防半初始化对象。</li>
+    <li><strong>Q3：CopyOnWriteArrayList 什么时候不能用？</strong> → 第 14 站：写频繁或数组大时，每次写复制整数组，内存翻倍、GC 压力大；它适合读多写极少。</li>
+    <li><strong>Q4：BlockingQueue 和普通队列有什么区别？</strong> → 第 12 站：put/take 会阻塞，天然提供"满/空"同步与反压；四组 API 的行为差异要能脱口而出。</li>
+  </ul>
+
+  <div class="crack">
+    <span class="crack-label">怎么破题</span>
+    <p>面试官问线程安全，别急着背 API。<strong>先给出"金字塔"框架</strong>（不可变 → 线程局部 → 并发容器 → 加锁），再落一两个具体场景（如"我做过订单快照用不可变对象、日志用有界队列 + 毒丸停机"）。有框架、有案例、有取舍，比背十条八股有用得多。</p>
+  </div>
+</section>
+
+<!-- ==================== 总结 ==================== -->
+<section class="station reveal" id="summary">
+  <div class="station-head">
+    <span class="station-no">总结</span>
+    <h2>这一篇你掌握了什么</h2>
+  </div>
+
+  <div class="recap">
+    <h3>核心知识点回顾</h3>
+    <ul>
+      <li><strong>线程安全金字塔</strong>：不可变对象（零成本）→ 线程局部（隔离）→ 并发容器（封装同步）→ 加锁（最后手段）。加锁解决不了设计问题，减少共享可变状态才是根本；</li>
+      <li><strong>不可变对象</strong>：final 类 + 全部字段 private final + 防御性拷贝 + 只读 getter；可变引用字段要"进也拷、出也拷"；<code>unmodifiableList</code> 只是视图，<code>List.of()/copyOf()</code> 才是真不可变；</li>
+      <li><strong>单例 5 种写法</strong>：饿汉（ClassLoader 白送线程安全）、懒汉（每次过锁）、DCL（必须 volatile 防半初始化）、静态内部类（无锁延迟加载）、枚举（JVM 保证唯一 + 天然防反射/防序列化，<strong>综合最优</strong>）；</li>
+      <li><strong>单例的坑</strong>：有状态单例 = 定时炸弹（状态用 AtomicXXX 或外移）；普通类单例可被反射/序列化破坏；多 ClassLoader 与分布式部署下"单例"不唯一；Spring 单例 ≠ 单例模式；</li>
+      <li><strong>生产者-消费者</strong>：BlockingQueue 封装了满/空同步；四组 API（抛异常 / 返回 false / 阻塞 / 超时）；有界队列天然形成反压防 OOM；毒丸模式优雅停机；</li>
+      <li><strong>并发容器</strong>：CHM 从 JDK 7 分段锁演进到 JDK 8 的 CAS + 锁桶头、读完全无锁；CopyOnWriteArrayList 读无锁、写复制，适合读多写极少；ThreadLocal 线程私有，必须 finally remove() 防串号；</li>
+      <li><strong>编码军规</strong>：最小化共享、优先不可变、并发集合替代同步包装、避免有状态单例、用线程池、缩小同步范围、锁外做 IO、DateTimeFormatter 替代 SimpleDateFormat。</li>
+    </ul>
+  </div>
+
+  <div class="recap">
+    <h3>一句话总结</h3>
+    <p>线程安全不是"把锁用好"，而是<strong>"让共享可变状态尽量少出现"</strong>：先用不可变对象和线程局部把共享消灭在设计里，再用并发容器把剩下的共享管精细，最后才轮到锁——<strong>能用不可变，就别上锁</strong>。</p>
+  </div>
+
+  <p style="margin-top:28px;text-align:center;font-size:16px;font-weight:600;color:var(--ink)">
+    👉 下一篇预告：Fork/Join 与并行 Stream——分治思想、工作窃取与并行流的五大陷阱。
+  </p>
 </section>
 
 </main>

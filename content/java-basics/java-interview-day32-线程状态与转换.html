@@ -17,16 +17,18 @@
 
 <div class="think"><div class="think-q">"说说线程的生命周期？它有哪些状态？状态之间怎么转换？"</div></div>
 
-<p>候选人 A 脱口而出：<strong>"有 NEW、RUNNING、BLOCKED、WAITING、TERMINATED 五种"</strong>。面试官微微一笑——漏了一个。</p>
+<p>候选人 A 脱口而出：<strong>"有 NEW、RUNNING、BLOCKED、WAITING、TERMINATED 五种"</strong>。面试官微微一笑——漏了一个，还多了一个（Java 里没有 RUNNING）。</p>
 
-<p>候选人 B 胸有成竹：<strong>"六种！NEW、RUNNABLE、BLOCKED、WAITING、TIMED_WAITING、TERMINATED"</strong>。面试官追问：那状态之间的 12 次转换分别由什么 API 触发？候选人沉默了。</p>
+<p>候选人 B 胸有成竹：<strong>"六种！NEW、RUNNABLE、BLOCKED、WAITING、TIMED_WAITING、TERMINATED"</strong>。面试官追问：那状态之间的转换分别由什么 API 触发？候选人沉默了。</p>
+
+<p>再往深挖一层，这是生产排查的基本功：凌晨服务变慢，<code>jstack</code> 抓个线程转储，满屏都是 <code>BLOCKED (on object monitor)</code>——如果你不熟状态机，这屏输出对你就只是一堆英文。</p>
 
 <p>这道题之所以<strong>高频</strong>，是因为它同时考察了三件事：</p>
 
 <ul>
   <li>你是否真正读过 <code>Thread.State</code> 的源码</li>
   <li>你是否理解每种状态背后的<strong>操作系统调度原理</strong></li>
-  <li>你能否把<strong>状态转换</strong>和<strong>具体 API</strong> 一一对应</li>
+  <li>你能否把<strong>状态转换</strong>和<strong>具体 API</strong> 一一对应，并用 jstack 在生产里验证</li>
 </ul>
 
 <p>发车之前，先问自己三个问题：</p>
@@ -34,7 +36,7 @@
 <ul>
   <li>RUNNABLE 到底包不包括"正在等待 CPU 时间片"的线程？</li>
   <li>BLOCKED 和 WAITING 的本质区别是什么？</li>
-  <li><code>Thread.sleep()</code> 和 <code>Object.wait()</code> 分别进入什么状态？</li>
+  <li><code>Thread.sleep()</code> 和 <code>Object.wait()</code> 分别进入什么状态？释放锁吗？</li>
 </ul>
 
 <p>带着这些问题，我们开始今天的线程之旅。</p>
@@ -64,85 +66,12 @@
 
 <div class="crack"><span class="crack-label">细节 2</span>BLOCKED 专指等待 <strong>synchronized 监视器锁</strong>。如果你用的是 <code>ReentrantLock.lock()</code>，线程进入的是 WAITING 或 TIMED_WAITING（底层走 LockSupport.park），而不是 BLOCKED。</div>
 
-<div class="takeaway"><span class="takeaway-label">记住</span>Thread.State 只有 6 个值，不是 5 个也不是 7 个。面试时说"5 种"直接扣分。</div>
+<div class="takeaway"><span class="takeaway-label">记住</span>Thread.State 只有 6 个值，不是 5 个也不是 7 个。面试时说"5 种"直接扣分，说"有 RUNNING"也算错。</div>
 </section>
 
-<!-- ═══════════════ 第3站：状态详解 ═══════════════ -->
+<!-- ═══════════════ 第3站：完整状态机 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>六种状态逐一拆解</h2></div>
-
-<table class="nb-table">
-<thead><tr><th>状态</th><th>含义</th><th>进入方式（代码示例）</th><th>退出条件</th></tr></thead>
-<tbody>
-<tr><td><strong>NEW</strong></td><td>对象已创建，尚未调用 start()</td><td><code>Thread t = new Thread();</code></td><td>调用 <code>t.start()</code></td></tr>
-<tr><td><strong>RUNNABLE</strong></td><td>正在运行 或 等待 CPU 调度</td><td><code>t.start()</code>、从阻塞返回</td><td>获取不到锁 / 主动等待 / 执行完毕</td></tr>
-<tr><td><strong>BLOCKED</strong></td><td>等待获取 synchronized 监视器锁</td><td>进入 synchronized 块但锁被其他线程持有</td><td>获取到锁 → RUNNABLE</td></tr>
-<tr><td><strong>WAITING</strong></td><td>无限期等待另一个线程的动作</td><td><code>Object.wait()</code>、<code>LockSupport.park()</code>、<code>Thread.join()</code></td><td>被 notify / unpark → RUNNABLE 或 BLOCKED</td></tr>
-<tr><td><strong>TIMED_WAITING</strong></td><td>限时等待，到时间自动恢复</td><td><code>Thread.sleep(ms)</code>、<code>Object.wait(ms)</code>、<code>LockSupport.parkNanos()</code></td><td>超时 / 被唤醒 → RUNNABLE 或 BLOCKED</td></tr>
-<tr><td><strong>TERMINATED</strong></td><td>run() 方法执行完毕</td><td>run() 正常返回或抛出未捕获异常</td><td>终态，不可再转换</td></tr>
-</tbody>
-</table>
-
-<p>下面用代码验证每个状态：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ThreadStateDemo.java</b></span></div>
-<pre><code><span class="c">// 1. NEW</span>
-<span class="t">Thread</span> t1 = <span class="k">new</span> <span class="t">Thread</span>(() -> {});
-System.out.println(t1.getState()); <span class="c">// NEW</span>
-
-<span class="c">// 2. RUNNABLE</span>
-<span class="t">Thread</span> t2 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    <span class="k">while</span> (<span class="k">true</span>) { <span class="t">Thread</span>.yield(); }
-});
-t2.start();
-System.out.println(t2.getState()); <span class="c">// RUNNABLE</span>
-
-<span class="c">// 3. BLOCKED</span>
-<span class="t">Object</span> lock = <span class="k">new</span> <span class="t">Object</span>();
-<span class="t">Thread</span> holder = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    <span class="k">synchronized</span> (lock) {
-        <span class="k">try</span> { <span class="t">Thread</span>.sleep(<span class="n">999999</span>); } <span class="k">catch</span> (<span class="t">Exception</span> e) {}
-    }
-});
-holder.start();
-<span class="t">Thread</span>.sleep(<span class="n">100</span>); <span class="c">// 等 holder 拿到锁</span>
-<span class="t">Thread</span> t3 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    <span class="k">synchronized</span> (lock) {} <span class="c">// 拿不到锁 → BLOCKED</span>
-});
-t3.start();
-<span class="t">Thread</span>.sleep(<span class="n">100</span>);
-System.out.println(t3.getState()); <span class="c">// BLOCKED</span>
-
-<span class="c">// 4. WAITING</span>
-<span class="t">Thread</span> t4 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    <span class="k">synchronized</span> (lock) {
-        <span class="k">try</span> { lock.wait(); } <span class="k">catch</span> (<span class="t">Exception</span> e) {}
-    }
-});
-<span class="c">// ... start + sleep → WAITING</span>
-
-<span class="c">// 5. TIMED_WAITING</span>
-<span class="t">Thread</span> t5 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    <span class="k">try</span> { <span class="t">Thread</span>.sleep(<span class="n">60000</span>); } <span class="k">catch</span> (<span class="t">Exception</span> e) {}
-});
-t5.start();
-<span class="t">Thread</span>.sleep(<span class="n">100</span>);
-System.out.println(t5.getState()); <span class="c">// TIMED_WAITING</span>
-
-<span class="c">// 6. TERMINATED</span>
-<span class="t">Thread</span> t6 = <span class="k">new</span> <span class="t">Thread</span>(() -> {});
-t6.start();
-t6.join();
-System.out.println(t6.getState()); <span class="c">// TERMINATED</span></code></pre>
-</div>
-
-<div class="takeaway"><span class="takeaway-label">核心</span>每种状态都有明确的"入口 API"和"出口条件"。面试不是背名词，而是能说清楚<strong>什么代码产生什么状态</strong>。</div>
-</section>
-
-<!-- ═══════════════ 第4站：完整状态机 SVG ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>完整状态机：6 个状态 × 12 次转换</h2></div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>完整状态机：6 个状态 × 12 次转换</h2></div>
 
 <p>下面这张图是线程生命周期的<strong>完整状态机</strong>。每一条箭头对应一次状态转换，箭头上标注了触发的 API。建议你放大仔细看——面试时能画出这张图，基本满分。</p>
 
@@ -229,14 +158,13 @@ System.out.println(t6.getState()); <span class="c">// TERMINATED</span></code></
   <path d="M490,250 C530,400 510,530 475,608" stroke="#C75050" stroke-width="2" fill="none" marker-end="url(#arr-r)"/>
   <text x="535" y="520" font-family="monospace" font-size="11" fill="#C75050" font-weight="600">⑩ run() 执行完毕</text>
 
-  <!-- ═══ 转换 11: BLOCKED → TERMINATED ═══ -->
-  <path d="M160,410 C160,520 280,600 348,630" stroke="#C75050" stroke-width="2" fill="none" marker-end="url(#arr-r)"/>
-  <text x="140" y="540" font-family="monospace" font-size="11" fill="#C75050" font-weight="600">⑪ 被中断</text>
-  <text x="140" y="555" font-family="monospace" font-size="11" fill="#C75050" font-weight="600">    (interrupt)</text>
+  <!-- ═══ 转换 11: WAITING → TERMINATED ═══ -->
+  <path d="M390,470 C370,520 380,560 405,608" stroke="#C75050" stroke-width="2" fill="none" marker-end="url(#arr-r)"/>
+  <text x="290" y="560" font-family="monospace" font-size="11" fill="#C75050" font-weight="600">⑪ 被中断 → 异常抛出 run() 结束</text>
 
-  <!-- ═══ 转换 12: WAITING → TERMINATED ═══ -->
-  <path d="M450,470 C450,520 450,560 455,608" stroke="#C75050" stroke-width="2" fill="none" marker-end="url(#arr-r)"/>
-  <text x="420" y="560" font-family="monospace" font-size="11" fill="#C75050" font-weight="600">⑫ 被中断</text>
+  <!-- ═══ 转换 12: TIMED_WAITING → TERMINATED ═══ -->
+  <path d="M710,410 C690,520 580,580 553,625" stroke="#C75050" stroke-width="2" fill="none" marker-end="url(#arr-r)"/>
+  <text x="655" y="540" font-family="monospace" font-size="11" fill="#C75050" font-weight="600">⑫ 被中断 → 异常抛出 run() 结束</text>
 
   <!-- 图例 -->
   <rect x="20" y="620" width="14" height="14" rx="3" fill="#E3EDF7" stroke="#3E6B8F"/>
@@ -268,83 +196,353 @@ System.out.println(t6.getState()); <span class="c">// TERMINATED</span></code></
 <tr><td>⑥</td><td>WAITING → RUNNABLE</td><td><code>LockSupport.unpark()</code>，无需竞争锁直接进入就绪</td></tr>
 <tr><td>⑦</td><td>RUNNABLE → TIMED_WAITING</td><td><code>Thread.sleep(ms)</code> / <code>Object.wait(ms)</code> / <code>Thread.join(ms)</code> / <code>LockSupport.parkNanos()</code></td></tr>
 <tr><td>⑧</td><td>TIMED_WAITING → RUNNABLE</td><td>超时自动恢复 / 被 <code>unpark()</code> 唤醒</td></tr>
-<tr><td>⑨</td><td>TIMED_WAITING → BLOCKED</td><td><code>Object.wait(ms)</code> 超时后需重新竞争 synchronized 锁</td></tr>
+<tr><td>⑨</td><td>TIMED_WAITING → BLOCKED</td><td><code>Object.wait(ms)</code> 超时或唤醒后需重新竞争 synchronized 锁</td></tr>
 <tr><td>⑩</td><td>RUNNABLE → TERMINATED</td><td><code>run()</code> 方法正常返回或抛出未捕获异常</td></tr>
-<tr><td>⑪</td><td>BLOCKED → TERMINATED</td><td><code>Thread.interrupt()</code>（阻塞中的线程被中断）</td></tr>
-<tr><td>⑫</td><td>WAITING → TERMINATED</td><td><code>Thread.interrupt()</code>（等待中的线程被中断）</td></tr>
+<tr><td>⑪</td><td>WAITING → TERMINATED</td><td>被 <code>Thread.interrupt()</code> → 抛 <code>InterruptedException</code> 未被捕获 → 冲出 <code>run()</code> → 线程死亡</td></tr>
+<tr><td>⑫</td><td>TIMED_WAITING → TERMINATED</td><td>同上（sleep / join(ms) / wait(ms) 中被打断）</td></tr>
 </tbody>
 </table>
+
+<div class="think"><div class="think-q">注意 ⑪⑫ 的细节：被中断的 WAITING 线程不是"直接被中断杀死"，而是 <code>wait()/park()</code> 抛出 <code>InterruptedException</code>，这个异常如果一路未捕获冲出 <code>run()</code>，线程才进入 TERMINATED。如果业务代码 catch 住了继续跑，线程还活着（只是中断标志被清掉了）。另外 <strong>BLOCKED 状态不能响应 interrupt</strong>——等 synchronized 锁的线程被打断只是记下标志，照样排队，拿到锁之后代码才有机会检查标志。</div></div>
 
 <div class="formula">状态机核心公式：<strong>状态 = f(最近一次 API 调用)</strong>——每次转换都由一个明确的 API 触发，不存在"隐式"转换。</div>
 </section>
 
-<!-- ═══════════════ 第5站：BLOCKED vs WAITING ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>BLOCKED vs WAITING：最容易混淆的一对</h2></div>
-
-<p>这是面试中<strong>区分度最高</strong>的追问。很多候选人把二者混为一谈，实际上它们的本质完全不同：</p>
-
-<div class="think"><div class="think-q">BLOCKED 是"被动阻塞"——我想拿锁，但锁在别人手里，JVM 自动帮我排队。<br>
-WAITING 是"主动等待"——我自己调了 wait() / park()，选择放弃执行权，等别人通知我。</div></div>
-
-<p>用一张表对比：</p>
+<!-- ═══════════════ 第4站：六种状态详解 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>六种状态逐一拆解 + 代码验证</h2></div>
 
 <table class="nb-table">
-<thead><tr><th>维度</th><th>BLOCKED</th><th>WAITING</th></tr></thead>
+<thead><tr><th>状态</th><th>含义</th><th>进入方式（代码示例）</th><th>退出条件</th></tr></thead>
 <tbody>
-<tr><td>触发方式</td><td>自动（JVM 检测到锁不可用）</td><td>手动调用 API</td></tr>
-<tr><td>等待的东西</td><td>synchronized 监视器锁</td><td>另一个线程的信号</td></tr>
-<tr><td>谁来唤醒</td><td>持有锁的线程释放锁后，JVM 自动唤醒</td><td>其他线程调用 notify() / unpark()</td></tr>
-<tr><td>超时</td><td>不支持（无限等待）</td><td>有 TIMED_WAITING 版本</td></tr>
-<tr><td>ReentrantLock</td><td>不产生 BLOCKED！</td><td>lock() → WAITING（底层走 park）</td></tr>
+<tr><td><strong>NEW</strong></td><td>对象已创建，尚未调用 start()</td><td><code>Thread t = new Thread();</code></td><td>调用 <code>t.start()</code></td></tr>
+<tr><td><strong>RUNNABLE</strong></td><td>正在运行 或 等待 CPU 调度</td><td><code>t.start()</code>、从阻塞返回</td><td>获取不到锁 / 主动等待 / 执行完毕</td></tr>
+<tr><td><strong>BLOCKED</strong></td><td>等待获取 synchronized 监视器锁</td><td>进入 synchronized 块但锁被其他线程持有</td><td>获取到锁 → RUNNABLE</td></tr>
+<tr><td><strong>WAITING</strong></td><td>无限期等待另一个线程的动作</td><td><code>Object.wait()</code>、<code>LockSupport.park()</code>、<code>Thread.join()</code></td><td>被 notify / unpark → RUNNABLE 或 BLOCKED</td></tr>
+<tr><td><strong>TIMED_WAITING</strong></td><td>限时等待，到时间自动恢复</td><td><code>Thread.sleep(ms)</code>、<code>Object.wait(ms)</code>、<code>LockSupport.parkNanos()</code></td><td>超时 / 被唤醒 → RUNNABLE 或 BLOCKED</td></tr>
+<tr><td><strong>TERMINATED</strong></td><td>run() 方法执行完毕</td><td>run() 正常返回或抛出未捕获异常</td><td>终态，不可再转换</td></tr>
 </tbody>
 </table>
 
-<p>代码对比——同样"等待获取资源"，产生的状态完全不同：</p>
+<p>下面用代码验证每个状态：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>BlockedVsWaiting.java</b></span></div>
-<pre><code><span class="c">// ━━━ 场景 1：synchronized → BLOCKED ━━━</span>
-<span class="t">Object</span> monitor = <span class="k">new</span> <span class="t">Object</span>();
+<div class="srcbox-head"><span class="srcbox-file"><b>ThreadStateDemo.java</b></span></div>
+<pre><code><span class="c">// 1. NEW</span>
+<span class="t">Thread</span> t1 = <span class="k">new</span> <span class="t">Thread</span>(() -> {});
+System.out.println(t1.getState()); <span class="c">// NEW</span>
 
-<span class="t">Thread</span> t1 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    <span class="k">synchronized</span> (monitor) {
-        <span class="t">Thread</span>.sleep(<span class="n">10000</span>); <span class="c">// 持锁休眠</span>
-    }
-});
-
+<span class="c">// 2. RUNNABLE</span>
 <span class="t">Thread</span> t2 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    <span class="k">synchronized</span> (monitor) { <span class="c">// 拿不到锁 → BLOCKED</span>
-        System.out.println(<span class="n">"拿到了"</span>);
+    <span class="k">while</span> (<span class="k">true</span>) { <span class="t">Thread</span>.yield(); }
+});
+t2.start();
+System.out.println(t2.getState()); <span class="c">// RUNNABLE</span>
+
+<span class="c">// 3. BLOCKED</span>
+<span class="t">Object</span> lock = <span class="k">new</span> <span class="t">Object</span>();
+<span class="t">Thread</span> holder = <span class="k">new</span> <span class="t">Thread</span>(() -> {
+    <span class="k">synchronized</span> (lock) {
+        <span class="k">try</span> { <span class="t">Thread</span>.sleep(<span class="n">999999</span>); } <span class="k">catch</span> (<span class="t">Exception</span> e) {}
     }
 });
-
-<span class="c">// ━━━ 场景 2：ReentrantLock → WAITING ━━━</span>
-<span class="t">ReentrantLock</span> lock = <span class="k">new</span> <span class="t">ReentrantLock</span>();
-
+holder.start();
+<span class="t">Thread</span>.sleep(<span class="n">100</span>); <span class="c">// 等 holder 拿到锁</span>
 <span class="t">Thread</span> t3 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    lock.lock();
-    <span class="k">try</span> {
-        <span class="t">Thread</span>.sleep(<span class="n">10000</span>); <span class="c">// 持锁休眠</span>
-    } <span class="k">finally</span> { lock.unlock(); }
+    <span class="k">synchronized</span> (lock) {} <span class="c">// 拿不到锁 → BLOCKED</span>
 });
+t3.start();
+<span class="t">Thread</span>.sleep(<span class="n">100</span>);
+System.out.println(t3.getState()); <span class="c">// BLOCKED</span>
 
+<span class="c">// 4. WAITING</span>
 <span class="t">Thread</span> t4 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
-    lock.lock(); <span class="c">// 拿不到锁 → WAITING（不是 BLOCKED！）</span>
-    <span class="k">try</span> {
-        System.out.println(<span class="n">"拿到了"</span>);
-    } <span class="k">finally</span> { lock.unlock(); }
-});</code></pre>
+    <span class="k">synchronized</span> (lock) {
+        <span class="k">try</span> { lock.wait(); } <span class="k">catch</span> (<span class="t">Exception</span> e) {}
+    }
+});
+<span class="c">// ... start + sleep → WAITING</span>
+
+<span class="c">// 5. TIMED_WAITING</span>
+<span class="t">Thread</span> t5 = <span class="k">new</span> <span class="t">Thread</span>(() -> {
+    <span class="k">try</span> { <span class="t">Thread</span>.sleep(<span class="n">60000</span>); } <span class="k">catch</span> (<span class="t">Exception</span> e) {}
+});
+t5.start();
+<span class="t">Thread</span>.sleep(<span class="n">100</span>);
+System.out.println(t5.getState()); <span class="c">// TIMED_WAITING</span>
+
+<span class="c">// 6. TERMINATED</span>
+<span class="t">Thread</span> t6 = <span class="k">new</span> <span class="t">Thread</span>(() -> {});
+t6.start();
+t6.join();
+System.out.println(t6.getState()); <span class="c">// TERMINATED</span></code></pre>
 </div>
 
-<div class="crack"><span class="crack-label">底层原因</span>synchronized 的阻塞由 JVM 的 ObjectMonitor 管理，线程排队在 EntryList 中，状态标记为 BLOCKED。而 ReentrantLock 底层基于 AQS + LockSupport.park()，线程被 park 后状态是 WAITING。<strong>这是 synchronized 和 ReentrantLock 在实现层面的核心差异之一。</strong></div>
-
-<div class="takeaway"><span class="takeaway-label">面试金句</span>BLOCKED 是 JVM 帮你排队等锁（自动），WAITING 是你自己选择等待信号（主动）。ReentrantLock.lock() 产生的不是 BLOCKED 而是 WAITING。</div>
+<div class="takeaway"><span class="takeaway-label">核心</span>每种状态都有明确的"入口 API"和"出口条件"。面试不是背名词，而是能说清楚<strong>什么代码产生什么状态</strong>。</div>
 </section>
 
-<!-- ═══════════════ 第6站：jstack 实战 ═══════════════ -->
+<!-- ═══════════════ 第5站：RUNNABLE 深挖 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>RUNNABLE 深挖：一个 JVM 状态，两个 OS 状态</h2></div>
+
+<p>第 2 站埋了个细节：RUNNABLE 包含"等待 CPU 时间片"。这句话值得单独展开，因为它揭示了 <strong>JVM 状态和 OS 状态不是一一对应的</strong>。</p>
+
+<table class="nb-table">
+<thead><tr><th>JVM 状态</th><th>对应的 OS 线程状态</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>NEW</td><td>OS 线程还没创建</td><td>start() 之前，只有 Java 对象，没有底层 pthread</td></tr>
+<tr><td>RUNNABLE</td><td><strong>Running（正在 CPU 上执行）</strong></td><td>占用一个 CPU 核，正在跑 run()</td></tr>
+<tr><td>　</td><td><strong>Ready（就绪，在运行队列里排队）</strong></td><td>时间片用完了 / 被更高优先级线程抢占了，但随时可被调度</td></tr>
+<tr><td>BLOCKED</td><td>OS 层面阻塞（等 JVM 的 monitor，JVM 内部排队）</td><td>注意：不是 OS 的 futex 阻塞，是 JVM 的 ObjectMonitor 管理</td></tr>
+<tr><td>WAITING / TIMED_WAITING</td><td>OS 层面阻塞（futex / 条件变量）</td><td>park 会真正让 OS 线程睡掉，不占 CPU</td></tr>
+<tr><td>TERMINATED</td><td>OS 线程退出</td><td>pthread 已 join 回收</td></tr>
+</tbody>
+</table>
+
+<p>三个推论，全是面试加分点：</p>
+<ul>
+  <li><strong>"jstack 里看到 RUNNABLE" ≠ 线程在跑</strong>。8 核机器上有 20 个 RUNNABLE 线程，同一时刻只有 8 个真的在 CPU 上，另外 12 个在 OS 运行队列里排队。CPU 密集型服务线程数远超核数时，大部分 RUNNABLE 线程其实都在排队——这是「线程越多吞吐越低」的底层原因。</li>
+  <li><strong>RUNNABLE 线程不会被「暂停」</strong>：时间片切换对 Java 代码完全透明，你的代码没有任何一行能观察到「我刚被抢占过」——所以 Java 层面不区分 READY/RUNNING，区分了也没用。</li>
+  <li><strong>yield() 只是「让一让」</strong>：把当前线程从 Running 挪回 Ready 队尾，不保证下次立刻再调度回来，别把它当同步手段用（第 4 站 demo 里用它只是制造一个可观测的 RUNNABLE 样本）。</li>
+</ul>
+
+<div class="takeaway"><span class="takeaway-label">面试金句</span>"Java 的 RUNNABLE 是一个『容器状态』，装的是 OS 的 Running + Ready 两个状态。JVM 不做这个区分，因为 Java 代码无法观测也无法影响 OS 调度——能观测的只有『我能不能跑到』，而这由 OS 决定。"</div>
+</section>
+
+<!-- ═══════════════ 第6站：start vs run ═══════════════ -->
 <section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>jstack 实战：从线程转储中读状态</h2></div>
+<div class="station-head"><span class="station-no">第 6 站</span><h2>NEW → RUNNABLE：start() 和 run() 的本质区别</h2></div>
+
+<p>状态机的第一条边（①）背后是新手最常踩的坑：<strong>直接调 <code>run()</code> 不会创建新线程</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><b>RunVsStart.java</b> —— 两种写法，两种命运</span>
+<pre><code><span class="t">Thread</span> t = <span class="k">new</span> <span class="t">Thread</span>(() -&gt;
+    System.out.println(<span class="s">"线程名: "</span> + <span class="t">Thread</span>.currentThread().getName()));
+
+<span class="c">// 写法 1：直接调 run() —— 普通方法调用，还是 main 线程在跑</span>
+t.run();   <span class="c">// 输出：线程名: main，状态永远是 NEW</span>
+
+<span class="c">// 写法 2：调 start() —— JVM 创建 OS 线程，在新线程里执行 run()</span>
+<span class="t">Thread</span> t2 = <span class="k">new</span> <span class="t">Thread</span>(t::run);
+t2.start(); <span class="c">// 输出：线程名: Thread-1（新线程！）</span>
+
+<span class="c">// 写法 3：对同一线程对象调两次 start()</span>
+t2.start(); <span class="c">// IllegalThreadStateException：线程是一次性的</span></code></pre>
+</div>
+
+<p>为什么这样设计？<code>start()</code> 内部做的是<strong>重量级</strong>的事：创建底层 OS 线程（pthread）、分配栈内存、把线程状态从 NEW（threadStatus=0）翻成 RUNNABLE、再让 OS 调度器接管。这些工作只该发生一次：<code>start()</code> 开头就检查 <code>threadStatus != 0</code> 直接抛异常——这也是为什么线程不能「重启」，跑完的线程对象只能当尸体用，要再用只能 new 一个。</p>
+
+<p>而 <code>run()</code> 只是个普通方法，谁调谁执行。调 <code>run()</code> 的经典错误后果：你以为并行跑了 100 个任务，其实是在一个线程里串行了 100 遍，总耗时变成 100 倍——而且不报任何错，静默变慢。正确姿势永远是用线程池的 <code>execute/submit</code>（见「线程池」篇），而不是手动 start。</p>
+
+<div class="think"><div class="think-q">追问：线程创建到底花了多少成本？创建 OS 线程要分配 1MB（默认栈大小）的栈空间 + 线程控制块 + 一次系统调用（clone），一次大约几百微秒到毫秒级，且线程数是硬资源——创建 1 万个线程的机器基本就废了。这就是「线程池」存在的全部理由：贵，所以要复用。</div></div>
+</section>
+
+<!-- ═══════════════ 第7站：BLOCKED 详解 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>RUNNABLE → BLOCKED：synchronized 的排队机制</h2></div>
+
+<p>一个 RUNNABLE 线程撞上被别人持有的 synchronized 锁，就进入 BLOCKED，在锁的 <strong>EntryList</strong>（ObjectMonitor 的阻塞列表）里排队。几个必须讲清楚的细节：</p>
+
+<ul>
+  <li><strong>排队不等于 FIFO</strong>：synchronized 没有公平性保证，持锁线程释放后，JVM 从 EntryList 里<strong>挑一个</strong>唤醒（实现上不保证先排的先拿到），其他线程继续等。所以 synchronized 下的锁是「非公平」的——想公平，用 <code>ReentrantLock(true)</code>。</li>
+  <li><strong>BLOCKED 期间不响应 interrupt</strong>：中断只是记下标志位，线程照样排队，直到拿到锁进入临界区后，代码才可能检查标志（第 12 站细讲）。</li>
+  <li><strong>持锁线程在临界区里 wait() 了会怎样</strong>：wait 会释放锁，排队的 BLOCKED 线程就能拿锁了——这就是为什么「持锁 + wait」是合法的，否则所有等这个锁的人全饿死。</li>
+</ul>
+
+<p>jstack 里 BLOCKED 线程长这样（第 13 站展开）：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>jstack 里的 BLOCKED</b></span></div>
+<pre><code><span class="k">"worker-1"</span> #11 ...
+  <span class="n">waiting for monitor entry</span>
+  java.lang.Thread.State: <span class="t">BLOCKED</span> (on object monitor)
+    at com.example.OrderService.process(OrderService.java:42)
+    - waiting to lock &lt;0x000000076bf62208&gt; (a java.lang.Object)</code></pre>
+</div>
+
+<p><code>waiting to lock &lt;地址&gt;</code> 就是线索：拿这个地址去全文搜 <code>- locked &lt;同一地址&gt;</code>，就找到了持锁者——谁持有、持有者卡在哪一行，锁竞争的全貌就出来了。</p>
+</section>
+
+<!-- ═══════════════ 第8站：WAITING 详解 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>RUNNABLE → WAITING：wait / join / park 三兄弟</h2></div>
+
+<p>三个 API，同一个状态（WAITING），但语义和用法差别很大：</p>
+
+<table class="nb-table">
+<thead><tr><th>API</th><th>等什么</th><th>谁唤醒</th><th>前提条件</th><th>典型用途</th></tr></thead>
+<tbody>
+<tr><td><code>obj.wait()</code></td><td>等另一个线程调 <code>notify/notifyAll</code></td><td>notify 挑一个，notifyAll 全唤醒</td><td><strong>必须持有 obj 的锁</strong>，否则 IllegalMonitorStateException</td><td>生产者-消费者、条件等待</td></tr>
+<tr><td><code>t.join()</code></td><td>等线程 t 结束</td><td>t 的 run() 结束（内部等价于对 t.wait()）</td><td>无（任何线程可调用）</td><td>主线程等子任务完成</td></tr>
+<tr><td><code>LockSupport.park()</code></td><td>等 unpark 信号（许可）</td><td><code>LockSupport.unpark(t)</code></td><td>无（不需要持锁）</td><td>AQS 底层、线程池工作线程取任务</td></tr>
+</tbody>
+</table>
+
+<p>三个易错点：</p>
+<ul>
+  <li><strong>wait() 是实例方法，sleep() 是静态方法</strong>：<code>Object.wait()</code> 操作的是「这个对象的监视器」，<code>Thread.sleep()</code> 只是让当前线程睡——所以 wait 必须在 synchronized 块里（要操作 monitor），sleep 在哪都能调。</li>
+  <li><strong>park 是「许可制」</strong>：unpark 可以在 park <strong>之前</strong>调用（许可先存着，后面 park 直接通过）——这比 wait/notify「先 wait 后 notify 才能匹配」灵活得多，AQS 的队列唤醒全靠它。</li>
+  <li><strong>wait() 会释放锁，sleep() 不会</strong>：这是「持锁线程想让路」时唯一正确的睡法——sleep 着持锁，所有竞争者全 BLOCKED，直接堵死。</li>
+</ul>
+</section>
+
+<!-- ═══════════════ 第9站：TIMED_WAITING 详解 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>RUNNABLE → TIMED_WAITING：四个限时 API 的取舍</h2></div>
+
+<table class="nb-table">
+<thead><tr><th>API</th><th>释放锁？</th><th>响应中断？</th><th>超时行为</th><th>适合场景</th></tr></thead>
+<tbody>
+<tr><td><code>Thread.sleep(ms)</code></td><td><strong>不释放</strong></td><td>是（抛 InterruptedException）</td><td>到点自动恢复</td><td>简单延时、轮询间隔</td></tr>
+<tr><td><code>obj.wait(ms)</code></td><td><strong>释放</strong></td><td>是</td><td>到点自动恢复，重新竞争锁</td><td>持锁线程限时等条件</td></tr>
+<tr><td><code>t.join(ms)</code></td><td>不涉及锁</td><td>是</td><td>超时后不再等 t</td><td>限时等任务完成</td></tr>
+<tr><td><code>LockSupport.parkNanos(ns)</code></td><td>不涉及锁</td><td>是（但不清许可）</td><td>到点或 unpark 恢复</td><td>框架底层（AQS、线程池）</td></tr>
+</tbody>
+</table>
+
+<div class="srcbox">
+<div class="srcbox-head"><b>最容易出 bug 的场景：持锁 sleep</b></span>
+<pre><code><span class="c">// ❌ 反例：持锁 sleep —— 10 秒内所有竞争线程全部 BLOCKED</span>
+<span class="k">synchronized</span> (lock) {
+    <span class="t">Thread</span>.sleep(<span class="n">10_000</span>);   <span class="c">// 锁一直攥在手里！</span>
+    doWork();
+}
+
+<span class="c">// ✅ 正解 1：真的需要等条件 → wait（释放锁）</span>
+<span class="k">synchronized</span> (lock) {
+    <span class="k">while</span> (!condition) lock.wait(<span class="n">10_000</span>);  <span class="c">// 等的时候锁放出去了</span>
+    doWork();
+}
+
+<span class="c">// ✅ 正解 2：只是任务本身慢 → 别在锁里干慢事</span>
+<span class="k">synchronized</span> (lock) {
+    submitHeavyTask();   <span class="c">// 锁内只做登记，重活丢给线程池</span>
+}</code></pre>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">口诀</span>等条件用 wait（放锁），纯延时用 sleep（不放锁但别在锁里睡），等线程用 join，框架底层用 park。</div>
+</section>
+
+<!-- ═══════════════ 第10站：唤醒路径 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>唤醒路径：WAITING 醒来 ≠ 立刻执行</h2></div>
+
+<p>WAITING / TIMED_WAITING 的线程有三条醒来的路：<strong>被通知</strong>（notify / unpark）、<strong>超时</strong>、<strong>被中断</strong>（interrupt → InterruptedException）。但「醒来」之后发生什么，是这里最容易被误解的地方：</p>
+
+<div class="formula"><strong>醒来的三步骤</strong><br/>① 被唤醒 ≠ 继续执行：wait()/wait(ms) 醒来后要先<strong>重新竞争 monitor 锁</strong>（拿不到就进 BLOCKED，对应状态机 ⑤⑨ 边）<br/>② park() 醒来没有锁的问题，但只是「有资格跑」，还要 OS 调度<br/>③ 条件必须<strong>重新检查</strong>——醒来不代表条件成立</div>
+
+<p>第③点直接决定了生产代码里一个铁律：<strong>wait 必须包在 while 里，不能用 if</strong>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><b>为什么必须 while 不能 if</b></span>
+<pre><code><span class="k">synchronized</span> (lock) {
+    <span class="c">// ❌ if：醒来直接往下走，但条件可能早被别人消费掉了</span>
+    <span class="k">if</span> (deque.isEmpty()) notEmpty.await();
+    T v = deque.removeFirst();   <span class="c">// 可能 remove 一个空队列 → 出错的不是报错，是数据错乱</span>
+
+    <span class="c">// ✅ while：醒来后重新判断，不满足继续等</span>
+    <span class="k">while</span> (deque.isEmpty()) notEmpty.await();
+    T v = deque.removeFirst();   <span class="c">// 此刻队列一定非空</span>
+}</code></pre>
+</div>
+
+<p>必须 while 的两个原因，面试都要说出来：</p>
+<ul>
+  <li><strong>虚假唤醒（spurious wakeup）</strong>：JVM 规范允许 wait() 在没有 notify 的情况下返回（底层 OS/硬件层面的设计），这是语言层面兜底的，业务代码必须自己扛。</li>
+  <li><strong>notify 之后条件可能被抢走</strong>：notifyAll 唤醒 5 个消费者，锁释放后 5 个人逐个重新竞争锁，第一个人拿走唯一元素，后四个醒来时条件已经不成立了——if 版代码就会在空队列上翻车。</li>
+</ul>
+
+<p>顺带把 <code>notify()</code> vs <code>notifyAll()</code> 定个调：能确定「只有一个等待者需要这个条件」时 notify 省开销；条件语义是「全体相关方都可能关心」时（如队列容量既约束生产者又约束消费者）必须 notifyAll，漏唤醒比多唤醒致命得多。</p>
+</section>
+
+<!-- ═══════════════ 第11站：wait/notify vs sleep ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>wait/notify vs sleep：一张表终结混淆</h2></div>
+
+<p>第 8、9 站分别讲了 wait 家族和 sleep 家族，这一站把它们放在同一张表里对撞——这是面试被追问频率第二高的问题：</p>
+
+<table class="nb-table">
+<thead><tr><th>维度</th><th><code>Object.wait()/notify()</code></th><th><code>Thread.sleep()</code></th></tr></thead>
+<tbody>
+<tr><td><strong>所属</strong></td><td>Object 的实例方法（操作 monitor）</td><td>Thread 的静态方法（操作当前线程）</td></tr>
+<tr><td><strong>释放锁？</strong></td><td><strong>释放</strong>（等的时候把 monitor 让出来）</td><td><strong>不释放</strong>（攥着锁睡）</td></tr>
+<tr><td><strong>调用前提</strong></td><td>必须在 synchronized 块内，否则 <code>IllegalMonitorStateException</code></td><td>任何位置都可以</td></tr>
+<tr><td><strong>恢复方式</strong></td><td>notify/notifyAll / 超时 / 中断</td><td>超时（到点必醒）/ 中断</td></tr>
+<tr><td><strong>能否指定时长</strong></td><td>能（wait(ms) / wait(ms, ns)）</td><td>必须（sleep 就是要睡一会儿）</td></tr>
+<tr><td><strong>响应中断</strong></td><td>是，抛 InterruptedException 且<strong>清除</strong>中断标志</td><td>是，抛 InterruptedException 且<strong>清除</strong>中断标志</td></tr>
+<tr><td><strong>本质</strong></td><td>线程间的<strong>协作</strong>（一个喊，一个应）</td><td>线程的<strong>自我延时</strong>（不需要别人配合）</td></tr>
+</tbody>
+</table>
+
+<p>一句话选型：<strong>需要「等某个条件成立」→ wait 家族；只是「过一会儿再来」→ sleep</strong>。生产里最常见的错误是拿 sleep 当 wait 用（轮询代替协作，延迟高还浪费 CPU），以及拿 wait 当 sleep 用（忘了 notify，线程永久 WAITING）——两种错误 jstack 里都看得见，一个是 TIMED_WAITING (sleeping)，一个是 WAITING (on object monitor) 停了好几天。</p>
+</section>
+
+<!-- ═══════════════ 第12站：interrupt 深挖 ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>interrupt 深挖：它不是「打断」，是「发信号」</h2></div>
+
+<div class="think"><div class="think-q">"怎么停止一个线程？"——答案永远是：你停不了，你只能发信号，线程自己决定要不要听。这就是 interrupt 的全部真相。</div></div>
+
+<p><code>Thread.interrupt(t)</code> 对处于不同状态的线程，行为完全不同——这是「中断」机制最常被答歪的地方：</p>
+
+<table class="nb-table">
+<thead><tr><th>目标线程状态</th><th>interrupt 的效果</th></tr></thead>
+<tbody>
+<tr><td>RUNNABLE（正常跑着）</td><td>只设置中断标志位（boolean），线程继续跑，<strong>什么都不发生</strong>——要它自己检查</td></tr>
+<tr><td>WAITING（wait/park/join 中）</td><td>抛出 <code>InterruptedException</code>，<strong>并清除</strong>中断标志</td></tr>
+<tr><td>TIMED_WAITING（sleep/join(ms)/wait(ms) 中）</td><td>同上：抛异常 + 清标志</td></tr>
+<tr><td>BLOCKED（等 synchronized）</td><td><strong>不响应</strong>：只记标志，照样排队；拿到锁后代码才有机会看到标志</td></tr>
+<tr><td>TERMINATED</td><td>无效</td></tr>
+</tbody>
+</table>
+
+<p>两个 API 读标志，语义不一样，别混：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><b>isInterrupted() vs interrupted()</b></span>
+<pre><code><span class="t">Thread</span>.currentThread().isInterrupted();  <span class="c">// 只读不清：看标志还在不在</span>
+<span class="t">Thread</span>.interrupted();                   <span class="c">// 读且清：一次性消费（静态方法，只能查当前线程）</span>
+
+<span class="c">// 长循环线程的优雅退出惯例：定期检查标志</span>
+<span class="k">while</span> (!<span class="t">Thread</span>.isInterrupted()) {
+    processOneTask();   <span class="c">// 单步之间检查，退出延迟 = 单步耗时</span>
+}</code></pre>
+</div>
+
+<p>为什么中断状态要「抛异常 + 清标志」？因为异常已经把信号送达了（你的 catch 里处理），再留着标志会引发二次误伤——下一轮循环 <code>Thread.isInterrupted()</code> 又 true，线程莫名其妙退出。<strong>惯例</strong>：在 catch 里如果决定继续跑，可以 <code>Thread.currentThread().interrupt()</code> 把标志重新补上，把决定权交还给上层；如果决定退出，就什么都不做让线程自然结束。</p>
+
+<div class="takeaway"><span class="takeaway-label">生产准则</span>写长循环 / 任务处理代码时，把「响应中断」当成接口契约的一部分：循环头检查 <code>isInterrupted()</code>，可中断点（IO、park、sleep）让异常正常抛出。这样 <code>thread.interrupt()</code> 才是真正的停止按钮，否则它只是一根没人接的电话线。</div>
+</section>
+
+<!-- ═══════════════ 第13站：TERMINATED ═══════════════ -->
+<section class="station reveal" id="s13">
+<div class="station-head"><span class="station-no">第 13 站</span><h2>TERMINATED：正常退场与异常猝死</h2></div>
+
+<p>线程进 TERMINATED 只有两条路：<code>run()</code> <strong>正常返回</strong>，或 <code>run()</code> 里抛出<strong>未捕获的异常</strong>。第二条路比表面看起来更危险：</p>
+
+<ul>
+  <li><strong>未捕获异常 = 线程猝死</strong>：异常冲出 run() 后，JVM 不会杀死整个进程，只是让这一个线程死亡，并把异常交给 <code>UncaughtExceptionHandler</code>（默认打印到 stderr）。业务后果：你以为是常驻的工作线程，其实早就死了，任务积压却毫无告警——「线程池里线程越来越少」的排查第一步就是看 UncaughtExceptionHandler 日志。</li>
+  <li><strong>线程对象不可复活</strong>：TERMINATED 后 start() 直接抛 <code>IllegalThreadStateException</code>。需要「再来一次」就 new 新线程（或更好的：线程池复用）。</li>
+  <li><strong>怎么知道它跑了没有 / 跑得对不对</strong>：<code>t.join()</code> 等它结束（自己进 TIMED_WAITING/WAITING）；<code>t.isAlive()</code> 查是否还在跑；有返回值的任务用 <code>FutureTask</code>/线程池 <code>submit</code>，<code>future.get()</code> 能拿到结果或异常（呼应「线程创建」篇的 execute vs submit 异常处理）。</li>
+</ul>
+
+<div class="srcbox">
+<div class="srcbox-head"><b>给工作线程装个「死亡播报」</b></span>
+<pre><code><span class="t">ThreadFactory</span> factory = r -&gt; {
+    <span class="t">Thread</span> t = <span class="k">new</span> <span class="t">Thread</span>(r, <span class="s">"worker-"</span> + seq.getAndIncrement());
+    t.setUncaughtExceptionHandler((th, ex) -&gt; {
+        log.error(<span class="s">"工作线程 {} 意外死亡"</span>, th.getName(), ex);
+        metrics.<span class="n">inc</span>(<span class="s">"thread.death"</span>);   <span class="c">// 告警：常驻线程死亡 = 事故</span>
+    });
+    <span class="k">return</span> t;
+};</code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第14站：jstack 实战 ═══════════════ -->
+<section class="station reveal" id="s14">
+<div class="station-head"><span class="station-no">第 14 站</span><h2>jstack 实战：从线程转储中读状态</h2></div>
 
 <p>面试官的终极杀招：<strong>"给你一个线程转储，你能分析出什么问题？"</strong>掌握 jstack 输出格式，是你从"背八股"进阶到"真会用"的标志。</p>
 
@@ -396,33 +594,63 @@ WAITING 是"主动等待"——我自己调了 wait() / park()，选择放弃执
 </tbody>
 </table>
 
-<p><strong>排查死锁的三板斧：</strong></p>
+<p><strong>先读「状态分布」，再读「具体线程」</strong>——这是老手和新手的第一区别：</p>
+
+<ul>
+  <li><strong>大量 WAITING 通常正常</strong>：线程池的空闲工作线程 park 在取任务、消费者 wait 在空队列、RPC 线程等 IO——WAITING 是「礼貌地等」，本身不是病。</li>
+  <li><strong>大量 BLOCKED = 锁竞争热点</strong>：几十个线程 waiting to lock 同一个地址，而持锁线程栈顶还卡在某行慢代码（比如锁内调 RPC）——这就是要修的问题：锁粒度太大或锁内干了重活。</li>
+  <li><strong>RUNNABLE 但 CPU 打满</strong>：找 nid 对应 <code>top -Hp</code> 的高耗线程，看它是不是在忙等循环（没 sleep 的 while）或 GC（VM 线程）。</li>
+  <li><strong>WAITING 停在同一条 wait() 好几天</strong>：被唤醒的 notify 漏发了，或者条件永远不成立——配合 while 条件排查。</li>
+</ul>
+
+<p>确认「某个线程到底卡在哪」的排查三板斧：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>排查步骤</b></span></div>
-<pre><code><span class="c"># 第一步：导出线程转储</span>
+<pre><code><span class="c"># 第一步：导出线程转储（-l 带锁信息）</span>
 <span class="k">jstack</span> -l <span class="n">&lt;pid&gt;</span> > thread_dump.txt
 
-<span class="c"># 第二步：搜索 BLOCKED 状态的线程</span>
-<span class="k">grep</span> -A 5 <span class="n">"BLOCKED"</span> thread_dump.txt
+<span class="c"># 第二步：统计状态分布，先看大局</span>
+<span class="k">grep</span> -o <span class="n">"Thread.State: [A-Z_]*"</span> thread_dump.txt | sort | uniq -c
 
-<span class="c"># 第三步：根据锁地址找到持有者</span>
+<span class="c"># 第三步：有 BLOCKED 的话，按锁地址找持有者</span>
+<span class="k">grep</span> -A 5 <span class="n">"BLOCKED"</span> thread_dump.txt
 <span class="k">grep</span> <span class="n">"0x000000076bf62208"</span> thread_dump.txt
-<span class="c"># → 看到 worker-2 执行 wait() 时释放了锁</span>
-<span class="c"># → 看到 worker-1 在等这把锁 → 检查是否有死锁</span>
+<span class="c"># → 找到 "locked &lt;0x...&gt;" 的线程 = 持锁者，看它的栈顶在干什么</span>
 
 <span class="c"># 如果 jstack 末尾出现 "Found one Java-level deadlock"：</span>
-<span class="c"># → 恭喜，确认死锁了。根据循环依赖链修复代码。</span></code></pre>
+<span class="c"># → 确认死锁，按输出的循环依赖链修代码（通常是加锁顺序不一致）</span></code></pre>
 </div>
 
-<div class="crack"><span class="crack-label">实战技巧</span>多次执行 jstack 并做 diff，可以识别出"卡住不动"的线程——如果某线程连续三次转储都停在同一行，大概率是死锁或活锁。</div>
-
-<div class="takeaway"><span class="takeaway-label">工具链</span>jstack → grep BLOCKED → 找锁地址 → 找持有者 → 判断死锁。这是生产环境排查线程问题的标准流程。</div>
+<div class="crack"><span class="crack-label">实战技巧</span>间隔 10 秒抓 3 次 jstack 做 diff：连续三次停在同一行的线程 = 真卡死；三次都在动 = 只是慢。对 BLOCKED 集群，重点永远在<strong>持锁者</strong>而不是排队者——排队的人无辜，攥着锁不放的人才是要审的对象。</div>
 </section>
 
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结与面试速查表</h2></div>
+<!-- ═══════════════ 第15站：常见症状速查 ═══════════════ -->
+<section class="station reveal" id="s15">
+<div class="station-head"><span class="station-no">第 15 站</span><h2>生产症状 → 状态 → 病根：速查表</h2></div>
+
+<p>把 14 站的排查经验压成一张「症状速查表」，下次 oncall 直接对号入座：</p>
+
+<table class="nb-table">
+<thead><tr><th>jstack 症状</th><th>常见病根</th><th>处置方向</th></tr></thead>
+<tbody>
+<tr><td>几十个线程 <code>BLOCKED (on object monitor)</code>，waiting to lock 同一地址</td><td>锁竞争热点：锁内慢代码（RPC/IO/大循环）或锁粒度太大</td><td>让持锁者栈顶说话：缩小临界区、锁外做慢事、或换无锁/分段方案</td></tr>
+<tr><td>线程池线程全 <code>WAITING</code> 在 <code>ArrayBlockingQueue.take()</code></td><td>池空闲（正常）或上游断流（异常）</td><td>对照 QPS 曲线：正常流量=健康；流量还在但没人取任务=提交端故障</td></tr>
+<tr><td>业务线程 <code>WAITING (on object monitor)</code> 停在自定义 wait()</td><td>notify 漏发 / 条件永不成立 / 虚假唤醒没 while 兜底</td><td>检查 notify 路径是否所有分支都覆盖；wait 改 while</td></tr>
+<tr><td>线程 <code>WAITING</code> 在 <code>SocketRead</code> / <code>read</code></td><td>下游 RPC / DB 慢（线程在等 IO 返回）</td><td>查下游 RT 和连接池；给调用加超时（无超时的阻塞调用是定时炸弹）</td></tr>
+<tr><td>大量线程 <code>RUNNABLE</code>，CPU 接近 100%</td><td>忙等循环 / 死循环 / GC 线程 / 正则回溯（ReDoS）</td><td>top -Hp 定位 nid → jstack 看栈顶；正则类问题给输入加白名单/长度限制</td></tr>
+<tr><td>线程数持续上涨，旧线程不消失</td><td>线程泄漏：new Thread 没进池 / 池没 shutdown</td><td>看线程名归类；所有线程收编进命名线程池</td></tr>
+<tr><td>常驻工作线程数量只减不增</td><td>线程猝死：run() 里未捕获异常</td><td>查 UncaughtExceptionHandler 日志；任务体包 try-catch</td></tr>
+<tr><td>jstack 末尾 <code>Found one Java-level deadlock</code></td><td>多把锁加锁顺序不一致（A→B vs B→A）</td><td>统一全局加锁顺序；或缩小到单锁；复杂场景用锁分层</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">oncall 心法</span>先看状态分布定性质（锁问题 / IO 问题 / CPU 问题），再按锁地址或栈顶定嫌疑人，最后三次 jstack diff 定实锤。状态机是地图，jstack 是罗盘——两个都在手里，oncall 不慌。</div>
+</section>
+
+<!-- ═══════════════ 第16站：总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
 
 <p>把今天的核心知识压缩成一张速查表：</p>
 
@@ -430,39 +658,53 @@ WAITING 是"主动等待"——我自己调了 wait() / park()，选择放弃执
 <thead><tr><th>状态</th><th>一句话</th><th>关键 API（进入）</th><th>关键 API（退出）</th></tr></thead>
 <tbody>
 <tr><td><strong>NEW</strong></td><td>创建了但没 start</td><td><code>new Thread()</code></td><td><code>start()</code></td></tr>
-<tr><td><strong>RUNNABLE</strong></td><td>正在跑或排队等 CPU</td><td><code>start()</code> / 从其他状态恢复</td><td>阻塞 / 等待 / 结束</td></tr>
-<tr><td><strong>BLOCKED</strong></td><td>等 synchronized 锁</td><td>进入 sync 块但锁被占用</td><td>拿到锁 / 被中断</td></tr>
-<tr><td><strong>WAITING</strong></td><td>等别人通知</td><td><code>wait()</code> / <code>park()</code> / <code>join()</code></td><td><code>notify</code> / <code>unpark</code> / 中断</td></tr>
-<tr><td><strong>TIMED_WAITING</strong></td><td>等一会儿，到点自动醒</td><td><code>sleep(ms)</code> / <code>wait(ms)</code></td><td>超时 / 被唤醒 / 中断</td></tr>
-<tr><td><strong>TERMINATED</strong></td><td>跑完了，不可逆</td><td><code>run()</code> 结束</td><td>无</td></tr>
+<tr><td><strong>RUNNABLE</strong></td><td>正在跑或排队等 CPU（含 OS Ready）</td><td><code>start()</code> / 从其他状态恢复</td><td>阻塞 / 等待 / 结束</td></tr>
+<tr><td><strong>BLOCKED</strong></td><td>等 synchronized 锁（不响应 interrupt）</td><td>进入 sync 块但锁被占用</td><td>拿到锁 / 持锁者释放</td></tr>
+<tr><td><strong>WAITING</strong></td><td>等别人通知（wait/park/join）</td><td><code>wait()</code> / <code>park()</code> / <code>join()</code></td><td><code>notify</code> / <code>unpark</code> / 中断</td></tr>
+<tr><td><strong>TIMED_WAITING</strong></td><td>等一会儿，到点自动醒</td><td><code>sleep(ms)</code> / <code>wait(ms)</code> / <code>join(ms)</code></td><td>超时 / 被唤醒 / 中断</td></tr>
+<tr><td><strong>TERMINATED</strong></td><td>跑完了（或异常猝死），不可逆</td><td><code>run()</code> 结束</td><td>无</td></tr>
 </tbody>
 </table>
 
 <p><strong>高频面试追问 &amp; 标准答案：</strong></p>
 
 <div class="think"><div class="think-q">Q1: sleep() 和 wait() 的区别？</div></div>
-<p><strong>A:</strong> 三个维度——① <code>sleep()</code> 是 Thread 的静态方法，<code>wait()</code> 是 Object 的实例方法；② <code>sleep()</code> 不释放锁（TIMED_WAITING），<code>wait()</code> 释放锁（WAITING）；③ <code>sleep()</code> 到时间自动醒，<code>wait()</code> 需要被 notify / notifyAll 唤醒。</p>
+<p><strong>A:</strong> 六个维度——sleep 是 Thread 静态方法、wait 是 Object 实例方法；sleep 不释放锁、wait 释放锁；wait 必须在 synchronized 内调用否则 IllegalMonitorStateException、sleep 随处可调；wait 靠 notify/notifyAll/超时/中断恢复、sleep 靠超时/中断；wait 是线程协作（等条件）、sleep 是自我延时；底层 wait 进 monitor 的 WaitSet、sleep 由 JVM 调度挂起。</p>
 
-<div class="think"><div class="think-q">Q2: 线程从 WAITING 被 notify 后，一定能继续执行吗？</div></div>
-<p><strong>A:</strong> 不一定。被 notify 后线程从 WAITING 变为 BLOCKED（因为需要重新竞争监视器锁），只有成功拿到锁后才能变为 RUNNABLE 继续执行。如果此时有其他线程持有该锁，就会继续在 BLOCKED 状态排队。</p>
+<div class="think"><div class="think-q">Q2: BLOCKED 和 WAITING 的区别？</div></div>
+<p><strong>A:</strong> BLOCKED 是被动等 synchronized 锁，JVM 自动排队，不响应中断；WAITING 是主动调 wait/park/join 等信号，可被 notify/unpark/interrupt 唤醒。关键推论：ReentrantLock.lock() 拿不到锁产生的是 WAITING（底层 park），不是 BLOCKED——所以 jstack 里一片 WAITING 不一定是问题，一片 BLOCKED 才是锁竞争热点。</p>
 
-<div class="think"><div class="think-q">Q3: start() 能调用两次吗？</div></div>
-<p><strong>A:</strong> 不能。第二次调用会抛 <code>IllegalThreadStateException</code>。因为线程状态已经从 NEW 变为 RUNNABLE（或更后面的状态），start() 方法内部会检查 <code>threadStatus != 0</code>（0 代表 NEW），非 0 直接抛异常。这也是为什么线程是一次性的——TERMINATED 后不能重新启动。</p>
+<div class="think"><div class="think-q">Q3: 线程在 wait() 时调 interrupt() 会发生什么？</div></div>
+<p><strong>A:</strong> wait() 立即抛出 InterruptedException，<strong>同时清除中断标志</strong>（异常已送达，标志不必再留）。线程从 WAITING 恢复，要重新竞争锁（拿不到就 BLOCKED）。如果业务代码不 catch 让它冲出 run()，线程就进 TERMINATED——这就是状态机里 WAITING → TERMINATED 那条边。</p>
 
 <div class="think"><div class="think-q">Q4: 如何正确中断一个线程？</div></div>
-<p><strong>A:</strong> 调用 <code>Thread.interrupt()</code>。如果目标线程处于 sleep / wait / join（TIMED_WAITING 或 WAITING），会立即抛出 <code>InterruptedException</code> 并清除中断标志。如果目标线程正在 RUNNABLE 状态运行，只设置中断标志位，需要目标线程自己检查 <code>Thread.interrupted()</code> 并退出。</p>
+<p><strong>A:</strong> 调用 <code>Thread.interrupt()</code>。如果目标线程处于 sleep / wait / join（TIMED_WAITING 或 WAITING），会立即抛出 <code>InterruptedException</code> 并清除中断标志。如果目标线程正在 RUNNABLE 状态运行，只设置中断标志位，需要目标线程自己检查 <code>Thread.interrupted()</code> 并退出。所以「可中断」是线程作者的契约：长循环要检查标志，可中断点要让异常正常传播。</p>
 
 <div class="recap">
-<strong>本站回顾：</strong>
+<h3>核心知识点回顾</h3>
 <ul>
-  <li>Thread.State 有且仅有 <strong>6 个值</strong>：NEW / RUNNABLE / BLOCKED / WAITING / TIMED_WAITING / TERMINATED</li>
-  <li>状态之间有 <strong>12 次转换</strong>，每次都由明确的 API 触发</li>
-  <li>BLOCKED 是被动等锁（synchronized），WAITING 是主动等信号（wait / park）</li>
-  <li>ReentrantLock.lock() 产生的状态是 WAITING 而不是 BLOCKED</li>
-  <li>jstack 是生产环境分析线程状态的第一工具</li>
+  <li>Thread.State 有且仅有 <strong>6 个值</strong>：NEW / RUNNABLE / BLOCKED / WAITING / TIMED_WAITING / TERMINATED。</li>
+  <li>状态之间有 <strong>12 次转换</strong>，每次都由明确的 API 触发（能徒手画出状态机图）。</li>
+  <li>RUNNABLE = OS 的 Running + Ready；jstack 里的 RUNNABLE 不等于在跑。</li>
+  <li><code>start()</code> 创建 OS 线程（一次性），<code>run()</code> 是普通方法调用。</li>
+  <li>BLOCKED 专等 synchronized 锁、非公平、不响应中断；ReentrantLock 等锁是 WAITING。</li>
+  <li>wait 三兄弟：wait（放锁+协作）、park（许可制）、join（等线程）；sleep 不放锁。</li>
+  <li>唤醒 ≠ 执行：wait 醒来要重竞争锁，条件必须 while 重新检查（虚假唤醒 + 抢跑）。</li>
+  <li>interrupt 是发信号不是打断：RUNNABLE 只设标志，WAITING 抛异常清标志，BLOCKED 不响应。</li>
+  <li>未捕获异常 = 线程猝死：给常驻线程装 UncaughtExceptionHandler + 打点告警。</li>
+  <li>jstack：先读状态分布再读单线程；大量 WAITING 通常正常，大量 BLOCKED = 锁热点。</li>
 </ul>
 </div>
 
+<div class="recap">
+<h3>一句话总结</h3>
+<p>线程状态机是「API 的投影」：每个状态都是某个调用（start/wait/park/sleep/同步失败）的指纹，jstack 就是拿着指纹库读现场——状态分布定性质，锁地址和栈顶定嫌疑人。</p>
+</div>
+
+<div class="recap">
+<h3>🎤 面试 30 秒总结</h3>
+<p>"Java 线程有 6 个状态：NEW、RUNNABLE、BLOCKED、WAITING、TIMED_WAITING、TERMINATED。RUNNABLE 包含 OS 层的 Running 和 Ready——JVM 不区分，因为 Java 代码观测不到调度。12 次转换都由明确 API 触发：start 进 RUNNABLE；synchronized 抢锁失败进 BLOCKED（不响应中断）；wait/park/join 进 WAITING，sleep/wait(ms)/join(ms) 进 TIMED_WAITING。唤醒后 wait 家族要重新竞争锁，所以条件必须 while 检查，防虚假唤醒和抢跑。BLOCKED 和 WAITING 的本质区别是「被动等锁 vs 主动等信号」，ReentrantLock 等锁走 park 所以是 WAITING 不是 BLOCKED。生产上 jstack 先看状态分布：大量 WAITING 通常正常，大量 BLOCKED 找同一锁地址的持锁者审栈顶；线程死亡要看 UncaughtExceptionHandler。"</p>
+</div>
 </section>
 
 </main>
