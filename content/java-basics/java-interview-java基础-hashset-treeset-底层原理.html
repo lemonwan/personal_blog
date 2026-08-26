@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HashSet 与 TreeSet 底层原理</title>
+<title>HashSet 与 TreeSet 底层原理：Map 的「马甲」</title>
 </head>
 <body>
 <main class="lesson-body">
@@ -19,7 +19,22 @@
 如果你只能回答"一个用 HashMap，一个用 TreeMap"，那你只说对了结论，还没展示出理解深度。面试官真正想听到的是：<strong>委托模式</strong>——Set 的所有操作如何转发给 Map，以及这种设计背后的工程思想。</div>
 </div>
 
-<p>本篇文章的核心观点只有一句话：<strong>Set 就是 Map 的马甲</strong>。理解了这个委托模式，一个知识点就能覆盖 HashSet、TreeSet、LinkedHashSet 三个类。我们从源码出发，逐层拆解。</p>
+<p>这道题还有一条经典的<strong>追问链</strong>，每一环都在考察你是否真的读过源码：</p>
+
+<ul>
+  <li>追问 1：<strong>HashSet 的 value 是什么？</strong>（PRESENT 占位对象）</li>
+  <li>追问 2：<strong>为什么 <code>add()</code> 返回 boolean 而不是 void？</strong>（靠 <code>put()</code> 的返回值判重）</li>
+  <li>追问 3：<strong>去重到底依赖什么？</strong>（<code>hashCode()</code> + <code>equals()</code> 契约）</li>
+  <li>追问 4：<strong>为什么 TreeSet 不能放 null，HashSet 却可以？</strong>（比较 vs 哈希）</li>
+  <li>追问 5：<strong>LinkedHashSet 怎么保持顺序的？</strong>（LinkedHashMap 的双向链表）</li>
+</ul>
+
+<p>本篇文章的核心观点只有一句话：<strong>Set 就是 Map 的马甲</strong>。理解了这个委托模式，一个知识点就能覆盖 HashSet、TreeSet、LinkedHashSet 三个类。我们从源码出发，逐层拆解：先看套壳结构，再深入 HashMap 的哈希、冲突、扩容，最后落到红黑树与生产实践。</p>
+
+<div class="crack">
+<div class="crack-label">为什么面试官爱从 Set 问起？</div>
+<p>因为 Set 是<strong>通往 Map 深水区的桥</strong>。从 HashSet 一句"底层是 HashMap"，可以顺势引出哈希函数、负载因子、树化阈值、扩容拆分、hashCode/equals 契约——一道题考完整个 Java 集合核心。答好了，就是体系化能力的展示。</p>
+</div>
 </section>
 
 <!-- ═══════════════ 第2站：Set 接口与委托模式 ═══════════════ -->
@@ -88,20 +103,22 @@
   <rect x="60" y="240" width="580" height="30" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
   <text x="350" y="260" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">Set 只管"有没有"，Map 负责"怎么存" —— 一个知识点覆盖两个类</text>
 </svg>
-<figcaption><span class="fig-no">图 1</span>委托模式：HashSet 将所有操作转发给内部的 HashMap，元素作为 key，PRESENT 作为占位 value</figcaption>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>委托模式：HashSet 将所有操作转发给内部的 HashMap，元素作为 key，PRESENT 作为占位 value</figcaption>
 </figure>
 
 <div class="crack">
 <div class="crack-label">为什么 value 要用固定的 PRESENT 对象？</div>
 <p>HashSet 只关心"元素是否存在"，不需要存 value。如果 value 设为 null，<code>add()</code> 中 <code>map.put(e, PRESENT) == null</code> 的判断就会失效——无法区分"key 不存在"和"value 本身就是 null"。用静态 final 对象引用既省内存（所有 entry 共享），又保证逻辑正确。</p>
 </div>
+
+<p>这套"外壳 + 内核"的设计在工程上叫<strong>组合优于继承</strong>：存储引擎（HashMap/TreeMap/LinkedHashMap）只写一遍，却能同时服务 Map 和 Set 两个 API 面；Set 侧不重复实现哈希表或红黑树，代码量、bug 面、维护成本全部减半。</p>
 </section>
 
 <!-- ═══════════════ 第3站：HashSet 源码解读 ═══════════════ -->
 <section class="station reveal" id="s3">
 <div class="station-head"><span class="station-no">第 3 站</span><h2>HashSet 源码解读：四行代码看透本质</h2></div>
 
-<p>HashSet 整个类不到 300 行，核心方法各只有一行——全部委托给 HashMap：</p>
+<p>HashSet 的源码极简：绝大多数方法体只有一行，核心逻辑全部在 HashMap 里。你只需要看四个方法，就能完整理解这个类：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>HashSet.java</b> · 核心方法实现</span></div>
@@ -131,6 +148,23 @@
 <strong>去重原理：</strong>put 返回 null 说明 key 不存在（新增成功），返回旧 value 说明 key 已存在（add 返回 false）
 </div>
 
+<p>再看构造器家族——每一行都在告诉我们"底层就是 HashMap"：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashSet.java</b> · 构造器与迭代器</span></div>
+<pre><code><span class="k">public</span> <span class="t">HashSet</span>() { map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;(); }          <span class="c">// 默认 16 容量、0.75 负载因子</span>
+<span class="k">public</span> <span class="t">HashSet</span>(<span class="t">int</span> initialCapacity) { map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;(initialCapacity); }
+
+<span class="c">// 用集合初始化：按 0.75 负载因子反推容量，避免 addAll 过程中扩容</span>
+<span class="k">public</span> <span class="t">HashSet</span>(<span class="t">Collection</span>&lt;? <span class="k">extends</span> E&gt; c) {
+    map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;(<span class="t">Math</span>.max((<span class="t">int</span>) (c.size() / .75f) + <span class="n">1</span>, <span class="n">16</span>));
+    addAll(c);
+}
+
+<span class="c">// 迭代 = 遍历 HashMap 的 keySet 视图</span>
+<span class="k">public</span> <span class="t">Iterator</span>&lt;E&gt; iterator() { <span class="k">return</span> map.keySet().iterator(); }</code></pre>
+</div>
+
 <p><strong>关键洞察：你对 HashMap 了解的一切，直接适用于 HashSet。</strong></p>
 
 <ul>
@@ -147,9 +181,361 @@
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：TreeSet 与 TreeMap ═══════════════ -->
+<!-- ═══════════════ 第4站：add 为什么返回 boolean ═══════════════ -->
 <section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>TreeSet 与 TreeMap：红黑树上的有序集合</h2></div>
+<div class="station-head"><span class="station-no">第 4 站</span><h2>为什么 add 返回 boolean：put 返回值的三段式</h2></div>
+
+<p>新手常问：<strong>add 为什么不设计成 void？</strong>答案藏在 <code>HashMap.put()</code> 的返回值语义里。</p>
+
+<div class="think">
+<div class="think-q">面试追问："HashSet.add(e) 返回 false 的时候，底层到底发生了什么？集合被修改了吗？modCount 会变吗？"</div>
+</div>
+
+<h3>put 返回值的三种情况</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.java</b> · put 返回值契约</span></div>
+<pre><code><span class="c">// 返回：与 key 关联的【旧 value】；若此前没有该 key 的映射，返回 null</span>
+<span class="k">public</span> V put(K key, V value) {
+    <span class="k">return</span> putVal(hash(key), key, value, <span class="k">false</span>, <span class="k">true</span>);
+}</code></pre>
+</div>
+
+<table class="nb-table">
+  <thead>
+    <tr>
+      <th>场景</th>
+      <th>put 返回</th>
+      <th>HashSet.add 返回</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>key 不存在，<strong>新插入</strong>节点</td>
+      <td><code>null</code></td>
+      <td><code>true</code>（新增成功）</td>
+    </tr>
+    <tr>
+      <td>key 已存在，<strong>覆盖</strong>旧 value（仍是 PRESENT）</td>
+      <td>旧 value = <code>PRESENT</code></td>
+      <td><code>false</code>（重复，未新增）</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>关键点：因为 value 恒为<strong>非 null 的 PRESENT</strong>，所以"put 返回 null"与"key 是新的"之间是一一对应的——这就是第 2 站那个 PRESENT 设计的闭环。如果 value 允许为 null，两种含义就混在一起无法区分了。</p>
+
+<div class="crack">
+<div class="crack-label">add 返回 false 时，底层发生了什么？</div>
+<p><code>putVal()</code> 命中已存在的 key 时走的是"覆盖分支"：只把 <code>e.value</code> 换成新 value（这里换的还是 PRESENT，等于没换），然后 <code>return oldValue</code>。<strong>不会 <code>++modCount</code>，不会 <code>++size</code></strong>。所以：add 一个重复元素不是结构性修改。推论：<strong>遍历 HashSet 的过程中重复 add 已存在的元素，不会抛 ConcurrentModificationException</strong>——这是很多人不知道的细节。</p>
+</div>
+
+<h3>返回 boolean 的工程价值</h3>
+
+<p>这个设计来自 <code>Collection.add()</code> 的接口契约：<strong>返回"集合是否因本次调用发生了改变"</strong>。List 里 add 几乎永远返回 true，而 Set 必须能表达"重复元素被拒绝"。调用方由此可以实现很多惯用法：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MetricService.java</b> · 统计"首次出现"</span></div>
+<pre><code><span class="c">// 统计独立访客：add 返回 true 才代表一个新用户</span>
+<span class="t">Set</span>&lt;<span class="t">Long</span>&gt; seen = <span class="k">new</span> <span class="t">HashSet</span>&lt;&gt;();
+<span class="k">for</span> (<span class="t">Long</span> uid : dailyLog) {
+    <span class="k">if</span> (seen.add(uid)) {   <span class="c">// 只有真正的新用户才计数</span>
+        uniqueCount++;
+    }
+}</code></pre>
+</div>
+
+<p>边界情况：<code>add(null)</code> 是合法的——HashMap 允许一个 null key（<code>hash(null) == 0</code>，落在桶 0），所以 HashSet 最多容纳一个 null；再 add 一次 null 返回 false。</p>
+
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+  <li><code>add(e)</code> 返回 <code>map.put(e, PRESENT) == null</code>，靠 put 的返回值判重。</li>
+  <li>返回 false 时集合内容、size、modCount 均不变，只是 value 被"覆盖"成同样的 PRESENT。</li>
+  <li>boolean 返回值是 <code>Collection</code> 的修改语义：调用方需要知道集合是否真的变了。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：hashCode + equals 契约 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>去重契约：hashCode() 与 equals() 的完整故事</h2></div>
+
+<p>HashSet 判断"重复"的本质是：<strong>先按 hashCode 找桶，再在桶内用 equals 精确定位</strong>。两个方法缺一不可。</p>
+
+<div class="think">
+<div class="think-q">面试追问："如果一个类只重写了 equals()、没有重写 hashCode()，放进 HashSet 会发生什么？"</div>
+</div>
+
+<h3>为什么必须成对出现</h3>
+
+<p><code>Object</code> 的默认实现是"身份比较"：<code>equals</code> 比引用，<code>hashCode</code> 是 JVM 生成的身份哈希（通常与内存地址相关）。而 Java 契约要求：</p>
+
+<div class="formula">
+<strong>equals() 相等 ⟹ hashCode() 必须相等</strong>（逆命题不成立：hashCode 相同不代表 equals 相等）
+</div>
+
+<p>这个契约不是摆设，它直接决定 HashMap 的查找正确性。看 <code>getNode()</code> 的两段式定位：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.java</b> · 查找一个 key 的两步</span></div>
+<pre><code><span class="c">// 第 1 步：hash(key) 定位桶 —— 只用 hashCode</span>
+<span class="k">if</span> ((tab = table) != <span class="k">null</span> &amp;&amp; (n = tab.length) &gt; <span class="n">0</span> &amp;&amp;
+    (first = tab[(n - <span class="n">1</span>) &amp; hash]) != <span class="k">null</span>) {
+    <span class="c">// 第 2 步：桶内用 == 或 equals 逐个比较 —— 只用 equals</span>
+    <span class="k">if</span> (first.hash == hash &amp;&amp; ((k = first.key) == key ||
+        (key != <span class="k">null</span> &amp;&amp; key.equals(k))))
+        <span class="k">return</span> first;
+    <span class="c">// ... 链表 / 红黑树中继续 equals 比较</span>
+}</code></pre>
+</div>
+
+<h3>只重写一半的两种事故现场</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>User.java</b> · 只重写 equals、忘掉 hashCode —— 去重直接失效</span></div>
+<pre><code><span class="k">public class</span> <span class="t">User</span> {
+    <span class="k">private final</span> <span class="t">Long</span> id;
+    <span class="k">private final</span> <span class="t">String</span> name;
+
+    <span class="c">// equals 正确：按业务字段比较</span>
+    <span class="k">@Override</span> <span class="k">public boolean</span> equals(<span class="t">Object</span> o) {
+        <span class="k">if</span> (<span class="k">this</span> == o) <span class="k">return true</span>;
+        <span class="k">if</span> (!(o <span class="k">instanceof</span> <span class="t">User</span>)) <span class="k">return false</span>;
+        <span class="t">User</span> u = (<span class="t">User</span>) o;
+        <span class="k">return</span> <span class="t">Objects</span>.equals(id, u.id) &amp;&amp; <span class="t">Objects</span>.equals(name, u.name);
+    }
+    <span class="c">// hashCode 没重写 —— 用的还是 Object 的身份哈希！</span>
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">User</span> a = <span class="k">new</span> <span class="t">User</span>(<span class="n">1L</span>, <span class="s">"Alice"</span>);
+        <span class="t">User</span> b = <span class="k">new</span> <span class="t">User</span>(<span class="n">1L</span>, <span class="s">"Alice"</span>);
+        <span class="t">Set</span>&lt;<span class="t">User</span>&gt; set = <span class="k">new</span> <span class="t">HashSet</span>&lt;&gt;();
+        set.add(a);
+        set.add(b);                 <span class="c">// 你以为返回 false？实际返回 true！</span>
+        System.out.println(set.size()); <span class="c">// 2 —— 两个"相等"对象并存，去重失效</span>
+    }
+}</code></pre>
+</div>
+
+<p>原因：<code>a.equals(b) == true</code>，但两者的身份 hashCode 不同，被散列到<strong>不同的桶</strong>，<code>equals()</code> 压根没机会被调用，Set 里自然出现两个"相等"元素。反向事故（hashCode 相同、equals 不同）则只影响性能：都挤进同一桶让链表变长，但桶内 equals 会精确区分，正确性不受影响。</p>
+
+<div class="crack">
+<div class="crack-label">生产中的两种写法</div>
+<p>现代写法直接用 <code>Objects.hash(...)</code> 和 <code>Objects.equals(...)</code>（或用 IDE 生成），参与计算的字段<strong>只取 equals 用到的字段</strong>，保证两者严格对齐。参与 hashCode 的字段最好 <code>final</code>——这引向第 12 站最大的坑：可变对象做 key。</p>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+  <li>定位两段式：<strong>hashCode 定桶，equals 定元素</strong>，二者缺一不可。</li>
+  <li>equals 相等 ⟹ hashCode 相等；反过来不成立（hashCode 碰撞是正常现象）。</li>
+  <li>只重写 equals：去重失效（不同桶）；只重写 hashCode：正确性无碍、性能受损。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：哈希与冲突解决 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>性能的地基：hash 扰动、寻址与 8 / 64 / 6 三个数字</h2></div>
+
+<p>HashSet 号称 O(1)，这个常数项的好坏完全取决于 HashMap 的哈希与冲突策略。先看两个关键函数：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>HashMap.java</b> · 扰动函数与关键常量</span></div>
+<pre><code><span class="c">// 扰动：让高 16 位也参与低 16 位运算，稀释低位的碰撞</span>
+<span class="k">static final int</span> hash(<span class="t">Object</span> key) {
+    <span class="t">int</span> h;
+    <span class="k">return</span> (key == <span class="k">null</span>) ? <span class="n">0</span> : (h = key.hashCode()) ^ (h &gt;&gt;&gt; <span class="n">16</span>);
+}
+
+<span class="c">// 寻址：i = (n - 1) &amp; hash —— n 是 2 的幂，等价 hash % n 且更快</span>
+
+<span class="k">static final int</span> DEFAULT_INITIAL_CAPACITY = <span class="n">1</span> &lt;&lt; <span class="n">4</span>;    <span class="c">// 16</span>
+<span class="k">static final float</span> DEFAULT_LOAD_FACTOR = <span class="n">0.75f</span>;         <span class="c">// 负载因子</span>
+<span class="k">static final int</span> TREEIFY_THRESHOLD = <span class="n">8</span>;                  <span class="c">// 链长 ≥ 8 → 尝试树化</span>
+<span class="k">static final int</span> UNTREEIFY_THRESHOLD = <span class="n">6</span>;                <span class="c">// 树节点 ≤ 6 → 退化为链表</span>
+<span class="k">static final int</span> MIN_TREEIFY_CAPACITY = <span class="n">64</span>;              <span class="c">// 树化前数组容量的下限</span></code></pre>
+</div>
+
+<p><strong>为什么用 <code>(n - 1) &amp; hash</code>？</strong>因为容量强制为 2 的幂（构造时用 <code>tableSizeFor()</code> 向上取整），此时 <code>hash % n</code> 与 <code>(n - 1) &amp; hash</code> 数学等价，而位与运算比取模快一个数量级。<strong>为什么还要扰动？</strong>寻址只用 hash 的低 log2(n) 位，若 hashCode 的低位分布差（比如某些对象低位恒为 0），冲突会集中；把高 16 位异或进来稀释低位，就是 <code>h ^ (h &gt;&gt;&gt; 16)</code> 的用意。</p>
+
+<h3>冲突解决：链表 → 红黑树的两级演化</h3>
+
+<figure class="fig">
+<svg viewBox="0 0 700 330" role="img" aria-label="哈希寻址、链表与树化示意">
+  <defs>
+    <marker id="arrow4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+  </defs>
+
+  <text x="350" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">从 hashCode 到桶：扰动 → 取模 → 冲突（链表 → 红黑树）</text>
+
+  <!-- 左侧流程 -->
+  <rect x="40" y="46" width="210" height="34" rx="6" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="145" y="68" text-anchor="middle" font-size="12" fill="#3E6B8F">key.hashCode() → h</text>
+  <line x1="145" y1="80" x2="145" y2="94" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrow4)"/>
+  <rect x="40" y="96" width="210" height="34" rx="6" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="145" y="118" text-anchor="middle" font-size="12" fill="#3E6B8F">hash()：h ^ (h &gt;&gt;&gt; 16) 扰动</text>
+  <line x1="145" y1="130" x2="145" y2="144" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrow4)"/>
+  <rect x="40" y="146" width="210" height="34" rx="6" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="145" y="168" text-anchor="middle" font-size="12" fill="#3E6B8F">(n - 1) &amp; hash → 桶索引</text>
+  <line x1="250" y1="163" x2="330" y2="163" stroke="#C2410C" stroke-width="2" marker-end="url(#arrow4)"/>
+  <text x="290" y="155" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">定位</text>
+
+  <!-- 桶数组 -->
+  <text x="530" y="42" text-anchor="middle" font-size="11" fill="#57544E">桶数组（容量 n = 16）</text>
+  <rect x="340" y="146" width="34" height="34" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <rect x="376" y="146" width="34" height="34" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <rect x="412" y="146" width="34" height="34" rx="4" fill="#FBE6C7" stroke="#C2410C"/>
+  <rect x="448" y="146" width="34" height="34" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <rect x="484" y="146" width="34" height="34" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <rect x="520" y="146" width="34" height="34" rx="4" fill="#FDE2E2" stroke="#B91C1C"/>
+  <rect x="556" y="146" width="34" height="34" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <rect x="592" y="146" width="34" height="34" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="357" y="195" text-anchor="middle" font-size="10" fill="#57544E">0</text>
+  <text x="393" y="195" text-anchor="middle" font-size="10" fill="#57544E">1</text>
+  <text x="429" y="195" text-anchor="middle" font-size="10" fill="#C2410C">2</text>
+  <text x="465" y="195" text-anchor="middle" font-size="10" fill="#57544E">3</text>
+  <text x="501" y="195" text-anchor="middle" font-size="10" fill="#57544E">4</text>
+  <text x="537" y="195" text-anchor="middle" font-size="10" fill="#B91C1C">5</text>
+  <text x="573" y="195" text-anchor="middle" font-size="10" fill="#57544E">6</text>
+  <text x="609" y="195" text-anchor="middle" font-size="10" fill="#57544E">7</text>
+
+  <!-- 桶2 的链表 -->
+  <rect x="412" y="210" width="46" height="26" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="435" y="227" text-anchor="middle" font-size="10" fill="#3E6B8F">A</text>
+  <line x1="458" y1="223" x2="470" y2="223" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrow4)"/>
+  <rect x="472" y="210" width="46" height="26" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="495" y="227" text-anchor="middle" font-size="10" fill="#3E6B8F">B</text>
+  <line x1="518" y1="223" x2="530" y2="223" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrow4)"/>
+  <rect x="532" y="210" width="46" height="26" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="555" y="227" text-anchor="middle" font-size="10" fill="#3E6B8F">C</text>
+  <text x="495" y="252" text-anchor="middle" font-size="10" fill="#3E6B8F">链长 ≥ 8 时触发 treeifyBin</text>
+
+  <!-- 桶5 的红黑树 -->
+  <rect x="520" y="210" width="46" height="26" rx="4" fill="#FDE2E2" stroke="#B91C1C"/>
+  <text x="543" y="227" text-anchor="middle" font-size="10" fill="#B91C1C">根</text>
+  <line x1="533" y1="236" x2="510" y2="252" stroke="#B91C1C" stroke-width="1.2"/>
+  <line x1="553" y1="236" x2="576" y2="252" stroke="#B91C1C" stroke-width="1.2"/>
+  <rect x="490" y="252" width="40" height="22" rx="4" fill="#FDE2E2" stroke="#B91C1C"/>
+  <text x="510" y="267" text-anchor="middle" font-size="10" fill="#B91C1C">左</text>
+  <rect x="556" y="252" width="40" height="22" rx="4" fill="#FDE2E2" stroke="#B91C1C"/>
+  <text x="576" y="267" text-anchor="middle" font-size="10" fill="#B91C1C">右</text>
+  <text x="543" y="290" text-anchor="middle" font-size="10" fill="#B91C1C">红黑树 TreeNode，查找 O(log n)</text>
+
+  <!-- 底部说明 -->
+  <rect x="40" y="296" width="620" height="26" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="313" text-anchor="middle" font-size="11" fill="#1C1C1C">树化条件：单桶链长 ≥ 8 且容量 ≥ 64，否则先扩容（resize）；扩容分裂后树节点 ≤ 6 退化为链表</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 2</span>哈希寻址与冲突演化：链表兜底，链长超过阈值后升级为红黑树</figcaption>
+</figure>
+
+<div class="think">
+<div class="think-q">面试追问："树化阈值为什么是 8？退化阈值为什么是 6 而不是 7？"</div>
+</div>
+
+<div class="crack">
+<div class="crack-label">8 和 6 背后的两个工程理由</div>
+<p><strong>选 8</strong>：HashMap 的 javadoc 给出过泊松分布估算——在理想随机哈希、负载因子 0.75 下，一个桶里链长恰好为 8 的概率约 <strong>0.00000006</strong>（不足一千万分之一）。所以 8 意味着"哈希质量已严重退化"，值得付出 TreeNode 的内存代价（TreeNode 约为普通 Node 的两倍）去换 O(log n)。<strong>选 6 而不是 7</strong>：避免元素在 7/8 之间增减时，链表与红黑树<strong>反复横跳</strong>（结构抖振），留 1 的缓冲带。且 <code>treeifyBin()</code> 有个前提：容量不足 64 时<strong>先扩容而不是先树化</strong>——小数组上树化收益低，扩容稀释冲突更划算。</p>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+  <li>扰动函数 <code>h ^ (h &gt;&gt;&gt; 16)</code> 让高位参与寻址，容量 2 的幂让 <code>(n-1) &amp; hash</code> 等价取模。</li>
+  <li>三个数字：<strong>TREEIFY_THRESHOLD = 8</strong>、<strong>MIN_TREEIFY_CAPACITY = 64</strong>、<strong>UNTREEIFY_THRESHOLD = 6</strong>。</li>
+  <li>树化是兜底不是常态：设计目标是"理想哈希下永远用不上红黑树"。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：扩容机制 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>扩容机制：2 倍扩容与高低位拆分</h2></div>
+
+<p>当 <code>size &gt; threshold</code>（threshold = 容量 × 负载因子，默认 16 × 0.75 = 12）时触发 <code>resize()</code>：<strong>容量翻倍</strong>（<code>newCap = oldCap &lt;&lt; 1</code>），上限 <code>MAXIMUM_CAPACITY = 1 &lt;&lt; 30</code>。扩容要搬运所有节点，是 O(n) 的全量操作，所以预估容量很重要。</p>
+
+<h3>JDK 8 的核心优化：免 rehash 的高低位拆分</h3>
+
+<p>JDK 7 扩容要重新计算每个元素的 hash 并取模；JDK 8 发现了一个数学规律：<strong>容量翻倍后，元素的索引要么不变，要么 = 原索引 + oldCap</strong>，判断依据是 <code>e.hash &amp; oldCap</code> 这一位是 0 还是 1。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 330" role="img" aria-label="扩容高低位拆分示意">
+  <defs>
+    <marker id="arrow5" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+  </defs>
+
+  <text x="350" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">JDK 8 扩容：不重新哈希，元素要么留原位，要么 + oldCap</text>
+
+  <!-- 扩容前 -->
+  <text x="150" y="50" text-anchor="middle" font-size="12" fill="#57544E" font-weight="600">扩容前：capacity = 8（oldCap = 8）</text>
+  <rect x="90" y="62" width="120" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="150" y="82" text-anchor="middle" font-size="11" fill="#1C1C1C">桶 3</text>
+  <rect x="60" y="110" width="110" height="28" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="115" y="128" text-anchor="middle" font-size="10" fill="#3E6B8F">k1 (h=3)</text>
+  <line x1="170" y1="124" x2="184" y2="124" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrow5)"/>
+  <rect x="186" y="110" width="110" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C"/>
+  <text x="241" y="128" text-anchor="middle" font-size="10" fill="#C2410C">k2 (h=11)</text>
+  <line x1="296" y1="124" x2="310" y2="124" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrow5)"/>
+  <rect x="312" y="110" width="110" height="28" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="367" y="128" text-anchor="middle" font-size="10" fill="#3E6B8F">k3 (h=19)</text>
+
+  <!-- 中间判定 -->
+  <text x="350" y="175" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">(e.hash &amp; oldCap) == 0 ? 原位 : 原位 + oldCap</text>
+  <text x="350" y="193" text-anchor="middle" font-size="11" fill="#57544E">3&amp;8=0 → 留桶3　·　11&amp;8=8 → 桶3+8=11　·　19&amp;8=0 → 留桶3</text>
+
+  <!-- 扩容后 -->
+  <text x="150" y="220" text-anchor="middle" font-size="12" fill="#57544E" font-weight="600">扩容后：capacity = 16</text>
+  <rect x="60" y="234" width="130" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="125" y="254" text-anchor="middle" font-size="11" fill="#1C1C1C">桶 3（原位）</text>
+  <rect x="350" y="234" width="130" height="30" rx="4" fill="#FBE6C7" stroke="#C2410C"/>
+  <text x="415" y="254" text-anchor="middle" font-size="11" fill="#C2410C">桶 11（+8）</text>
+
+  <rect x="60" y="280" width="110" height="28" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="115" y="298" text-anchor="middle" font-size="10" fill="#3E6B8F">k1 (h=3)</text>
+  <line x1="170" y1="294" x2="184" y2="294" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrow5)"/>
+  <rect x="186" y="280" width="110" height="28" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="241" y="298" text-anchor="middle" font-size="10" fill="#3E6B8F">k3 (h=19)</text>
+  <text x="130" y="322" text-anchor="middle" font-size="10" fill="#3E6B8F">lo 链：(e.hash &amp; oldCap) == 0</text>
+
+  <rect x="360" y="280" width="110" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C"/>
+  <text x="415" y="298" text-anchor="middle" font-size="10" fill="#C2410C">k2 (h=11)</text>
+  <text x="415" y="322" text-anchor="middle" font-size="10" fill="#C2410C">hi 链：原索引 + oldCap</text>
+
+  <!-- 拆分箭头 -->
+  <line x1="250" y1="124" x2="180" y2="268" stroke="#8C8676" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow5)"/>
+  <line x1="367" y1="124" x2="245" y2="268" stroke="#8C8676" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow5)"/>
+  <line x1="241" y1="124" x2="415" y2="268" stroke="#C2410C" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow5)"/>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 3</span>扩容时用 <code>e.hash &amp; oldCap</code> 把一条链表拆成 lo / hi 两条，hi 链整体搬到原索引 + oldCap</figcaption>
+</figure>
+
+<div class="crack">
+<div class="crack-label">从 JDK 7 死循环到 JDK 8 尾插：线程安全的历史课</div>
+<p>JDK 7 的 HashMap 扩容用<strong>头插法</strong>（新节点插到链表头），并发扩容时两条线程同时搬运，可能把链表搬成<strong>环形</strong>，之后任何 <code>get()</code> 都会死循环，CPU 直接打满——这是当年著名的生产事故。JDK 8 改为<strong>尾插法</strong>并配合高低位拆分，不再有环，但并发下仍会丢数据、覆盖写，<strong>线程安全依然要交给 ConcurrentHashMap</strong>（其 sizeCtl 控制初始化/扩容，CounterCell 分担计数，保证 size() 近似准确）。</p>
+</div>
+
+<h3>扩容与复杂度</h3>
+
+<ul>
+  <li>触发时机：<code>size &gt; threshold</code>，其中 <code>threshold = capacity × 0.75</code>（默认 16 × 0.75 = 12，即第 13 个元素触发首次扩容）。</li>
+  <li>均摊成本：虽然单次扩容是 O(n)，但扩容频率随容量增长指数下降，<strong>均摊到每次 put 仍是 O(1)</strong>——这就是"均摊分析"。</li>
+  <li>生产启示：能预估规模时，直接用 <code>new HashSet&lt;&gt;((int) (n / 0.75f) + 1)</code> 初始化，避免中途多次全量搬运。</li>
+</ul>
+
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+  <li>扩容 = 容量翻倍（上限 1 &lt;&lt; 30），threshold = 容量 × 0.75。</li>
+  <li>JDK 8 免 rehash：<code>e.hash &amp; oldCap</code> 判定元素留原位还是 +oldCap，且尾插保序。</li>
+  <li>扩容是 O(n)，但均摊 O(1)；预估容量是生产级性能的第一道防线。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第8站：TreeSet 与 TreeMap ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>TreeSet 与 TreeMap：红黑树上的有序集合</h2></div>
 
 <p>TreeSet 同样采用委托模式，但底层 Map 换成了 <code>NavigableMap</code>（通常是 <code>TreeMap</code>）。TreeMap 基于<strong>红黑树</strong>实现，保证每次插入、删除、查找的时间复杂度为 <strong>O(log n)</strong>。</p>
 
@@ -186,17 +572,271 @@
 }</code></pre>
 </div>
 
-<p>元素在红黑树中按 <code>Comparable.compareTo()</code> 或 <code>Comparator.compare()</code> 进行比较定位，中序遍历即为升序序列。</p>
+<h3>红黑树：自平衡的二叉搜索树</h3>
+
+<p>如果只是普通二叉搜索树，插入顺序可能让它退化成一条链表（O(n)）。红黑树用<strong>颜色标记 + 旋转/变色</strong>维持平衡，保证树高始终约 log₂n。五条性质：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 340" role="img" aria-label="红黑树结构示意">
+  <defs>
+    <marker id="arrow6" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+  </defs>
+
+  <text x="350" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">红黑树：自平衡的二叉搜索树（TreeMap 内核）</text>
+
+  <!-- 树结构 -->
+  <circle cx="350" cy="70" r="20" fill="#3B3B3B"/>
+  <text x="350" y="76" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">50</text>
+
+  <line x1="340" y1="86" x2="200" y2="130" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="360" y1="86" x2="500" y2="130" stroke="#8C8676" stroke-width="1.5"/>
+
+  <circle cx="200" cy="150" r="20" fill="#C2410C"/>
+  <text x="200" y="156" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">30</text>
+  <circle cx="500" cy="150" r="20" fill="#C2410C"/>
+  <text x="500" y="156" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">70</text>
+
+  <line x1="190" y1="166" x2="120" y2="210" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="210" y1="166" x2="280" y2="210" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="490" y1="166" x2="420" y2="210" stroke="#8C8676" stroke-width="1.5"/>
+  <line x1="510" y1="166" x2="580" y2="210" stroke="#8C8676" stroke-width="1.5"/>
+
+  <circle cx="120" cy="230" r="20" fill="#3B3B3B"/>
+  <text x="120" y="236" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">20</text>
+  <circle cx="280" cy="230" r="20" fill="#3B3B3B"/>
+  <text x="280" y="236" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">40</text>
+  <circle cx="420" cy="230" r="20" fill="#3B3B3B"/>
+  <text x="420" y="236" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">60</text>
+  <circle cx="580" cy="230" r="20" fill="#3B3B3B"/>
+  <text x="580" y="236" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">80</text>
+
+  <!-- 图例 -->
+  <circle cx="100" cy="276" r="8" fill="#3B3B3B"/>
+  <text x="114" y="280" font-size="11" fill="#57544E">黑色节点（含根与 NIL 叶子）</text>
+  <circle cx="330" cy="276" r="8" fill="#C2410C"/>
+  <text x="344" y="280" font-size="11" fill="#57544E">红色节点（红节点子必为黑，无红红相邻）</text>
+
+  <!-- 性质说明 -->
+  <rect x="60" y="296" width="580" height="38" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="314" text-anchor="middle" font-size="11" fill="#1C1C1C">性质：① 节点非红即黑　② 根为黑　③ 叶子 NIL 为黑　④ 红节点孩子必为黑　⑤ 任一节点到叶子路径黑数相同</text>
+  <text x="350" y="331" text-anchor="middle" font-size="11" fill="#C2410C">中序遍历（左-根-右）＝升序：20 30 40 50 60 70 80</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 4</span>红黑树五条性质保证树高约 log₂n；TreeMap 插入/删除后由 <code>fixAfterInsertion()</code> / <code>fixAfterDeletion()</code> 做变色与旋转自平衡</figcaption>
+</figure>
+
+<h3>排序从哪来：Comparable 与 Comparator</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TreeMap.java</b> · 比较入口</span></div>
+<pre><code><span class="c">// 有外部 Comparator 用 Comparator，否则要求 key 实现 Comparable（自然排序）</span>
+<span class="k">final int</span> compare(<span class="t">Object</span> k1, <span class="t">Object</span> k2) {
+    <span class="k">return</span> comparator == <span class="k">null</span>
+        ? ((<span class="t">Comparable</span>&lt;? <span class="k">super</span> K&gt;) k1).compareTo((K) k2)
+        : comparator.compare((K) k1, (K) k2);
+}
+
+<span class="c">// put 中：cmp == 0 视为同一个 key —— 只覆盖 value，不新增节点</span>
+<span class="k">else</span> <span class="k">return</span> t.setValue(value);</code></pre>
+</div>
+
+<div class="think">
+<div class="think-q">面试追问："TreeSet 判断元素是否重复，用的是 equals() 还是 compareTo()？如果一个类的 compareTo 和 equals 不一致会怎样？"</div>
+</div>
+
+<div class="crack">
+<div class="crack-label">TreeSet 的去重标准是 compare 结果，不是 equals</div>
+<p>TreeSet 的重复判定只看 <code>compareTo() == 0</code>（或 Comparator 返回 0）：返回 0 就认为"同一个元素"，<code>add()</code> 返回 false，<strong>equals() 根本不参与</strong>。因此若类没实现 Comparable，add 时抛 <code>ClassCastException</code>；若 compareTo 与 equals 不一致，会出现"equals 不同的两个对象被当成一个"或反之——这是生产中的经典坑，第 12 站会展开。这也是为什么 <code>TreeSet</code> 的元素必须实现 <code>Comparable</code> 或传入 <code>Comparator</code>。</p>
+</div>
 
 <div class="crack">
 <div class="crack-label">为什么 TreeSet 不允许插入 null？</div>
-<p>TreeSet 需要对元素进行比较排序。插入 null 时会调用 <code>null.compareTo(...)</code> 或 <code>comparator.compare(null, ...)</code>，直接抛出 <code>NullPointerException</code>。而 HashSet 只依赖 <code>hashCode()</code> 和 <code>equals()</code>，null 的 hashCode 被特殊处理为 0，所以允许一个 null。</p>
+<p>TreeSet 需要对元素进行比较排序。插入 null 时，<code>TreeMap.put()</code> 会先执行 <code>compare(key, key)</code> 做类型检查：自然排序下 <code>((Comparable) null).compareTo(...)</code> 直接抛 <code>NullPointerException</code>。而 HashSet 只依赖 <code>hashCode()</code> 和 <code>equals()</code>，null 的 hashCode 被特殊处理为 0，所以允许一个 null。<strong>注意边界</strong>：若自定义 Comparator 显式容忍 null，TreeMap 理论上也能收 null——但这是反直觉的用法，面试按"默认 NPE"回答即可。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第5站：对比总结表 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>对比总结表：一张表覆盖三个 Set</h2></div>
+<!-- ═══════════════ 第9站：导航方法与视图 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>TreeSet 的导航方法与"活视图"</h2></div>
+
+<p>TreeSet 独有的价值在于<strong>有序查询</strong>。六个导航方法要分清"严格"与"含等"、以及"找不到返回什么"：</p>
+
+<table class="nb-table">
+  <thead>
+    <tr>
+      <th>方法</th>
+      <th>语义</th>
+      <th>找不到时</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>first()</code> / <code>last()</code></td>
+      <td>最小 / 最大元素</td>
+      <td>空集合抛 <code>NoSuchElementException</code></td>
+    </tr>
+    <tr>
+      <td><code>lower(e)</code></td>
+      <td>严格小于 e 的最大元素</td>
+      <td rowspan="4">返回 <code>null</code>（不抛异常）</td>
+    </tr>
+    <tr>
+      <td><code>floor(e)</code></td>
+      <td>小于等于 e 的最大元素（含 e）</td>
+    </tr>
+    <tr>
+      <td><code>ceiling(e)</code></td>
+      <td>大于等于 e 的最小元素（含 e）</td>
+    </tr>
+    <tr>
+      <td><code>higher(e)</code></td>
+      <td>严格大于 e 的最小元素</td>
+    </tr>
+    <tr>
+      <td><code>pollFirst()</code> / <code>pollLast()</code></td>
+      <td>取出并删除最小 / 最大元素</td>
+      <td>返回 <code>null</code>（空集合）</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>subSet / headSet / tailSet：返回的是"活视图"</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>TreeSet.java</b> · 区间视图的实现</span></div>
+<pre><code><span class="c">// 子区间视图：包一层 NavigableSubMap，操作实时映射回原 TreeMap</span>
+<span class="k">public</span> <span class="t">NavigableSet</span>&lt;E&gt; subSet(E fromElement, <span class="k">boolean</span> fromInclusive,
+                               E toElement, <span class="k">boolean</span> toInclusive) {
+    <span class="k">return new</span> <span class="t">TreeSet</span>&lt;&gt;(m.subMap(fromElement, fromInclusive, toElement, toInclusive));
+}
+
+<span class="k">public</span> <span class="t">NavigableSet</span>&lt;E&gt; headSet(E toElement, <span class="k">boolean</span> inclusive) {
+    <span class="k">return new</span> <span class="t">TreeSet</span>&lt;&gt;(m.headMap(toElement, inclusive));
+}</code></pre>
+</div>
+
+<div class="crack">
+<div class="crack-label">视图是"活的"：类比数据库视图</div>
+<p><code>subSet()</code> 返回的不是副本，而是<strong>原树的窗口</strong>——就像数据库视图，查的是同一张表。对视图的读写都会实时作用到原 TreeSet：原集合新增元素，视图立刻"看得见"（若落在区间内）；向视图 add 区间外的元素则抛 <code>IllegalArgumentException</code>。如果不需要联动，再 <code>new TreeSet&lt;&gt;(view)</code> 拷贝一份。</p>
+</div>
+
+<p>还有 <code>descendingSet()</code> / <code>descendingIterator()</code> 提供逆序遍历视图。这些导航操作全部走红黑树路径，复杂度都是 O(log n)。典型场景：日程表中查"下一个空闲时间段"、价格区间查询、按时间线做范围聚合。</p>
+
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+  <li>lower/floor/ceiling/higher 四兄弟的区别只在"严格/含等"；空结果返回 null，而 first/last 抛异常。</li>
+  <li>subSet/headSet/tailSet 是活视图：共享底层数据，区间外 add 抛 IllegalArgumentException。</li>
+  <li>TreeSet 判重以 compare == 0 为准，与 equals 无关。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第10站：LinkedHashSet ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>LinkedHashSet：LinkedHashMap 保序的秘密</h2></div>
+
+<p>LinkedHashSet 的代码量比 HashSet 还少——它<strong>继承 HashSet</strong>，只是把底层 Map 换成 LinkedHashMap。看那个 package-private 的构造器：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LinkedHashSet.java / HashSet.java</b> · 偷天换日</span></div>
+<pre><code><span class="c">// LinkedHashSet 的构造器，全部转发给 HashSet 的"特殊"构造器</span>
+<span class="k">public class</span> <span class="t">LinkedHashSet</span>&lt;E&gt; <span class="k">extends</span> <span class="t">HashSet</span>&lt;E&gt; {
+    <span class="k">public</span> <span class="t">LinkedHashSet</span>() { <span class="k">super</span>(<span class="n">16</span>, .75f, <span class="k">true</span>); }
+    <span class="k">public</span> <span class="t">LinkedHashSet</span>(<span class="t">Collection</span>&lt;? <span class="k">extends</span> E&gt; c) {
+        <span class="k">super</span>(<span class="t">Math</span>.max(<span class="n">2</span> * c.size(), <span class="n">11</span>), .75f, <span class="k">true</span>);
+        addAll(c);
+    }
+}
+
+<span class="c">// HashSet 里的"隐藏构造器"：第三个参数 dummy 只是占位，真正作用是换 Map 实现</span>
+<span class="t">HashSet</span>(<span class="t">int</span> initialCapacity, <span class="t">float</span> loadFactor, <span class="k">boolean</span> dummy) {
+    map = <span class="k">new</span> <span class="t">LinkedHashMap</span>&lt;&gt;(initialCapacity, loadFactor);
+}</code></pre>
+</div>
+
+<h3>LinkedHashMap = HashMap + 双向链表</h3>
+
+<p>LinkedHashMap 在 HashMap 的每个节点上多挂了两个指针 <code>before</code> / <code>after</code>，串成一条<strong>贯穿所有桶的全局双向链表</strong>。桶内的冲突链表（next 指针）负责"定位"，全局链表负责"顺序"，两套结构互不干扰。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="LinkedHashSet 双向链表保序示意">
+  <defs>
+    <marker id="arrow7" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+    <marker id="arrow8" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+  </defs>
+
+  <text x="350" y="24" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">LinkedHashSet = 哈希定位 + 双向链表保序（插入顺序）</text>
+
+  <!-- 桶数组 -->
+  <text x="245" y="50" text-anchor="middle" font-size="11" fill="#57544E">桶数组</text>
+  <rect x="80" y="60" width="70" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="115" y="80" text-anchor="middle" font-size="10" fill="#57544E">桶 0</text>
+  <rect x="190" y="60" width="70" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="225" y="80" text-anchor="middle" font-size="10" fill="#57544E">桶 1</text>
+  <rect x="300" y="60" width="70" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="335" y="80" text-anchor="middle" font-size="10" fill="#57544E">桶 2</text>
+  <rect x="410" y="60" width="70" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6"/>
+  <text x="445" y="80" text-anchor="middle" font-size="10" fill="#57544E">桶 3</text>
+
+  <!-- 节点行（按插入顺序：apple → banana → cherry → durian） -->
+  <rect x="80" y="120" width="90" height="30" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="125" y="139" text-anchor="middle" font-size="11" fill="#3E6B8F">cherry</text>
+  <rect x="190" y="120" width="90" height="30" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="235" y="139" text-anchor="middle" font-size="11" fill="#3E6B8F">apple</text>
+  <rect x="300" y="120" width="90" height="30" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="345" y="139" text-anchor="middle" font-size="11" fill="#3E6B8F">banana</text>
+  <rect x="410" y="120" width="90" height="30" rx="4" fill="#E8F0F8" stroke="#3E6B8F"/>
+  <text x="455" y="139" text-anchor="middle" font-size="11" fill="#3E6B8F">durian</text>
+
+  <!-- 桶归属：apple 和 durian 都在桶 1（冲突链） -->
+  <line x1="225" y1="90" x2="235" y2="120" stroke="#8C8676" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <line x1="225" y1="90" x2="455" y2="120" stroke="#8C8676" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="225" y="108" text-anchor="middle" font-size="9" fill="#8C8676">next 冲突链</text>
+  <line x1="115" y1="90" x2="125" y2="120" stroke="#8C8676" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <line x1="335" y1="90" x2="345" y2="120" stroke="#8C8676" stroke-width="1.2" stroke-dasharray="4,3"/>
+
+  <!-- 全局插入序双向链表：apple → banana → cherry → durian -->
+  <text x="350" y="178" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="600">before / after 双向链表（遍历只走这条链，输出插入顺序）</text>
+  <line x1="235" y1="185" x2="345" y2="185" stroke="#C2410C" stroke-width="2" marker-end="url(#arrow8)"/>
+  <line x1="345" y1="195" x2="125" y2="195" stroke="#C2410C" stroke-width="2" marker-end="url(#arrow8)"/>
+  <line x1="125" y1="205" x2="455" y2="205" stroke="#C2410C" stroke-width="2" marker-end="url(#arrow8)"/>
+  <text x="210" y="180" text-anchor="middle" font-size="10" fill="#C2410C">after</text>
+  <text x="235" y="205" text-anchor="middle" font-size="10" fill="#C2410C">after</text>
+  <text x="300" y="222" text-anchor="middle" font-size="10" fill="#C2410C">after</text>
+
+  <!-- head / tail -->
+  <text x="160" y="244" font-size="11" fill="#57544E">head（最老）→ apple</text>
+  <text x="430" y="244" font-size="11" fill="#57544E">tail（最新）← durian</text>
+
+  <!-- 底部说明 -->
+  <rect x="60" y="262" width="580" height="30" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="350" y="282" text-anchor="middle" font-size="11" fill="#1C1C1C">虚线 = 桶内 next 冲突链（负责查找）；实线 = 全局 before/after 顺序链（负责遍历）</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 5</span>LinkedHashMap 在哈希桶之外另挂一条全局双向链表：查找走哈希，遍历走链表，顺序与插入一致</figcaption>
+</figure>
+
+<div class="think">
+<div class="think-q">面试追问："向 LinkedHashSet 重复 add 一个已存在的元素，元素的顺序会变吗？"</div>
+</div>
+
+<div class="crack">
+<div class="crack-label">插入序 vs 访问序：accessOrder 开关</div>
+<p>LinkedHashMap 有个字段 <code>accessOrder</code>，默认 <code>false</code> 表示<strong>插入序</strong>：重复 put 已存在的 key 只覆盖 value，<strong>不移动节点位置</strong>（所以 LinkedHashSet 重复 add 不改变顺序）。若设为 <code>true</code> 则每次访问都把节点挪到链表尾部——这正是 <code>LinkedHashMap.removeEldestEntry()</code> 实现 <strong>LRU 缓存</strong>（如 MyBatis 的 LruCache、Spring 早期的缓存）的底层机制。LinkedHashSet 只暴露插入序版本，因为 Set 语义下"访问序"没有意义。</p>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+  <li>LinkedHashSet 继承 HashSet，通过隐藏构造器把底层换成 LinkedHashMap，代码零重复。</li>
+  <li>顺序由 before/after 全局双向链表保证，查找仍走哈希桶，复杂度与 HashSet 同阶 O(1) 平均。</li>
+  <li>代价：每个节点多两个引用（before/after），内存略高于 HashSet；重复 add 不改变顺序。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第11站：对比总结表 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>一张表覆盖三个 Set + 复杂度对比</h2></div>
 
 <p>掌握了委托模式后，三个 Set 实现类的区别就转化为三个 Map 的区别：</p>
 
@@ -254,6 +894,65 @@
     </tr>
   </tbody>
 </table>
+
+<h3>复杂度对比（均摊 / 平均意义）</h3>
+
+<table class="nb-table">
+  <thead>
+    <tr>
+      <th>操作</th>
+      <th>HashSet</th>
+      <th>LinkedHashSet</th>
+      <th>TreeSet</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>add</strong></td>
+      <td>O(1) 平均（最坏 O(log n)，全树化后）</td>
+      <td>O(1) 平均</td>
+      <td>O(log n)</td>
+    </tr>
+    <tr>
+      <td><strong>remove</strong></td>
+      <td>O(1) 平均</td>
+      <td>O(1) 平均</td>
+      <td>O(log n)</td>
+    </tr>
+    <tr>
+      <td><strong>contains</strong></td>
+      <td>O(1) 平均</td>
+      <td>O(1) 平均</td>
+      <td>O(log n)</td>
+    </tr>
+    <tr>
+      <td><strong>遍历全部</strong></td>
+      <td>O(容量)（按桶扫描，含空桶）</td>
+      <td>O(n)（沿 after 链，无空桶开销）</td>
+      <td>O(n)（中序遍历）</td>
+    </tr>
+    <tr>
+      <td><strong>取最小 / 最大</strong></td>
+      <td>不支持</td>
+      <td>不支持</td>
+      <td>O(log n)（first/last）</td>
+    </tr>
+    <tr>
+      <td><strong>区间查询</strong></td>
+      <td>不支持</td>
+      <td>不支持</td>
+      <td>O(log n + k)（subSet 等）</td>
+    </tr>
+    <tr>
+      <td><strong>排序能力</strong></td>
+      <td>无</td>
+      <td>仅保持插入序</td>
+      <td>实时有序</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>值得注意的细节：<strong>HashSet 遍历是 O(容量) 而不是 O(size)</strong>——它要扫过整个桶数组（包括空桶），这也是为什么"容量开得过大"会拖慢迭代。而 LinkedHashSet 沿 after 链走，天然 O(size)；TreeSet 中序走树，也是 O(size)。</p>
 
 <figure class="fig">
 <svg viewBox="0 0 700 320" role="img" aria-label="Set 家族继承树">
@@ -316,74 +1015,112 @@
   <line x1="170" y1="308" x2="200" y2="308" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5,3"/>
   <text x="206" y="312" font-size="10" fill="#57544E">= 委托给 Map</text>
 </svg>
-<figcaption><span class="fig-no">图 2</span>Set 家族继承树：每个 Set 实现类都委托给对应的 Map 实现</figcaption>
+<figcaption class="figcaption"><span class="fig-no">图 6</span>Set 家族继承树：每个 Set 实现类都委托给对应的 Map 实现</figcaption>
 </figure>
+
+<div class="crack">
+<div class="crack-label">一句话选型</div>
+<p>数据量大、只要去重 → HashSet；去重要排序或区间查询 → TreeSet；去重且遍历要稳定有序 → LinkedHashSet。本质上就是问自己：<strong>要不要顺序？顺序是"比较序"还是"插入序"？</strong>答案决定底层 Map。</p>
+</div>
 </section>
 
-<!-- ═══════════════ 第6站：实战使用场景 ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>实战使用场景</h2></div>
+<!-- ═══════════════ 第12站：实战场景与生产最佳实践 ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>实战场景与生产最佳实践</h2></div>
 
 <h3>场景一：去重 —— HashSet</h3>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>UserService.java</b> · 用户 ID 去重</span></div>
-<pre><code><span class="c">// 收集所有不重复的用户 ID</span>
-<span class="t">Set</span>&lt;<span class="t">Long</span>&gt; uniqueUserIds = <span class="k">new</span> <span class="t">HashSet</span>&lt;&gt;();
+<pre><code><span class="c">// 收集所有不重复的用户 ID（O(1) 插入 + 自动去重）</span>
+<span class="t">Set</span>&lt;<span class="t">Long</span>&gt; uniqueUserIds = <span class="k">new</span> <span class="t">HashSet</span>&lt;&gt;(
+    (<span class="t">int</span>) (orderList.size() / 0.75f) + <span class="n">1</span>);   <span class="c">// 预估容量，避免扩容</span>
 <span class="k">for</span> (<span class="t">Order</span> order : orderList) {
     uniqueUserIds.add(order.getUserId());
-}
-<span class="c">// O(1) 插入 + 自动去重，最适合海量数据的去重场景</span></code></pre>
+}</code></pre>
 </div>
 
-<h3>场景二：有序去重 —— TreeSet</h3>
+<h3>场景二：有序去重 + 区间查询 —— TreeSet</h3>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>Leaderboard.java</b> · 排行榜</span></div>
-<pre><code><span class="c">// 排行榜：自动排序 + 去重，支持范围查询</span>
+<pre><code><span class="c">// 按分数降序；分数相同按名字升序 —— 注意 TreeSet 以 compare 结果判重，</span>
+<span class="c">// 若只按分数比较，同分玩家会被当成"重复元素"吞掉！</span>
 <span class="t">TreeSet</span>&lt;<span class="t">Player</span>&gt; leaderboard = <span class="k">new</span> <span class="t">TreeSet</span>&lt;&gt;(
-    Comparator.comparingInt(<span class="t">Player</span>::getScore).reversed()
+    <span class="t">Comparator</span>.comparingInt(<span class="t">Player</span>::getScore).reversed()
+             .thenComparing(<span class="t">Player</span>::getName)   <span class="c">// 决胜字段，保证唯一性</span>
 );
 leaderboard.add(<span class="k">new</span> <span class="t">Player</span>(<span class="s">"Alice"</span>, <span class="n">2800</span>));
 leaderboard.add(<span class="k">new</span> <span class="t">Player</span>(<span class="s">"Bob"</span>, <span class="n">3200</span>));
-leaderboard.add(<span class="k">new</span> <span class="t">Player</span>(<span class="s">"Carol"</span>, <span class="n">2800</span>));
+leaderboard.add(<span class="k">new</span> <span class="t">Player</span>(<span class="s">"Carol"</span>, <span class="n">2800</span>)); <span class="c">// 与 Alice 同分，靠名字区分</span>
 
-<span class="t">Player</span> top = leaderboard.first();  <span class="c">// 最高分</span>
-<span class="t">SortedSet</span>&lt;<span class="t">Player</span>&gt; top3 = leaderboard.headSet(leaderboard.toArray(<span class="k">new</span> <span class="t">Player</span>[<span class="n">0</span>])[<span class="n">2</span>], <span class="k">true</span>);</code></pre>
+<span class="t">Player</span> top = leaderboard.first();                  <span class="c">// Bob（最高分）</span>
+<span class="t">Player</span> second = leaderboard.lower(top);            <span class="c">// 第二名</span>
+<span class="c">// 区间查询：分数 ≥ 3000 的玩家（probe 对象模式，只用于比较）</span>
+<span class="t">NavigableSet</span>&lt;<span class="t">Player</span>&gt; highScores =
+    leaderboard.tailSet(<span class="k">new</span> <span class="t">Player</span>(<span class="s">""</span>, <span class="n">3000</span>), <span class="k">true</span>);</code></pre>
 </div>
 
 <h3>场景三：保持插入顺序 —— LinkedHashSet</h3>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>TagService.java</b> · 有序标签</span></div>
-<pre><code><span class="c">// 文章标签：去重且保持添加顺序</span>
+<pre><code><span class="c">// 文章标签：去重且保持添加顺序，遍历输出稳定</span>
 <span class="t">Set</span>&lt;<span class="t">String</span>&gt; tags = <span class="k">new</span> <span class="t">LinkedHashSet</span>&lt;&gt;();
 tags.add(<span class="s">"Java"</span>);
 tags.add(<span class="s">"集合框架"</span>);
 tags.add(<span class="s">"面试"</span>);
-tags.add(<span class="s">"Java"</span>);  <span class="c">// 重复，忽略</span>
-<span class="c">// 遍历顺序：Java → 集合框架 → 面试（保持插入顺序）</span></code></pre>
+tags.add(<span class="s">"Java"</span>);  <span class="c">// 重复，忽略且不改变顺序</span>
+<span class="c">// 遍历顺序：Java → 集合框架 → 面试</span></code></pre>
 </div>
+
+<h3>生产坑清单：每一个都见过线上事故</h3>
+
+<div class="think">
+<div class="think-q">面试追问："把一个可变对象放进 HashSet 之后，又修改了它的字段，会发生什么？"</div>
+</div>
+
+<div class="crack">
+<div class="crack-label">坑 1：可变对象做 key = 幽灵元素 + 内存泄漏</div>
+<p>如果元素的 <code>hashCode()</code> 依赖可变字段，放进去之后再改字段，它的哈希值变了，但它在桶里的位置没变。<code>contains()</code> / <code>remove()</code> 会按<strong>新哈希</strong>去另一个桶找——找不到！这个元素既无法查询也无法删除，成了集合里的"幽灵"，常驻内存。所以：<strong>做 Set 元素 / Map key 的类，参与 hashCode 的字段应尽量 final 不可变</strong>（String、Integer、Long 天生安全）。</p>
+</div>
+
+<ul>
+  <li><strong>坑 2：equals / hashCode 契约被破坏</strong>——只重写一个、或用了非 final 字段、或子类继承时破坏对称性，直接导致去重失效或查询错乱。用 <code>Objects.hash()</code> / <code>Objects.equals()</code> 或 IDE 生成，别手写。</li>
+  <li><strong>坑 3：容量预估不当</strong>——<code>new HashSet&lt;&gt;()</code> 默认 16，塞进 10 万条要扩容多次（每次 O(n) 全量搬运）。已知规模 N 用 <code>new HashSet&lt;&gt;((int) (N / 0.75f) + 1)</code>。反过来也别盲目开超大容量：HashSet 遍历是 O(容量)，空桶也要扫。</li>
+  <li><strong>坑 4：多线程直接用 HashSet</strong>——HashMap 非线程安全，并发 put 可能丢数据、覆盖写（JDK 8 后不再死循环，但依然错乱）。并发去重用 <code>ConcurrentHashMap.newKeySet()</code>（内部 sizeCtl 控制初始化与扩容、CounterCell 分担计数）；读多写少用 <code>CopyOnWriteArraySet</code>；简单场景 <code>Collections.synchronizedSet()</code>。</li>
+  <li><strong>坑 5：fail-fast 迭代器</strong>——遍历时通过 <code>iterator.remove()</code> 之外的途径修改集合（结构性修改，modCount 变化），抛 <code>ConcurrentModificationException</code>。注意：add 一个<strong>已存在</strong>的元素不改变 modCount，不会触发（见第 4 站）。</li>
+  <li><strong>坑 6：TreeSet 的排序器与 equals 不一致</strong>——TreeSet 判重只看 compare 结果。Comparator 只比较分数时，同分玩家会被吞；自定义类若 compareTo 与 equals 语义不一致，可能出现"equals 不相等却被去重"或"compareTo 认为相同但 equals 不同"，破坏 Set 语义，也坑了依赖 hashCode/equals 的其他容器。另注意 TreeSet 默认不接受 null。</li>
+  <li><strong>坑 7：序列化与深浅拷贝</strong>——HashSet/TreeSet 都实现 Serializable，但其中的元素必须可序列化；跨进程传递 Set 时元素类要保持版本一致，否则反序列化报错。</li>
+</ul>
 
 <div class="takeaway">
 <div class="takeaway-label">选型口诀</div>
 <ul>
-  <li><strong>只要去重</strong> → HashSet（最快，O(1)）</li>
-  <li><strong>去重 + 排序</strong> → TreeSet（O(log n)，支持范围查询）</li>
-  <li><strong>去重 + 保持插入顺序</strong> → LinkedHashSet（O(1)，LRU 缓存的基础）</li>
+  <li><strong>只要去重</strong> → HashSet（最快，O(1)，记得预估容量）</li>
+  <li><strong>去重 + 排序 / 区间查询</strong> → TreeSet（O(log n)，元素要 Comparable 或传 Comparator）</li>
+  <li><strong>去重 + 保持插入顺序</strong> → LinkedHashSet（O(1)，遍历稳定有序，LRU 缓存同源机制）</li>
+  <li><strong>并发去重</strong> → <code>ConcurrentHashMap.newKeySet()</code>，别裸用 HashSet</li>
 </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：从 Set 讲到 Map 底层</h2></div>
-
-<p>记住 <strong>Set 是 Map 的马甲</strong>，面试时从 Set 讲到 Map 底层，展示你的知识深度：</p>
+<!-- ═══════════════ 总结站 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
 
 <div class="recap">
-  <p><strong>核心观点：</strong>Set 接口本身不实现存储，三个实现类全部通过委托 Map 完成工作。理解了这个模式，一个知识点覆盖整个 Set 家族。</p>
-  <p><strong>HashSet</strong> → 内部持有 <code>HashMap&lt;E, Object&gt;</code>，元素作 key，<code>PRESENT</code> 作 value。add/remove/contains 各只一行代码，全部委托 HashMap。O(1) 性能，无序。</p>
-  <p><strong>TreeSet</strong> → 内部持有 <code>NavigableMap&lt;E, Object&gt;</code>（通常是 TreeMap），红黑树保证 O(log n)，元素自动有序。额外提供 first/last/lower/higher/ceiling/floor 等导航方法。不允许 null。</p>
-  <p><strong>LinkedHashSet</strong> → 继承 HashSet，构造时用 LinkedHashMap，通过双向链表保持插入顺序。</p>
-  <p><strong>面试加分点：</strong>不要只说"HashSet 用 HashMap"，要讲清楚委托模式——元素作为 key、PRESENT 作为占位 value、add 返回 put 的结果判 null。从 Set 出发自然串联到 Map 的哈希表、红黑树、扩容等底层知识，展示体系化理解。</p>
+<h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>一个模式：</strong>Set 是 Map 的马甲——HashSet 委托 HashMap、TreeSet 委托 TreeMap、LinkedHashSet 委托 LinkedHashMap，元素作 key，PRESENT 静态对象作占位 value。</li>
+  <li><strong>add 返回 boolean：</strong>靠 <code>map.put(e, PRESENT) == null</code> 判重；put 返回 null 说明新插入（true），返回旧 value 说明已存在（false），且重复 add 不改 size / modCount。</li>
+  <li><strong>去重契约：</strong>hashCode 定桶 + equals 定元素，两段式定位；equals 相等 ⟹ hashCode 相等，二者必须成对重写。</li>
+  <li><strong>三个数字：</strong>树化阈值 8、退化阈值 6、最小树化容量 64；负载因子 0.75、初始容量 16、扩容翻倍（上限 1 &lt;&lt; 30）。</li>
+  <li><strong>扩容优化：</strong>JDK 8 用 <code>e.hash &amp; oldCap</code> 高低位拆分，免 rehash、尾插保序；均摊 O(1)。</li>
+  <li><strong>红黑树：</strong>TreeMap 内核，五条性质保证树高约 log₂n，中序遍历即升序；判重以 compare == 0 为准而非 equals；默认不允许 null。</li>
+  <li><strong>导航方法：</strong>first/last（空集抛异常）、lower/floor/ceiling/higher（无结果返回 null）、subSet/headSet/tailSet 是活视图。</li>
+  <li><strong>保序原理：</strong>LinkedHashMap = HashMap + before/after 全局双向链表，查找走哈希、遍历走链表，accessOrder=false 时重复 add 不改变顺序。</li>
+  <li><strong>复杂度：</strong>HashSet/LinkedHashSet O(1) 平均，TreeSet O(log n)；HashSet 遍历是 O(容量)，LinkedHashSet/TreeSet 遍历是 O(size)。</li>
+  <li><strong>生产红线：</strong>可变对象不做 key、容量按 N/0.75 预估、并发用 ConcurrentHashMap.newKeySet()、Comparator 与 equals 保持一致。</li>
+</ul>
+<p>面试时的满分话术：<strong>"HashSet、TreeSet、LinkedHashSet 都是 Map 的马甲——元素作 key、PRESENT 占位 value，差异只在底层 Map：哈希表 O(1)、红黑树 O(log n) 有序、双向链表保插入序。去重靠 hashCode+equals 契约，add 用 put 返回值判重。"</strong>一句话说完，深度自然就出来了。</p>
 </div>
 </section>
 

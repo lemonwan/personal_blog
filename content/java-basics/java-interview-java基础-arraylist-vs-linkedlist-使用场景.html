@@ -20,26 +20,35 @@
 <div class="think"><div class="think-q">在你的项目中，上一次用 LinkedList 是什么时候？如果答案是"记不清了"——那你已经直觉地抓住了真相：在 95% 的场景下，ArrayList 都是更好的选择。</div></div>
 
 <p>这篇文章不靠记忆、不靠直觉，我们用<strong>源码 + 数据 + 内存模型</strong>来回答这个问题。读完之后你会发现，面试中最有区分度的答案往往不是背出来的，而是理解出来的。</p>
+
+<p>整篇文章的路线图如下：<strong>内部结构（数组 vs 链表）→ 扩容与搬移（grow / System.arraycopy）→ 增删实现（link / unlink）→ 性能实测 → CPU 缓存与内存开销 → 生产避坑 → 面试追问链 → 选择指南</strong>。我们先把两个容器的"骨架"看清楚。</p>
 </section>
 
 <!-- ═══════════════ 第2站：ArrayList 内部结构 ═══════════════ -->
 <section class="station reveal" id="s2">
 <div class="station-head"><span class="station-no">第 2 站</span><h2>ArrayList：连续内存 + 下标直达</h2></div>
 
-<p>ArrayList 的内部结构非常朴素——就是一个 <code>Object[]</code> 数组。所有的元素按插入顺序连续存放在内存中：</p>
+<p>ArrayList 的内部结构非常朴素——就是一个 <code>Object[]</code> 数组。所有的元素按插入顺序连续存放在内存中。注意区分两个概念：<code>size</code>（已存元素个数）和 <code>elementData.length</code>（数组容量），前者永远小于等于后者：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · 核心字段</span></div>
-<pre><code><span class="k">transient</span> <span class="t">Object</span>[] elementData; <span class="c">// 底层数组（transient 表示不参与序列化）</span>
-<span class="k">private</span> <span class="t">int</span> size;               <span class="c">// 当前元素个数（≠ 数组长度）</span>
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · 核心字段与随机访问</span></div>
+<pre><code><span class="c">// ArrayList.java（JDK 8+）· 核心字段</span>
+<span class="k">transient</span> <span class="t">Object</span>[] elementData;    <span class="c">// 底层数组：连续内存（transient 见第 13 站）</span>
+<span class="k">private</span> <span class="t">int</span> size;                  <span class="c">// 当前元素个数（≠ 数组长度）</span>
 
-<span class="c">// 默认空数组，首次 add 时扩容到 10</span>
-<span class="k">private static final</span> <span class="t">Object</span>[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
+<span class="k">private static final</span> <span class="t">int</span> DEFAULT_CAPACITY = <span class="n">10</span>;
+<span class="k">private static final</span> <span class="t">Object</span>[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {}; <span class="c">// 懒加载：首次 add 才建 10 容量</span>
+<span class="k">private static final</span> <span class="t">int</span> MAX_ARRAY_SIZE = <span class="t">Integer</span>.MAX_VALUE - <span class="n">8</span>; <span class="c">// 数组长度上限</span>
 
 <span class="c">// 随机访问 —— O(1)</span>
 <span class="k">public</span> E get(<span class="t">int</span> index) {
-    rangeCheck(index);
-    <span class="k">return</span> elementData(index); <span class="c">// 直接下标取值</span>
+    rangeCheck(index);            <span class="c">// 越界检查</span>
+    <span class="k">return</span> elementData(index);   <span class="c">// 直接下标取值</span>
+}
+
+<span class="k">private void</span> rangeCheck(<span class="t">int</span> index) {
+    <span class="k">if</span> (index &gt;= size)          <span class="c">// 只查上界；负数会由数组访问抛 AIOOBE</span>
+        <span class="k">throw new</span> <span class="t">IndexOutOfBoundsException</span>(outOfBoundsMsg(index));
 }
 
 <span class="c">// 下标访问的内部方法，无任何边界检查</span>
@@ -86,23 +95,228 @@ E elementData(<span class="t">int</span> index) {
 
 <p><code>get(index)</code> 的实现只有一行——直接数组下标访问。这意味着不管列表有 10 个元素还是 100 万个元素，<code>get(999999)</code> 的速度和 <code>get(0)</code> <strong>完全一样</strong>。</p>
 
+<div class="crack"><div class="crack-label">为什么 O(1)？—— 一次乘加运算 + 一次访存</div>
+<p>数组的地址计算是确定性的：<strong>元素地址 = 数组基址 + index × 引用大小（4 或 8 字节）</strong>。CPU 做一次乘法加法，然后一次内存访问就拿到数据——与列表长度无关。这就是"下标直达"的物理本质。</p>
+</div>
+
 <div class="crack"><div class="crack-label">为什么 ArrayList 实现了 RandomAccess 接口？</div>
-<p><code>RandomAccess</code> 是一个标记接口（没有任何方法），它告诉 Collections 工具类和 Stream API："这个 List 支持快速随机访问"。例如 <code>Collections.binarySearch()</code> 在遇到 <code>RandomAccess</code> 时会用下标遍历（O(log n)），否则改用迭代器遍历（O(n)）。</p>
+<p><code>RandomAccess</code> 是一个标记接口（没有任何方法），它告诉 Collections 工具类和 Stream API："这个 List 支持快速随机访问"。例如 <code>Collections.binarySearch()</code> 遇到 <code>RandomAccess</code> 时走 <code>indexedBinarySearch</code>（每次 <code>get(index)</code> 都是 O(1)，总复杂度 O(log n)）；否则退化为 <code>iteratorBinarySearch</code>（LinkedList 上每次移动迭代器都是 O(n)，二分直接失效）。功能相同，性能天差地别。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第3站：LinkedList 内部结构 ═══════════════ -->
+<!-- ═══════════════ 第3站：ArrayList 扩容 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>LinkedList：双向链表 + 节点跳转</h2></div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>ArrayList 扩容：1.5 倍与均摊 O(1)</h2></div>
 
-<p>LinkedList 的底层是一个<strong>双向链表</strong>——每个节点保存了前驱 <code>prev</code>、后继 <code>next</code> 和元素值 <code>item</code>：</p>
+<p>数组一旦创建长度就固定了，那 ArrayList 是怎么做到"无限追加"的？答案在 <code>grow()</code>——<strong>装不下就换一个更大的数组，把旧元素整体拷贝过去</strong>：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>LinkedList.Node</b> · 双向链表节点</span></div>
-<pre><code><span class="k">private static class</span> <span class="t">Node</span>&lt;E&gt; {
-    E item;
-    <span class="t">Node</span>&lt;E&gt; next;
-    <span class="t">Node</span>&lt;E&gt; prev;
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · add 与 grow</span></div>
+<pre><code><span class="k">public boolean</span> add(E e) {
+    ensureCapacityInternal(size + <span class="n">1</span>);   <span class="c">// 容量不足时触发扩容</span>
+    elementData[size++] = e;               <span class="c">// 追加到末尾</span>
+    <span class="k">return true</span>;
+}
+
+<span class="k">private void</span> grow(<span class="t">int</span> minCapacity) {
+    <span class="t">int</span> oldCapacity = elementData.length;
+    <span class="hl"><span class="t">int</span> newCapacity = oldCapacity + (oldCapacity &gt;&gt; <span class="n">1</span>);</span> <span class="c">// ★ 1.5 倍：右移一位再相加</span>
+    <span class="k">if</span> (newCapacity - minCapacity &lt; <span class="n">0</span>)     <span class="c">// 一次 addAll 加太多时，直接扩到刚好够</span>
+        newCapacity = minCapacity;
+    <span class="k">if</span> (newCapacity - MAX_ARRAY_SIZE &gt; <span class="n">0</span>) <span class="c">// 触及上限走 hugeCapacity</span>
+        newCapacity = hugeCapacity(minCapacity);
+    elementData = <span class="t">Arrays</span>.copyOf(elementData, newCapacity); <span class="c">// 新数组 + 整体拷贝</span>
+}
+
+<span class="k">private static int</span> hugeCapacity(<span class="t">int</span> minCapacity) {
+    <span class="k">if</span> (minCapacity &lt; <span class="n">0</span>)                 <span class="c">// int 溢出为负数 → 真的装不下了</span>
+        <span class="k">throw new</span> <span class="t">OutOfMemoryError</span>();
+    <span class="k">return</span> (minCapacity &gt; MAX_ARRAY_SIZE) ? <span class="t">Integer</span>.MAX_VALUE : MAX_ARRAY_SIZE;
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 260" role="img" aria-label="ArrayList 扩容 1.5 倍示意图">
+  <text x="350" y="24" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">ArrayList 扩容：capacity 10 → 15（1.5 倍）</text>
+
+  <text x="30" y="52" font-size="11" fill="#57544E">扩容前：elementData.length = 10，已满（size = 10）</text>
+  <rect x="30" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="74" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="118" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="162" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="206" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="250" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="294" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="338" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="382" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="426" y="60" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+
+  <line x1="240" y1="95" x2="240" y2="118" stroke="#C2410C" stroke-width="2"/>
+  <text x="250" y="110" font-size="11" fill="#C2410C">grow()：Arrays.copyOf 整体拷贝（复制 10 个引用）</text>
+
+  <text x="30" y="142" font-size="11" fill="#57544E">扩容后：elementData.length = 15（10 + (10 &gt;&gt; 1) = 10 + 5），size 仍为 10</text>
+  <rect x="30" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="74" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="118" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="162" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="206" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="250" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="294" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="338" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="382" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="426" y="150" width="42" height="30" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <rect x="470" y="150" width="42" height="30" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <rect x="514" y="150" width="42" height="30" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <rect x="558" y="150" width="42" height="30" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <rect x="602" y="150" width="42" height="30" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <rect x="646" y="150" width="42" height="30" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+
+  <text x="350" y="212" text-anchor="middle" font-size="11" fill="#57544E">旧数组失去引用 → GC 回收；继续 add 到第 16 个元素才再次扩容</text>
+  <text x="350" y="237" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">扩容 = 分配新数组 + 一次整体拷贝：单次 O(n)，均摊 O(1)</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>grow() 的 1.5 倍扩容：新数组 + 整体拷贝，旧数组交给 GC</figcaption>
+</figure>
+
+<div class="think"><div class="think-q">为什么是 1.5 倍而不是 2 倍？扩容倍数越大，扩容次数越少，但每次扩容后浪费的"空位"也越多——1.5 倍是扩容次数与内存浪费之间的折中（增长因子 2 会让旧容量永远无法被新容量"回收利用"，1.5 倍则允许）。</div></div>
+
+<h3>边界条件与两个隐藏细节</h3>
+
+<ul>
+  <li><strong>首次 add 扩容到 10</strong>：无参构造时 <code>elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA</code>（空数组，不占堆），第一次 add 才把 <code>minCapacity</code> 提升到 <code>max(10, size+1)</code>——<strong>懒加载</strong>，空列表零开销。</li>
+  <li><strong>MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8</strong>：预留 8 个字节给数组对象头，避免部分 JVM 上"能分配却访问越界"的边界问题；再往上就只剩 <code>Integer.MAX_VALUE</code> 一条路。</li>
+  <li><strong>hugeCapacity 的 OOM</strong>：当 <code>minCapacity</code> 溢出为负数时直接抛 <code>OutOfMemoryError</code>——这是"真要 20 亿个元素"时才会触发的极端边界。</li>
+</ul>
+
+<div class="takeaway"><div class="takeaway-label">核心要点</div>
+<ul>
+  <li>扩容公式：<code>newCapacity = oldCapacity + (oldCapacity &gt;&gt; 1)</code>，即 1.5 倍（向下取整）</li>
+  <li>扩容 = 新数组 + <code>Arrays.copyOf</code> 整体拷贝，单次 O(n)，均摊 O(1)</li>
+  <li>对比：HashMap 容量恒为 2 的幂（用 <code>hash &amp; (n-1)</code> 取模），扩容 2 倍；ArrayList 用 1.5 倍更省内存——两者目标不同</li>
+  <li>生产实践：已知规模时用 <code>new ArrayList&lt;&gt;(n)</code> 或 <code>ensureCapacity(n)</code> 预分配，避免扩容震荡</li>
+</ul>
+</div>
+
+<div class="crack"><div class="crack-label">后端类比：批量导入为何要预分配？</div>
+<p>一次性往列表里灌 10 万条订单记录时，如果不预分配，ArrayList 会经历约 23 次扩容、累计拷贝近 3n 个引用——虽然均摊下来仍是 O(1)，但每次扩容都伴随一次内存分配与 GC 压力。类似数据库批量 INSERT 前先 <code>BATCH_SIZE</code> 规划，提前 <code>new ArrayList&lt;&gt;(batchSize)</code> 是最便宜的优化。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：arraycopy 搬移 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>中间插入与删除：System.arraycopy 搬移</h2></div>
+
+<p>ArrayList 的"增删代价"全部集中在<strong>下标中间位置</strong>：为了保持数组连续，插入/删除后，后半段元素必须整体搬移一个位置。核心就是 <code>System.arraycopy</code>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · add(index, e) 与 remove(index)</span></div>
+<pre><code><span class="k">public void</span> add(<span class="t">int</span> index, E element) {
+    rangeCheckForAdd(index);                      <span class="c">// 要求 0 ≤ index ≤ size</span>
+    ensureCapacityInternal(size + <span class="n">1</span>);         <span class="c">// 可能触发扩容</span>
+    <span class="hl">System.arraycopy(elementData, index,</span>
+                     elementData, index + <span class="n">1</span>,  <span class="c">// 目标位置右移一位</span>
+                     size - index);               <span class="c">// 搬移后半段全部元素</span>
+    elementData[index] = element;
+    size++;
+}
+
+<span class="k">public</span> E remove(<span class="t">int</span> index) {
+    rangeCheck(index);
+    modCount++;
+    E oldValue = elementData(index);
+    <span class="t">int</span> numMoved = size - index - <span class="n">1</span>;
+    <span class="k">if</span> (numMoved &gt; <span class="n">0</span>)
+        System.arraycopy(elementData, index + <span class="n">1</span>, elementData, index, numMoved);
+    elementData[--size] = <span class="k">null</span>;   <span class="c">// ★ 尾部置 null：切断引用，帮助 GC</span>
+    <span class="k">return</span> oldValue;
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 320" role="img" aria-label="中间插入 arraycopy 搬移示意">
+  <text x="350" y="24" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">add(2, "X")：index 2 及之后的元素整体右移一位</text>
+
+  <text x="30" y="52" font-size="11" fill="#57544E">插入前：[A][B][C][D][E]，size = 5</text>
+  <rect x="30" y="60" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="65" y="85" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">A</text>
+  <text x="65" y="115" text-anchor="middle" font-size="10" fill="#8C8676">0</text>
+  <rect x="110" y="60" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="145" y="85" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">B</text>
+  <text x="145" y="115" text-anchor="middle" font-size="10" fill="#8C8676">1</text>
+  <rect x="190" y="60" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="225" y="85" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">C</text>
+  <text x="225" y="115" text-anchor="middle" font-size="10" fill="#8C8676">2</text>
+  <rect x="270" y="60" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="305" y="85" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">D</text>
+  <text x="305" y="115" text-anchor="middle" font-size="10" fill="#8C8676">3</text>
+  <rect x="350" y="60" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="385" y="85" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">E</text>
+  <text x="385" y="115" text-anchor="middle" font-size="10" fill="#8C8676">4</text>
+
+  <rect x="186" y="56" width="238" height="48" rx="6" fill="none" stroke="#3E6B8F" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="432" y="72" font-size="10" fill="#3E6B8F">要搬移的区间</text>
+  <text x="432" y="86" font-size="10" fill="#3E6B8F">length = size - index = 3</text>
+
+  <line x1="230" y1="125" x2="230" y2="150" stroke="#C2410C" stroke-width="2"/>
+  <text x="240" y="140" font-size="11" fill="#C2410C" font-weight="700">System.arraycopy(elementData, 2, elementData, 3, 3)</text>
+  <text x="240" y="156" font-size="10" fill="#57544E">srcPos=2 · destPos=3 · length=3（源与目标重叠，按 memmove 语义处理）</text>
+
+  <text x="30" y="182" font-size="11" fill="#57544E">插入后：[A][B][X][C][D][E]，size = 6</text>
+  <rect x="30" y="190" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="65" y="215" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">A</text>
+  <text x="65" y="245" text-anchor="middle" font-size="10" fill="#8C8676">0</text>
+  <rect x="110" y="190" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="145" y="215" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">B</text>
+  <text x="145" y="245" text-anchor="middle" font-size="10" fill="#8C8676">1</text>
+  <rect x="190" y="190" width="70" height="40" rx="4" fill="#3E6B8F" opacity="0.15" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="225" y="215" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">X</text>
+  <text x="225" y="245" text-anchor="middle" font-size="10" fill="#3E6B8F">2（新元素）</text>
+  <rect x="270" y="190" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="305" y="215" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">C</text>
+  <text x="305" y="245" text-anchor="middle" font-size="10" fill="#8C8676">3</text>
+  <rect x="350" y="190" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="385" y="215" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">D</text>
+  <text x="385" y="245" text-anchor="middle" font-size="10" fill="#8C8676">4</text>
+  <rect x="430" y="190" width="70" height="40" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="465" y="215" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">E</text>
+  <text x="465" y="245" text-anchor="middle" font-size="10" fill="#8C8676">5</text>
+
+  <text x="305" y="184" font-size="13" fill="#C2410C">→</text>
+  <text x="385" y="184" font-size="13" fill="#C2410C">→</text>
+  <text x="465" y="184" font-size="13" fill="#C2410C">→</text>
+
+  <text x="350" y="278" text-anchor="middle" font-size="11" fill="#57544E">搬移平均成本 = n/2 个引用；连续内存 → JIT 编译为 memmove，SIMD 指令批量搬运</text>
+  <text x="350" y="298" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">最后 X 写入 index 2，一步完成</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>add(index, e) 的搬移过程：后半段整体右移，X 落位</figcaption>
+</figure>
+
+<h3>复杂度与两个容易忽略的点</h3>
+
+<ul>
+  <li><strong>平均 O(n/2)</strong>：插入到中间，平均要搬移 <code>size - index</code> 个元素；删除同理。头部插入/删除是 O(n)，尾部追加/删除是 O(1)（追加含均摊扩容）。</li>
+  <li><strong>remove 尾部置 null</strong>：<code>elementData[--size] = null</code>——如果不置 null，尾部"逻辑已删除"的引用会一直强引用着对象，阻碍 GC。这是 ArrayList 源码里非常经典的"帮助 GC"手法。</li>
+  <li><strong>arraycopy 是 native 方法</strong>：同一数组内搬移时，JIT 会把它编译成内存块的 <code>memmove</code>（正确处理重叠区间），再配合 SIMD 指令一次搬多个引用。这也是后面"中间插入实测反而更快"的伏笔。</li>
+</ul>
+
+<div class="think"><div class="think-q">"ArrayList 增删慢"的说法严谨吗？——慢的只是"中间位置的增删"（O(n) 搬移）；尾部追加是均摊 O(1)，比 LinkedList 的尾部操作还快（少一次节点分配）。</div></div>
+</section>
+
+<!-- ═══════════════ 第5站：LinkedList 内部结构 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>LinkedList：双向链表 + 节点跳转</h2></div>
+
+<p>LinkedList 的底层是一个<strong>双向链表</strong>——每个节点保存了前驱 <code>prev</code>、后继 <code>next</code> 和元素值 <code>item</code>，链表自身只持有头尾两个指针和一个计数器：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LinkedList.java</b> · 字段与 Node</span></div>
+<pre><code><span class="k">transient int</span> size = <span class="n">0</span>;
+<span class="k">transient</span> <span class="t">Node</span>&lt;E&gt; first;   <span class="c">// 头节点</span>
+<span class="k">transient</span> <span class="t">Node</span>&lt;E&gt; last;    <span class="c">// 尾节点</span>
+
+<span class="k">private static class</span> <span class="t">Node</span>&lt;E&gt; {
+    E item;                 <span class="c">// 元素本身</span>
+    <span class="t">Node</span>&lt;E&gt; next;           <span class="c">// 后继</span>
+    <span class="t">Node</span>&lt;E&gt; prev;           <span class="c">// 前驱</span>
 
     <span class="t">Node</span>(<span class="t">Node</span>&lt;E&gt; prev, E element, <span class="t">Node</span>&lt;E&gt; next) {
         <span class="k">this</span>.item = element;
@@ -145,37 +359,209 @@ E elementData(<span class="t">int</span> index) {
   <text x="560" y="106" text-anchor="middle" font-size="11" fill="#1C1C1C">每个节点 24+ 字节（3 个引用）</text>
   <text x="560" y="124" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">CPU 缓存命中率低</text>
 </svg>
-<figcaption><span class="fig-no">图 2</span>LinkedList 的散落内存布局：每个节点可能在堆中的任何位置，CPU 缓存难以预取</figcaption>
+<figcaption><span class="fig-no">图 4</span>LinkedList 的散落内存布局：每个节点可能在堆中的任何位置，CPU 缓存难以预取</figcaption>
 </figure>
 
-<p>要访问第 i 个元素，LinkedList 必须从头（或尾）开始，<strong>逐个节点跳转</strong>：</p>
+<p>注意这里的结构差异带来的第一层结论：<strong>LinkedList 没有"下标"概念</strong>，<code>first</code>/<code>last</code> 只让头尾两个位置 O(1) 可达，其余节点只能靠指针"跳"过去。</p>
+
+<div class="crack"><div class="crack-label">自引用对象的 GC 代价</div>
+<p>每个 Node 都是一个独立的堆对象，自带 12~16 字节对象头，还持有 3 个引用。GC 扫描、对象晋升、TLAB 分配都会因"节点多 + 散落"而变慢。这也是 LinkedList 在 <code>add</code> 时比 ArrayList 慢的原因之一：<strong>ArrayList 追加只写一个数组槽位，LinkedList 要 new 一个 Node 对象</strong>。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：node() 随机访问 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>LinkedList 的随机访问：node() 从头/尾遍历</h2></div>
+
+<p>要访问第 i 个元素，LinkedList 必须从头（或尾）开始，<strong>逐个节点跳转</strong>。JDK 的优化是"从距离更近的一端出发"，即经典的双向链表折半遍历：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>LinkedList.node()</b> · 按下标查找节点</span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>LinkedList.java</b> · node() 按下标查找节点</span></div>
 <pre><code><span class="t">Node</span>&lt;E&gt; node(<span class="t">int</span> index) {
     <span class="c">// 优化：从距离更近的一端开始遍历</span>
-    <span class="k">if</span> (index &lt; (size &gt;&gt; <span class="n">1</span>)) {
+    <span class="hl"><span class="k">if</span> (index &lt; (size &gt;&gt; <span class="n">1</span>))</span> {   <span class="c">// index 在前半段 → 从头走</span>
         <span class="t">Node</span>&lt;E&gt; x = first;
         <span class="k">for</span> (<span class="t">int</span> i = <span class="n">0</span>; i &lt; index; i++)
-            x = x.next;       <span class="c">// 从头部跳到 index</span>
+            x = x.next;             <span class="c">// 从头部跳到 index</span>
         <span class="k">return</span> x;
-    } <span class="k">else</span> {
+    } <span class="k">else</span> {                        <span class="c">// index 在后半段 → 从尾走</span>
         <span class="t">Node</span>&lt;E&gt; x = last;
         <span class="k">for</span> (<span class="t">int</span> i = size - <span class="n">1</span>; i &gt; index; i--)
-            x = x.prev;       <span class="c">// 从尾部跳到 index</span>
+            x = x.prev;             <span class="c">// 从尾部跳到 index</span>
         <span class="k">return</span> x;
     }
 }</code></pre>
 </div>
 
-<p>即使 JDK 做了"从更近的一端开始"的优化，访问中间元素仍然需要 <strong>O(n/2) 次指针跳转</strong>——这在大列表下是很可观的开销。</p>
+<p><code>get(int index)</code> 和 <code>set(int index, E)</code> 内部都走 <code>node(index)</code>，因此：</p>
+
+<ul>
+  <li><strong>get(i) / set(i)：O(n)</strong>——即使 JDK 做了"从更近的一端开始"的优化，访问中间元素仍然需要 <strong>O(n/2) 次指针跳转</strong>，在大列表下是很可观的开销。</li>
+  <li><strong>getFirst() / getLast()：O(1)</strong>——直接返回 <code>first</code> / <code>last</code>，不需要遍历。</li>
+  <li><strong>size()：O(1)</strong>——维护在 <code>size</code> 字段里，不是遍历统计。</li>
+</ul>
+
+<div class="think"><div class="think-q">为什么 LinkedList 不适合二分查找？——二分需要"任意下标 O(1) 直达"，而 LinkedList 每次访问都要 O(n) 遍历，二分直接退化成 O(n log n)。这也是 <code>RandomAccess</code> 标记接口存在的意义：让算法知道"能不能放心按下标访问"。</div></div>
+
+<div class="crack"><div class="crack-label">每次跳转都可能是一次 Cache Miss</div>
+<p>for 循环里 <code>x = x.next</code> 看起来只是一行赋值，实际每次都要去内存里读下一个 Node 的地址——而下一个 Node 可能在任何地方。每跳一次，CPU 都面临一次缓存未命中等待。这也是"算法上 O(n)，实测上更慢"的放大器。</p>
+</div>
 </section>
 
-<!-- ═══════════════ 第4站：性能实测 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>性能实测：数据说话</h2></div>
+<!-- ═══════════════ 第7站：link/unlink ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>LinkedList 的增删：link/unlink 与 O(1) 的前提</h2></div>
 
-<p>我们用 JMH 做了一个标准化基准测试，列表大小为 <strong>100,000</strong>，每个操作重复 1000 次取平均值：</p>
+<p>链表真正的"O(1) 增删"发生在<strong>拿到目标节点引用之后</strong>——只改相邻指针，不搬数据：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LinkedList.java</b> · linkFirst / linkBefore / unlink</span></div>
+<pre><code><span class="c">// 头尾操作：O(1)</span>
+<span class="k">private void</span> linkFirst(E e) {
+    <span class="k">final</span> <span class="t">Node</span>&lt;E&gt; f = first;
+    <span class="k">final</span> <span class="t">Node</span>&lt;E&gt; newNode = <span class="k">new</span> <span class="t">Node</span>&lt;&gt;(<span class="k">null</span>, e, f);
+    first = newNode;
+    <span class="k">if</span> (f == <span class="k">null</span>) last = newNode;   <span class="c">// 原链表为空</span>
+    <span class="k">else</span> f.prev = newNode;
+    size++; modCount++;
+}
+<span class="c">// linkLast 对称，略</span>
+
+<span class="c">// 在 succ 节点之前插入：只改 4 个指针</span>
+<span class="k">void</span> linkBefore(E e, <span class="t">Node</span>&lt;E&gt; succ) {
+    <span class="k">final</span> <span class="t">Node</span>&lt;E&gt; pred = succ.prev;
+    <span class="k">final</span> <span class="t">Node</span>&lt;E&gt; newNode = <span class="k">new</span> <span class="t">Node</span>&lt;&gt;(pred, e, succ);
+    succ.prev = newNode;
+    <span class="k">if</span> (pred == <span class="k">null</span>) first = newNode;   <span class="c">// succ 是头节点</span>
+    <span class="k">else</span> pred.next = newNode;
+    size++; modCount++;
+}
+
+<span class="c">// 摘除节点：同样只改相邻指针</span>
+E unlink(<span class="t">Node</span>&lt;E&gt; x) {
+    <span class="k">final</span> E element = x.item;
+    <span class="k">final</span> <span class="t">Node</span>&lt;E&gt; next = x.next;
+    <span class="k">final</span> <span class="t">Node</span>&lt;E&gt; prev = x.prev;
+
+    <span class="k">if</span> (prev == <span class="k">null</span>) first = next;
+    <span class="k">else</span> { prev.next = next; x.prev = <span class="k">null</span>; }
+
+    <span class="k">if</span> (next == <span class="k">null</span>) last = prev;
+    <span class="k">else</span> { next.prev = prev; x.next = <span class="k">null</span>; }
+
+    x.item = <span class="k">null</span>;          <span class="c">// 帮助 GC</span>
+    size--; modCount++;
+    <span class="k">return</span> element;
+}
+
+<span class="c">// 但按 API 删除：先 O(n) 找节点，再 O(1) 摘除</span>
+<span class="k">public</span> E remove(<span class="t">int</span> index) {
+    checkElementIndex(index);
+    <span class="k">return</span> unlink(node(index));   <span class="c">// ★ node(index) 才是真正的成本</span>
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 300" role="img" aria-label="linkBefore 节点链接示意">
+  <text x="350" y="24" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">linkBefore(X, S)：在 S 前插入新节点 N，只改 4 个指针（O(1)）</text>
+
+  <text x="60" y="62" font-size="10" fill="#B0A895">灰色虚线 = 被替换的旧指针</text>
+  <text x="60" y="210" font-size="10" fill="#B0A895">红色实线 = 新指针</text>
+
+  <!-- P -->
+  <rect x="50" y="75" width="130" height="56" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="115" y="100" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">P</text>
+  <text x="115" y="118" text-anchor="middle" font-size="9" fill="#57544E">(前驱节点)</text>
+
+  <!-- N -->
+  <rect x="285" y="75" width="130" height="56" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="2" stroke-dasharray="6 3"/>
+  <text x="350" y="100" text-anchor="middle" font-size="14" fill="#C2410C" font-weight="700">N</text>
+  <text x="350" y="118" text-anchor="middle" font-size="9" fill="#C2410C">(新节点)</text>
+
+  <!-- S -->
+  <rect x="520" y="75" width="130" height="56" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="585" y="100" text-anchor="middle" font-size="14" fill="#1C1C1C" font-weight="700">S</text>
+  <text x="585" y="118" text-anchor="middle" font-size="9" fill="#57544E">(succ)</text>
+
+  <!-- 旧指针 -->
+  <line x1="180" y1="88" x2="520" y2="88" stroke="#B0A895" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="520" y1="118" x2="180" y2="118" stroke="#B0A895" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="350" y="82" text-anchor="middle" font-size="9" fill="#B0A895">旧：P.next → S</text>
+  <text x="350" y="130" text-anchor="middle" font-size="9" fill="#B0A895">旧：S.prev → P</text>
+
+  <!-- 新指针 -->
+  <line x1="180" y1="95" x2="285" y2="95" stroke="#C2410C" stroke-width="2"/>
+  <circle cx="232" cy="95" r="8" fill="#C2410C"/>
+  <text x="232" y="98" text-anchor="middle" font-size="9" fill="#fff" font-weight="700">④</text>
+  <line x1="415" y1="95" x2="520" y2="95" stroke="#C2410C" stroke-width="2"/>
+  <circle cx="467" cy="95" r="8" fill="#C2410C"/>
+  <text x="467" y="98" text-anchor="middle" font-size="9" fill="#fff" font-weight="700">②</text>
+  <line x1="520" y1="108" x2="415" y2="108" stroke="#C2410C" stroke-width="2"/>
+  <circle cx="467" cy="108" r="8" fill="#C2410C"/>
+  <text x="467" y="111" text-anchor="middle" font-size="9" fill="#fff" font-weight="700">③</text>
+  <line x1="285" y1="108" x2="180" y2="108" stroke="#C2410C" stroke-width="2"/>
+  <circle cx="232" cy="108" r="8" fill="#C2410C"/>
+  <text x="232" y="111" text-anchor="middle" font-size="9" fill="#fff" font-weight="700">①</text>
+
+  <text x="350" y="160" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">① N.prev = P　② N.next = S　③ S.prev = N　④ P.next = N</text>
+  <text x="350" y="180" text-anchor="middle" font-size="11" fill="#57544E">四个指针赋值完成插入，不搬动任何数据，其他节点完全不受影响</text>
+  <text x="350" y="230" text-anchor="middle" font-size="11" fill="#57544E">但 API add(index, e) 的前置是 node(index) 遍历 —— 总复杂度 O(n) + O(1)</text>
+  <text x="350" y="250" text-anchor="middle" font-size="11" fill="#57544E">同理 remove(index) = node(index)（O(n)）+ unlink（O(1)）</text>
+</svg>
+<figcaption><span class="fig-no">图 5</span>linkBefore 只改 4 个指针：O(1) 的前提是"已经站在目标节点旁边"</figcaption>
+</figure>
+
+<h3>O(1) 增删的前提：持有节点引用</h3>
+
+<p>LinkedList 的 <code>add(index, e)</code> 完整流程是 <code>checkPositionIndex</code> →（index == size ? linkLast : <code>linkBefore(e, node(index))</code>）。注意 <code>node(index)</code> 的 O(n) 遍历<strong>已经包含在这个 API 里</strong>了。真正能拿到"免费 O(1)"的只有两种途径：</p>
+
+<table>
+  <thead><tr><th>调用方式</th><th>复杂度</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>addFirst / addLast / removeFirst / removeLast</code></td><td><strong>O(1)</strong></td><td>头尾指针直达，不遍历</td></tr>
+    <tr><td><code>add(index, e) / remove(index) / remove(o)</code></td><td><strong>O(n)</strong></td><td>先 node(index) 遍历找位置，再 link/unlink</td></tr>
+    <tr><td><code>ListIterator.add / remove</code>（在迭代位置操作）</td><td><strong>O(1)</strong></td><td>迭代器"随身携带"当前节点引用，无需重新查找 —— LinkedList 独有的中间操作优势</td></tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">后端类比：LRU 缓存为什么敢用"链表 + HashMap"？</div>
+<p>经典 LRU 实现（LinkedHashMap）的核心正是"HashMap 找节点 + 链表 O(1) 摘除/前移"——因为<strong>已经通过 key 拿到了节点引用</strong>，才享受 O(1)。如果你只能拿到下标或对象值，LinkedList 的 O(1) 优势就荡然无存。这是理解 LinkedList 的钥匙：<strong>它的快，是"站在正确位置"的快</strong>。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第8站：打破误区 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>打破误区：中间插入谁更快？</h2></div>
+
+<p>很多人认为 LinkedList 插入是 O(1)，但这有个前提：<strong>你已经拿到了要插入位置的节点引用</strong>。我们先把两种结构的复杂度摊开对比：</p>
+
+<table>
+  <thead><tr><th>操作</th><th>ArrayList</th><th>LinkedList</th><th>胜出方</th></tr></thead>
+  <tbody>
+    <tr><td>get(i) 随机访问</td><td>O(1) 下标直达</td><td>O(n) 折半遍历</td><td>ArrayList 碾压</td></tr>
+    <tr><td>add(e) 尾部追加</td><td>O(1) 均摊</td><td>O(1)（但要 new Node）</td><td>持平，实测 ArrayList 略快</td></tr>
+    <tr><td>addFirst / addLast</td><td>O(n)（arraycopy 搬移）</td><td>O(1)</td><td>LinkedList 胜</td></tr>
+    <tr><td>add(index, e) 中间插入</td><td>O(n) 搬移（连续内存 memmove）</td><td>O(n) 遍历 + O(1) 链接</td><td><strong>实测 ArrayList 更快</strong></td></tr>
+    <tr><td>remove(index) 中间删除</td><td>O(n) 搬移</td><td>O(n) 遍历 + O(1) 摘除</td><td><strong>实测 ArrayList 更快</strong></td></tr>
+    <tr><td>contains / indexOf</td><td>O(n) 线性扫描</td><td>O(n) 线性扫描</td><td>持平（缓存差异让 ArrayList 略快）</td></tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">为什么 LinkedList 中间插入反而更慢？</div>
+<p>实际调用 <code>list.add(index, element)</code> 时，LinkedList 需要先调用 <code>node(index)</code> 遍历到目标位置（O(n)），然后才是 O(1) 的节点链接操作。<strong>遍历找位置的开销远大于插入本身</strong>。</p>
+<p>而 ArrayList 的 <code>add(index, element)</code> 虽然需要 <code>System.arraycopy</code> 搬运后半段数据，但这个操作是<strong>连续内存的 memcpy</strong>——CPU 可以用 SIMD 指令批量搬运，速度极快。在 10 万规模下，arraycopy 的耗时甚至低于 LinkedList 的遍历。</p>
+</div>
+
+<div class="think"><div class="think-q">面试官追问："那 LinkedList 的 add(index, e) 不也是 O(n) 吗，凭什么是"增删快"？"——正确答法：O(1) 只属于"持有节点引用的链接/摘除"这一步；完整 API 的复杂度要看它包不包含查找。面试中能主动区分这两层，就已经超过 90% 的候选人。</div></div>
+
+<p>那 LinkedList 在什么场景下真的快？——<strong>头尾操作</strong>：<code>addFirst()</code>、<code>addLast()</code>、<code>removeFirst()</code>、<code>removeLast()</code> 都是 O(1)。但这些操作用 <code>ArrayDeque</code> 做更快（连续内存 + 环形缓冲区），后面会说。</p>
+</section>
+
+<!-- ═══════════════ 第9站：性能实测 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>性能实测：数据说话</h2></div>
+
+<p>我们用 JMH 做了一个标准化基准测试，列表大小为 <strong>100,000</strong>，每个操作重复 1000 次取平均值（该数据来自社区经典 JMH 基准，绝对数值随 JDK 版本与机器浮动，但<strong>趋势稳定可复现</strong>）：</p>
 
 <div class="takeaway"><div class="takeaway-label">基准测试结果（n = 100,000）</div>
 <table class="nb-table">
@@ -192,20 +578,18 @@ E elementData(<span class="t">int</span> index) {
 </table>
 </div>
 
-<p>注意看中间插入那一行——这是最大的认知误区。</p>
+<p>注意看中间插入那一行——这是最大的认知误区：<strong>ArrayList 唯一的"输面"是头部插入</strong>（40,000 ns vs 3 ns），因为整个数组要右移一位；而一旦到中间位置，arraycopy 的 memmove 优势就开始显现。</p>
 
-<div class="crack"><div class="crack-label">为什么 LinkedList 中间插入反而更慢？</div>
-<p>很多人认为 LinkedList 插入是 O(1)，但这有个前提：<strong>你已经拿到了要插入位置的节点引用</strong>。</p>
-<p>实际调用 <code>list.add(index, element)</code> 时，LinkedList 需要先调用 <code>node(index)</code> 遍历到目标位置（O(n)），然后才是 O(1) 的节点链接操作。<strong>遍历找位置的开销远大于插入本身</strong>。</p>
-<p>而 ArrayList 的 <code>add(index, element)</code> 虽然需要 <code>System.arraycopy</code> 搬运后半段数据，但这个操作是<strong>连续内存的 memcpy</strong>——CPU 可以用 SIMD 指令批量搬运，速度极快。在 10 万规模下，arraycopy 的耗时甚至低于 LinkedList 的遍历。</p>
+<div class="crack"><div class="crack-label">三个反直觉结论</div>
+<p><strong>① 随机访问差 25,000 倍</strong>：不是 2 倍、不是 10 倍，是 4 个数量级。任何"按下标取元素"的算法（排序、二分、随机采样）在 LinkedList 上都是灾难。</p>
+<p><strong>② 遍历差 4 倍</strong>：同样的 for-each，复杂度都是 O(n)，差距全来自 CPU 缓存命中率（下一站展开）。</p>
+<p><strong>③ 中间插入/删除都是 ArrayList 赢</strong>：memmove 的常数太小，LinkedList 的遍历常数太大。</p>
 </div>
-
-<p>那 LinkedList 在什么场景下真的快？——<strong>头尾操作</strong>：<code>addFirst()</code>、<code>addLast()</code>、<code>removeFirst()</code>、<code>removeLast()</code> 都是 O(1)。但这些操作用 <code>ArrayDeque</code> 做更快（连续内存 + 环形缓冲区），后面会说。</p>
 </section>
 
-<!-- ═══════════════ 第5站：CPU 缓存 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>CPU 缓存：ArrayList 的隐藏优势</h2></div>
+<!-- ═══════════════ 第10站：CPU 缓存 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>CPU 缓存：ArrayList 的隐藏优势</h2></div>
 
 <p>性能差异的根源不仅是算法复杂度，还有一个常被忽略的因素：<strong>CPU 缓存命中率</strong>。</p>
 
@@ -227,7 +611,7 @@ E elementData(<span class="t">int</span> index) {
   <rect x="184" y="95" width="28" height="12" rx="2" fill="#3E6B8F" opacity="0.6"/><text x="198" y="104" font-size="7" fill="#fff">e5</text>
   <rect x="214" y="95" width="28" height="12" rx="2" fill="#3E6B8F" opacity="0.6"/><text x="228" y="104" font-size="7" fill="#fff">e6</text>
   <rect x="244" y="95" width="28" height="12" rx="2" fill="#3E6B8F" opacity="0.6"/><text x="258" y="104" font-size="7" fill="#fff">e7</text>
-  <text x="180" y="125" text-anchor="middle" font-size="10" fill="#3E6B8F">一次加载 → 缓存 8 个元素引用</text>
+  <text x="180" y="125" text-anchor="middle" font-size="10" fill="#3E6B8F">一次加载 → 缓存 8~16 个元素引用</text>
 
   <!-- LinkedList -->
   <rect x="370" y="40" width="300" height="24" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
@@ -252,40 +636,180 @@ E elementData(<span class="t">int</span> index) {
   <text x="350" y="172" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">空间局部性原理：连续内存 → 缓存预取 → 快；散落内存 → 缓存未命中 → 慢</text>
   <text x="350" y="192" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">这是 ArrayList 遍历快 4 倍、中间插入也更快 的根本原因</text>
 </svg>
-<figcaption><span class="fig-no">图 3</span>CPU L1 缓存行为对比：ArrayList 的连续内存天然适配缓存预取机制</figcaption>
+<figcaption><span class="fig-no">图 6</span>CPU L1 缓存行为对比：ArrayList 的连续内存天然适配缓存预取机制</figcaption>
 </figure>
 
-<p>现代 CPU 的 L1 缓存每次加载不是 1 个字节，而是一整个 <strong>Cache Line（64 字节）</strong>。ArrayList 的引用数组是连续的，所以一次缓存加载可以装下 8 个元素引用（每个 4-8 字节），CPU 预取器还能提前加载下一个 Cache Line。</p>
+<p>现代 CPU 的 L1 缓存每次加载不是 1 个字节，而是一整个 <strong>Cache Line（64 字节）</strong>。ArrayList 的引用数组是连续的，所以一次缓存加载可以装下 8~16 个元素引用（压缩指针下每个引用 4 字节，未压缩 8 字节），CPU 预取器还能提前加载下一个 Cache Line。</p>
 
 <p>LinkedList 的节点散落在堆内存的不同位置，每次跳转到新节点都可能触发一次 <strong>Cache Miss</strong>，需要从更慢的 L2/L3 缓存甚至主存中读取数据。这就是为什么 LinkedList 遍历 10 万个元素比 ArrayList 慢 4 倍——不是算法差了 4 倍，而是<strong>内存访问模式差了 4 倍</strong>。</p>
+
+<div class="crack"><div class="crack-label">局部性原理（Locality of Reference）</div>
+<p>CPU 性能优化的两条铁律：<strong>时间局部性</strong>（刚访问过的数据很快会再访问）和<strong>空间局部性</strong>（刚访问过的数据附近的数据很快会被访问）。ArrayList 完美契合空间局部性：遍历时下一个元素就在缓存里。LinkedList 两者都不沾——每个节点都是"远方来客"。这也是为什么<strong>现代数据结构（ArrayDeque、ArrayList、HashMap 的数组桶）几乎全部基于连续数组</strong>。</p>
+</div>
 </section>
 
-<!-- ═══════════════ 第6站：内存开销 ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>内存开销：LinkedList 的隐形成本</h2></div>
+<!-- ═══════════════ 第11站：内存开销 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>内存开销：LinkedList 的隐形成本</h2></div>
 
-<p>每个元素的实际内存占用对比（64 位 JVM，开启指针压缩）：</p>
+<p>每个元素的实际内存占用对比（64 位 JVM）。关键前提是<strong>指针压缩</strong>：JVM 默认在堆小于 32 GB 时开启 <code>UseCompressedOops</code>，对象引用只占 4 字节：</p>
 
-<div class="formula">
-<strong>ArrayList</strong>：每个元素 = 1 个引用（4~8 字节） + 对象本身的内存<br/>
-<strong>LinkedList</strong>：每个元素 = 1 个 Node 对象（16 字节对象头 + 3 个引用 = 28~40 字节） + 对象本身的内存
-</div>
+<table>
+  <thead><tr><th>指针模式</th><th>ArrayList 每个元素（容器开销）</th><th>LinkedList 每个元素（Node 开销）</th><th>倍数</th></tr></thead>
+  <tbody>
+    <tr><td>压缩指针（默认，堆 &lt; 32G）</td><td>1 个引用 = <strong>4 字节</strong></td><td>对象头 12B + 3 引用 × 4B = <strong>24 字节</strong></td><td>6×</td></tr>
+    <tr><td>未压缩（-XX:-UseCompressedOops）</td><td>1 个引用 = <strong>8 字节</strong></td><td>对象头 16B + 3 引用 × 8B = <strong>40 字节</strong></td><td>5×</td></tr>
+  </tbody>
+</table>
 
-<p>也就是说，LinkedList 的<strong>额外开销</strong>是每个元素 24~36 字节的 Node 结构。对于 100 万个 Integer 元素：</p>
+<p>也就是说，LinkedList 的<strong>额外开销</strong>是每个元素 24~40 字节的 Node 结构（12~16 字节对象头 + 3 个引用，恰好 8 字节对齐）。对于 100 万个 Integer 元素（元素对象本身两者相同，只比"容器开销"）：</p>
 
 <ul>
-  <li>ArrayList 额外开销：100 万 × 8 字节（引用）= <strong>~8 MB</strong></li>
-  <li>LinkedList 额外开销：100 万 × 32 字节（Node）= <strong>~32 MB</strong></li>
+  <li>ArrayList 额外开销：100 万 × 4 字节（压缩引用）= <strong>~4 MB</strong>；未压缩则 ~8 MB</li>
+  <li>LinkedList 额外开销：100 万 × 24 字节（Node）= <strong>~24 MB</strong>；未压缩则 ~40 MB</li>
+  <li>差值：<strong>多浪费 ~20 MB（压缩）到 ~32 MB（未压缩）</strong>——全部花在"链接"上，不存储任何业务数据</li>
 </ul>
 
-<p>LinkedList 多消耗了 4 倍的存储空间，而这 4 倍空间全部浪费在了"链接"上——不存储任何业务数据。</p>
+<p>无论哪种模式，LinkedList 的容器开销都是 ArrayList 的 <strong>5~6 倍</strong>，而且这些 Node 对象还额外增加 GC 扫描与对象晋升的压力。</p>
 
-<div class="think"><div class="think-q">LinkedList 还实现了 Deque 接口，能当队列和双端队列用——但 ArrayDeque 也实现了 Deque，而且在几乎所有场景下性能更好。所以即使需要队列行为，也不一定要选 LinkedList。</div></div>
+<div class="think"><div class="think-q">LinkedList 还实现了 Deque 接口，能当队列和双端队列用——但 ArrayDeque 也实现了 Deque，而且在几乎所有场景下性能更好（连续数组 + 环形缓冲区，无节点对象开销）。所以即使需要队列行为，也不一定要选 LinkedList。</div></div>
+
+<div class="crack"><div class="crack-label">如何精确测量？—— JOL</div>
+<p>别再凭记忆估算对象大小，用 <strong>OpenJDK JOL</strong>（org.openjdk.jol）一行命令即可实测：<code>jol-core</code> 的 <code>ClassLayout.parseClass(Node.class).toPrintable()</code> 会输出对象头、字段偏移与对齐后的总大小。面试/博客中引用内存数字时，注明"压缩指针开启/关闭"才严谨。</p>
+</div>
 </section>
 
-<!-- ═══════════════ 第7站：选择建议 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>什么时候用 LinkedList？几乎不用</h2></div>
+<!-- ═══════════════ 第12站：生产避坑 ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>生产实践：避坑清单与最佳实践</h2></div>
+
+<p>面试之外，后端日常开发里这两兄弟埋了不少雷。下面是高频踩坑点与正确姿势：</p>
+
+<h3>坑 1：for-each 中删除 → ConcurrentModificationException</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>错误 vs 正确</b> · 遍历中删除</span></div>
+<pre><code><span class="c">// ✗ 错误：for-each 中直接 remove，迭代器检测到 modCount 变化 → 抛 CME</span>
+<span class="k">for</span> (String s : list) {
+    <span class="k">if</span> (s.startsWith(<span class="s">"x"</span>)) list.remove(s);
+}
+
+<span class="c">// ✓ 正确 1：迭代器 remove（同步 modCount）</span>
+<span class="t">Iterator</span>&lt;String&gt; it = list.iterator();
+<span class="k">while</span> (it.hasNext()) {
+    <span class="k">if</span> (it.next().startsWith(<span class="s">"x"</span>)) it.remove();
+}
+
+<span class="c">// ✓ 正确 2：removeIf（JDK 8+，ArrayList 底层用 BitSet 标记 + 一次批量搬移，性能最好）</span>
+list.removeIf(s -&gt; s.startsWith(<span class="s">"x"</span>));
+
+<span class="c">// ✗ 另一个坑：for-i 正序删除会跳过相邻元素（删除后下标错位）</span>
+<span class="k">for</span> (<span class="t">int</span> i = <span class="n">0</span>; i &lt; list.size(); i++) {
+    <span class="k">if</span> (list.get(i).startsWith(<span class="s">"x"</span>)) list.remove(i); <span class="c">// 相邻元素被跳过</span>
+}
+<span class="c">// ✓ 倒序遍历即可</span></code></pre>
+</div>
+
+<p>机制解释：ArrayList / LinkedList 都维护一个 <code>modCount</code>（结构性修改计数器）。迭代器创建时记录期望值，每次 <code>next()</code>/<code>remove()</code> 校验，不一致就抛 <code>ConcurrentModificationException</code>——这就是<strong>fail-fast（快速失败）</strong>机制。注意：它只保证"尽力检测"，多线程下并不保证一定抛出，所以不能依赖它做并发控制。</p>
+
+<h3>坑 2：subList 是视图，不是拷贝</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>subList 陷阱</b> · 视图语义</span></div>
+<pre><code><span class="t">List</span>&lt;String&gt; sub = list.subList(<span class="n">1</span>, <span class="n">3</span>);   <span class="c">// 视图：共享底层数组，不是新列表</span>
+sub.set(<span class="n">0</span>, <span class="s">"X"</span>);                          <span class="c">// 会影响原 list（视图的修改是"原地"的）</span>
+list.add(<span class="s">"new"</span>);                          <span class="c">// ✗ 原 list 结构性修改后，再碰 sub → CME</span>
+<span class="c">// 需要独立副本时：new ArrayList&lt;&gt;(list.subList(1, 3))</span></code></pre>
+</div>
+
+<h3>坑 3：toArray 强转陷阱</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>toArray</b> · 泛型擦除的代价</span></div>
+<pre><code>String[] arr = (String[]) list.toArray();   <span class="c">// ✗ ClassCastException：擦除后运行时是 Object[]</span>
+String[] arr2 = list.toArray(<span class="k">new</span> String[<span class="n">0</span>]);  <span class="c">// ✓ JDK 11+ 对空数组有专门优化，推荐</span>
+String[] arr3 = list.toArray(<span class="k">new</span> String[list.size()]); <span class="c">// ✓ 但会先分配再被覆盖</span></code></pre>
+</div>
+
+<h3>坑 4：Arrays.asList 与 List.of 的"假 List"</h3>
+
+<ul>
+  <li><code>Arrays.asList(a, b)</code>：返回<strong>固定长度</strong>的数组视图，<code>add/remove</code> 抛 <code>UnsupportedOperationException</code>，但 <code>set</code> 可以。</li>
+  <li><code>List.of(...)</code>（JDK 9+）：<strong>完全不可变</strong>，连 <code>set</code> 都禁止；且不允许 null 元素。</li>
+  <li>拿它们当普通 List 往方法里传，是最常见的生产事故来源。</li>
+</ul>
+
+<h3>最佳实践清单</h3>
+
+<table>
+  <thead><tr><th>场景</th><th>做法</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td>已知规模批量加载</td><td><code>new ArrayList&lt;&gt;(n)</code> / <code>ensureCapacity(n)</code></td><td>避免约 23 次扩容拷贝与 GC 压力</td></tr>
+    <tr><td>大量按条件删除</td><td><code>removeIf</code></td><td>ArrayList 内部 BitSet 标记 + 单次搬移，比逐个 remove 快一个量级</td></tr>
+    <tr><td>读多写少并发</td><td><code>CopyOnWriteArrayList</code></td><td>写时复制，读无锁；ArrayList 本身线程不安全</td></tr>
+    <tr><td>简单并发包装</td><td><code>Collections.synchronizedList</code></td><td>方法级同步，注意复合操作仍要手动加锁</td></tr>
+    <tr><td>队列 / 双端队列 / 栈</td><td><code>ArrayDeque</code></td><td>环形数组，头尾 O(1)，无节点开销；LinkedList 能做的它都能更快做（除 null 元素）</td></tr>
+    <tr><td>大列表内存敏感</td><td><code>trimToSize()</code></td><td>把容量收缩到 size，释放空位；但会触发一次拷贝，别频繁调用</td></tr>
+  </tbody>
+</table>
+
+<div class="crack"><div class="crack-label">后端类比：这些坑在业务代码里长什么样</div>
+<p>分页接口的 <code>records</code> 就是 ArrayList；消息队列的 FIFO 缓冲用 ArrayDeque 而不是 LinkedList；Excel 导出的百万行先用 <code>ensureCapacity</code> 预分配；定时任务里"遍历再删除"如果直接 for-each remove，线上立刻 CME——<strong>同样的坑，不同的项目，年年都在踩</strong>。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第13站：面试追问链 ═══════════════ -->
+<section class="station reveal" id="s13">
+<div class="station-head"><span class="station-no">第 13 站</span><h2>面试追问链：从背诵到理解</h2></div>
+
+<p>面试官不会满足于"查询快、增删快"，真正的区分度在追问里。下面是完整的追问链与参考答案：</p>
+
+<div class="think"><div class="think-q">追问 1："你说 add(e) 是 O(1)，可扩容时要整体拷贝，不也是 O(n) 吗？"</div></div>
+<div class="crack"><div class="crack-label">答案：均摊分析（Amortized Analysis）</div>
+<p>扩容虽然单次 O(n)，但容量按比例增长后，扩容频率是"越来越稀疏"的（1/n 级别）。把 n 次 add 的总成本（约 3n 次引用拷贝）摊到每次上，平均成本是<strong>常数</strong>——这就是<strong>均摊 O(1)</strong>。和 HashMap 的扩容、StringBuilder 的扩容是同一个道理。</p>
+</div>
+
+<div class="think"><div class="think-q">追问 2："get(i) 凭什么 O(1)？"</div></div>
+<div class="crack"><div class="crack-label">答案：地址 = 基址 + index × 引用大小</div>
+<p>数组的物理本质是"一块连续内存 + 一个基址"。<code>elementData[index]</code> 在 JVM 里就是一次乘加运算 + 一次访存，与列表长度无关；而链表只有"跳到下一个节点"这一种移动方式。</p>
+</div>
+
+<div class="think"><div class="think-q">追问 3："elementData 为什么要声明 transient？"</div></div>
+<div class="crack"><div class="crack-label">答案：自定义序列化，只写有效区间</div>
+<p>ArrayList 实现了 <code>writeObject/readObject</code>，序列化时只写 <code>[0, size)</code> 区间，<strong>不序列化容量里的空位</strong>。声明 <code>transient</code> 是为了绕过默认序列化（否则会把整个 elementData 数组连同 null 空位一起序列化），这是节省网络/磁盘的经典手法。LinkedList 的 Node 也是 transient，序列化时只按节点链写出 item。</p>
+</div>
+
+<div class="think"><div class="think-q">追问 4："modCount 是干什么的？"</div></div>
+<div class="crack"><div class="crack-label">答案：fail-fast 的结构修改计数器</div>
+<p>每次结构性修改（增删）都 <code>modCount++</code>；迭代器记录创建时的值，操作前校验，不一致即抛 <code>ConcurrentModificationException</code>。LinkedList、HashMap 等集合都有同样的机制。注意它<strong>不是并发控制</strong>，只是"尽力检测"。</p>
+</div>
+
+<div class="think"><div class="think-q">追问 5："那 LinkedList 到底什么时候值得用？"</div></div>
+<div class="crack"><div class="crack-label">答案：持有节点引用的场景 + 头尾操作</div>
+<p>真正合理的场景只有两类：<strong>① 持有节点引用时的 O(1) 插入/删除</strong>（如手写 LRU，或通过 <code>ListIterator</code> 边遍历边操作）；<strong>② 大量头尾操作</strong>（addFirst/addLast）。而 ② 用 <code>ArrayDeque</code> 更好。所以结论是：<strong>工程上 LinkedList 几乎没有不可替代的场景</strong>——Joshua Bloch（集合框架作者）也说过"LinkedList 几乎总是错误的选择"。</p>
+</div>
+
+<div class="think"><div class="think-q">追问 6："为什么 ArrayList 扩容 1.5 倍，HashMap 却是 2 倍？"</div></div>
+<div class="crack"><div class="crack-label">答案：目标不同</div>
+<p>HashMap 容量恒为 2 的幂，是为了用 <code>hash &amp; (n-1)</code> 位运算替代取模，扩容 2 倍正好翻倍；ArrayList 没有位运算需求，1.5 倍在"扩容次数"与"内存浪费"之间更均衡，且 1.5 倍允许旧数组被新数组"吞掉"（2 倍则永远做不到）。</p>
+</div>
+
+<h3>分层评分：同样的问题，三种答案</h3>
+
+<table>
+  <thead><tr><th>层级</th><th>典型回答</th><th>面试官判断</th></tr></thead>
+  <tbody>
+    <tr><td>背结论</td><td>"ArrayList 查询快，LinkedList 增删快"</td><td>及格线以下，大概率追问即挂</td></tr>
+    <tr><td>懂结构</td><td>"数组 vs 双向链表，get 是 O(1) vs O(n)，add(index, e) 都要 O(n)"</td><td>中上，基础扎实</td></tr>
+    <tr><td>懂原理</td><td>"中间插入实测 ArrayList 更快：arraycopy 是 memmove + 缓存局部性；LinkedList 要先 node(index) 遍历；只有持有节点引用才 O(1)；头尾操作用 ArrayDeque"</td><td>高分，有源码功底</td></tr>
+    <tr><td>有工程判断</td><td>补充 ensureCapacity 预分配、fail-fast / removeIf、subList 视图、toArray 强转、CopyOnWriteArrayList 等生产细节</td><td>顶格，能直接干活</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第14站：选择指南 ═══════════════ -->
+<section class="station reveal" id="s14">
+<div class="station-head"><span class="station-no">第 14 站</span><h2>什么时候用 LinkedList？几乎不用</h2></div>
 
 <p>综合以上分析，给出一个明确的选择指南：</p>
 
@@ -311,11 +835,12 @@ E elementData(<span class="t">int</span> index) {
 
 <div class="formula">
 <strong>"ArrayList vs LinkedList 的区别"</strong> —— 面试标准回答框架：<br/><br/>
-1. <strong>数据结构</strong>：ArrayList 是连续数组，LinkedList 是双向链表<br/>
-2. <strong>随机访问</strong>：ArrayList O(1)，LinkedList O(n)<br/>
-3. <strong>增删操作</strong>：尾部追加两者都是 O(1)（均摊），中间插入 ArrayList 的 arraycopy 在实际测试中反而更快，因为连续内存对 CPU 缓存更友好<br/>
-4. <strong>内存开销</strong>：LinkedList 每个元素多 24-36 字节的 Node 结构<br/>
-5. <strong>结论</strong>：绝大多数场景选 ArrayList，需要队列行为选 ArrayDeque
+1. <strong>数据结构</strong>：ArrayList 是 Object[] 连续数组（elementData），LinkedList 是双向链表（Node：prev/item/next）<br/>
+2. <strong>随机访问</strong>：ArrayList O(1)（下标直达），LinkedList O(n)（node() 从头/尾折半遍历）<br/>
+3. <strong>增删操作</strong>：尾部追加两者都是 O(1)（ArrayList 均摊）；头部操作 LinkedList O(1) 但 ArrayDeque 更优；中间插入 ArrayList 的 System.arraycopy 在实际测试中反而更快（连续内存 memcpy + CPU 缓存友好），LinkedList 要先 O(n) 遍历找位置<br/>
+4. <strong>内存开销</strong>：LinkedList 每个元素多 24~40 字节的 Node 结构（取决于指针压缩），容器开销是 ArrayList 的 5~6 倍<br/>
+5. <strong>生产细节</strong>：默认 ArrayList + ensureCapacity 预分配；遍历删除用迭代器/removeIf；队列用 ArrayDeque<br/>
+6. <strong>结论</strong>：绝大多数场景选 ArrayList，需要队列行为选 ArrayDeque，LinkedList 几乎没有用武之地
 </div>
 </section>
 
@@ -325,11 +850,15 @@ E elementData(<span class="t">int</span> index) {
 
 <div class="recap"><h3>核心知识点回顾</h3>
 <ul>
-  <li><strong>ArrayList</strong>：Object[] 连续数组，get(index) O(1)，CPU 缓存友好，95% 场景的首选</li>
-  <li><strong>LinkedList</strong>：双向链表，节点散落在堆内存中，缓存命中率低</li>
+  <li><strong>ArrayList</strong>：Object[] elementData 连续数组，get(index) 下标直达 O(1)，CPU 缓存友好，95% 场景的首选</li>
+  <li><strong>扩容机制</strong>：grow() 按 1.5 倍扩容（oldCapacity + (oldCapacity &gt;&gt; 1)），单次 O(n)、均摊 O(1)，上限 MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8</li>
+  <li><strong>中间增删</strong>：add(index, e) / remove(index) 用 System.arraycopy 搬移后半段，平均 O(n/2)，连续内存 memmove 常数极小</li>
+  <li><strong>LinkedList</strong>：双向链表 Node(prev/item/next)，节点散落堆内存，get 必须 node() 从头/尾遍历 O(n)，缓存命中率低</li>
+  <li><strong>O(1) 的前提</strong>：只有持有节点引用（ListIterator）或头尾操作才 O(1)；API add(index, e) 本身是 O(n)</li>
   <li><strong>最大误区</strong>："LinkedList 中间插入快"——实测数据证明 ArrayList 的 arraycopy 更快</li>
-  <li><strong>CPU 缓存</strong>：连续内存 → Cache Line 预取 → 快；散落内存 → Cache Miss → 慢</li>
-  <li><strong>内存开销</strong>：LinkedList 每个元素多 ~32 字节 Node 结构，百万级数据多浪费 ~24 MB</li>
+  <li><strong>CPU 缓存</strong>：连续内存 → Cache Line 预取 → 快；散落内存 → Cache Miss → 慢（遍历慢 4 倍的根源）</li>
+  <li><strong>内存开销</strong>：LinkedList 每个元素多 24~40 字节 Node（指针压缩相关），容器开销是 ArrayList 的 5~6 倍</li>
+  <li><strong>生产避坑</strong>：fail-fast（CME）、subList 视图、toArray 强转、Arrays.asList/List.of、ensureCapacity 预分配、遍历删除用 removeIf、队列/栈用 ArrayDeque</li>
   <li><strong>选择建议</strong>：通用选 ArrayList，队列选 ArrayDeque，LinkedList 几乎没有用武之地</li>
 </ul>
 </div>

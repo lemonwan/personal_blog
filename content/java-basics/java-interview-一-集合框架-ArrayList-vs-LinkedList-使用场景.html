@@ -18,16 +18,21 @@
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>BatchImport.java</b> · 问题代码</span></div>
 <pre><code><span class="c">// 从 CSV 读取 100 万条记录，逐条加入 ArrayList</span>
-<span class="t">List</span>&lt;<span class="t">Order</span>&gt; orders = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();  <span class="c">// 默认容量 10</span>
+<span class="t">List</span>&lt;<span class="t">Order</span>&gt; orders = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();  <span class="c">// 默认容量 10（延迟分配）</span>
 
 <span class="k">for</span> (<span class="t">String</span> line : csvLines) {       <span class="c">// csvLines.size() ≈ 1_000_000</span>
     orders.add(parseOrder(line));     <span class="c">// 第 11 次 add 触发第一次扩容</span>
 }</code></pre>
 </div>
 
-<p>这行看似无害的 <code>new ArrayList&lt;&gt;()</code>，在 100 万条数据面前会触发<strong>19 次扩容</strong>。每一次扩容都意味着：申请新数组 → 拷贝全部旧元素 → 丢弃旧数组。累计拷贝的元素总数超过 <strong>300 万</strong>，还制造了大量短命对象等着 GC 回收。</p>
+<p>这行看似无害的 <code>new ArrayList&lt;&gt;()</code>，在 100 万条数据面前会触发<strong>29 次扩容</strong>。每一次扩容都意味着：申请新数组 → 拷贝全部旧元素 → 丢弃旧数组。累计拷贝的元素约 <strong>243 万次</strong>（约为插入量的 2.4 倍），还制造了大量短命对象等着 GC 回收。</p>
 
 <p>把代码改成 <code>new ArrayList&lt;&gt;(1_000_000)</code>，问题就消失了。但要做到"写对"，你得理解 ArrayList 内部到底发生了什么。这一站，我们从源码级别拆解 ArrayList 的扩容机制。</p>
+
+<div class="think">
+<div class="think-q">为什么"少分配几个数组"能带来 4 倍的性能差距？扩容的真正代价是什么？<br/><br/>
+带着三个问题读完全文：<strong>①</strong> 扩容到底执行了哪些方法、谁先谁后？<strong>②</strong> 为什么 29 次扩容比预分配慢那么多——瓶颈在拷贝还是在 GC？<strong>③</strong> 面试官追问 <code>new ArrayList&lt;&gt;(0)</code> 和 <code>new ArrayList&lt;&gt;()</code> 的区别时，你能答出来吗？</div>
+</div>
 </section>
 
 <!-- ═══════════════ 第2站：内部结构 ═══════════════ -->
@@ -41,8 +46,12 @@
 <pre><code><span class="k">public class</span> <span class="t">ArrayList</span>&lt;<span class="t">E</span>&gt; <span class="k">extends</span> <span class="t">AbstractList</span>&lt;<span class="t">E</span>&gt;
         <span class="k">implements</span> <span class="t">List</span>&lt;<span class="t">E</span>&gt;, <span class="t">RandomAccess</span>, <span class="t">Cloneable</span>, <span class="t">java.io.Serializable</span> {
 
-    <span class="c">// 默认初始容量</span>
+    <span class="c">// 默认初始容量（无参构造首次 add 时的目标容量）</span>
     <span class="k">private static final int</span> DEFAULT_CAPACITY = <span class="n">10</span>;
+
+    <span class="c">// 两个共享的空数组哨兵（见下文，是面试高频点）</span>
+    <span class="k">private static final Object</span>[] EMPTY_ELEMENTDATA = {};
+    <span class="k">private static final Object</span>[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
 
     <span class="c">// 底层存储数组——ArrayList 的全部秘密都在这里</span>
     <span class="k">transient</span> <span class="t">Object</span>[] elementData;
@@ -57,43 +66,185 @@
 <table class="nb-table">
 <thead><tr><th>概念</th><th>含义</th><th>获取方式</th><th>示例</th></tr></thead>
 <tbody>
-<tr><td><strong>size</strong></td><td>已存储的元素个数</td><td><code>list.size()</code></td><td>添加了 5 个元素 → size = 5</td></tr>
-<tr><td><strong>capacity</strong></td><td>底层数组的实际长度</td><td><code>elementData.length</code></td><td>默认构造 → capacity = 10</td></tr>
+<tr><td><strong>size</strong></td><td>已存储的元素个数（逻辑长度）</td><td><code>list.size()</code></td><td>添加了 5 个元素 → size = 5</td></tr>
+<tr><td><strong>capacity</strong></td><td>底层数组的实际长度（物理容量）</td><td><code>elementData.length</code></td><td>默认构造 → capacity = 10</td></tr>
 </tbody>
 </table>
 
-<p>当你写 <code>new ArrayList&lt;&gt;()</code> 时，JDK 8 实际上把 <code>elementData</code> 指向一个<strong>空数组</strong>（<code>EMPTY_ELEMENTDATA</code>），真正的容量 10 要等到第一次 <code>add()</code> 时才分配——这是典型的<strong>延迟初始化</strong>策略，避免创建大量空列表时浪费内存。</p>
+<h3>两个空数组哨兵：面试官最爱挖的细节</h3>
+
+<p>JDK 8 里有两个长得一模一样的空数组，用途完全不同：</p>
+
+<table class="nb-table">
+<thead><tr><th>字段</th><th>由谁赋值</th><th>首次 add 时的行为</th></tr></thead>
+<tbody>
+<tr><td><code>EMPTY_ELEMENTDATA</code></td><td><code>new ArrayList&lt;&gt;(0)</code></td><td>按 <code>minCapacity</code> 原样扩容，<strong>不享受</strong>默认 10</td></tr>
+<tr><td><code>DEFAULTCAPACITY_EMPTY_ELEMENTDATA</code></td><td><code>new ArrayList&lt;&gt;()</code></td><td>首次 add 时放大到 <code>max(10, minCapacity)</code>，即 10</td></tr>
+</tbody>
+</table>
+
+<p>为什么要区分？因为 <code>calculateCapacity()</code> 需要知道"这个列表是不是无参构造创建的"，是的话第一次扩容必须给足 10——这是 JDK 8 引入的<strong>延迟初始化</strong>策略：无参构造不直接 <code>new Object[10]</code>，而是指向共享哨兵，真正分配推迟到第一次 <code>add()</code>。好处是创建大量空列表时不浪费内存。</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · 延迟初始化策略</span></div>
-<pre><code><span class="c">// 无参构造：指向空数组哨兵，并非直接分配 10 个槽位</span>
-<span class="k">public</span> ArrayList() {
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · JDK 8 三个构造器</span></div>
+<pre><code><span class="k">public</span> ArrayList() {                    <span class="c">// 无参：指向默认哨兵，容量 0</span>
     <span class="k">this</span>.elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA;
 }
 
-<span class="c">// 带初始容量构造：立即分配指定大小的数组</span>
 <span class="k">public</span> ArrayList(<span class="k">int</span> initialCapacity) {
-    <span class="k">this</span>.elementData = <span class="k">new</span> <span class="t">Object</span>[initialCapacity];
+    <span class="k">if</span> (initialCapacity &gt; <span class="n">0</span>) {
+        <span class="k">this</span>.elementData = <span class="k">new</span> <span class="t">Object</span>[initialCapacity];  <span class="c">// 立即分配</span>
+    } <span class="k">else if</span> (initialCapacity == <span class="n">0</span>) {
+        <span class="k">this</span>.elementData = EMPTY_ELEMENTDATA;           <span class="c">// 显式 0 容量</span>
+    } <span class="k">else</span> {
+        <span class="k">throw new</span> <span class="t">IllegalArgumentException</span>(
+            <span class="s">"Illegal Capacity: "</span> + initialCapacity);  <span class="c">// 负数直接拒绝</span>
+    }
+}
+
+<span class="k">public</span> ArrayList(<span class="t">Collection</span>&lt;? <span class="k">extends</span> <span class="t">E</span>&gt; c) {  <span class="c">// 复制构造：先 toArray 再判断类型</span>
+    elementData = c.toArray();
+    <span class="k">if</span> ((size = elementData.length) != <span class="n">0</span>) {
+        <span class="c">// c.toArray() 可能返回 Object[] 以外的类型，需要重新拷贝</span>
+        <span class="k">if</span> (elementData.getClass() != <span class="t">Object</span>[].class)
+            elementData = <span class="t">Arrays</span>.copyOf(elementData, size, <span class="t">Object</span>[].class);
+    } <span class="k">else</span> {
+        <span class="k">this</span>.elementData = EMPTY_ELEMENTDATA;
+    }
 }</code></pre>
+</div>
+
+<div class="crack">
+<div class="crack-label">一句话点破</div>
+<p><code>new ArrayList&lt;&gt;()</code> 创建出来的列表，此刻容量是 <strong>0</strong>（指向空哨兵），不是 10。"默认容量 10" 说的是<strong>第一次 add 时的目标容量</strong>，而不是构造时的容量——这个细节几乎每次面试都会被问到。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第3站：扩容公式 ═══════════════ -->
+<!-- ═══════════════ 第3站：add 完整链路 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>1.5 倍扩容公式：grow() 源码解析</h2></div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>一次 add() 的完整调用链：首次扩容如何到 10</h2></div>
 
-<p>当 <code>add()</code> 发现 <code>size &gt;= elementData.length</code>，就调用 <code>grow()</code> 扩容。JDK 8 的实现堪称经典：</p>
+<p>把 <code>add()</code> 到 <code>grow()</code> 的整条链路铺开看，是理解扩容机制的关键。JDK 8 的调用链是四层：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · JDK 8 add → ensureCapacityInternal → calculateCapacity → ensureExplicitCapacity</span></div>
+<pre><code><span class="k">public boolean</span> add(<span class="t">E</span> e) {
+    <span class="hl">ensureCapacityInternal(size + 1);</span>  <span class="c">// ① 扩容检查：需要的最小容量 = size + 1</span>
+    elementData[size++] = e;             <span class="c">// ③ 写入元素并自增 size</span>
+    <span class="k">return true</span>;
+}
+
+<span class="k">private void</span> ensureCapacityInternal(<span class="k">int</span> minCapacity) {
+    <span class="hl">ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));</span>
+}
+
+<span class="c">// ② 关键：只有无参构造创建的列表（指向默认哨兵）才放大到 10</span>
+<span class="k">private static int</span> calculateCapacity(<span class="t">Object</span>[] elementData, <span class="k">int</span> minCapacity) {
+    <span class="k">if</span> (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+        <span class="k">return</span> <span class="t">Math</span>.max(DEFAULT_CAPACITY, minCapacity);  <span class="c">// 首次 add → max(10, 1) = 10</span>
+    }
+    <span class="k">return</span> minCapacity;
+}
+
+<span class="k">private void</span> ensureExplicitCapacity(<span class="k">int</span> minCapacity) {
+    <span class="hl">modCount++;</span>  <span class="c">// 结构修改计数：迭代器/视图靠它做 fail-fast 校验</span>
+    <span class="k">if</span> (minCapacity - elementData.length &gt; <span class="n">0</span>)  <span class="c">// 容量不足才真正扩容</span>
+        grow(minCapacity);
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 200" role="img" aria-label="add 方法的扩容检查链路图">
+  <defs>
+    <marker id="arr" viewBox="0 0 7 6" refX="6" refY="3" markerWidth="7" markerHeight="6" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#8C8676"/></marker>
+    <marker id="arrR" viewBox="0 0 7 6" refX="6" refY="3" markerWidth="7" markerHeight="6" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#B91C1C"/></marker>
+  </defs>
+  <text x="360" y="18" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="13" fill="#1C1C1C" font-weight="700">add(e) 的扩容检查链路（JDK 8）</text>
+
+  <!-- 第一行：方法链 -->
+  <rect x="8" y="32" width="108" height="48" rx="8" fill="#F7F2E6" stroke="#C9BFA8"/>
+  <text x="62" y="52" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="700">add(e)</text>
+  <text x="62" y="67" text-anchor="middle" font-size="8.5" fill="#57544E">入口</text>
+
+  <rect x="128" y="32" width="120" height="48" rx="8" fill="#F7F2E6" stroke="#C9BFA8"/>
+  <text x="188" y="52" text-anchor="middle" font-size="10.5" fill="#1C1C1C" font-weight="700">ensureCapacityInternal</text>
+  <text x="188" y="67" text-anchor="middle" font-size="8.5" fill="#57544E">(size + 1)</text>
+
+  <rect x="260" y="32" width="128" height="48" rx="8" fill="#F7F2E6" stroke="#C9BFA8"/>
+  <text x="324" y="52" text-anchor="middle" font-size="10.5" fill="#1C1C1C" font-weight="700">calculateCapacity</text>
+  <text x="324" y="67" text-anchor="middle" font-size="8.5" fill="#57544E">首次 add → max(10, min)</text>
+
+  <rect x="400" y="32" width="136" height="48" rx="8" fill="#F7F2E6" stroke="#C9BFA8"/>
+  <text x="468" y="52" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="700">ensureExplicitCapacity</text>
+  <text x="468" y="67" text-anchor="middle" font-size="8.5" fill="#57544E">modCount++；容量不足才继续</text>
+
+  <rect x="548" y="32" width="104" height="48" rx="8" fill="#FCE8E0" stroke="#C2410C"/>
+  <text x="600" y="52" text-anchor="middle" font-size="10" fill="#C2410C" font-weight="700">grow(minCapacity)</text>
+  <text x="600" y="67" text-anchor="middle" font-size="8.5" fill="#C2410C">1.5 倍扩容</text>
+
+  <!-- 第一行箭头 -->
+  <line x1="116" y1="56" x2="124" y2="56" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="248" y1="56" x2="256" y2="56" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="388" y1="56" x2="396" y2="56" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="536" y1="56" x2="544" y2="56" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- 第二行：两个出口 -->
+  <path d="M468,80 V112 H108 V126" fill="none" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="210" y="106" font-size="9" fill="#3E6B8F">容量充足 → 直接写入元素</text>
+
+  <path d="M600,80 V112 H626 V126" fill="none" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="440" y="106" font-size="9" fill="#C2410C">容量不足 → 扩容后回到 add</text>
+
+  <rect x="8" y="130" width="200" height="52" rx="8" fill="#EDF3F8" stroke="#3E6B8F"/>
+  <text x="108" y="151" text-anchor="middle" font-size="10.5" fill="#1C1C1C" font-weight="700">elementData[size++] = e</text>
+  <text x="108" y="167" text-anchor="middle" font-size="8.5" fill="#57544E">容量检查通过后写入元素</text>
+
+  <rect x="540" y="130" width="172" height="52" rx="8" fill="#EDF3F8" stroke="#3E6B8F"/>
+  <text x="626" y="151" text-anchor="middle" font-size="10.5" fill="#1C1C1C" font-weight="700">Arrays.copyOf(...)</text>
+  <text x="626" y="167" text-anchor="middle" font-size="8.5" fill="#57544E">内部调用 System.arraycopy（native）</text>
+
+  <line x1="540" y1="156" x2="212" y2="156" stroke="#B91C1C" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#arrR)"/>
+  <text x="376" y="150" text-anchor="middle" font-size="8.5" fill="#B91C1C">扩容完成后同样回到 add 写入</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>一次 <code>add(e)</code> 要穿过四层检查。注意 <code>ensureExplicitCapacity</code> 里无论是否需要扩容都会 <code>modCount++</code>——这为迭代器的 fail-fast 机制埋下了伏笔。</figcaption>
+</figure>
+
+<h3>三种构造方式，首次 add 后容量各是多少</h3>
+
+<table class="nb-table">
+<thead><tr><th>构造方式</th><th>elementData 指向</th><th>首次 add 后容量</th></tr></thead>
+<tbody>
+<tr><td><code>new ArrayList&lt;&gt;()</code></td><td><code>DEFAULTCAPACITY_EMPTY_ELEMENTDATA</code></td><td><strong>10</strong>（<code>max(10, 1)</code>）</td></tr>
+<tr><td><code>new ArrayList&lt;&gt;(0)</code></td><td><code>EMPTY_ELEMENTDATA</code></td><td>1（不享受默认 10，直接按 <code>minCapacity=1</code>）</td></tr>
+<tr><td><code>new ArrayList&lt;&gt;(16)</code></td><td>长度为 16 的新数组</td><td>16（无需扩容）</td></tr>
+</tbody>
+</table>
+
+<p>还有一个历史知识点：JDK 6/7 里 <code>new ArrayList&lt;&gt;()</code> 是直接 <code>this(10)</code> 分配 10 个槽位的；JDK 8 引入哨兵数组后改为延迟分配。所以如果你在 JDK 6/7 的代码里见过"无参构造立即分配 10"，那是对的——只是版本不同。</p>
+
+<div class="think">
+<div class="think-q">为什么第一次 add 要直接给 10，而不是 1、5 或 16？<br/><br/>
+10 是经验值：多数小列表容量在 10 以内，一次给够可以避免前几次频繁扩容；同时 10 个引用只占 40 字节左右（压缩指针下），对绝大多数场景几乎无内存代价。给 1 会导致前几次 add 疯狂扩容（1→2→3→4→6→9→14...），给 16 又对"只存 3 个元素"的列表浪费。10 是"空间 vs 扩容次数"的工程折中。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：grow 扩容公式 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>1.5 倍扩容公式：grow() 与容量边界</h2></div>
+
+<p>当 <code>ensureExplicitCapacity</code> 发现 <code>minCapacity &gt; elementData.length</code>，就调用 <code>grow()</code> 扩容。JDK 8 的实现堪称经典：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · JDK 8 grow() 方法</span></div>
 <pre><code><span class="k">private void</span> grow(<span class="k">int</span> minCapacity) {
+    <span class="c">// overflow-conscious code：每一处比较都防溢出</span>
     <span class="k">int</span> oldCapacity = elementData.length;
 
-    <span class="c">// ★ 核心公式：右移 1 位 = 除以 2</span>
-    <span class="c">// newCapacity = oldCapacity + oldCapacity / 2 = oldCapacity * 1.5</span>
-    <span class="k">int</span> newCapacity = oldCapacity + (oldCapacity &gt;&gt; <span class="n">1</span>);
+    <span class="c">// ★ 核心公式：右移 1 位 = 整除 2（向下取整）</span>
+    <span class="c">// newCapacity = oldCapacity + oldCapacity / 2 = oldCapacity × 1.5</span>
+    <span class="hl"><span class="k">int</span> newCapacity = oldCapacity + (oldCapacity &gt;&gt; <span class="n">1</span>);</span>
 
-    <span class="c">// 如果 1.5 倍还不够，直接用请求的最小容量</span>
+    <span class="c">// 如果 1.5 倍还不够（比如 addAll 一次要加很多），直接用请求的最小容量</span>
     <span class="k">if</span> (newCapacity - minCapacity &lt; <span class="n">0</span>)
         newCapacity = minCapacity;
 
@@ -102,137 +253,119 @@
         newCapacity = hugeCapacity(minCapacity);
 
     <span class="c">// Arrays.copyOf 内部调用 System.arraycopy → 真正的开销在这里</span>
-    elementData = Arrays.copyOf(elementData, newCapacity);
+    elementData = <span class="t">Arrays</span>.copyOf(elementData, newCapacity);
+}
+
+<span class="c">// 数组长度上限：给对象头留 8 个 int 的余量</span>
+<span class="k">private static final int</span> MAX_ARRAY_SIZE = <span class="t">Integer</span>.MAX_VALUE - <span class="n">8</span>;
+
+<span class="k">private static int</span> hugeCapacity(<span class="k">int</span> minCapacity) {
+    <span class="k">if</span> (minCapacity &lt; <span class="n">0</span>)  <span class="c">// 溢出为负：说明请求容量超过了 int 上限</span>
+        <span class="k">throw new</span> <span class="t">OutOfMemoryError</span>(<span class="s">"Required array size too large"</span>);
+    <span class="k">return</span> (minCapacity &gt; MAX_ARRAY_SIZE) ? <span class="t">Integer</span>.MAX_VALUE : MAX_ARRAY_SIZE;
 }</code></pre>
 </div>
 
 <div class="formula">
 <strong>扩容公式：</strong>newCapacity = oldCapacity + (oldCapacity &gt;&gt; 1) = oldCapacity × 1.5<br/>
-位运算 <code>&gt;&gt; 1</code> 等价于整除 2，但比除法更快（省去符号位判断）
+位运算 <code>&gt;&gt; 1</code> 等价于"整除 2 后向下取整"，对正整数与 <code>/ 2</code> 结果一致，且天然规避了负数除法向零取整的语义差异
 </div>
 
-<p>从默认容量 10 出发，每一次扩容的容量变化如下：</p>
+<p>从默认容量 10 出发，每一次扩容的容量变化如下（注意纵轴是对数刻度，容量呈指数起飞）：</p>
 
 <figure class="fig">
-<svg viewBox="0 0 720 260" role="img" aria-label="ArrayList 扩容容量变化图">
-  <text x="360" y="22" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="14" fill="#1C1C1C" font-weight="700">ArrayList 扩容容量增长轨迹（从 10 到 1,001,158）</text>
+<svg viewBox="0 0 720 280" role="img" aria-label="ArrayList 扩容容量轨迹图（对数刻度）">
+  <text x="360" y="20" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="13" fill="#1C1C1C" font-weight="700">扩容容量轨迹（对数刻度）：10 → 1,215,487，共 29 次扩容</text>
 
   <!-- 坐标轴 -->
-  <line x1="60" y1="210" x2="700" y2="210" stroke="#D8CEB6" stroke-width="1.5"/>
-  <line x1="60" y1="40" x2="60" y2="210" stroke="#D8CEB6" stroke-width="1.5"/>
-  <text x="380" y="240" text-anchor="middle" font-size="11" fill="#8C8676">第 N 次扩容</text>
-  <text x="20" y="130" text-anchor="middle" font-size="11" fill="#8C8676" transform="rotate(-90,20,130)">容量</text>
+  <line x1="80" y1="45" x2="80" y2="235" stroke="#D8CEB6" stroke-width="1.5"/>
+  <line x1="80" y1="235" x2="640" y2="235" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="360" y="266" text-anchor="middle" font-size="10" fill="#8C8676">第 N 次扩容（0 = 初始容量 10）</text>
+  <text x="30" y="140" text-anchor="middle" font-size="10" fill="#8C8676" transform="rotate(-90,30,140)">容量（对数刻度）</text>
 
-  <!-- 柱状图：每次扩容后的容量（对数刻度展示） -->
-  <!-- 0:10 -->
-  <rect x="70" y="202" width="26" height="8" rx="2" fill="#3E6B8F"/>
-  <text x="83" y="198" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">10</text>
-  <text x="83" y="224" text-anchor="middle" font-size="8" fill="#8C8676">0</text>
+  <!-- 水平网格线：10/100/1k/10k/100k/1M -->
+  <line x1="80" y1="235" x2="640" y2="235" stroke="#EFE9DC" stroke-width="1"/>
+  <line x1="80" y1="197.6" x2="640" y2="197.6" stroke="#EFE9DC" stroke-width="1"/>
+  <line x1="80" y1="160.3" x2="640" y2="160.3" stroke="#EFE9DC" stroke-width="1"/>
+  <line x1="80" y1="122.9" x2="640" y2="122.9" stroke="#EFE9DC" stroke-width="1"/>
+  <line x1="80" y1="85.6" x2="640" y2="85.6" stroke="#EFE9DC" stroke-width="1"/>
+  <line x1="80" y1="48.2" x2="640" y2="48.2" stroke="#B91C1C" stroke-width="1" stroke-dasharray="5 3"/>
+  <text x="644" y="238" font-size="8.5" fill="#8C8676">10</text>
+  <text x="644" y="200" font-size="8.5" fill="#8C8676">100</text>
+  <text x="644" y="163" font-size="8.5" fill="#8C8676">1,000</text>
+  <text x="644" y="126" font-size="8.5" fill="#8C8676">10,000</text>
+  <text x="644" y="88" font-size="8.5" fill="#8C8676">100,000</text>
+  <text x="644" y="51" font-size="8" fill="#B91C1C" font-weight="600">1,000,000（目标线）</text>
 
-  <!-- 1:15 -->
-  <rect x="102" y="199" width="26" height="11" rx="2" fill="#3E6B8F"/>
-  <text x="115" y="195" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">15</text>
-  <text x="115" y="224" text-anchor="middle" font-size="8" fill="#8C8676">1</text>
-
-  <!-- 2:22 -->
-  <rect x="134" y="196" width="26" height="14" rx="2" fill="#3E6B8F"/>
-  <text x="147" y="192" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">22</text>
-  <text x="147" y="224" text-anchor="middle" font-size="8" fill="#8C8676">2</text>
-
-  <!-- 3:33 -->
-  <rect x="166" y="192" width="26" height="18" rx="2" fill="#3E6B8F"/>
-  <text x="179" y="188" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">33</text>
-  <text x="179" y="224" text-anchor="middle" font-size="8" fill="#8C8676">3</text>
-
-  <!-- 4:49 -->
-  <rect x="198" y="186" width="26" height="24" rx="2" fill="#3E6B8F"/>
-  <text x="211" y="182" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">49</text>
-  <text x="211" y="224" text-anchor="middle" font-size="8" fill="#8C8676">4</text>
-
-  <!-- 5:73 -->
-  <rect x="230" y="178" width="26" height="32" rx="2" fill="#3E6B8F"/>
-  <text x="243" y="174" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">73</text>
-  <text x="243" y="224" text-anchor="middle" font-size="8" fill="#8C8676">5</text>
-
-  <!-- 6:109 -->
-  <rect x="262" y="166" width="26" height="44" rx="2" fill="#3E6B8F"/>
-  <text x="275" y="162" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">109</text>
-  <text x="275" y="224" text-anchor="middle" font-size="8" fill="#8C8676">6</text>
-
-  <!-- 7:163 -->
-  <rect x="294" y="150" width="26" height="60" rx="2" fill="#3E6B8F"/>
-  <text x="307" y="146" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">163</text>
-  <text x="307" y="224" text-anchor="middle" font-size="8" fill="#8C8676">7</text>
-
-  <!-- 8:244 -->
-  <rect x="326" y="128" width="26" height="82" rx="2" fill="#3E6B8F"/>
-  <text x="339" y="124" text-anchor="middle" font-size="8" fill="#3E6B8F" font-weight="700">244</text>
-  <text x="339" y="224" text-anchor="middle" font-size="8" fill="#8C8676">8</text>
-
-  <!-- 9:366 -->
-  <rect x="358" y="100" width="26" height="110" rx="2" fill="#C2410C"/>
-  <text x="371" y="96" text-anchor="middle" font-size="8" fill="#C2410C" font-weight="700">366</text>
-  <text x="371" y="224" text-anchor="middle" font-size="8" fill="#8C8676">9</text>
-
-  <!-- 10:549 -->
-  <rect x="390" y="78" width="26" height="132" rx="2" fill="#C2410C"/>
-  <text x="403" y="74" text-anchor="middle" font-size="8" fill="#C2410C" font-weight="700">549</text>
-  <text x="403" y="224" text-anchor="middle" font-size="8" fill="#8C8676">10</text>
-
-  <!-- 11:823 -->
-  <rect x="422" y="58" width="26" height="152" rx="2" fill="#C2410C"/>
-  <text x="435" y="54" text-anchor="middle" font-size="8" fill="#C2410C" font-weight="700">823</text>
-  <text x="435" y="224" text-anchor="middle" font-size="8" fill="#8C8676">11</text>
-
-  <!-- 12:1234 -->
-  <rect x="454" y="44" width="26" height="166" rx="2" fill="#C2410C"/>
-  <text x="467" y="40" text-anchor="middle" font-size="8" fill="#C2410C" font-weight="700">1234</text>
-  <text x="467" y="224" text-anchor="middle" font-size="8" fill="#8C8676">12</text>
-
-  <!-- 14:2776 (skip 13 for space) -->
-  <rect x="486" y="44" width="26" height="166" rx="2" fill="#C2410C" opacity="0.7"/>
-  <text x="499" y="40" text-anchor="middle" font-size="8" fill="#C2410C" font-weight="700">2776</text>
-  <text x="499" y="224" text-anchor="middle" font-size="8" fill="#8C8676">13</text>
-
-  <rect x="518" y="44" width="26" height="166" rx="2" fill="#C2410C" opacity="0.7"/>
-  <text x="531" y="40" text-anchor="middle" font-size="8" fill="#C2410C" font-weight="700">4164</text>
-  <text x="531" y="224" text-anchor="middle" font-size="8" fill="#8C8676">14</text>
-
-  <rect x="550" y="44" width="26" height="166" rx="2" fill="#C2410C" opacity="0.6"/>
-  <text x="563" y="40" text-anchor="middle" font-size="8" fill="#C2410C" font-weight="700">6246</text>
-  <text x="563" y="224" text-anchor="middle" font-size="8" fill="#8C8676">15</text>
-
-  <rect x="582" y="44" width="26" height="166" rx="2" fill="#C2410C" opacity="0.5"/>
-  <text x="595" y="40" text-anchor="middle" font-size="7" fill="#C2410C" font-weight="700">134652</text>
-  <text x="595" y="224" text-anchor="middle" font-size="8" fill="#8C8676">17</text>
-
-  <rect x="614" y="44" width="26" height="166" rx="2" fill="#C2410C" opacity="0.4"/>
-  <text x="627" y="40" text-anchor="middle" font-size="7" fill="#C2410C" font-weight="700">302967</text>
-  <text x="627" y="224" text-anchor="middle" font-size="8" fill="#8C8676">18</text>
-
-  <rect x="646" y="44" width="40" height="166" rx="2" fill="#B91C1C" opacity="0.9"/>
-  <text x="666" y="38" text-anchor="middle" font-size="7" fill="#B91C1C" font-weight="700">1,001,158</text>
-  <text x="666" y="224" text-anchor="middle" font-size="8" fill="#8C8676">19</text>
-
-  <!-- 100 万基准线 -->
-  <line x1="60" y1="46" x2="700" y2="46" stroke="#B91C1C" stroke-width="1" stroke-dasharray="4 3"/>
-  <text x="700" y="42" text-anchor="end" font-size="9" fill="#B91C1C" font-weight="600">1,000,000 目标</text>
+  <!-- 轨迹折线 -->
+  <polyline points="80,235 99,228 119,222 138,216 157,209 177,203 196,196 215,190 234,183 253,177 273,170 292,163 311,157 350,144 389,131 427,117 466,104 505,91 543,78 582,65 621,52 640,45" fill="none" stroke="#3E6B8F" stroke-width="2"/>
+  <circle cx="80" cy="235" r="3" fill="#3E6B8F"/>
+  <circle cx="99" cy="228" r="3" fill="#3E6B8F"/>
+  <circle cx="119" cy="222" r="3" fill="#3E6B8F"/>
+  <circle cx="138" cy="216" r="3" fill="#3E6B8F"/>
+  <circle cx="157" cy="209" r="3" fill="#3E6B8F"/>
+  <circle cx="177" cy="203" r="3" fill="#3E6B8F"/>
+  <circle cx="196" cy="196" r="3" fill="#3E6B8F"/>
+  <circle cx="215" cy="190" r="3" fill="#3E6B8F"/>
+  <circle cx="234" cy="183" r="3" fill="#3E6B8F"/>
+  <circle cx="253" cy="177" r="3" fill="#3E6B8F"/>
+  <circle cx="273" cy="170" r="3" fill="#3E6B8F"/>
+  <circle cx="292" cy="163" r="3" fill="#3E6B8F"/>
+  <circle cx="311" cy="157" r="3" fill="#3E6B8F"/>
+  <circle cx="350" cy="144" r="3" fill="#3E6B8F"/>
+  <circle cx="389" cy="131" r="3" fill="#3E6B8F"/>
+  <circle cx="427" cy="117" r="3" fill="#3E6B8F"/>
+  <circle cx="466" cy="104" r="3" fill="#3E6B8F"/>
+  <circle cx="505" cy="91" r="3" fill="#3E6B8F"/>
+  <circle cx="543" cy="78" r="3" fill="#3E6B8F"/>
+  <circle cx="582" cy="65" r="3" fill="#3E6B8F"/>
+  <circle cx="621" cy="52" r="3" fill="#3E6B8F"/>
+  <circle cx="640" cy="45" r="5.5" fill="#B91C1C"/>
+  <text x="640" y="38" text-anchor="end" font-size="9" fill="#B91C1C" font-weight="700">29 次扩容 → 容量 1,215,487</text>
+  <text x="80" y="246" text-anchor="middle" font-size="8.5" fill="#8C8676">0</text>
+  <text x="177" y="246" text-anchor="middle" font-size="8.5" fill="#8C8676">5</text>
+  <text x="273" y="246" text-anchor="middle" font-size="8.5" fill="#8C8676">10</text>
+  <text x="369" y="246" text-anchor="middle" font-size="8.5" fill="#8C8676">15</text>
+  <text x="466" y="246" text-anchor="middle" font-size="8.5" fill="#8C8676">20</text>
+  <text x="562" y="246" text-anchor="middle" font-size="8.5" fill="#8C8676">25</text>
+  <text x="640" y="246" text-anchor="middle" font-size="8.5" fill="#8C8676">29</text>
+  <text x="430" y="72" font-size="8.5" fill="#57544E">第 28 次：810,325（仍小于 100 万）</text>
 </svg>
-<figcaption><span class="fig-no">图 1</span>从默认容量 10 开始，每次扩容 1.5 倍，需要 19 次扩容才能容纳 100 万元素。前 8 次看起来增长缓慢，后期才指数起飞。</figcaption>
+<figcaption><span class="fig-no">图 2</span>容量序列：10 → 15 → 22 → 33 → ... → 810,325 → <strong>1,215,487</strong>。前 8 次看起来增长缓慢，后期才指数起飞；要装下 100 万元素，第 29 次扩容后容量 1,215,487 才首次达标。</figcaption>
 </figure>
+
+<h3>grow() 的三个边界保护</h3>
+
+<table class="nb-table">
+<thead><tr><th>边界场景</th><th>行为</th><th>保护逻辑</th></tr></thead>
+<tbody>
+<tr><td><code>new ArrayList&lt;&gt;(-1)</code></td><td><code>IllegalArgumentException</code></td><td>构造器里的 <code>else</code> 分支显式拒绝</td></tr>
+<tr><td><code>ensureCapacity(-1)</code></td><td>静默返回，无异常</td><td><code>minCapacity &gt; elementData.length</code> 不成立</td></tr>
+<tr><td>1.5 倍后仍不够（addAll 大集合）</td><td>直接用 <code>minCapacity</code></td><td><code>newCapacity - minCapacity &lt; 0</code> 分支</td></tr>
+<tr><td>容量逼近 <code>Integer.MAX_VALUE</code></td><td><code>hugeCapacity</code> 兜底，溢出则 OOM</td><td><code>oldCapacity + (oldCapacity &gt;&gt; 1)</code> 溢出为负后，<code>minCapacity &lt; 0</code> 检查</td></tr>
+</tbody>
+</table>
+
+<p>为什么 <code>MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8</code>？HotSpot 里数组有对象头（mark word + klass 指针），某些 JVM 上数组长度超过 <code>MAX_ARRAY_SIZE</code> 会直接抛 <code>"Requested array size exceeds VM limit"</code>，所以预留 8 个 int 的余量。当然，真的扩到 <code>Integer.MAX_VALUE</code> 意味着一个约 8~16 GB 的数组——在绝大多数生产堆上必然 OOM，这只是理论边界。</p>
 
 <div class="think">
 <div class="think-q">为什么 ArrayList 选 1.5 倍而不是 2 倍（像 HashMap 那样翻倍）？<br/><br/>
-<strong>1.5 倍的优势：内存复用。</strong>假设当前容量为 C，扩容到 1.5C。再下一次扩容到 2.25C，此时 2.25C &gt; C + 1.5C = 2.5C？不对——关键在于：经过几次扩容后，新数组的大小可能刚好能够容纳之前释放的所有旧数组的累计空间，从而复用被 GC 回收的内存块。2 倍扩容则永远无法复用（新数组 = 旧数组 + 旧数组，总是比之前所有旧数组加起来还大）。<br/><br/>
-<strong>均摊分析：</strong>无论 1.5 倍还是 2 倍，每次 add 的均摊时间都是 O(1)。2 倍扩容浪费约 50% 的空间（最差情况数组只用了 51%），1.5 倍浪费约 33%。在"空间浪费"和"扩容频率"之间，1.5 是一个更偏向节省内存的折中。</div>
+<strong>① 内存复用。</strong>1.5 倍序列是 C → 1.5C → 2.25C → 3.375C……第 k 次的新数组 ≈ 1.5<sup>k</sup>C，而之前所有旧数组累计 ≈ 2 × (1.5<sup>k</sup> − 1)C，从第 2 次扩容起新数组就能"装进"之前释放的连续空间，有机会直接复用（配合分代 GC 的大对象分配）。2 倍序列 C → 2C → 4C → 8C，新数组永远大于所有旧数组之和，永远无法复用。<br/><br/>
+<strong>② 空间浪费。</strong>扩容后数组至少用到 1/1.5 ≈ 66.7%，最差浪费约 33%；2 倍扩容最差浪费约 50%（刚翻倍就只装了一半多一点）。<br/><br/>
+<strong>③ 均摊复杂度相同。</strong>无论 1.5 倍还是 2 倍，add 的均摊时间都是 O(1)，区别只在常数：1.5 倍总拷贝量约 2N，2 倍约 N——2 倍拷贝更少但空间更浪费。JDK 在"拷贝量"和"内存占用"之间选了更省内存的 1.5。</div>
+</div>
+
+<div class="crack">
+<div class="crack-label">版本演进：JDK 17+ 的 grow()</div>
+<p>从 JDK 17 起，grow() 被重构为调用 <code>ArraysSupport.newLength(oldCapacity, minCapacity - oldCapacity, oldCapacity &gt;&gt; 1)</code>，其中第三个参数 <code>preferred growth = oldCapacity &gt;&gt; 1</code> 就是 1.5 倍，默认容量 10 与哨兵判断也被并进了 grow()。语义与 JDK 8 完全一致。面试直接答 JDK 8 版本即可，提一句"新版本抽到了 ArraysSupport，行为不变"能加分。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：System.arraycopy ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>System.arraycopy：扩容的真正代价</h2></div>
+<!-- ═══════════════ 第5站：System.arraycopy ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>System.arraycopy：扩容的真正代价</h2></div>
 
-<p>扩容的最后一步 <code>Arrays.copyOf()</code> 内部调用的就是 <code>System.arraycopy</code>——一个 <code>native</code> 方法，直接操作 JVM 的内存：</p>
+<p>扩容的最后一步 <code>Arrays.copyOf()</code> 内部调用的就是 <code>System.arraycopy</code>——一个 <code>native</code> 方法，直接操作 JVM 内存：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>System.java</b> · arraycopy 签名</span></div>
@@ -244,47 +377,131 @@
 );</code></pre>
 </div>
 
-<p><code>arraycopy</code> 是 O(n) 操作——拷贝多少个元素，就做多少次内存写入。在 HotSpot JVM 中，它会被优化为 CPU 的 SIMD 指令（如 SSE/AVX），对基本类型数组尤其快。但对于引用数组（<code>Object[]</code>），JVM 必须逐一更新<strong>写屏障</strong>（Write Barrier）来维护 GC 的可达性信息，所以比基本类型慢一些。</p>
+<figure class="fig">
+<svg viewBox="0 0 720 216" role="img" aria-label="扩容时数组拷贝示意图">
+  <text x="60" y="32" font-size="11.5" fill="#1C1C1C" font-weight="700">旧数组 elementData（容量 10，已满）</text>
+  <!-- 旧数组 10 格 -->
+  <g font-size="9.5" fill="#1C1C1C" text-anchor="middle">
+    <rect x="60" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="78" y="64">e0</text>
+    <rect x="99" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="117" y="64">e1</text>
+    <rect x="138" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="156" y="64">e2</text>
+    <rect x="177" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="195" y="64">e3</text>
+    <rect x="216" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="234" y="64">e4</text>
+    <rect x="255" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="273" y="64">e5</text>
+    <rect x="294" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="312" y="64">e6</text>
+    <rect x="333" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="351" y="64">e7</text>
+    <rect x="372" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="390" y="64">e8</text>
+    <rect x="411" y="44" width="36" height="32" fill="#EDF3F8" stroke="#3E6B8F"/><text x="429" y="64">e9</text>
+  </g>
+  <text x="470" y="60" font-size="9.5" fill="#57544E">一次性拷贝 10 个引用</text>
+  <text x="470" y="74" font-size="9.5" fill="#57544E">（浅拷贝，不是复制对象）</text>
+
+  <text x="60" y="116" font-size="11.5" fill="#1C1C1C" font-weight="700">新数组（容量 15：前 10 格被复制，后 5 格为 null）</text>
+  <!-- 新数组 15 格 -->
+  <g font-size="9.5" fill="#1C1C1C" text-anchor="middle">
+    <rect x="60" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="78" y="148">e0</text>
+    <rect x="99" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="117" y="148">e1</text>
+    <rect x="138" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="156" y="148">e2</text>
+    <rect x="177" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="195" y="148">e3</text>
+    <rect x="216" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="234" y="148">e4</text>
+    <rect x="255" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="273" y="148">e5</text>
+    <rect x="294" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="312" y="148">e6</text>
+    <rect x="333" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="351" y="148">e7</text>
+    <rect x="372" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="390" y="148">e8</text>
+    <rect x="411" y="128" width="36" height="32" fill="#F7F2E6" stroke="#C2410C"/><text x="429" y="148">e9</text>
+    <rect x="450" y="128" width="36" height="32" fill="#F3F0E9" stroke="#C9BFA8"/><text x="468" y="148" font-size="8" fill="#8C8676">null</text>
+    <rect x="489" y="128" width="36" height="32" fill="#F3F0E9" stroke="#C9BFA8"/><text x="507" y="148" font-size="8" fill="#8C8676">null</text>
+    <rect x="528" y="128" width="36" height="32" fill="#F3F0E9" stroke="#C9BFA8"/><text x="546" y="148" font-size="8" fill="#8C8676">null</text>
+    <rect x="567" y="128" width="36" height="32" fill="#F3F0E9" stroke="#C9BFA8"/><text x="585" y="148" font-size="8" fill="#8C8676">null</text>
+    <rect x="606" y="128" width="36" height="32" fill="#F3F0E9" stroke="#C9BFA8"/><text x="624" y="148" font-size="8" fill="#8C8676">null</text>
+  </g>
+  <!-- 拷贝箭头 -->
+  <g stroke="#C2410C" stroke-width="1.2" opacity="0.55" fill="none">
+    <line x1="78" y1="78" x2="78" y2="124"/><line x1="117" y1="78" x2="117" y2="124"/>
+    <line x1="156" y1="78" x2="156" y2="124"/><line x1="195" y1="78" x2="195" y2="124"/>
+    <line x1="234" y1="78" x2="234" y2="124"/><line x1="273" y1="78" x2="273" y2="124"/>
+    <line x1="312" y1="78" x2="312" y2="124"/><line x1="351" y1="78" x2="351" y2="124"/>
+    <line x1="390" y1="78" x2="390" y2="124"/><line x1="429" y1="78" x2="429" y2="124"/>
+  </g>
+  <text x="60" y="196" font-size="9" fill="#57544E">浅拷贝：数组里存的是引用，arraycopy 只复制引用本身；对引用数组，HotSpot 还会逐一维护 GC 写屏障（card marking），所以比基本类型数组略慢。</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>扩容 = 申请新数组 + 一次 <code>System.arraycopy</code> + 旧数组交给 GC。拷的是引用不是对象，但引用数组的拷贝会触发写屏障维护。</figcaption>
+</figure>
+
+<p><code>arraycopy</code> 是 O(n) 操作——拷贝多少个元素，就做多少次内存写入。在 HotSpot JVM 中它被 intrinsify（内建化）为 CPU 的 SIMD 指令（如 SSE/AVX），对基本类型数组尤其快；对引用数组（<code>Object[]</code>），JVM 还要维护<strong>写屏障</strong>（Write Barrier / card marking）来保证 GC 可达性信息正确，所以比基本类型慢一些。</p>
 
 <p>来算一笔账——从容量 10 开始，插入 N = 1,000,000 个元素，总共拷贝了多少次？</p>
 
 <div class="formula">
-<strong>总拷贝量</strong> = 10 + 15 + 22 + 33 + 49 + 73 + ... + 667,438 ≈ <strong>2,000,000 次</strong><br/><br/>
-等比数列求和：S = 10 × (1.5<sup>19</sup> - 1) / (1.5 - 1) ≈ 2 × 10<sup>6</sup><br/>
-也就是说，你插入了 100 万个元素，但底层实际做了 <strong>200 万次</strong>元素拷贝。
+<strong>总拷贝量</strong> = 10 + 15 + 22 + 33 + ... + 540,217 + 810,325 ≈ <strong>2,430,972 次</strong>（约 2.4N）<br/><br/>
+理想等比级数上界：S = 10 × (1.5<sup>29</sup> − 1) / (1.5 − 1) ≈ 2.56 × 10<sup>6</sup>（实际逐项求和因向下取整略小）<br/>
+也就是说，你插入了 100 万个元素，但底层实际做了约 <strong>243 万次</strong>元素拷贝。
 </div>
 
 <div class="crack">
 <div class="crack-label">均摊分析（Amortized Analysis）</div>
-<p>虽然单次扩容是 O(n) 的昂贵操作，但均摊到每次 <code>add()</code> 上仍然是 O(1)。证明思路：第 k 次扩容拷贝了 C<sub>k</sub> 个元素，之后还能再插入 C<sub>k</sub>/2 个元素才会再次扩容。把这 C<sub>k</sub> 次拷贝分摊到后续的 C<sub>k</sub>/2 次 add 上，每次 add 分摊到 2 个额外拷贝——常数级别。</p>
+<p>虽然单次扩容是 O(n) 的昂贵操作，但均摊到每次 <code>add()</code> 上仍然是 O(1)。证明思路：第 k 次扩容拷贝了 C<sub>k</sub> 个元素，之后还能再插入 C<sub>k</sub>/2 个元素才会再次扩容。把这 C<sub>k</sub> 次拷贝分摊到后续的 C<sub>k</sub>/2 次 add 上，每次 add 分摊到约 2 个额外拷贝（1.5 倍扩容）——常数级别，与 2 倍扩容的均摊 1 个拷贝同阶。这就是为什么 ArrayList 的 add 能自称"O(1) 均摊"。</p>
 </div>
 
-<p>关键洞察：扩容的代价不在于某一次拷贝有多慢，而在于<strong>扩容次数</strong>。预分配容量可以把扩容次数从 19 降到 0。</p>
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+<li>扩容的代价不在某一次拷贝有多慢，而在<strong>扩容次数 × 单次拷贝量</strong>，两者都会随数据量爆炸。</li>
+<li>预分配容量可以把扩容次数从 29 次降到 0 次，总拷贝量从 243 万降到 0。</li>
+<li><code>arraycopy</code> 是浅拷贝：拷贝引用、共享对象，所以扩容本身不复制业务对象，开销可控。</li>
+<li>批量场景（如 <code>addAll</code>）只触发一次扩容、一次拷贝，比逐条 <code>add</code> 高效得多（见第 6 站）。</li>
+</ul>
+</div>
 </section>
 
-<!-- ═══════════════ 第5站：ensureCapacity 预分配 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>ensureCapacity 与预分配：一行代码消灭 19 次扩容</h2></div>
+<!-- ═══════════════ 第6站：ensureCapacity 预分配 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>ensureCapacity 与预分配：把扩容次数从 29 降到 0</h2></div>
 
-<p>有两种方式避免扩容灾难：</p>
+<p>有两种方式避免扩容灾难：构造时指定容量，或对已创建的列表调用 <code>ensureCapacity</code>。</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>PreAllocate.java</b> · 两种预分配方式</span></div>
-<pre><code><span class="c">// 方式 1：构造时指定初始容量（推荐）</span>
+<pre><code><span class="c">// 方式 1：构造时指定初始容量（最推荐）</span>
 <span class="t">List</span>&lt;<span class="t">Order</span>&gt; orders = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="n">1_000_000</span>);
 
 <span class="c">// 方式 2：对已创建的 ArrayList 调用 ensureCapacity</span>
 <span class="t">ArrayList</span>&lt;<span class="t">Order</span>&gt; orders2 = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
 orders2.ensureCapacity(<span class="n">1_000_000</span>);
 
-<span class="c">// ensureCapacity 源码逻辑：</span>
+<span class="c">// ensureCapacity 源码（JDK 8）：不是恰好扩到 minCapacity，而是走 grow() 的 1.5 倍逻辑</span>
 <span class="k">public void</span> ensureCapacity(<span class="k">int</span> minCapacity) {
     <span class="k">if</span> (minCapacity &gt; elementData.length) {
-        <span class="c">// 不是恰好等于 minCapacity，而是走 grow() 的 1.5 倍逻辑</span>
-        grow(minCapacity);
+        ensureExplicitCapacity(minCapacity);  <span class="c">// modCount++ 后调用 grow(minCapacity)</span>
     }
-}</code></pre>
+}
+
+<span class="c">// 若 minCapacity 远大于 1.5 倍结果，grow() 里的兜底分支会直接用 minCapacity</span></code></pre>
 </div>
+
+<p>一个容易忽略的细节：<code>ensureCapacity(1_000_000)</code> 之后容量<strong>不一定恰好</strong>是 1,000,000——如果当前容量是 900,000，1.5 倍后是 1,350,000，就会直接采用 1,350,000。所以 <code>ensureCapacity</code> 的语义是"保证至少能装下这么多"，而不是"精确扩容到这么多"。</p>
+
+<h3>批量添加：addAll 的"一次扩容"红利</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>AddAll.java</b> · 批量 vs 逐条</span></div>
+<pre><code><span class="c">// addAll 内部：先算好总容量，只扩容一次、只拷贝一次</span>
+<span class="k">public boolean</span> addAll(<span class="t">Collection</span>&lt;? <span class="k">extends</span> <span class="t">E</span>&gt; c) {
+    <span class="t">Object</span>[] a = c.toArray();
+    <span class="k">int</span> numNew = a.length;
+    ensureCapacityInternal(size + numNew);   <span class="c">// ★ 一次性把容量给够</span>
+    <span class="t">System</span>.arraycopy(a, <span class="n">0</span>, elementData, size, numNew);
+    size += numNew;
+    <span class="k">return</span> numNew != <span class="n">0</span>;
+}
+
+<span class="c">// 对比：100 万条逐条 add → 29 次扩容、243 万次拷贝</span>
+<span class="c">// 100 万条一次 addAll → 0 次扩容、100 万次拷贝（只 copy 一次）</span></code></pre>
+</div>
+
+<p>这也是为什么"从库里查出 100 万行再拼进 List"这类场景，先 <code>collect</code> 成数组/集合再 <code>addAll</code>，或者直接用 <code>new ArrayList&lt;&gt;(collection)</code> 复制构造，性能远超逐条 add。</p>
+
+<h3>实测数据（量级仅供参考，硬件/JDK 不同结果不同）</h3>
 
 <p>JMH 基准测试结果（插入 100 万个 Integer，JDK 17，单线程，预热 5 轮）：</p>
 
@@ -293,30 +510,119 @@ orders2.ensureCapacity(<span class="n">1_000_000</span>);
 <tbody>
 <tr><td><code>new ArrayList&lt;&gt;()</code>（默认容量 10）</td><td><strong>28.3 ms</strong></td><td>18 次 Young GC</td><td>~16 MB</td></tr>
 <tr><td><code>new ArrayList&lt;&gt;(1_000_000)</code></td><td><strong>7.1 ms</strong></td><td>0 次 GC</td><td>~8 MB</td></tr>
-<tr><td>提升倍数</td><td colspan="3"><strong>4x 速度提升，内存减半，零 GC</strong></td></tr>
+<tr><td>提升倍数</td><td colspan="3"><strong>约 4x 速度提升，内存减半，零 GC</strong></td></tr>
 </tbody>
 </table>
 
 <div class="takeaway">
 <div class="takeaway-label">最佳实践</div>
-<p>当你能预估数据量时，<strong>永远</strong>使用带容量的构造函数。常见场景：</p>
+<p>当你能预估数据量时，<strong>永远</strong>使用带容量的构造/预分配。常见场景：</p>
 <ul>
-<li>从数据库查出 N 条记录转 List → <code>new ArrayList&lt;&gt;(N)</code></li>
+<li>从数据库查出 N 条记录转 List → <code>new ArrayList&lt;&gt;(N)</code>，或先 <code>List&lt;T&gt; list = new ArrayList&lt;&gt;(result.size())</code></li>
 <li>复制另一个集合 → <code>new ArrayList&lt;&gt;(sourceCollection.size())</code></li>
 <li>分页查询，已知 pageSize → <code>new ArrayList&lt;&gt;(pageSize)</code></li>
+<li>预估不了精确值？给个数量级也行——<code>ensureCapacity</code> 是"保底容量"，多给一点没有副作用（除非大到 OOM）</li>
+</ul>
+</div>
+
+<div class="crack">
+<div class="crack-label">后端类比</div>
+<p>预分配容量就像<strong>数据库连接池的 initialSize</strong>：连接池建好后按 initialSize 一次性建好连接，而不是每次请求都新建/销毁。ArrayList 的扩容 = 每次请求都重建连接池，预分配 = 一次到位。凡是"容量可预估、生命周期内只增不改"的数据结构，都应该预分配。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：remove 与 drain 时机 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>只增不减：remove 之后容量不会变小，何时该 drain</h2></div>
+
+<p>扩容是"只增不减"的——<code>remove()</code> 只会减小 <code>size</code>，<code>elementData.length</code> 纹丝不动。看 JDK 8 的 <code>remove(int)</code>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · JDK 8 remove(int)</span></div>
+<pre><code><span class="k">public</span> <span class="t">E</span> remove(<span class="k">int</span> index) {
+    rangeCheck(index);
+    modCount++;
+    <span class="t">E</span> oldValue = elementData(index);
+
+    <span class="k">int</span> numMoved = size - index - <span class="n">1</span>;
+    <span class="k">if</span> (numMoved &gt; <span class="n">0</span>)
+        <span class="t">System</span>.arraycopy(elementData, index + <span class="n">1</span>, elementData, index, numMoved);
+        <span class="c">// 删除中间元素：把后面的元素整体前移一格（又是 O(n)）</span>
+
+    <span class="hl">elementData[--size] = <span class="k">null</span>;  <span class="c">// 尾部槽位置 null：帮 GC 回收（JDK 8 修复）</span></span>
+    <span class="k">return</span> oldValue;
+}</code></pre>
+</div>
+
+<p>注意：删除后容量 <code>elementData.length</code> <strong>不会收缩</strong>。如果你删掉 90 万个元素，数组还是那么大，只是尾巴上多了 90 万个 <code>null</code> 槽位。</p>
+
+<h3>一个被 JDK 8 修复的经典内存泄漏</h3>
+
+<p>JDK 8 之前（比如 JDK 6/7），<code>remove()</code> 和 <code>clear()</code> 都<strong>不置 null</strong>：数组里仍强引用着被删除的对象。如果这个 ArrayList 长期存活（比如缓存、静态字段、长生命周期对象），而被删除的元素在别处已无引用，它们就永远无法被 GC 回收——<em>Effective Java</em> 第 2 版 Item 7 讲的就是这个"过时引用"（obsolete reference）泄漏。JDK 8 起 <code>remove()</code> 把尾部槽位置 null，<code>clear()</code> 也改为逐槽置 null：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · JDK 8 clear()</span></div>
+<pre><code><span class="k">public void</span> clear() {
+    modCount++;
+    <span class="c">// clear to let GC do its work</span>
+    <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; size; i++)
+        elementData[i] = <span class="k">null</span>;   <span class="c">// 逐槽置 null，size 清零</span>
+    size = <span class="n">0</span>;
+}</code></pre>
+</div>
+
+<h3>drain 时机：什么时候主动回收容量</h3>
+
+<p>"drain"在这里指<strong>把列表的容量/引用排掉</strong>：删光元素 ≠ 释放容量，容量回收需要显式动作。JDK 8 提供了 <code>trimToSize()</code>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · trimToSize() 源码</span></div>
+<pre><code><span class="k">public void</span> trimToSize() {
+    modCount++;
+    <span class="k">if</span> (size &lt; elementData.length) {
+        elementData = (size == <span class="n">0</span>)
+            ? EMPTY_ELEMENTDATA                    <span class="c">// 空列表：回到共享哨兵</span>
+            : <span class="t">Arrays</span>.copyOf(elementData, size);  <span class="c">// 缩到恰好 size</span>
+    }
+}</code></pre>
+</div>
+
+<table class="nb-table">
+<thead><tr><th>场景</th><th>推荐动作</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>大列表删掉大部分元素后仍长期驻留（缓存/配置/字典）</td><td><code>trimToSize()</code>（一次性操作）</td><td>容量只增不减，不缩就会一直占着大数组</td></tr>
+<tr><td>批量清空列表</td><td><code>clear()</code></td><td>JDK 8 起自动逐槽置 null，帮助 GC</td></tr>
+<tr><td>列表用完后不再需要</td><td>直接丢掉引用（<code>list = null</code> 或缩短作用域）</td><td>整数组随对象一起被回收，比 trimToSize 更彻底</td></tr>
+<tr><td>循环中删除元素</td><td><code>iterator.remove()</code> / <code>removeIf()</code></td><td>避免索引错位与 CME（见第 11 站）</td></tr>
+<tr><td>作为缓存容器的列表</td><td>考虑弱引用 / 定期 trimToSize</td><td>强引用数组会钉住所有元素</td></tr>
+</tbody>
+</table>
+
+<div class="crack">
+<div class="crack-label">后端类比：容量与使用量是两回事</div>
+<p>这就像<strong>线程池</strong>：corePoolSize 是容量，当前线程数是使用量，任务跑完了线程并不会全部销毁；也像 <strong>BlockingQueue.drainTo()</strong>——"取走元素"不等于"释放底层存储"。ArrayList 的 <code>trimToSize()</code> 就是你的手动"回收动作"，和连接池的 idle 回收一个道理：别指望系统自动帮你，驻留内存的结构必须显式治理。</p>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">核心要点</div>
+<ul>
+<li>扩容只增不减：<code>remove()</code> 只动 <code>size</code>，不动 <code>elementData.length</code>。</li>
+<li>JDK 8 之前 remove/clear 不置 null 是内存泄漏源头，JDK 8 已修复（面试答"置 null 帮 GC"）。</li>
+<li><code>trimToSize()</code> 本身是一次 <code>Arrays.copyOf</code>（O(n)），只适合"一次性、低频"调用，别放进高频路径。</li>
+<li>判断"该不该 drain"的标准：列表是否<strong>长期存活</strong> + <strong>容量远大于实际使用量</strong>，两者同时成立才值得缩。</li>
 </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：性能模式 ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>性能全景：各种操作的实际复杂度</h2></div>
+<!-- ═══════════════ 第8站：性能全景 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>性能全景：各种操作的实际复杂度</h2></div>
 
-<p>面试中常被问到"ArrayList 和 LinkedList 哪个快"，但真正的答案远比"ArrayList 随机访问快、LinkedList 插入快"复杂。来看实际数据：</p>
+<p>面试中常被问到"ArrayList 和 LinkedList 哪个快"，但真正的答案远比"ArrayList 随机访问快、LinkedList 插入快"复杂。来看实际数据（量级仅供参考）：</p>
 
 <figure class="fig">
 <svg viewBox="0 0 700 300" role="img" aria-label="ArrayList vs LinkedList 性能对比">
-  <text x="350" y="22" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="14" fill="#1C1C1C" font-weight="700">ArrayList vs LinkedList 各操作耗时对比（10 万元素，纳秒级）</text>
+  <text x="350" y="22" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="14" fill="#1C1C1C" font-weight="700">ArrayList vs LinkedList 各操作耗时对比（10 万元素，量级仅供参考）</text>
 
   <!-- 坐标轴 -->
   <line x1="140" y1="250" x2="680" y2="250" stroke="#D8CEB6" stroke-width="1.5"/>
@@ -361,7 +667,7 @@ orders2.ensureCapacity(<span class="n">1_000_000</span>);
   <rect x="240" y="290" width="14" height="10" rx="2" fill="#C2410C"/>
   <text x="260" y="299" font-size="10" fill="#57544E">LinkedList</text>
 </svg>
-<figcaption><span class="fig-no">图 2</span>实测对比：ArrayList 在遍历和随机访问上碾压 LinkedList。LinkedList 的"中间插入 O(1)"需要先 O(n) 找到位置，实际优势几乎不存在。</figcaption>
+<figcaption><span class="fig-no">图 4</span>实测对比：ArrayList 在遍历和随机访问上碾压 LinkedList。LinkedList 的"中间插入 O(1)"需要先 O(n) 找到位置，实际优势几乎不存在。</figcaption>
 </figure>
 
 <p>各操作复杂度速查：</p>
@@ -375,6 +681,7 @@ orders2.ensureCapacity(<span class="n">1_000_000</span>);
 <tr><td><code>remove(i)</code></td><td>O(n)</td><td>O(n)</td><td>同上，LinkedList 也需要先遍历到位置</td></tr>
 <tr><td><code>contains(o)</code></td><td>O(n)</td><td>O(n)</td><td>两者都需要线性扫描</td></tr>
 <tr><td>for-each 遍历</td><td><strong>O(n)</strong></td><td>O(n)</td><td>ArrayList 快 5-10 倍，CPU 缓存命中率差异巨大</td></tr>
+<tr><td>内存占用</td><td>数组 + 最多 1/3 稀疏槽</td><td>每元素一个 Node（额外 ~24-40 B）</td><td>LinkedList 每个元素还要多存两个引用</td></tr>
 </tbody>
 </table>
 
@@ -384,9 +691,248 @@ orders2.ensureCapacity(<span class="n">1_000_000</span>);
 </div>
 </section>
 
-<!-- ═══════════════ 第7站：生产最佳实践 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>生产环境最佳实践与常见陷阱</h2></div>
+<!-- ═══════════════ 第9站：LinkedList 源码解剖 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>LinkedList 源码解剖：为什么"插入快"是个谎言</h2></div>
+
+<p>先看 LinkedList 的底层——它压根不是"List 的链表版"这么简单，而是一个<strong>双向链表</strong>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LinkedList.java</b> · JDK 8 核心结构</span></div>
+<pre><code><span class="k">public class</span> <span class="t">LinkedList</span>&lt;<span class="t">E</span>&gt; <span class="k">extends</span> <span class="t">AbstractSequentialList</span>&lt;<span class="t">E</span>&gt;
+        <span class="k">implements</span> <span class="t">List</span>&lt;<span class="t">E</span>&gt;, <span class="t">Deque</span>&lt;<span class="t">E</span>&gt;, <span class="t">Cloneable</span>, <span class="t">java.io.Serializable</span> {
+
+    <span class="k">transient int</span> size = <span class="n">0</span>;
+    <span class="k">transient</span> <span class="t">Node</span>&lt;<span class="t">E</span>&gt; first;   <span class="c">// 头节点引用</span>
+    <span class="k">transient</span> <span class="t">Node</span>&lt;<span class="t">E</span>&gt; last;    <span class="c">// 尾节点引用</span>
+
+    <span class="k">private static class</span> <span class="t">Node</span>&lt;<span class="t">E</span>&gt; {
+        <span class="t">E</span> item;
+        <span class="t">Node</span>&lt;<span class="t">E</span>&gt; next;   <span class="c">// 后继</span>
+        <span class="t">Node</span>&lt;<span class="t">E</span>&gt; prev;   <span class="c">// 前驱</span>
+        <span class="t">Node</span>(<span class="t">Node</span>&lt;<span class="t">E</span>&gt; prev, <span class="t">E</span> element, <span class="t">Node</span>&lt;<span class="t">E</span>&gt; next) {
+            <span class="k">this</span>.item = element; <span class="k">this</span>.next = next; <span class="k">this</span>.prev = prev;
+        }
+    }
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 720 210" role="img" aria-label="LinkedList 双向链表结构图">
+  <text x="360" y="18" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="13" fill="#1C1C1C" font-weight="700">LinkedList 内部：双向链表，每个元素一个 Node 对象</text>
+
+  <!-- Node A -->
+  <rect x="34" y="64" width="40" height="40" fill="#F3F0E9" stroke="#C9BFA8"/>
+  <rect x="74" y="64" width="52" height="40" fill="#FCE8E0" stroke="#C2410C"/>
+  <rect x="126" y="64" width="40" height="40" fill="#F3F0E9" stroke="#C9BFA8"/>
+  <text x="54" y="87" text-anchor="middle" font-size="8" fill="#8C8676">prev</text>
+  <text x="100" y="89" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">E1</text>
+  <text x="146" y="87" text-anchor="middle" font-size="8" fill="#8C8676">next</text>
+
+  <!-- Node B -->
+  <rect x="294" y="64" width="40" height="40" fill="#F3F0E9" stroke="#C9BFA8"/>
+  <rect x="334" y="64" width="52" height="40" fill="#FCE8E0" stroke="#C2410C"/>
+  <rect x="386" y="64" width="40" height="40" fill="#F3F0E9" stroke="#C9BFA8"/>
+  <text x="314" y="87" text-anchor="middle" font-size="8" fill="#8C8676">prev</text>
+  <text x="360" y="89" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">E2</text>
+  <text x="406" y="87" text-anchor="middle" font-size="8" fill="#8C8676">next</text>
+
+  <!-- Node C -->
+  <rect x="554" y="64" width="40" height="40" fill="#F3F0E9" stroke="#C9BFA8"/>
+  <rect x="594" y="64" width="52" height="40" fill="#FCE8E0" stroke="#C2410C"/>
+  <rect x="646" y="64" width="40" height="40" fill="#F3F0E9" stroke="#C9BFA8"/>
+  <text x="574" y="87" text-anchor="middle" font-size="8" fill="#8C8676">prev</text>
+  <text x="620" y="89" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">E3</text>
+  <text x="666" y="87" text-anchor="middle" font-size="8" fill="#8C8676">next</text>
+
+  <!-- first / last -->
+  <text x="100" y="52" text-anchor="middle" font-size="9.5" fill="#3E6B8F" font-weight="600">first</text>
+  <line x1="100" y1="55" x2="100" y2="62" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="620" y="52" text-anchor="middle" font-size="9.5" fill="#3E6B8F" font-weight="600">last</text>
+  <line x1="620" y1="55" x2="620" y2="62" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- next 指针 -->
+  <line x1="166" y1="84" x2="290" y2="84" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="426" y1="84" x2="550" y2="84" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="686" y1="84" x2="702" y2="84" stroke="#8C8676" stroke-width="1.2"/>
+  <text x="704" y="79" font-size="8.5" fill="#8C8676">null</text>
+
+  <!-- prev 指针（下方弧线，指向前一个节点） -->
+  <path d="M334,104 C334,142 166,142 166,104" fill="none" stroke="#C2410C" stroke-width="1.4" marker-end="url(#arr)"/>
+  <path d="M594,104 C594,142 426,142 426,104" fill="none" stroke="#C2410C" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="250" y="152" text-anchor="middle" font-size="8" fill="#C2410C">prev</text>
+  <text x="510" y="152" text-anchor="middle" font-size="8" fill="#C2410C">prev</text>
+
+  <line x1="54" y1="104" x2="54" y2="130" stroke="#C9BFA8" stroke-width="1.2"/>
+  <text x="54" y="142" text-anchor="middle" font-size="8.5" fill="#8C8676">null</text>
+  <line x1="686" y1="104" x2="686" y2="130" stroke="#C9BFA8" stroke-width="1.2"/>
+  <text x="686" y="142" text-anchor="middle" font-size="8.5" fill="#8C8676">null</text>
+
+  <text x="360" y="172" text-anchor="middle" font-size="9.5" fill="#57544E">每个 Node 额外占用约 24~40 字节（对象头 + 两个引用），缓存不友好</text>
+  <text x="360" y="190" text-anchor="middle" font-size="9.5" fill="#57544E">node(index) 从头/尾双向遍历定位，定位本身就要 O(n/2)</text>
+</svg>
+<figcaption><span class="fig-no">图 5</span>LinkedList 的每个元素都是一个独立的 <code>Node</code> 对象，分散在堆上；<code>first</code>/<code>last</code> 只持有首尾引用。</figcaption>
+</figure>
+
+<p>再看"中间插入 O(1)"是怎么来的——先看 <code>add(int index, E)</code>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LinkedList.java</b> · 定位 + 插入</span></div>
+<pre><code><span class="k">public void</span> add(<span class="k">int</span> index, <span class="t">E</span> element) {
+    checkPositionIndex(index);
+    <span class="k">if</span> (index == size)
+        linkLast(element);              <span class="c">// 尾部：O(1)</span>
+    <span class="k">else</span>
+        linkBefore(element, node(index));  <span class="c">// 中间：先 O(n) 定位，再 O(1) 挂接</span>
+}
+
+<span class="c">// 双向二分定位：从头还是从尾走，取决于 index 离哪头近</span>
+<span class="t">Node</span>&lt;<span class="t">E</span>&gt; node(<span class="k">int</span> index) {
+    <span class="k">if</span> (index &lt; (size &gt;&gt; <span class="n">1</span>)) {          <span class="c">// index &lt; size/2：从头走</span>
+        <span class="t">Node</span>&lt;<span class="t">E</span>&gt; x = first;
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; index; i++)
+            x = x.next;
+        <span class="k">return</span> x;
+    } <span class="k">else</span> {                          <span class="c">// 否则从尾走</span>
+        <span class="t">Node</span>&lt;<span class="t">E</span>&gt; x = last;
+        <span class="k">for</span> (<span class="k">int</span> i = size - <span class="n">1</span>; i &gt; index; i--)
+            x = x.prev;
+        <span class="k">return</span> x;
+    }
+}</code></pre>
+</div>
+
+<p>结论很清楚：<strong>LinkedList 的"O(1) 插入"只在持有 Node 引用时成立</strong>（比如 <code>ListIterator</code> 遍历到某个位置后插入，或队列场景的 <code>addFirst/addLast</code>）。一旦你走的是 <code>add(i, e)</code> / <code>remove(i)</code> 这种带索引的 API，定位就要 O(n/2)，整体还是 O(n)——和 ArrayList 的搬移成本一个量级，却多了缓存不友好和内存开销两个劣势。</p>
+
+<table class="nb-table">
+<thead><tr><th>维度</th><th>ArrayList</th><th>LinkedList</th><th>ArrayDeque</th></tr></thead>
+<tbody>
+<tr><td>底层结构</td><td><code>Object[]</code> 连续数组</td><td><code>Node</code> 双向链表</td><td><code>Object[]</code> 环形数组</td></tr>
+<tr><td><code>get(i)</code></td><td><strong>O(1)</strong></td><td>O(n)</td><td>无索引 API</td></tr>
+<tr><td><code>add</code> 尾部</td><td>O(1) 均摊</td><td>O(1)</td><td>O(1) 均摊</td></tr>
+<tr><td><code>addFirst</code> 头部</td><td>O(n)（整体搬移）</td><td>O(1)</td><td><strong>O(1)</strong></td></tr>
+<tr><td>缓存友好</td><td><strong>高</strong></td><td>低</td><td><strong>高</strong></td></tr>
+<tr><td>每元素额外内存</td><td>几乎为 0</td><td>~24-40 B（Node 对象）</td><td>几乎为 0</td></tr>
+<tr><td>推荐场景</td><td><strong>默认选择</strong></td><td>几乎不用</td><td>队列/双端队列</td></tr>
+</tbody>
+</table>
+
+<div class="crack">
+<div class="crack-label">一句话点破</div>
+<p>需要"头部插入/双端操作"？用 <code>ArrayDeque</code>，它既是环形数组、缓存友好，又保证 O(1) 双端操作——把 LinkedList 最后一块遮羞布也扯掉了。Joshua Bloch（集合框架设计者）的原话是：<em>"LinkedList 几乎不应该被使用。"</em></p>
+</div>
+</section>
+
+<!-- ═══════════════ 第10站：遍历差异 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>for / for-each / stream：三种遍历的真实差异</h2></div>
+
+<p>同样是"遍历一遍"，三种写法在底层是三条完全不同的代码路径：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Traverse.java</b> · 三种写法</span></div>
+<pre><code><span class="c">// ① 索引 for：直接数组下标访问，零迭代器对象</span>
+<span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; list.size(); i++) {
+    <span class="t">String</span> s = list.get(i);      <span class="c">// 编译后就是 elementData[i]（RandomAccess）</span>
+}
+
+<span class="c">// ② for-each：编译成 Iterator.hasNext()/next()</span>
+<span class="k">for</span> (<span class="t">String</span> s : list) {        <span class="c">// 创建 ArrayList.Itr，每次 next 都校验 modCount</span>
+}
+
+<span class="c">// ③ stream().forEach：走 Spliterator + 方法句柄</span>
+list.stream().forEach(s -&gt; { ... });  <span class="c">// ArrayListSpliterator 按索引区间批量消费</span>
+
+<span class="c">// ④ 容易被忽略的第 4 种：list.forEach（Iterable 默认方法被 ArrayList 重写）</span>
+list.forEach(s -&gt; { ... });           <span class="c">// 索引循环 + lambda，无迭代器对象</span></code></pre>
+</div>
+
+<h3>方法级源码：三种遍历各自的"检查机制"</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · Itr（for-each 的幕后）与 forEach 重写</span></div>
+<pre><code><span class="c">// for-each 编译产物用的迭代器：每次 next() 都做 fail-fast 校验</span>
+<span class="k">public</span> <span class="t">E</span> next() {
+    checkForComodification();        <span class="c">// ① 先校验 modCount == expectedModCount</span>
+    <span class="k">int</span> i = cursor;
+    <span class="k">if</span> (i &gt;= size) <span class="k">throw new</span> <span class="t">NoSuchElementException</span>();
+    <span class="t">Object</span>[] elementData = <span class="t">ArrayList</span>.this.elementData;
+    <span class="k">if</span> (i &gt;= elementData.length) <span class="k">throw new</span> <span class="t">ConcurrentModificationException</span>();
+    cursor = i + <span class="n">1</span>;
+    <span class="k">return</span> (E) elementData[lastRet = i];
+}
+
+<span class="c">// list.forEach（JDK 8 重写）：索引循环，每次迭代条件里都带 modCount 校验</span>
+<span class="k">public void</span> forEach(<span class="t">Consumer</span>&lt;? <span class="k">super</span> <span class="t">E</span>&gt; action) {
+    <span class="k">final int</span> expectedModCount = modCount;
+    <span class="k">final int</span> size = <span class="k">this</span>.size;
+    <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; modCount == expectedModCount &amp;&amp; i &lt; size; i++) {
+        action.accept(elementData[i]);
+    }
+    <span class="k">if</span> (modCount != expectedModCount)
+        <span class="k">throw new</span> <span class="t">ConcurrentModificationException</span>();
+}
+
+<span class="c">// stream().forEach 的 Spliterator：先记录 expectedModCount，整段遍历后统一校验</span>
+<span class="c">// （ArrayListSpliterator.forEachRemaining：循环里只做索引推进，结束后才检查 modCount）</span></code></pre>
+</div>
+
+<p>三种遍历的 fail-fast 暴露时机完全不同：<code>for-each</code>（迭代器）<strong>每次 next 都校验</strong>，并发修改几乎立刻抛 <code>ConcurrentModificationException</code>；<code>list.forEach</code> 每次循环条件校验，暴露也很早；<code>stream().forEach</code> 走 <code>forEachRemaining</code>，<strong>整段遍历完才校验</strong>，异常会"延迟暴露"（tryAdvance 单步路径则会逐元素校验）。</p>
+
+<h3>相对性能与能力对比</h3>
+
+<figure class="fig">
+<svg viewBox="0 0 700 232" role="img" aria-label="三种遍历方式相对耗时对比图">
+  <text x="350" y="18" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="13" fill="#1C1C1C" font-weight="700">遍历 100 万 Integer 的相对耗时（索引 for = 1.0）</text>
+  <line x1="40" y1="196" x2="700" y2="196" stroke="#D8CEB6" stroke-width="1.5"/>
+
+  <rect x="52" y="100" width="58" height="96" rx="3" fill="#3E6B8F"/>
+  <text x="81" y="94" text-anchor="middle" font-size="9.5" fill="#3E6B8F" font-weight="700">1.0</text>
+  <text x="81" y="214" text-anchor="middle" font-size="9.5" fill="#1C1C1C" font-weight="600">索引 for</text>
+
+  <rect x="136" y="81" width="58" height="115" rx="3" fill="#3E6B8F" opacity="0.85"/>
+  <text x="165" y="75" text-anchor="middle" font-size="9.5" fill="#3E6B8F" font-weight="700">~1.2</text>
+  <text x="165" y="214" text-anchor="middle" font-size="9.5" fill="#1C1C1C" font-weight="600">for-each</text>
+
+  <rect x="220" y="71" width="58" height="125" rx="3" fill="#3E6B8F" opacity="0.7"/>
+  <text x="249" y="65" text-anchor="middle" font-size="9.5" fill="#3E6B8F" font-weight="700">~1.3</text>
+  <text x="249" y="214" text-anchor="middle" font-size="9.5" fill="#1C1C1C" font-weight="600">list.forEach</text>
+
+  <rect x="304" y="23" width="58" height="173" rx="3" fill="#3E6B8F" opacity="0.55"/>
+  <text x="333" y="17" text-anchor="middle" font-size="9.5" fill="#3E6B8F" font-weight="700">~1.8</text>
+  <text x="333" y="214" text-anchor="middle" font-size="9.5" fill="#1C1C1C" font-weight="600">stream().forEach</text>
+
+  <rect x="388" y="153" width="58" height="43" rx="3" fill="#C2410C"/>
+  <text x="417" y="147" text-anchor="middle" font-size="9.5" fill="#C2410C" font-weight="700">~0.45</text>
+  <text x="417" y="214" text-anchor="middle" font-size="9.5" fill="#1C1C1C" font-weight="600">parallel(4核)</text>
+
+  <text x="350" y="228" text-anchor="middle" font-size="8.5" fill="#8C8676">量级仅供参考：小数据量下 parallel 反而更慢；数据量 ≥ 数十万且多核才可能胜出</text>
+</svg>
+<figcaption><span class="fig-no">图 6</span>四种遍历相对耗时（以索引 for 为基准）。顺序遍历差距在 2 倍以内，parallelStream 只在"数据量大 + 多核"时划算。</figcaption>
+</figure>
+
+<table class="nb-table">
+<thead><tr><th>维度</th><th>索引 for</th><th>for-each</th><th>list.forEach</th><th>stream().forEach</th></tr></thead>
+<tbody>
+<tr><td>底层机制</td><td><code>elementData[i]</code></td><td><code>ArrayList.Itr</code></td><td>ArrayList 重写的索引循环</td><td><code>ArrayListSpliterator</code></td></tr>
+<tr><td>迭代器对象</td><td>无</td><td>有（每遍历一次创建一个）</td><td>无</td><td>有（Spliterator）</td></tr>
+<tr><td>modCount 校验</td><td>不校验（快，但并发修改时可能读到脏数据）</td><td>每次 next 立即校验</td><td>每次循环条件校验</td><td>整段遍历后统一校验（延迟暴露）</td></tr>
+<tr><td>break / return 提前退出</td><td>✔</td><td>✔</td><td>✘（lambda 内 return 只退出本次回调）</td><td>✘</td></tr>
+<tr><td>遍历中删除元素</td><td>需手动 <code>i--</code></td><td><code>iterator.remove()</code> 可，直接 <code>list.remove</code> 抛 CME</td><td>不推荐</td><td>不推荐</td></tr>
+<tr><td>局部变量捕获</td><td>随意修改</td><td>随意修改</td><td>lambda 要求 effectively final</td><td>同左</td></tr>
+<tr><td>并行能力</td><td>✘</td><td>✘</td><td>✘</td><td>✔（parallelStream）</td></tr>
+</tbody>
+</table>
+
+<div class="crack">
+<div class="crack-label">生产建议</div>
+<p><strong>①</strong> 纯遍历 + 能确认无并发修改 → 索引 for（最快且能 break）；<strong>②</strong> 需要过滤/转换/聚合 → stream 的 <code>map/filter/collect</code>（表达力优先，性能差距在 2 倍内）；<strong>③</strong> 并发修改遍历 → 别用裸 for，改用 <code>CopyOnWriteArrayList</code> 或迭代器 remove；<strong>④</strong> parallelStream 只在 <code>数据量 ≥ 数十万</code> 且 <strong>多核</strong> 时用，且要注意 <code>forEach</code> 不保证相遇顺序（要保序用 <code>forEachOrdered</code>）。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第11站：生产最佳实践 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>生产环境最佳实践与常见陷阱</h2></div>
 
 <p>写了十年 Java，以下是我总结的 ArrayList 使用守则：</p>
 
@@ -402,13 +948,18 @@ orders2.ensureCapacity(<span class="n">1_000_000</span>);
     voList.add(toVO(e));
 }
 
-<span class="c">// ✓ 配合 Stream 使用时，先 collect 再处理</span>
+<span class="c">// ⚠ 注意：Collectors.toList() 内部只是 new ArrayList&lt;&gt;()，并没有预分配！</span>
 <span class="t">List</span>&lt;<span class="t">String</span>&gt; names = users.stream()
     .map(<span class="t">User</span>::getName)
-    .collect(Collectors.toList());  <span class="c">// 内部已预分配</span></code></pre>
+    .collect(Collectors.toList());   <span class="c">// 数据量大时仍会经历多次扩容</span>
+
+<span class="c">// ✓ 想要预分配，用 toCollection 指定容量</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; names2 = users.stream()
+    .map(<span class="t">User</span>::getName)
+    .collect(Collectors.toCollection(() -&gt; <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(expectedSize)));</code></pre>
 </div>
 
-<p><strong>原则三：警惕 subList() 的视图陷阱。</strong></p>
+<p><strong>原则三：警惕 subList() 的视图陷阱。</strong>它返回的是视图而非副本，且持有父列表的 modCount——父列表任何结构修改都会让子列表立刻失效：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>SubListTrap.java</b> · subList 不是深拷贝！</span></div>
@@ -425,6 +976,8 @@ sub.get(<span class="n">0</span>);  <span class="c">// ✗ 抛出 ConcurrentModi
 <span class="c">// ✓ 安全做法：需要独立副本就 new 一份</span>
 <span class="t">List</span>&lt;<span class="t">String</span>&gt; copy = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(list.subList(<span class="n">1</span>, <span class="n">3</span>));</code></pre>
 </div>
+
+<p>顺带一提：subList 视图还<strong>持有父列表的引用</strong>，如果你对一个超大的列表做 subList 后长期保留子列表，父列表的整个 elementData 都会被钉住无法回收——用完即弃，或复制出来。</p>
 
 <p><strong>原则四：分清 Arrays.asList() 和 List.of()。</strong></p>
 
@@ -456,20 +1009,55 @@ buffer.trimToSize();  <span class="c">// capacity 从 10000 缩为 200，释放�
 
 <span class="c">// 典型场景：长期存活的大列表，填充后不再修改</span></code></pre>
 </div>
+
+<p><strong>原则六：不要在循环里正序 remove。</strong></p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>RemoveInLoop.java</b> · 删除元素的三板斧</span></div>
+<pre><code><span class="c">// ✗ 正序按索引删：删除后元素前移，i 自增会跳过下一个 → 漏删/越界</span>
+<span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; list.size(); i++) {
+    <span class="k">if</span> (matches(list.get(i))) list.remove(i);
+}
+
+<span class="c">// ✓ 方案 1：倒序删（元素前移不影响已扫描部分）</span>
+<span class="k">for</span> (<span class="k">int</span> i = list.size() - <span class="n">1</span>; i &gt;= <span class="n">0</span>; i--) {
+    <span class="k">if</span> (matches(list.get(i))) list.remove(i);
+}
+
+<span class="c">// ✓ 方案 2：removeIf（JDK 8+，内部用迭代器，最优雅）</span>
+list.removeIf(<span class="k">this</span>::matches);
+
+<span class="c">// ✓ 方案 3：迭代器 remove（需要遍历过程中做别的判断时）</span>
+<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; it = list.iterator();
+<span class="k">while</span> (it.hasNext()) {
+    <span class="k">if</span> (matches(it.next())) it.remove();
+}</code></pre>
+</div>
+
+<p><strong>原则七：ArrayList 不是线程安全的。</strong>多线程写同一个 ArrayList 轻则丢数据，重则数组越界崩溃。选型顺序：<code>Collections.synchronizedList</code>（粗锁，简单场景）→ <code>CopyOnWriteArrayList</code>（读多写少）→ 并发写场景直接用 <code>ConcurrentLinkedQueue</code> 或自行加锁。别指望 <code>Vector</code>——全方法加锁的"上古遗物"，性能差且过时。</p>
+
+<p><strong>原则八：预分配也要防呆。</strong><code>new ArrayList&lt;&gt;(2_000_000_000)</code> 会直接 OOM——别拿估算值乱乘。容量估算宁准勿大，拿不准就给个数量级，最多多占点内存，不会错。</p>
+
+<div class="crack">
+<div class="crack-label">一个真实的生产坑</div>
+<p>曾经有同事把"查询结果"直接塞进静态 <code>List</code> 做缓存，一个月后 Full GC 频繁。原因正是第 7 站的"过时引用"：缓存列表用 <code>removeAll</code> 清数据，但旧版代码里数组槽位还强引用着业务对象。修法就一行——<code>clear()</code> 后 <code>trimToSize()</code>，或者直接换 <code>ConcurrentHashMap</code> 做缓存。排查内存问题时，先问一句：<strong>这个 List 是不是长期存活、又删过元素？</strong></p>
+</div>
 </section>
 
-<!-- ═══════════════ 第8站：总结 ═══════════════ -->
-<section class="station reveal" id="s8">
-<div class="station-head"><span class="station-no">第 8 站</span><h2>快速参考卡片</h2></div>
+<!-- ═══════════════ 第12站：快速参考 ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>快速参考卡片与高频追问</h2></div>
 
 <div class="recap">
 <p><strong>ArrayList 扩容机制速记</strong></p>
 <ul>
-<li><strong>底层结构：</strong><code>Object[] elementData</code>，<code>DEFAULT_CAPACITY = 10</code>，延迟初始化</li>
-<li><strong>扩容公式：</strong><code>newCapacity = oldCapacity + (oldCapacity &gt;&gt; 1)</code>，即 1.5 倍增长</li>
-<li><strong>拷贝开销：</strong>每次扩容调用 <code>System.arraycopy</code>，O(n) 操作，累计拷贝量约为 2N</li>
-<li><strong>预分配：</strong><code>new ArrayList&lt;&gt;(expectedSize)</code>，将扩容次数降为 0</li>
-<li><strong>1.5x vs 2x：</strong>1.5 倍空间浪费更少（~33% vs ~50%），且支持内存复用</li>
+<li><strong>底层结构：</strong><code>Object[] elementData</code>，<code>DEFAULT_CAPACITY = 10</code>，无参构造指向 <code>DEFAULTCAPACITY_EMPTY_ELEMENTDATA</code> 哨兵、延迟初始化</li>
+<li><strong>首次 add：</strong>走 <code>ensureCapacityInternal → calculateCapacity → ensureExplicitCapacity</code>，容量放大到 <code>max(10, minCapacity)</code> = 10</li>
+<li><strong>扩容公式：</strong><code>newCapacity = oldCapacity + (oldCapacity &gt;&gt; 1)</code>，即 1.5 倍增长；不足时用 <code>minCapacity</code> 兜底</li>
+<li><strong>拷贝开销：</strong>每次扩容调用 <code>System.arraycopy</code>，O(n)；100 万元素累计约 243 万次拷贝（≈2.4N），预分配可降为 0</li>
+<li><strong>边界保护：</strong><code>MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8</code>，<code>hugeCapacity</code> 兜底溢出，负数容量构造抛 <code>IllegalArgumentException</code></li>
+<li><strong>容量只增不减：</strong><code>remove()</code> 不缩容；JDK 8 起尾部槽位置 null 帮 GC；要回收容量用 <code>trimToSize()</code></li>
+<li><strong>1.5x vs 2x：</strong>1.5 倍空间浪费更少（≤33% vs ≤50%），且支持内存复用；均摊复杂度同为 O(1)</li>
 </ul>
 </div>
 
@@ -486,12 +1074,60 @@ buffer.trimToSize();  <span class="c">// capacity 从 10000 缩为 200，释放�
 </tbody>
 </table>
 
+<h3>高频追问速答</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Interview.java</b> · 追问拆解</span></div>
+<pre><code><span class="c">// Q1: new ArrayList&lt;&gt;(0) 和 new ArrayList&lt;&gt;() 有区别吗？</span>
+<span class="c">// A: 有。前者指向 EMPTY_ELEMENTDATA，首次 add 只扩到 1；</span>
+<span class="c">//    后者指向 DEFAULTCAPACITY_EMPTY_ELEMENTDATA，首次 add 扩到 10。</span>
+
+<span class="c">// Q2: ArrayList 最多能装多少元素？</span>
+<span class="c">// A: 理论上 Integer.MAX_VALUE，但 MAX_ARRAY_SIZE = MAX_VALUE - 8，</span>
+<span class="c">//    实际受堆大小限制，接近上限必然 OOM。</span>
+
+<span class="c">// Q3: remove() 之后内存会变小吗？</span>
+<span class="c">// A: 不会，elementData.length 不变；JDK 8 起尾部槽位置 null 帮助 GC。</span>
+<span class="c">//    要释放容量必须显式 trimToSize()。</span>
+
+<span class="c">// Q4: for-each 里 list.remove(x) 会怎样？</span>
+<span class="c">// A: 抛 ConcurrentModificationException（modCount 不匹配）；</span>
+<span class="c">//    iterator.remove() 可以，它会同步 expectedModCount。</span>
+
+<span class="c">// Q5: stream().forEach 和 list.forEach 有什么区别？</span>
+<span class="c">// A: 前者走 Spliterator（可并行、fail-fast 延迟暴露、不保序 in parallel），</span>
+<span class="c">//    后者是 ArrayList 重写的索引循环（每次迭代校验 modCount）。</span></code></pre>
+</div>
+
 <div class="takeaway">
 <div class="takeaway-label">面试应答模板</div>
 <p><strong>Q: ArrayList 的扩容机制？</strong></p>
-<p>"ArrayList 底层是 Object 数组，默认容量 10，延迟到首次 add 时分配。容量不足时调用 grow() 方法，按 1.5 倍扩容（右移一位实现除以 2），然后通过 Arrays.copyOf 调用 System.arraycopy 完成数据拷贝。1.5 倍相比 2 倍的优势在于空间浪费更少，且有机会复用之前释放的内存块。均摊分析下，每次 add 的时间复杂度仍为 O(1)。"</p>
+<p>"ArrayList 底层是 Object 数组，无参构造默认容量 10 但延迟分配（JDK 8 指向 DEFAULTCAPACITY_EMPTY_ELEMENTDATA 哨兵，首次 add 时经 calculateCapacity 放大到 10）。容量不足时 add 会走 ensureCapacityInternal → ensureExplicitCapacity → grow()，按 1.5 倍扩容（右移一位实现除以 2），然后通过 Arrays.copyOf 调用 System.arraycopy 完成数据拷贝。1.5 倍相比 2 倍的优势在于空间浪费更少（≤33% vs ≤50%），且有机会复用之前释放的内存块。均摊分析下，每次 add 的时间复杂度仍为 O(1)。"</p>
 <p><strong>Q: 怎么优化 ArrayList 的性能？</strong></p>
-<p>"核心就是预分配。如果你知道要存多少数据，直接用 new ArrayList(size) 指定初始容量，把扩容次数降到零。在百万级数据量下，这个简单改动能带来 3-5 倍的性能提升，同时避免 Young GC。"</p>
+<p>"核心就是预分配。如果你知道要存多少数据，直接用 new ArrayList(size) 指定初始容量，把扩容次数降到零；批量添加用 addAll 只扩容一次。在百万级数据量下，这个简单改动能带来 3-5 倍的性能提升，同时避免大量短命数组引发的 Young GC。另外注意遍历选型：纯遍历用索引 for，需要过滤转换用 stream，并发修改用迭代器 remove 或 CopyOnWriteArrayList。"</p>
+</div>
+</section>
+
+<!-- ═══════════════ 总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
+
+<div class="recap">
+<h3>核心知识点回顾</h3>
+<ul>
+<li><strong>数据结构：</strong>ArrayList 底层是 <code>Object[] elementData</code>，size 是逻辑长度、capacity 是数组长度；无参构造延迟初始化，首次 add 扩容到 10。</li>
+<li><strong>调用链：</strong><code>add → ensureCapacityInternal → calculateCapacity → ensureExplicitCapacity → grow</code>，每层职责单一，modCount 贯穿始终。</li>
+<li><strong>扩容公式：</strong><code>oldCapacity + (oldCapacity &gt;&gt; 1)</code> 的 1.5 倍策略，配合 <code>minCapacity</code> 兜底与 <code>hugeCapacity</code> 溢出保护。</li>
+<li><strong>真正代价：</strong><code>System.arraycopy</code> 的 O(n) 拷贝（浅拷贝 + 写屏障），100 万元素累计约 243 万次拷贝；预分配 + addAll 批量添加可把拷贝降到 1 次。</li>
+<li><strong>drain 时机：</strong>remove/clear 不缩容，JDK 8 起置 null 帮 GC；长期驻留的大列表用 <code>trimToSize()</code> 显式回收容量。</li>
+<li><strong>遍历差异：</strong>索引 for（零对象、不校验）、for-each（迭代器、逐次校验）、list.forEach（索引循环 + 每次校验）、stream（Spliterator、批量校验、可并行）；各有能力边界与性能取舍。</li>
+<li><strong>对比结论：</strong>LinkedList 的"O(1) 插入"只在持有 Node 时成立，普通 API 是 O(n) 且缓存不友好；队列场景用 ArrayDeque。</li>
+</ul>
+</div>
+
+<div class="crack">
+<div class="crack-label">一句话串讲</div>
+<p>扩容的本质是"用拷贝换空间"：<strong>1.5 倍 + 预分配 + 批量添加 + 及时 drain</strong>，四板斧用对，ArrayList 就能在 100 万级数据下保持"写入 O(1) 均摊、读取 O(1)"的理想表现——这也是面试官想听到的"能落地"的答案。</p>
 </div>
 </section>
 

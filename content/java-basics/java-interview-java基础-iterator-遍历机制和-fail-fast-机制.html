@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Iterator 与 fail-fast 机制</title></head><body><main class="lesson-body">
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Iterator 与 fail-fast：集合遍历的安全边界</title></head><body><main class="lesson-body">
 
 <!-- ═══════════════ 第1站：开场 ═══════════════ -->
 <section class="station reveal" id="s1">
@@ -23,13 +23,13 @@ java.util.<span class="k">ConcurrentModificationException</span>
 <p>很多同学的回答停留在"modCount 不一致就抛异常"就说不下去了。但高级工程师需要回答的是：</p>
 
 <ul>
-  <li><code>modCount</code> 在哪个层级定义？哪些操作会触发它递增？</li>
-  <li>fail-fast 是"一定能检测出并发修改"还是"尽力而为"？</li>
-  <li><code>CopyOnWriteArrayList</code> 的 Iterator 为什么不抛异常？它的快照语义有什么代价？</li>
-  <li>增强 for 循环里不能调用 <code>remove()</code>，但 <code>Iterator.remove()</code> 为什么就可以？</li>
+  <li><code>modCount</code> 在哪个层级定义？哪些操作会触发它递增？哪些操作不会？</li>
+  <li>fail-fast 是"一定能检测出并发修改"还是"尽力而为"？哪些场景下它<strong>检测不到</strong>？</li>
+  <li><code>Iterator.remove()</code> 为什么安全？<code>removeIf()</code> 内部做了什么，为什么它自己遍历自己删却不抛 CME？</li>
+  <li>增强 for 循环的本质是什么？<code>CopyOnWriteArrayList</code> 的快照语义又有什么代价？</li>
 </ul>
 
-<p>带着这些问题，我们从 Iterator 的设计模式源头开始，逐层拆解。</p>
+<p>带着这些问题，我们从 Iterator 的设计模式源头开始，逐层拆解到方法级源码。</p>
 </section>
 
 <!-- ═══════════════ 第2站：Iterator 设计模式 ═══════════════ -->
@@ -86,7 +86,7 @@ java.util.<span class="k">ConcurrentModificationException</span>
 }</code></pre>
 </div>
 
-<p>而增强 for 循环（foreach）在编译期会被自动翻译为 Iterator 遍历。这意味着你写的每一行 <code>for (T item : collection)</code>，背后都在使用 Iterator 模式。</p>
+<p>而增强 for 循环（foreach）在编译期会被自动翻译为 Iterator 遍历（下一站我们会用 <code>javap</code> 反编译验证）。这意味着你写的每一行 <code>for (T item : collection)</code>，背后都在使用 Iterator 模式。</p>
 
 <figure class="fig">
 <svg viewBox="0 0 700 320" role="img" aria-label="Iterator 状态机">
@@ -148,7 +148,7 @@ java.util.<span class="k">ConcurrentModificationException</span>
 </figure>
 
 <div class="crack"><div class="crack-label">为什么需要统一的 Iterator 接口？</div>
-<p>如果没有 Iterator，调用者需要了解每种集合的内部结构：ArrayList 用索引遍历、LinkedList 用节点跳转、HashMap 要遍历桶数组 + 链表。Iterator 把这些差异封装了，让算法可以独立于数据结构编写。这也是为什么 Java 8 的 Stream API 可以在任意 Collection 上工作——它底层依赖的就是 Spliterator（Iterator 的并行增强版）。</p>
+<p>如果没有 Iterator，调用者需要了解每种集合的内部结构：ArrayList 用索引遍历、LinkedList 用节点跳转、HashMap 要遍历桶数组 + 链表。Iterator 把这些差异封装了，让算法可以独立于数据结构编写。这也是为什么 Java 8 的 Stream API 可以在任意 Collection 上工作——它底层依赖的就是 Spliterator（Iterator 的并行增强版）。顺带一提：<code>ListIterator</code> 是 Iterator 的 List 专用扩展，额外提供 <code>hasPrevious()</code>/<code>previous()</code>/<code>add()</code>/<code>set()</code>，支持双向遍历与在迭代中插入元素。</p>
 </div>
 </section>
 
@@ -156,7 +156,7 @@ java.util.<span class="k">ConcurrentModificationException</span>
 <section class="station reveal" id="s3">
 <div class="station-head"><span class="station-no">第 3 站</span><h2>modCount：集合的"修改版本号"</h2></div>
 
-<p>fail-fast 机制的核心是一个计数器：<code>modCount</code>。它定义在 <code>AbstractList</code>（以及 <code>AbstractMap</code> 等抽象基类）中，记录集合被<strong>结构性修改</strong>的次数。</p>
+<p>fail-fast 机制的核心是一个计数器：<code>modCount</code>。它定义在 <code>AbstractList</code>（<code>HashMap</code> 则在自身类中重新声明了一个同名字段）中，记录集合被<strong>结构性修改</strong>的次数。</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>AbstractList.java</b> · modCount 定义</span></div>
@@ -169,56 +169,112 @@ java.util.<span class="k">ConcurrentModificationException</span>
 }</code></pre>
 </div>
 
-<p>什么叫"结构性修改"？<strong>任何改变了集合 size 的操作</strong>都算。具体来说：</p>
+<h3>什么算"结构性修改"？</h3>
 
-<ul>
-  <li><code>add()</code> — 添加元素，size +1</li>
-  <li><code>remove()</code> — 删除元素，size -1</li>
-  <li><code>clear()</code> — 清空集合，size 归零</li>
-  <li><code>addAll()</code> / <code>removeAll()</code> / <code>retainAll()</code> — 批量操作</li>
-</ul>
+<p>一句话：<strong>任何改变了集合 size（元素个数）的操作</strong>都是结构性修改。注意 <code>set()</code>（替换指定位置的值）<strong>不算</strong>——它不改 size，因此遍历时调用 <code>list.set(i, newValue)</code> 不会触发 CME：</p>
 
-<p>而 <code>set()</code>（替换指定位置元素）<strong>不算结构性修改</strong>，因为它不改变 size。这就是为什么在遍历 ArrayList 时调用 <code>list.set(i, newValue)</code> 不会触发 CME。</p>
+<table class="nb-table">
+  <thead>
+    <tr>
+      <th>操作</th>
+      <th>是否结构性修改</th>
+      <th>modCount 变化</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>add()</code> / <code>remove()</code> / <code>clear()</code></td>
+      <td><strong>是</strong></td>
+      <td>+1（每次）</td>
+    </tr>
+    <tr>
+      <td><code>addAll()</code> / <code>removeAll()</code> / <code>retainAll()</code></td>
+      <td><strong>是</strong></td>
+      <td>+1（批量操作同样递增）</td>
+    </tr>
+    <tr>
+      <td><code>set(index, value)</code></td>
+      <td><strong>否</strong></td>
+      <td>不变</td>
+    </tr>
+    <tr>
+      <td><code>get()</code> / <code>contains()</code> / <code>iterator()</code></td>
+      <td>否（只读）</td>
+      <td>不变</td>
+    </tr>
+  </tbody>
+</table>
 
-<p>来看 ArrayList 中 <code>add()</code> 和 <code>remove()</code> 是怎么操作 modCount 的：</p>
+<div class="think"><div class="think-q">为什么 <code>set()</code> 不算结构性修改？<br/><br/>
+因为 fail-fast 保护的是"遍历游标的合法性"：add/remove/clear 会改变元素下标与 size，导致游标指向的元素错位或越界，必须报错；而 set 只改值不改结构，cursor 与 size 的语义完全不变，读到的仍然是合法元素。所以 set 不动 modCount，遍历中替换值永远安全。</div></div>
+
+<p>来看 ArrayList 中 <code>add()</code> 和 <code>remove()</code> 是怎么操作 modCount 的（JDK 8 版本，JDK 11+ 只是把 <code>modCount++</code> 挪进了 public 的 <code>add</code>，结论不变）：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · modCount 的递增时机</span></div>
 <pre><code><span class="c">// add 方法 —— 每次成功添加都让 modCount +1</span>
 <span class="k">public boolean</span> add(E e) {
-    ensureCapacityInternal(size + <span class="n">1</span>);  <span class="c">// 可能触发扩容，扩容也会 modCount++</span>
+    ensureCapacityInternal(size + <span class="n">1</span>);  <span class="c">// 内部无条件 modCount++</span>
     elementData[size++] = e;
     <span class="k">return true</span>;
 }
 
-<span class="c">// remove 方法 —— 同样 modCount +1</span>
-<span class="k">public</span> E remove(<span class="k">int</span> index) {
-    rangeCheck(index);
-    modCount++;       <span class="c">// ← 注意这里</span>
-    E oldValue = elementData(index);
-    <span class="k">int</span> numMoved = size - index - <span class="n">1</span>;
-    <span class="k">if</span> (numMoved > <span class="n">0</span>)
-        System.arraycopy(elementData, index + <span class="n">1</span>, elementData, index, numMoved);
-    elementData[--size] = <span class="k">null</span>;
-    <span class="k">return</span> oldValue;
+<span class="k">private void</span> ensureExplicitCapacity(<span class="k">int</span> minCapacity) {
+    modCount++;                    <span class="c">// ★ 无条件递增：每次 add 都 +1</span>
+    <span class="k">if</span> (minCapacity - elementData.length &gt; <span class="n">0</span>)
+        grow(minCapacity);         <span class="c">// 真正扩容：newCap = oldCap + (oldCap &gt;&gt; 1)，即 1.5 倍</span>
 }
 
-<span class="c">// ensureCapacityInternal → ensureExplicitCapacity</span>
-<span class="k">private void</span> ensureExplicitCapacity(<span class="k">int</span> minCapacity) {
-    modCount++;       <span class="c">// ← 扩容也算结构性修改！</span>
-    <span class="k">if</span> (minCapacity - elementData.length > <span class="n">0</span>)
-        grow(minCapacity);
+<span class="c">// remove(int index) —— 同样 modCount +1</span>
+<span class="k">public</span> E remove(<span class="k">int</span> index) {
+    rangeCheck(index);
+    modCount++;                    <span class="c">// ← 结构性修改，+1</span>
+    E oldValue = elementData(index);
+    <span class="k">int</span> numMoved = size - index - <span class="n">1</span>;
+    <span class="k">if</span> (numMoved &gt; <span class="n">0</span>)
+        System.arraycopy(elementData, index + <span class="n">1</span>, elementData, index, numMoved);
+    elementData[--size] = <span class="k">null</span>;  <span class="c">// 尾部置空，帮助 GC</span>
+    <span class="k">return</span> oldValue;
 }</code></pre>
 </div>
 
-<p>Iterator 在创建时会"拍快照"，记住当前的 modCount 值：</p>
+<div class="crack"><div class="crack-label">深度点：不是"扩容才 +1"，而是"每次 add 都 +1"</div>
+<p>网上很多资料说"扩容算结构性修改，所以 modCount++"，这个说法不够精确。<code>modCount++</code> 写在 <code>ensureExplicitCapacity</code> 的第一行，是<strong>无条件执行</strong>的——即使数组容量足够、根本没触发 <code>grow()</code>，这次 add 依然 +1。扩容只是恰好发生在某次 add 的内部。理解了这一点，你就知道为什么"扩容 1.5 倍 / 2 倍"这类阈值与 fail-fast 的检测粒度无关：fail-fast 关心的是"结构变了多少次"，而不是"内存搬了多少"。</p>
+</div>
+
+<div class="crack"><div class="crack-label">为什么 modCount 不需要 synchronized？</div>
+<p>因为 fail-fast 本身就不是为线程安全设计的。modCount 是一个"尽力而为"的检测机制，它主要防范的是<strong>单线程下的错误用法</strong>（比如在 foreach 里调 <code>list.remove()</code>）。多线程场景下，即使 modCount 碰巧相等，也不代表线程安全——fail-fast 的 Javadoc 里明确写了"不保证检测到并发修改"。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：Itr 完整源码与 fail-fast 全链路 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>Itr 源码拆解：fail-fast 全链路</h2></div>
+
+<p><code>ArrayList.iterator()</code> 返回的是一个名为 <code>Itr</code> 的<strong>内部类实例</strong>（日志里那个 <code>ArrayList$Itr</code> 就是它）。它只有三个字段、三个方法，却承载了全部检测逻辑：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · Iterator 内部类（关键字段）</span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · Itr 内部类完整源码（JDK 8）</span></div>
 <pre><code><span class="k">private class</span> <span class="t">Itr</span> <span class="k">implements</span> <span class="t">Iterator</span>&lt;E&gt; {
-    <span class="k">int</span> cursor = <span class="n">0</span>;               <span class="c">// 下一个要返回的元素索引</span>
-    <span class="k">int</span> lastRet = -<span class="n">1</span>;             <span class="c">// 上一次 next()/previous() 返回的元素索引</span>
-    <span class="k">int</span> expectedModCount = modCount; <span class="c">// 创建 Iterator 时拍快照</span>
+    <span class="k">int</span> cursor = <span class="n">0</span>;                 <span class="c">// 下一个要返回的元素下标</span>
+    <span class="k">int</span> lastRet = -<span class="n">1</span>;               <span class="c">// 上一次 next() 返回的元素下标，-1 表示"没有"</span>
+    <span class="k">int</span> expectedModCount = modCount; <span class="c">// ★ 创建时对 modCount 拍快照</span>
+
+    <span class="k">public boolean</span> hasNext() {
+        <span class="k">return</span> cursor != size;       <span class="c">// 注意：不校验 modCount！</span>
+    }
+
+    <span class="k">public</span> E next() {
+        checkForComodification();       <span class="c">// ★ 第一行就校验版本号</span>
+        <span class="k">int</span> i = cursor;
+        <span class="k">if</span> (i &gt;= size)
+            <span class="k">throw new</span> <span class="t">NoSuchElementException</span>();
+        <span class="t">Object</span>[] elementData = <span class="t">ArrayList</span>.<span class="k">this</span>.elementData;
+        <span class="k">if</span> (i &gt;= elementData.length)  <span class="c">// 数组长度都小于 size 了 → 集合被删过</span>
+            <span class="k">throw new</span> <span class="t">ConcurrentModificationException</span>();
+        cursor = i + <span class="n">1</span>;
+        <span class="k">return</span> (E) elementData[lastRet = i];
+    }
 
     <span class="k">final void</span> checkForComodification() {
         <span class="k">if</span> (modCount != expectedModCount)
@@ -227,16 +283,9 @@ java.util.<span class="k">ConcurrentModificationException</span>
 }</code></pre>
 </div>
 
-<div class="crack"><div class="crack-label">为什么 modCount 不需要同步（synchronized）？</div>
-<p>因为 fail-fast 本身就不是为线程安全设计的。modCount 是一个"尽力而为"的检测机制，它主要防范的是<strong>单线程下的错误用法</strong>（比如在 foreach 里调 list.remove()）。多线程场景下，即使 modCount 碰巧相等，也不代表线程安全——fail-fast 的 Javadoc 里明确写了"不保证检测到并发修改"。</p>
-</div>
-</section>
+<h3>全链路走一遍：从创建到 BOOM</h3>
 
-<!-- ═══════════════ 第4站：fail-fast 触发过程 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>fail-fast 全链路：从创建到 BOOM</h2></div>
-
-<p>现在我们把整个 fail-fast 触发过程一步步走完。假设有一个 ArrayList，已经有 3 个元素，经历过 3 次 add，所以 <code>modCount = 3</code>：</p>
+<p>假设 ArrayList 已有 3 个元素，经历过 3 次 add，所以 <code>modCount = 3</code>：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>FailFastDemo.java</b> · 完整的异常触发过程</span></div>
@@ -246,12 +295,12 @@ list.add(<span class="t">"B"</span>);  <span class="c">// modCount = 2</span>
 list.add(<span class="t">"C"</span>);  <span class="c">// modCount = 3</span>
 
 <span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; it = list.iterator();
-<span class="c">// ↑ Iterator 创建，expectedModCount = 3（快照）</span>
+<span class="c">// ↑ Itr 构造，expectedModCount = 3（快照）</span>
 
 <span class="k">while</span> (it.hasNext()) {
-    <span class="t">String</span> s = it.next();   <span class="c">// 第一次调用 next()，checkForComodification() 通过</span>
+    <span class="t">String</span> s = it.next();   <span class="c">// 第一次调用 next()：checkForComodification() 通过</span>
     <span class="k">if</span> (<span class="t">"B"</span>.equals(s)) {
-        list.remove(s);     <span class="c">// ← 用 list 的 remove！modCount 变成 4</span>
+        list.remove(s);     <span class="c">// ← 用 list 的 remove()！modCount 变成 4</span>
     }
     <span class="c">// 第二次调用 it.next()：</span>
     <span class="c">//   checkForComodification() 发现 modCount(4) != expectedModCount(3)</span>
@@ -326,136 +375,521 @@ list.add(<span class="t">"C"</span>);  <span class="c">// modCount = 3</span>
 <figcaption><span class="fig-no">图 2</span>fail-fast 异常触发时序：list.remove() 修改 modCount 后，下一次 it.next() 的 checkForComodification() 检测到不一致并抛出 CME</figcaption>
 </figure>
 
-<p>这里有几个细节需要注意：</p>
+<p>从源码可以提炼出三个"细节级"结论，面试时说出来就是加分项：</p>
 
 <ul>
-  <li>异常不是在 <code>list.remove()</code> 那一刻抛出的——而是在<strong>下一次调用 <code>it.next()</code></strong> 时才检测到</li>
-  <li><code>checkForComodification()</code> 在 <code>next()</code> 方法的<strong>第一行</strong>就被调用，先于任何业务逻辑</li>
-  <li>如果你恰好删除的是遍历中的<strong>最后一个元素</strong>，而且之后不再调用 <code>next()</code>，CME 可能不会被触发</li>
+  <li>异常不是在 <code>list.remove()</code> 那一刻抛出的——而是在<strong>下一次调用 <code>it.next()</code></strong> 时才检测到；<code>checkForComodification()</code> 位于 <code>next()</code> 的<strong>第一行</strong>，先于任何业务逻辑。</li>
+  <li><code>hasNext()</code> 只是 <code>cursor != size</code>，<strong>从不校验 modCount</strong>——这是后面"删最后一个元素可能不抛"这类盲区的根源。</li>
+  <li><code>next()</code> 里还有一道"双保险"：<code>i &gt;= elementData.length</code> 也会抛 CME。它专门捕获"集合被删得比 size 还快"的极端竞态。</li>
 </ul>
 
 <div class="think"><div class="think-q">fail-fast 是"一定能检测到并发修改"吗？<br/><br/>
 不是。JDK 文档明确说了：fail-fast 是一种<strong>尽力而为（best-effort）</strong>的机制，不能保证 100% 检测。例如 modCount 是 int 类型，极端情况下可能溢出回到原来的值；或者在 Iterator 的两次操作之间集合被修改了偶数次，modCount 碰巧又等于 expectedModCount。所以 fail-fast 只用于检测<strong>bug</strong>，不能依赖它来实现业务逻辑。</div></div>
 </section>
 
-<!-- ═══════════════ 第5站：fail-safe 替代方案 ═══════════════ -->
+<!-- ═══════════════ 第5站：增强 for 的本质 ═══════════════ -->
 <section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>fail-safe：遍历并发修改不抛异常的代价</h2></div>
+<div class="station-head"><span class="station-no">第 5 站</span><h2>增强 for 的本质：编译器替你写的 Iterator 代码</h2></div>
 
-<p>如果你的场景确实需要"一边遍历一边修改"，fail-fast 集合就不够用了。JDK 提供了几种 fail-safe（更准确的说法是<strong>弱一致性</strong>）的并发集合：</p>
-
-<h3>CopyOnWriteArrayList —— 写时复制</h3>
+<p>增强 for 是语法糖。它的"真身"是什么？用 <code>javap -c</code> 反编译一个最简单的类就能看到真相：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>CopyOnWriteArrayList.java</b> · 核心思路</span></div>
-<pre><code><span class="k">public class</span> <span class="t">CopyOnWriteArrayList</span>&lt;E&gt; {
+<div class="srcbox-head"><span class="srcbox-file"><b>javap -c Demo.class</b> · foreach 反编译结果（节选）</span></div>
+<pre><code><span class="c">// 源：for (String s : list) { System.out.println(s); }</span>
+<span class="n">0:</span>  aload_1
+<span class="n">1:</span>  invokeinterface #2  java/util/List.iterator()Ljava/util/Iterator;
+<span class="n">6:</span>  astore_2              <span class="c">// 编译器悄悄把迭代器塞进局部变量表</span>
+<span class="n">7:</span>  aload_2
+<span class="n">8:</span>  invokeinterface #3  java/util/Iterator.hasNext()Z
+<span class="n">13:</span> ifeq <span class="n">36</span>             <span class="c">// hasNext() == false 就跳出循环</span>
+<span class="n">16:</span> aload_2
+<span class="n">17:</span> invokeinterface #4  java/util/Iterator.next()Ljava/lang/Object;
+<span class="n">22:</span> checkcast #5            <span class="c">// 向下转型回 String</span>
+<span class="n">25:</span> astore_3                <span class="c">// 存入循环变量 s</span>
+<span class="n">26:</span> getstatic #6            <span class="c">// System.out</span>
+<span class="n">29:</span> aload_3
+<span class="n">30:</span> invokevirtual #7        <span class="c">// println(s)</span>
+<span class="n">33:</span> goto <span class="n">7</span>               <span class="c">// 回到 hasNext() 判断</span>
+<span class="n">36:</span> return</code></pre>
+</div>
 
-    <span class="c">// 底层数组是 volatile 的，保证可见性</span>
-    <span class="k">private volatile transient</span> <span class="t">Object</span>[] array;
+<p>字节码揭示了三个关键事实：</p>
 
-    <span class="c">// add 操作：加锁 → 复制整个数组 → 追加元素 → 替换引用</span>
+<ul>
+  <li><strong>foreach 就是 Iterator 循环</strong>：`iterator()` → `hasNext()` → `next()` 三步循环，与手写迭代器完全等价，因此同样受 fail-fast 保护。</li>
+  <li><strong>迭代器引用被编译器藏起来了</strong>：它存在局部变量表（<code>astore_2</code>）里，但源码层面你<strong>拿不到这个引用</strong>——这就是"foreach 里无法调用 <code>it.remove()</code>"的根本原因，不是语法禁止，而是你根本没机会拿到它。</li>
+  <li><strong>数组是特例</strong>：对数组做 foreach，编译器生成的是普通下标循环（<code>int i = 0; i &lt; arr.length; i++</code>），数组没有 modCount，自然也没有 fail-fast 概念。</li>
+</ul>
+
+<h3>四种遍历方式的对比</h3>
+
+<table class="nb-table">
+  <thead>
+    <tr>
+      <th>遍历方式</th>
+      <th>编译产物</th>
+      <th>性能特征</th>
+      <th>遍历中安全删除</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>数组增强 for</strong></td>
+      <td>下标循环</td>
+      <td>快（无对象分配）</td>
+      <td>无 fail-fast 概念，随意改</td>
+    </tr>
+    <tr>
+      <td><strong>集合增强 for</strong></td>
+      <td>Iterator（hasNext/next）</td>
+      <td>中（有迭代器对象）</td>
+      <td>不能（拿不到迭代器引用）</td>
+    </tr>
+    <tr>
+      <td><strong>普通 for + get(i)</strong></td>
+      <td>下标循环</td>
+      <td>ArrayList 略快；LinkedList 是 <strong>O(n²)</strong> 灾难</td>
+      <td>能（倒序删除）</td>
+    </tr>
+    <tr>
+      <td><strong>显式 Iterator</strong></td>
+      <td>同增强 for</td>
+      <td>中</td>
+      <td>能（<code>it.remove()</code>）</td>
+    </tr>
+    <tr>
+      <td><strong>Stream / removeIf</strong></td>
+      <td>Spliterator</td>
+      <td>中（可并行）</td>
+      <td>推荐（<code>removeIf</code> 批量删除）</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="think"><div class="think-q">"遍历 ArrayList 用普通 for 还是增强 for 更快？"<br/><br/>
+ArrayList 场景下普通 for + get(i) 略快——少一次迭代器对象分配，且 <code>get(i)</code> 直接下标访问；增强 for 多一层 hasNext/next 调用。但这点差距在 O(1) 级别的访问开销面前微乎其微。真正的性能陷阱是：<strong>LinkedList 用普通 for + get(i)</strong>，每次 get 都要从头遍历，整体 O(n²)，这才会被打爆。结论：优先可读性，用增强 for；要遍历中删除，显式 Iterator 或 removeIf。</div></div>
+
+<div class="crack"><div class="crack-label">面试追问："foreach 里到底能不能删？"</div>
+<p>标准答法分三层：① 不能调 <code>list.remove()</code>——会 CME（单线程也一样）；② 也调不了 <code>it.remove()</code>——编译器生成的迭代器引用被藏在局部变量表里，源码拿不到；③ 正确姿势是改成显式 <code>Iterator</code> 循环调 <code>it.remove()</code>，或直接用 Java 8 的 <code>removeIf()</code>。能一口气答出这三层，说明你真的看过字节码。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：Iterator.remove() 为什么安全 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>Iterator.remove()：为什么它是唯一的安全删除通道</h2></div>
+
+<p>同样的 <code>remove</code>，走 <code>list.remove()</code> 抛 CME，走 <code>it.remove()</code> 就没事。差异全在 <code>Itr.remove()</code> 的源码里——它多做了三件事：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · Itr.remove() 完整源码（JDK 8）</span></div>
+<pre><code><span class="k">public void</span> remove() {
+    <span class="k">if</span> (lastRet &lt; <span class="n">0</span>)                    <span class="c">// ① 还没 next() 就 remove()？</span>
+        <span class="k">throw new</span> <span class="t">IllegalStateException</span>();
+    checkForComodification();              <span class="c">// ② 先做 fail-fast 校验</span>
+
+    <span class="k">try</span> {
+        <span class="t">ArrayList</span>.<span class="k">this</span>.remove(lastRet); <span class="c">// ③ 删"上一次 next() 返回的元素"（内部 modCount++）</span>
+        cursor = lastRet;                  <span class="c">// ④ 游标回退到被删位置，避免跳过下一个元素</span>
+        lastRet = -<span class="n">1</span>;                   <span class="c">// ⑤ 一次 next 只能配一次 remove</span>
+        expectedModCount = modCount;       <span class="c">// ★ ⑥ 同步版本号——"安全"的关键</span>
+    } <span class="k">catch</span> (<span class="t">IndexOutOfBoundsException</span> ex) {
+        <span class="k">throw new</span> <span class="t">ConcurrentModificationException</span>();
+    }
+}</code></pre>
+</div>
+
+<p>核心就一句话：<strong><code>it.remove()</code> 在删完之后把 <code>expectedModCount = modCount</code> 同步了</strong>。版本号两边一起涨，下一次 <code>next()</code> 的校验自然通过。而 <code>list.remove()</code> 只涨 <code>modCount</code>、不动你的 <code>expectedModCount</code>，两边立刻失衡。</p>
+
+<h3>一次 remove 的完整内部账本</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SafeRemove.java</b> · 游标账本追踪</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>));
+<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; it = list.iterator();  <span class="c">// cursor=0, lastRet=-1, expected=3</span>
+
+it.next();  <span class="c">// → "A"，cursor=1, lastRet=0</span>
+it.next();  <span class="c">// → "B"，cursor=2, lastRet=1</span>
+
+it.remove(); <span class="c">// 内部：remove(1) → 数组变为 [A, C]，size=2，modCount=4</span>
+             <span class="c">//       cursor=1, lastRet=-1, expectedModCount=4（同步！）</span>
+
+it.next();  <span class="c">// → "C"：checkForComodification 4==4 通过；cursor=2</span>
+<span class="c">// 结果：A、C 都被遍历到——没有漏元素，也没有抛异常</span></code></pre>
+</div>
+
+<div class="think"><div class="think-q">"it.remove() 之后还能继续遍历吗？会不会漏掉被删元素后面的元素？"<br/><br/>
+不会漏。删除后 <code>cursor = lastRet</code> 回退到被删位置，而删除动作让后面的元素整体左移一位填补空位，所以下一次 <code>next()</code> 返回的恰好就是"原被删元素后面的那个"。cursor 回退 + 数组左移，两者抵消，遍历语义完美连续。</div></div>
+
+<h3>边界条件：IllegalStateException 的两道闸</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>IllegalState.java</b> · remove() 的两条红线</span></div>
+<pre><code><span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; it = list.iterator();
+
+it.remove();   <span class="c">// ❌ IllegalStateException：还没 next()，lastRet == -1</span>
+
+<span class="c">// 或：</span>
+it.next();     <span class="c">// → "A"</span>
+it.remove();   <span class="c">// 删 A，lastRet 置回 -1</span>
+it.remove();   <span class="c">// ❌ IllegalStateException：一次 next() 只能配一次 remove()</span></code></pre>
+</div>
+
+<h3>list.remove() vs it.remove()：一表看懂</h3>
+
+<table class="nb-table">
+  <thead>
+    <tr>
+      <th>维度</th>
+      <th>list.remove(i / o)</th>
+      <th>it.remove()</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>谁能调用</strong></td>
+      <td>任何持有 list 引用的人</td>
+      <td>只有迭代器自己</td>
+    </tr>
+    <tr>
+      <td><strong>对已创建迭代器的影响</strong></td>
+      <td>全部失效（modCount +1 但不同步）</td>
+      <td>只同步自己的 expectedModCount，自身继续有效</td>
+    </tr>
+    <tr>
+      <td><strong>前置条件</strong></td>
+      <td>下标合法即可</td>
+      <td>必须先 next()（lastRet &gt;= 0），否则 IllegalStateException</td>
+    </tr>
+    <tr>
+      <td><strong>删除对象</strong></td>
+      <td>任意下标 / 任意元素</td>
+      <td>只能删"上一次 next() 返回的元素"</td>
+    </tr>
+    <tr>
+      <td><strong>连续调用</strong></td>
+      <td>可以</td>
+      <td>第二次抛 IllegalStateException</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+<div class="takeaway-label">安全删除姿势（面试标准答案）</div>
+<ul>
+  <li><strong>遍历中要删元素</strong>：用 <code>iterator.remove()</code> 或 <code>removeIf()</code>，绝不用集合自身的 remove</li>
+  <li><strong>需要倒序遍历删除</strong>：普通 for 从 <code>size-1</code> 往 0 倒着删，同样安全（删过的下标不再被访问）</li>
+  <li><strong>不要在 foreach 里碰运气</strong>：即使"这次没抛"，也是侥幸，下一个元素就可能炸</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：removeIf 内部机制 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>JDK 8 removeIf：一趟批量删除，如何避免"自误报"</h2></div>
+
+<p>Java 8 给 <code>Collection</code> 加了一个 default 方法 <code>removeIf(Predicate)</code>，一行搞定"遍历 + 条件删除"。它最反直觉的地方是：<strong>它自己明明也在"遍历中删除"，却不抛 CME</strong>。秘密要看两层实现。</p>
+
+<h3>第一层：Collection 的默认实现（LinkedList / HashSet 走这里）</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Collection.java</b> · removeIf 默认实现（JDK 8）</span></div>
+<pre><code><span class="k">default boolean</span> removeIf(<span class="t">Predicate</span>&lt;? <span class="k">super</span> E&gt; filter) {
+    <span class="t">Objects</span>.requireNonNull(filter);
+    <span class="k">boolean</span> removed = <span class="k">false</span>;
+    <span class="k">final</span> <span class="t">Iterator</span>&lt;E&gt; each = iterator();   <span class="c">// 拿到自己的迭代器</span>
+    <span class="k">while</span> (each.hasNext()) {
+        <span class="k">if</span> (filter.test(each.next())) {
+            each.remove();          <span class="c">// 用迭代器删 → expectedModCount 自动同步</span>
+            removed = <span class="k">true</span>;
+        }
+    }
+    <span class="k">return</span> removed;
+}</code></pre>
+</div>
+
+<p>默认实现就是"手写迭代器循环"的封装——<strong>它删的是自己的迭代器</strong>，每次删除都同步 expectedModCount，所以全程无 CME。这就是为什么 <code>LinkedList</code>、<code>HashSet</code> 调 <code>removeIf</code> 也安全。</p>
+
+<h3>第二层：ArrayList 的覆写——BitSet 批量删除</h3>
+
+<p>ArrayList 嫌弃逐条删太慢（每次删除都要 <code>System.arraycopy</code> 搬移后续元素，删 m 个最坏 O(n·m)），于是在 JDK 8 覆写了 <code>removeIf</code>，改成"<strong>一趟扫描 + BitSet 标记 + 原地压缩</strong>"：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ArrayList.java</b> · removeIf 覆写（JDK 8，结构与行为一致）</span></div>
+<pre><code><span class="k">public boolean</span> removeIf(<span class="t">Predicate</span>&lt;? <span class="k">super</span> E&gt; filter) {
+    <span class="t">Objects</span>.requireNonNull(filter);
+    <span class="k">final int</span> removeCount;
+    <span class="k">final</span> <span class="t">BitSet</span> removeSet;
+    <span class="k">final</span> <span class="t">Object</span>[] es = elementData;
+    <span class="k">final int</span> size = <span class="k">this</span>.size;
+    <span class="k">final int</span> expectedModCount = modCount;
+    removeSet = <span class="k">new</span> <span class="t">BitSet</span>(size);          <span class="c">// ① BitSet 记录"要删的下标"</span>
+
+    <span class="c">// ② 一趟扫描：循环条件里就盯着 modCount，被并发改了就提前退出</span>
+    <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; modCount == expectedModCount &amp;&amp; i &lt; size; i++) {
+        <span class="k">final</span> E element = (E) es[i];
+        <span class="k">if</span> (filter.test(element)) {
+            removeSet.set(i);
+        }
+    }
+    <span class="k">if</span> (modCount != expectedModCount)       <span class="c">// ③ 扫描期被并发修改 → 抛 CME（列表还没动）</span>
+        <span class="k">throw new</span> <span class="t">ConcurrentModificationException</span>();
+
+    removeCount = removeSet.cardinality();
+    <span class="k">if</span> (removeCount &gt; <span class="n">0</span>) {
+        <span class="k">final int</span> newSize = size - removeCount;
+        <span class="c">// ④ 双指针左移压缩：把"不删的"依次搬到前面</span>
+        <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>, j = <span class="n">0</span>; i &lt; size &amp;&amp; j &lt; newSize; i++) {
+            <span class="k">if</span> (!removeSet.get(i)) {
+                es[j++] = es[i];
+            }
+        }
+        <span class="c">// ⑤ 尾部置空，交给 GC</span>
+        <span class="k">for</span> (<span class="k">int</span> i = newSize; i &lt; size; i++) {
+            es[i] = <span class="k">null</span>;
+        }
+        <span class="k">this</span>.size = newSize;
+        <span class="k">if</span> (modCount != expectedModCount)     <span class="c">// ⑥ 压缩前再校验一次</span>
+            <span class="k">throw new</span> <span class="t">ConcurrentModificationException</span>();
+        modCount++;                              <span class="c">// ⑦ 整个操作只 +1 一次！</span>
+    }
+    <span class="k">return</span> removeCount &gt; <span class="n">0</span>;
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 700 360" role="img" aria-label="removeIf 的 BitSet 批量删除过程">
+  <defs>
+    <marker id="arrDn" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+    <marker id="arrGr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">removeIf：一趟扫描 + BitSet 标记 + 原地压缩</text>
+
+  <!-- Row 1: original array -->
+  <text x="40" y="62" font-size="12" fill="#57544E" font-weight="700">① 原数组（size=6）</text>
+  <rect x="40" y="70" width="70" height="44" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="75" y="97" text-anchor="middle" font-size="14" fill="#1C1C1C">A</text>
+  <rect x="115" y="70" width="70" height="44" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="150" y="97" text-anchor="middle" font-size="14" fill="#C2410C">B</text>
+  <rect x="190" y="70" width="70" height="44" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="225" y="97" text-anchor="middle" font-size="14" fill="#1C1C1C">C</text>
+  <rect x="265" y="70" width="70" height="44" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="300" y="97" text-anchor="middle" font-size="14" fill="#C2410C">D</text>
+  <rect x="340" y="70" width="70" height="44" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="375" y="97" text-anchor="middle" font-size="14" fill="#1C1C1C">E</text>
+  <rect x="415" y="70" width="70" height="44" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="450" y="97" text-anchor="middle" font-size="14" fill="#1C1C1C">F</text>
+
+  <!-- Arrow down -->
+  <line x1="260" y1="120" x2="260" y2="150" stroke="#8C8676" stroke-width="1.5" marker-end="url(#arrDn)"/>
+  <text x="300" y="140" font-size="11" fill="#57544E">filter.test() 一趟扫描，命中即 set(i)</text>
+
+  <!-- Row 2: BitSet -->
+  <text x="40" y="172" font-size="12" fill="#57544E" font-weight="700">② BitSet 标记（1 = 要删）</text>
+  <rect x="40" y="180" width="70" height="40" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="75" y="205" text-anchor="middle" font-size="13" fill="#1C1C1C">0</text>
+  <rect x="115" y="180" width="70" height="40" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="150" y="205" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">1</text>
+  <rect x="190" y="180" width="70" height="40" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="225" y="205" text-anchor="middle" font-size="13" fill="#1C1C1C">0</text>
+  <rect x="265" y="180" width="70" height="40" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="300" y="205" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">1</text>
+  <rect x="340" y="180" width="70" height="40" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="375" y="205" text-anchor="middle" font-size="13" fill="#1C1C1C">0</text>
+  <rect x="415" y="180" width="70" height="40" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1.5"/>
+  <text x="450" y="205" text-anchor="middle" font-size="13" fill="#1C1C1C">0</text>
+
+  <!-- Arrow down -->
+  <line x1="260" y1="226" x2="260" y2="256" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arrGr)"/>
+  <text x="300" y="246" font-size="11" fill="#3E6B8F">cardinality()=2 → 双指针左移压缩</text>
+
+  <!-- Row 3: result -->
+  <text x="40" y="278" font-size="12" fill="#57544E" font-weight="700">③ 结果（size=4）</text>
+  <rect x="40" y="286" width="70" height="44" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="75" y="313" text-anchor="middle" font-size="14" fill="#3E6B8F">A</text>
+  <rect x="115" y="286" width="70" height="44" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="150" y="313" text-anchor="middle" font-size="14" fill="#3E6B8F">C</text>
+  <rect x="190" y="286" width="70" height="44" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="225" y="313" text-anchor="middle" font-size="14" fill="#3E6B8F">E</text>
+  <rect x="265" y="286" width="70" height="44" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="300" y="313" text-anchor="middle" font-size="14" fill="#3E6B8F">F</text>
+
+  <rect x="380" y="270" width="260" height="78" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="510" y="292" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">modCount 只 +1 一次</text>
+  <text x="510" y="312" text-anchor="middle" font-size="11" fill="#57544E">整个批量删除算"一次"结构性修改</text>
+  <text x="510" y="330" text-anchor="middle" font-size="11" fill="#57544E">→ 自身永远不会"遍历中修改"误报 CME</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>ArrayList.removeIf 的 BitSet 批量删除：一趟扫描标记下标，双指针原地压缩，modCount 只递增一次</figcaption>
+</figure>
+
+<div class="think"><div class="think-q">"removeIf 自己遍历自己删，为什么不抛 CME？"<br/><br/>
+三个原因叠在一起：① 它根本<strong>不创建 Iterator</strong>，而是直接按下标扫描底层数组，不存在"别人的 expectedModCount"；② 删除不是逐条进行的，而是先记下所有要删的下标，最后一次性原地压缩，<strong>modCount 只 +1 一次</strong>——整个操作对版本号来说只算一次结构性修改；③ 扫描期间若真被并发修改，循环条件 <code>modCount == expectedModCount</code> 会提前退出并抛 CME，绝不会把列表改坏一半再继续。</div></div>
+
+<h3>removeIf 不是"免疫"，只是"自己不误报"</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Misuse.java</b> · removeIf 与既有迭代器的关系</span></div>
+<pre><code><span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; it = list.iterator();
+list.removeIf(s -&gt; s.startsWith(<span class="t">"tmp"</span>));  <span class="c">// ✅ 自身安全，但 modCount +1 了</span>
+it.next();   <span class="c">// ❌ CME！你手上这个迭代器的 expectedModCount 已过期</span>
+
+<span class="c">// 结论：removeIf 只保证"自己这一趟"不出事，</span>
+<span class="c">//      任何其他正在进行的遍历，都会被它的一次 modCount++ 打断</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">生产级对比：removeIf vs 手动 iterator.remove vs 谓词异常</div>
+<p>① 性能：n 个元素删 m 个，逐条 <code>iterator.remove()</code> 最坏 O(n·m)（每次删除都搬移后续元素）；<code>removeIf</code> 一趟 O(n)。100 万元素删 50 万，量级天壤之别。② 异常安全性：ArrayList 的覆写版本里，如果谓词在扫描期抛异常，列表<strong>尚未开始压缩</strong>，处于"原封不动"状态；而 Collection 默认实现是边遍历边删，谓词抛异常时可能已删了一部分。③ HashMap 的 <code>keySet()</code>/<code>entrySet()</code>/<code>values()</code> 在 JDK 8 也覆写了 <code>removeIf</code>，直接扫桶数组删除，同样安全高效。</p>
+</div>
+
+<div class="takeaway">
+<div class="takeaway-label">removeIf 使用要点</div>
+<ul>
+  <li><strong>单线程批量条件删除，无脑用 <code>removeIf</code></strong>：一行代码、O(n)、不误报 CME</li>
+  <li><strong>Map 过滤</strong>：用 <code>map.entrySet().removeIf(...)</code> 或 <code>map.values().removeIf(...)</code>，不要手写遍历再 put</li>
+  <li><strong>需要边删边做业务逻辑</strong>（记日志、发消息）：才退回显式 <code>Iterator</code> 循环</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第8站：CopyOnWriteArrayList ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>fail-safe：CopyOnWriteArrayList 的写时复制快照</h2></div>
+
+<p>如果业务确实需要"一边遍历一边被别人改"且不抛异常，就要换并发集合了。JDK 里最典型的 fail-safe（更准确的说法是<strong>弱一致性 / 快照一致性</strong>）集合是 <code>CopyOnWriteArrayList</code>（COW）。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CopyOnWriteArrayList.java</b> · 写时复制核心（JDK 8）</span></div>
+<pre><code><span class="k">public class</span> <span class="t">CopyOnWriteArrayList</span>&lt;E&gt; <span class="k">implements</span> <span class="t">List</span>&lt;E&gt;, <span class="t">RandomAccess</span> {
+
+    <span class="c">// 底层数组：volatile 保证跨线程可见性；没有任何 modCount</span>
+    <span class="k">private transient volatile</span> <span class="t">Object</span>[] array;
+
+    <span class="c">// add：加锁 → 复制整数组 → 追加 → 原子替换引用</span>
     <span class="k">public boolean</span> add(E e) {
         <span class="k">final</span> <span class="t">ReentrantLock</span> lock = <span class="k">this</span>.lock;
         lock.lock();
         <span class="k">try</span> {
             <span class="t">Object</span>[] elements = getArray();
             <span class="k">int</span> len = elements.length;
-            <span class="t">Object</span>[] newElements = <span class="t">Arrays</span>.copyOf(elements, len + <span class="n">1</span>); <span class="c">// ← 复制！</span>
+            <span class="t">Object</span>[] newElements = <span class="t">Arrays</span>.copyOf(elements, len + <span class="n">1</span>); <span class="c">// ← 全量复制</span>
             newElements[len] = e;
-            setArray(newElements);  <span class="c">// 原子替换引用</span>
+            setArray(newElements);     <span class="c">// volatile 写，原子替换引用</span>
             <span class="k">return true</span>;
         } <span class="k">finally</span> {
             lock.unlock();
         }
     }
 
-    <span class="c">// Iterator 拿到的永远是创建时的数组快照——不需要 modCount</span>
+    <span class="c">// iterator：直接把"当前数组引用"交给迭代器——这就是快照</span>
     <span class="k">public</span> <span class="t">Iterator</span>&lt;E&gt; iterator() {
         <span class="k">return new</span> <span class="t">COWIterator</span>&lt;&gt;(getArray(), <span class="n">0</span>);
     }
 }</code></pre>
 </div>
 
-<p>核心原理：每次写操作都会<strong>复制整个底层数组</strong>，在新副本上修改，然后原子替换引用。Iterator 在创建时拿到的是当时数组的引用，后续写操作不影响这个旧数组——所以永远不会 CME。</p>
+<p>核心原理：每次写操作都<strong>复制整个底层数组</strong>，在新副本上修改，然后通过 volatile 引用一次性原子切换。Iterator 在创建时握住的只是"当时那个数组的引用"，此后任何写操作都在新数组上进行，旧数组没人再动——<strong>快照天然不可变，因此根本不需要 modCount，也永远不会 CME</strong>。</p>
 
-<h3>ConcurrentHashMap —— 弱一致性迭代器</h3>
+<figure class="fig">
+<svg viewBox="0 0 700 330" role="img" aria-label="CopyOnWriteArrayList 写时复制过程">
+  <defs>
+    <marker id="arrCOW" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+    <marker id="arrCOW2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
 
-<p>ConcurrentHashMap 的迭代器采用的是<strong>弱一致性（weakly consistent）</strong>策略：</p>
+  <text x="350" y="24" text-anchor="middle" font-family="'AlimamaShuHeiTi', sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">写时复制：迭代器永远握着"旧数组"这张快照</text>
 
-<ul>
-  <li>创建 Iterator 后，<strong>可能</strong>看到创建之后的修改，也<strong>可能</strong>看不到</li>
-  <li>保证不会抛出 <code>ConcurrentModificationException</code></li>
-  <li>不会看到"脏数据"——每个返回的元素在某个时间点确实存在过</li>
-</ul>
+  <!-- Old array -->
+  <rect x="60" y="60" width="240" height="30" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="180" y="80" text-anchor="middle" font-size="12" fill="#1C1C1C">volatile array（旧数组：L1 L2 L3）</text>
+
+  <!-- Iterator snapshot arrow -->
+  <line x1="180" y1="90" x2="180" y2="150" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arrCOW2)"/>
+  <rect x="60" y="160" width="240" height="34" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="180" y="182" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">Iterator 快照 → 旧数组（无 modCount）</text>
+  <text x="180" y="210" text-anchor="middle" font-size="10" fill="#57544E">后续遍历只读 snapshot，谁也影响不了它</text>
+
+  <!-- New array -->
+  <rect x="400" y="60" width="250" height="30" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="525" y="80" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">新数组：L1 L2 L3 L4（复制后追加）</text>
+
+  <!-- Copy arrow -->
+  <line x1="300" y1="75" x2="395" y2="75" stroke="#C2410C" stroke-width="1.8" marker-end="url(#arrCOW)"/>
+  <text x="348" y="66" text-anchor="middle" font-size="11" fill="#C2410C">Arrays.copyOf 全量复制</text>
+
+  <!-- setArray -->
+  <rect x="400" y="120" width="250" height="34" rx="6" fill="#D4EDDA" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="525" y="142" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">setArray(newElements) 原子替换引用</text>
+
+  <line x1="525" y1="94" x2="525" y2="116" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arrCOW2)"/>
+
+  <!-- Bottom annotation -->
+  <rect x="60" y="250" width="590" height="56" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="355" y="272" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">写：ReentrantLock 加锁 + 复制整数组；读：无锁直接读 volatile</text>
+  <text x="355" y="292" text-anchor="middle" font-size="11" fill="#57544E">代价：每次写 O(n)；遍历中发起的写不影响进行中的 Iterator，但 Iterator 也看不到新数据</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span>CopyOnWriteArrayList 写时复制：写操作复制新数组并原子替换引用，旧数组被 Iterator 当作快照继续使用</figcaption>
+</figure>
+
+<h3>快照的代价：COWIterator 连 remove 都不支持</h3>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>对比代码</b> · 两种迭代器的行为差异</span></div>
-<pre><code><span class="c">// ─── CopyOnWriteArrayList：看到的是快照 ───</span>
-<span class="t">CopyOnWriteArrayList</span>&lt;<span class="t">String</span>&gt; cowList = <span class="k">new</span> <span class="t">CopyOnWriteArrayList</span>&lt;&gt;();
-cowList.addAll(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>));
+<div class="srcbox-head"><span class="srcbox-file"><b>COWIterator.java</b> · 快照迭代器是只读的</span></div>
+<pre><code><span class="k">static final class</span> <span class="t">COWIterator</span>&lt;E&gt; <span class="k">implements</span> <span class="t">ListIterator</span>&lt;E&gt; {
+    <span class="k">private final</span> <span class="t">Object</span>[] snapshot;   <span class="c">// ★ 快照：创建时固定，之后不可变</span>
+    <span class="k">private int</span> cursor;
 
-<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; cowIt = cowList.iterator();
-cowList.add(<span class="t">"D"</span>);           <span class="c">// 写操作触发整个数组复制</span>
+    <span class="k">public</span> E next() {
+        <span class="k">if</span> (!hasNext()) <span class="k">throw new</span> <span class="t">NoSuchElementException</span>();
+        <span class="k">return</span> (E) snapshot[cursor++];
+    }
 
-<span class="k">while</span> (cowIt.hasNext()) {
-    System.out.print(cowIt.next() + <span class="t">" "</span>);
+    <span class="k">public void</span> remove() {
+        <span class="k">throw new</span> <span class="t">UnsupportedOperationException</span>();  <span class="c">// ★ 快照是只读的！</span>
+    }
 }
-<span class="c">// 输出: A B C  ← 看不到后来加的 "D"（快照语义）</span>
 
-<span class="c">// ─── ConcurrentHashMap：弱一致性 ───</span>
-<span class="t">ConcurrentHashMap</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; map = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();
-map.put(<span class="t">"A"</span>, <span class="n">1</span>); map.put(<span class="t">"B"</span>, <span class="n">2</span>); map.put(<span class="t">"C"</span>, <span class="n">3</span>);
-
-<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; chmIt = map.keySet().iterator();
-map.put(<span class="t">"D"</span>, <span class="n">4</span>);           <span class="c">// 修改底层 table</span>
-
-<span class="k">while</span> (chmIt.hasNext()) {
-    System.out.print(chmIt.next() + <span class="t">" "</span>);
-}
-<span class="c">// 输出: A B C D 或 A B C  ← 可能看到也可能看不到（弱一致）</span></code></pre>
+<span class="c">// 想删？通过集合自身删（会再复制一次），正在进行的遍历不受影响：</span>
+cowList.remove(<span class="t">"B"</span>);   <span class="c">// 旧快照里 B 还在——遍历结果可能"过期"</span></code></pre>
 </div>
 
-<p>代价是什么？来看性能对比：</p>
+<div class="think"><div class="think-q">"COW 的 Iterator 为什么连 remove 都不给？"<br/><br/>
+因为它遍历的是创建时刻的数组快照。快照是共享的、只读的，任何"就地删除"都会破坏其他正在使用同一快照的迭代器。要改数据，只能通过集合自身（复制新数组），这正是"以空间换一致性"的代价。记住：COW 的迭代器是<strong>只读的</strong>，想要"遍历中删"请改用 <code>list.removeIf()</code>（它会基于当前快照创建新数组）。</div></div>
+
+<h3>适用场景与代价</h3>
 
 <table class="nb-table">
   <thead>
     <tr>
       <th>维度</th>
-      <th>ArrayList (fail-fast)</th>
-      <th>CopyOnWriteArrayList (fail-safe)</th>
-      <th>ConcurrentHashMap (弱一致)</th>
+      <th>ArrayList</th>
+      <th>CopyOnWriteArrayList</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><strong>写操作开销</strong></td>
+      <td><strong>写操作</strong></td>
       <td>O(1) 摊还</td>
-      <td>O(n) 每次写都复制整个数组</td>
-      <td>O(1) 平均，CAS + 锁分段</td>
+      <td>O(n)：每次写都复制整数组</td>
     </tr>
     <tr>
-      <td><strong>读/遍历开销</strong></td>
-      <td>O(1) 索引访问</td>
-      <td>O(1) 索引访问，无锁</td>
-      <td>O(n) 遍历桶数组</td>
+      <td><strong>读 / 遍历</strong></td>
+      <td>O(1)，无锁</td>
+      <td>O(1)，无锁，且永不 CME</td>
     </tr>
     <tr>
-      <td><strong>内存占用</strong></td>
-      <td>低</td>
-      <td>高（可能存在新旧两份数组）</td>
-      <td>中等</td>
-    </tr>
-    <tr>
-      <td><strong>遍历中看到修改</strong></td>
+      <td><strong>遍历中别人修改</strong></td>
       <td>抛 CME</td>
-      <td>看不到（快照）</td>
-      <td>不确定（弱一致）</td>
+      <td>不抛；但也看不到新数据（快照）</td>
     </tr>
     <tr>
-      <td><strong>适用场景</strong></td>
-      <td>单线程</td>
-      <td>读多写少（如监听器列表）</td>
-      <td>高并发读写</td>
+      <td><strong>内存</strong></td>
+      <td>低</td>
+      <td>高：写瞬间新旧两份数组并存</td>
+    </tr>
+    <tr>
+      <td><strong>典型场景</strong></td>
+      <td>单线程 / 读改写均衡</td>
+      <td><strong>读多写极少</strong>：监听器注册表、订阅者列表、黑白名单</td>
     </tr>
   </tbody>
 </table>
@@ -465,140 +899,258 @@ map.put(<span class="t">"D"</span>, <span class="n">4</span>);           <span c
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：常见坑与正确做法 ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>避坑指南：六个高频翻车场景</h2></div>
+<!-- ═══════════════ 第9站：ConcurrentHashMap 弱一致 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>弱一致性迭代器：ConcurrentHashMap 的遍历哲学</h2></div>
 
-<h3>坑 1：遍历中用 list.remove() → 用 iterator.remove()</h3>
+<p>高并发场景下 Map 的首选是 <code>ConcurrentHashMap</code>（CHM）。它的迭代器既不抛 CME，也不是严格快照，而是<strong>弱一致（weakly consistent）</strong>：</p>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Fix1.java</b> · 错误 vs 正确</span></div>
-<pre><code><span class="c">// ❌ 错误：用 list.remove()，modCount 与 expectedModCount 不同步</span>
-<span class="k">for</span> (<span class="t">String</span> s : list) {
-    <span class="k">if</span> (<span class="t">"B"</span>.equals(s)) {
-        list.remove(s);  <span class="c">// CME!</span>
-    }
-}
-
-<span class="c">// ✅ 正确：用 iterator.remove()，内部会同步 expectedModCount</span>
-<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; it = list.iterator();
-<span class="k">while</span> (it.hasNext()) {
-    <span class="t">String</span> s = it.next();
-    <span class="k">if</span> (<span class="t">"B"</span>.equals(s)) {
-        it.remove();  <span class="c">// 安全！remove() 内部执行 expectedModCount = modCount</span>
-    }
-}</code></pre>
-</div>
-
-<h3>坑 2：增强 for 循环里无法安全删除 → 用 removeIf()</h3>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Fix2.java</b> · Java 8 最优解</span></div>
-<pre><code><span class="c">// ❌ foreach 中无法调用 iterator.remove()，因为 Iterator 引用不可见</span>
-<span class="k">for</span> (<span class="t">String</span> s : list) {
-    <span class="k">if</span> (s.startsWith(<span class="t">"tmp_"</span>)) {
-        <span class="c">// 这里没有 it.remove() 可以调！</span>
-    }
-}
-
-<span class="c">// ✅ Java 8+ 最优雅的解法：removeIf（底层使用 Iterator.remove()）</span>
-list.removeIf(s -> s.startsWith(<span class="t">"tmp_"</span>));</code></pre>
-</div>
-
-<h3>坑 3：SubList 和父 List 共享 modCount</h3>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Fix3.java</b> · SubList 的隐藏陷阱</span></div>
-<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; parent = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>, <span class="t">"D"</span>));
-<span class="t">List</span>&lt;<span class="t">String</span>&gt; sub = parent.subList(<span class="n">1</span>, <span class="n">3</span>);  <span class="c">// [B, C] 视图，不是副本！</span>
-
-parent.add(<span class="t">"E"</span>);  <span class="c">// 修改了父 list 的 modCount</span>
-
-System.out.println(sub.get(<span class="n">0</span>));
-<span class="c">// → 抛出 ConcurrentModificationException！</span>
-<span class="c">// subList 操作时会检查 parent 的 modCount 是否与创建时一致</span></code></pre>
-</div>
-
-<h3>坑 4：HashMap 遍历中 put 新键</h3>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Fix4.java</b> · Map 也有 fail-fast</span></div>
-<pre><code><span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
-map.put(<span class="t">"a"</span>, <span class="n">1</span>);
-map.put(<span class="t">"b"</span>, <span class="n">2</span>);
-
-<span class="k">for</span> (<span class="t">Map.Entry</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; e : map.entrySet()) {
-    map.put(<span class="t">"c"</span>, <span class="n">3</span>);  <span class="c">// ❌ CME! 新增 key 是结构性修改</span>
-}
-
-<span class="c">// ✅ 正确：用 entrySet().iterator().remove()，或 ConcurrentHashMap</span>
-<span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; concMap = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;(map);
-concMap.forEach((k, v) -> {
-    concMap.put(<span class="t">"c"</span>, <span class="n">3</span>);  <span class="c">// ✅ 弱一致，不抛异常</span>
-});</code></pre>
-</div>
-
-<h3>坑 5：Stream 的 parallel 与并发修改</h3>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Fix5.java</b> · 并行流的隐蔽陷阱</span></div>
-<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>, <span class="t">"D"</span>));
-
-<span class="c">// ❌ 并行流中修改源集合——结果不可预测</span>
-list.parallelStream()
-    .filter(s -> {
-        list.add(<span class="t">"X"</span>);  <span class="c">// 在 filter 中修改了源 list！</span>
-        <span class="k">return true</span>;
-    })
-    .count();
-<span class="c">// 可能抛 CME，也可能得到错误结果，也可能"看起来正常"</span>
-
-<span class="c">// ✅ 正确：Stream 应该是无副作用的，不要修改源集合</span>
-<span class="t">List</span>&lt;<span class="t">String</span>&gt; result = list.stream()
-    .filter(s -> s.length() > <span class="n">1</span>)
-    .collect(<span class="t">Collectors</span>.toList());</code></pre>
-</div>
-
-<h3>坑 6：单线程也可能触发 CME</h3>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Fix6.java</b> · 不是多线程的锅</span></div>
-<pre><code><span class="c">// 单线程下最常见的 CME 场景：在 foreach 里删元素</span>
-<span class="t">List</span>&lt;<span class="t">String</span>&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>));
-
-<span class="c">// 这不是多线程问题！这是用法错误！</span>
-<span class="k">for</span> (<span class="t">String</span> s : list) {
-    <span class="k">if</span> (<span class="t">"B"</span>.equals(s)) {
-        list.remove(s);  <span class="c">// CME！单线程也会抛</span>
-    }
-}
-
-<span class="c">// 面试官问"fail-fast 和线程安全什么关系"时，核心答案：</span>
-<span class="c">// fail-fast 不是线程安全机制，它是检测"错误用法"的手段</span>
-<span class="c">// 单线程的错误用法同样会触发 CME</span></code></pre>
-</div>
-
-<div class="takeaway">
-<div class="takeaway-label">避坑核心原则</div>
 <ul>
-  <li><strong>遍历中要删元素</strong>：用 <code>iterator.remove()</code> 或 <code>removeIf()</code>，绝不用集合自身的 remove</li>
-  <li><strong>遍历中要加元素</strong>：用 <code>ConcurrentHashMap</code> / <code>CopyOnWriteArrayList</code>，或收集到新集合再合并</li>
-  <li><strong>SubList 是视图不是副本</strong>：父 list 修改后 subList 不可用</li>
-  <li><strong>Stream 不要有副作用</strong>：filter/map 中不要修改源集合</li>
+  <li>创建 Iterator 后，<strong>可能</strong>看到创建之后的修改，也<strong>可能</strong>看不到——不保证、不承诺</li>
+  <li>保证<strong>不会抛出 ConcurrentModificationException</strong></li>
+  <li>保证不会看到"脏数据"——每个返回的元素在某个时间点确实存在过，不会出现被删元素的残留引用</li>
 </ul>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>对比代码</b> · 快照 vs 弱一致的行为差异</span></div>
+<pre><code><span class="c">// ─── CopyOnWriteArrayList：严格快照，看不到任何后续修改 ───</span>
+<span class="t">CopyOnWriteArrayList</span>&lt;<span class="t">String</span>&gt; cowList = <span class="k">new</span> <span class="t">CopyOnWriteArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>));
+<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; cowIt = cowList.iterator();
+cowList.add(<span class="t">"D"</span>);                  <span class="c">// 触发复制，旧数组快照不变</span>
+<span class="k">while</span> (cowIt.hasNext()) System.out.print(cowIt.next() + <span class="t">" "</span>);
+<span class="c">// 输出：A B C（永远看不到 D）</span>
+
+<span class="c">// ─── ConcurrentHashMap：弱一致，可能看到也可能看不到 ───</span>
+<span class="t">ConcurrentHashMap</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; map = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();
+map.put(<span class="t">"A"</span>, <span class="n">1</span>); map.put(<span class="t">"B"</span>, <span class="n">2</span>); map.put(<span class="t">"C"</span>, <span class="n">3</span>);
+<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; chmIt = map.keySet().iterator();
+map.put(<span class="t">"D"</span>, <span class="n">4</span>);                  <span class="c">// 修改底层 table</span>
+<span class="k">while</span> (chmIt.hasNext()) System.out.print(chmIt.next() + <span class="t">" "</span>);
+<span class="c">// 输出：A B C D 或 A B C（取决于遍历到那个桶时的时序）</span></code></pre>
 </div>
-</section>
 
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：快速参考表</h2></div>
-
-<p>面试中遇到 Iterator 和 fail-fast 相关的问题，下面这张表可以作为快速参考：</p>
+<div class="crack"><div class="crack-label">CHM 为什么能做到弱一致？方法级答案</div>
+<p>CHM 的迭代器是 <code>Traverser</code> 的子类，它不比较任何版本号（CHM 没有暴露给迭代器的 expectedModCount 语义），而是持有一个 table 引用直接遍历桶数组。JDK 8 扩容时旧桶会被替换成 <code>ForwardingNode</code>（hash 值为负数），<code>Traverser.advance()</code> 遇到它时会把遍历目标<strong>切换到 nextTable 继续</strong>——所以迭代器可能"半路进入新表"，看到部分扩容后的数据。这就是"可能看到、也可能看不到"的底层来源。并发修改不会被检测，自然也永不 CME。</p>
+</div>
 
 <table class="nb-table">
   <thead>
     <tr>
-      <th>集合类型</th>
+      <th>维度</th>
+      <th>ArrayList（fail-fast）</th>
+      <th>CopyOnWriteArrayList（快照）</th>
+      <th>ConcurrentHashMap（弱一致）</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>遍历中并发修改</strong></td>
+      <td>抛 CME</td>
+      <td>不抛，看不到修改</td>
+      <td>不抛，可能看到部分修改</td>
+    </tr>
+    <tr>
+      <td><strong>写开销</strong></td>
+      <td>O(1) 摊还</td>
+      <td>O(n) 每次复制整数组</td>
+      <td>O(1) 平均（CAS + 细粒度同步）</td>
+    </tr>
+    <tr>
+      <td><strong>读 / 遍历</strong></td>
+      <td>O(1) 索引</td>
+      <td>O(1) 索引，无锁</td>
+      <td>遍历桶数组，弱一致</td>
+    </tr>
+    <tr>
+      <td><strong>线程安全模型</strong></td>
+      <td>不安全</td>
+      <td>读无锁 / 写加锁复制</td>
+      <td>CAS + synchronized 桶级同步</td>
+    </tr>
+    <tr>
+      <td><strong>适用场景</strong></td>
+      <td>单线程</td>
+      <td>读多写极少</td>
+      <td>高并发读写 KV</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+<div class="takeaway-label">遍历安全选型一句话</div>
+<ul>
+  <li>单线程遍历删除 → <code>iterator.remove()</code> / <code>removeIf()</code></li>
+  <li>读多写极少、遍历不能受影响 → <code>CopyOnWriteArrayList</code>（监听器列表、订阅者）</li>
+  <li>高并发 KV 读改写 → <code>ConcurrentHashMap</code>（<code>computeIfAbsent</code>/<code>merge</code> 配合）</li>
+  <li>需要严格一致的遍历快照 → 先 <code>new ArrayList&lt;&gt;(src)</code> 拷贝一份再遍历</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第10站：边界与盲区 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>边界与盲区：fail-fast 到底有多"尽力而为"</h2></div>
+
+<p>把 fail-fast 用熟之后，真正拉开差距的是对<strong>盲区</strong>的认知。以下每个点都可能成为面试追问的落点。</p>
+
+<h3>盲区 1：hasNext() 不校验 modCount —— "删最后一个元素"的侥幸</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>EdgeCase.java</b> · 什么时候"删了也不抛"</span></div>
+<pre><code><span class="c">// 场景 A：foreach 里删"当前元素后面还有元素" → 必抛</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>, <span class="t">"D"</span>));
+<span class="k">for</span> (<span class="t">String</span> s : list) {
+    <span class="k">if</span> (<span class="t">"B"</span>.equals(s)) list.remove(s);  <span class="c">// 删 B 后还有 C、D → 下次 next() 抛 CME</span>
+}
+
+<span class="c">// 场景 B：删除后 cursor 恰好等于新 size → 可能不抛！</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; list2 = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>));
+<span class="t">Iterator</span>&lt;<span class="t">String</span>&gt; it = list2.iterator();
+it.next();  <span class="c">// A，cursor=1</span>
+it.next();  <span class="c">// B，cursor=2</span>
+list2.remove(<span class="t">"C"</span>);  <span class="c">// 删的是游标之后的尾部元素 → size=2</span>
+<span class="c">// 下一轮 hasNext()：cursor(2) != size(2) 为 false → 循环结束，无 CME</span>
+<span class="c">// 但这纯属侥幸：CME 的触发点只在 next()/remove() 内部，hasNext() 从不检查</span></code></pre>
+</div>
+
+<p>精确结论：<strong>只要"结构性修改之后还会调用一次 next()"，必抛 CME；若之后不再调用 next()（hasNext() 返回 false 或循环已结束），则检测不到</strong>。所以"删最后一个元素可能不抛"只是这类侥幸场景的特例，绝不能依赖它写业务代码。</p>
+
+<h3>盲区 2：偶数次修改相互抵消 & modCount 溢出</h3>
+
+<ul>
+  <li><strong>偶数次抵消</strong>：并发下集合被改了偶数次，modCount 绕一圈又等于 expectedModCount——检测彻底失效。这就是"尽力而为"的数学本质。</li>
+  <li><strong>int 溢出</strong>：modCount 是 int，理论上 2³¹ 次修改后变负数，2³² 次后绕回原值。实践中不可能，但理论上存在。</li>
+  <li><strong>不是线程安全的证明</strong>：即使不抛 CME，多线程下的 ArrayList 读也可能读到写了一半的数组（元素赋值非原子可见）。fail-fast 是"检测 bug 的哨兵"，不是"并发安全保证"。</li>
+</ul>
+
+<h3>盲区 3：单线程同样触发 CME</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SingleThread.java</b> · 不是多线程的锅</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; list = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>));
+<span class="k">for</span> (<span class="t">String</span> s : list) {
+    <span class="k">if</span> (<span class="t">"B"</span>.equals(s)) {
+        list.remove(s);   <span class="c">// CME！一个线程也会抛</span>
+    }
+}
+<span class="c">// 面试结论：fail-fast 不是线程安全机制，它是检测"错误用法"的手段</span>
+<span class="c">// 单线程的错误用法同样触发 CME——"并发"两个字只是名字，不代表只在并发下发生</span></code></pre>
+</div>
+
+<h3>盲区 4：SubList 与父 List 共享 modCount</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>SubList.java</b> · 视图的隐藏陷阱</span></div>
+<pre><code><span class="t">List</span>&lt;<span class="t">String</span>&gt; parent = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(<span class="t">List</span>.of(<span class="t">"A"</span>, <span class="t">"B"</span>, <span class="t">"C"</span>, <span class="t">"D"</span>));
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; sub = parent.subList(<span class="n">1</span>, <span class="n">3</span>);  <span class="c">// [B, C] —— 视图，不是副本！</span>
+
+parent.add(<span class="t">"E"</span>);       <span class="c">// 父集合 modCount +1</span>
+System.out.println(sub.get(<span class="n">0</span>));
+<span class="c">// → ConcurrentModificationException！</span>
+<span class="c">// SubList 每次操作前都检查"创建时的父 modCount"是否与当前一致</span></code></pre>
+</div>
+
+<p>SubList 内部持有父 List 的引用和创建时的 expectedModCount，任何访问都会先做 checkForComodification。反过来，通过 sub 增删元素也会同步改到父集合，并同步自己的 expectedModCount。生产上最常见的坑是：把 subList 存起来用，期间父集合被别的代码改了。</p>
+
+<h3>盲区 5：Map 也有 fail-fast —— 遍历中 put 新键</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>MapPit.java</b> · HashMap 遍历中的结构性修改</span></div>
+<pre><code><span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; map = <span class="k">new</span> <span class="t">HashMap</span>&lt;&gt;();
+map.put(<span class="t">"a"</span>, <span class="n">1</span>); map.put(<span class="t">"b"</span>, <span class="n">2</span>);
+
+<span class="k">for</span> (<span class="t">Map.Entry</span>&lt;<span class="t">String</span>, <span class="t">Integer</span>&gt; e : map.entrySet()) {
+    map.put(<span class="t">"c"</span>, <span class="n">3</span>);  <span class="c">// ❌ CME！新增 key 是结构性修改（modCount++）</span>
+}
+<span class="c">// 注意：put 已有 key（覆盖 value）不是结构性修改，不会抛——又是"尽力而为"的体现</span>
+
+<span class="c">// ✅ 正确：</span>
+<span class="c">//  1) entrySet().removeIf(...)  只删不增</span>
+<span class="c">//  2) ConcurrentHashMap        遍历中随便 put</span>
+<span class="c">//  3) 先收集到新集合，遍历完再 putAll 合并</span></code></pre>
+</div>
+
+<div class="think"><div class="think-q">"HashMap 遍历中 put 一个已存在的 key，会抛 CME 吗？"<br/><br/>
+不会。覆盖已有 key 不改变 size，不是结构性修改，modCount 不变。只有<strong>新增 key</strong>（size 变化）才会让 modCount++。这个细节区分了"懂 fail-fast"和"背概念"两种人——fail-fast 盯的是结构，不是数据内容。</div></div>
+
+<div class="takeaway">
+<div class="takeaway-label">边界结论速记</div>
+<ul>
+  <li>CME 触发点只在 <code>next()</code>/<code>remove()</code> 内部；<code>hasNext()</code> 永不校验</li>
+  <li>删除后不再调用 <code>next()</code> → 检测不到（侥幸，勿依赖）</li>
+  <li>偶数次修改抵消 / modCount 溢出 → fail-fast 彻底失效</li>
+  <li>单线程错误用法同样触发 CME；fail-fast ≠ 线程安全</li>
+  <li>SubList 是共享 modCount 的视图；HashMap 新增 key 才算结构性修改</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第11站：生产最佳实践 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>生产最佳实践：从"不抛异常"到"写对代码"</h2></div>
+
+<p>生产环境里，CME 从来不是"并发集合一换就完事"，而是要先想清楚<strong>数据的一致性语义</strong>。下面是后端场景里直接能抄的写法。</p>
+
+<h3>场景化代码：五种安全写法</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Production.java</b> · 后端场景对照</span></div>
+<pre><code><span class="c">// ① 单线程批量条件删除：removeIf 一趟 O(n)，首选</span>
+orders.removeIf(o -&gt; o.getStatus() == <span class="t">Status</span>.CANCELLED);
+
+<span class="c">// ② 需要边删边做业务（记日志 / 发消息）：显式 Iterator</span>
+<span class="t">Iterator</span>&lt;<span class="t">Order</span>&gt; it = orders.iterator();
+<span class="k">while</span> (it.hasNext()) {
+    <span class="t">Order</span> o = it.next();
+    <span class="k">if</span> (o.isExpired()) {
+        auditLog.info(<span class="t">"expire order {}"</span>, o.getId());
+        it.remove();
+    }
+}
+
+<span class="c">// ③ 读多写极少：监听器 / 订阅者列表 → CopyOnWriteArrayList</span>
+<span class="k">private final</span> <span class="t">CopyOnWriteArrayList</span>&lt;<span class="t">OrderListener</span>&gt; listeners =
+    <span class="k">new</span> <span class="t">CopyOnWriteArrayList</span>&lt;&gt;();
+<span class="k">void</span> notifyListeners(<span class="t">Order</span> o) {
+    <span class="k">for</span> (<span class="t">OrderListener</span> l : listeners) l.onOrder(o);  <span class="c">// 遍历中注册/注销都安全</span>
+}
+
+<span class="c">// ④ 高并发 KV：ConcurrentHashMap（不要 HashMap + synchronized 自欺欺人）</span>
+<span class="t">ConcurrentHashMap</span>&lt;<span class="t">String</span>, <span class="t">Session</span>&gt; sessions = <span class="k">new</span> <span class="t">ConcurrentHashMap</span>&lt;&gt;();
+sessions.computeIfAbsent(token, Session::create);   <span class="c">// 原子读写</span>
+
+<span class="c">// ⑤ 必须遍历共享 ArrayList 快照：先拷贝，别在锁里遍历大集合</span>
+<span class="k">synchronized</span> (orderLock) {
+    <span class="k">for</span> (<span class="t">Order</span> o : <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;(orders)) { <span class="c">// 快照遍历，锁内只做拷贝</span>
+        <span class="c">// 处理期间 orders 随便被改，互不影响</span>
+    }
+}</code></pre>
+</div>
+
+<h3>Stream 的副作用陷阱（老生常谈但必考）</h3>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StreamPit.java</b> · filter 里别动源集合</span></div>
+<pre><code><span class="c">// ❌ 并行流中修改源集合——结果不可预测</span>
+list.parallelStream()
+    .filter(s -&gt; {
+        list.add(<span class="t">"X"</span>);   <span class="c">// 并发修改源 list！可能 CME、可能丢数据、可能"看起来正常"</span>
+        <span class="k">return true</span>;
+    })
+    .count();
+
+<span class="c">// ✅ Stream 必须无副作用：用中间流/新集合，最后一次性合并</span>
+<span class="t">List</span>&lt;<span class="t">String</span>&gt; result = list.stream()
+    .filter(s -&gt; s.length() &gt; <span class="n">1</span>)
+    .collect(<span class="t">Collectors</span>.toList());</code></pre>
+</div>
+
+<h3>快速参考表（面试速查）</h3>
+
+<table class="nb-table">
+  <thead>
+    <tr>
+      <th>集合</th>
       <th>迭代器类型</th>
       <th>遍历中修改</th>
       <th>安全删除方式</th>
@@ -606,52 +1158,34 @@ list.parallelStream()
   </thead>
   <tbody>
     <tr>
-      <td><strong>ArrayList</strong></td>
+      <td><strong>ArrayList / LinkedList</strong></td>
       <td>fail-fast</td>
       <td>抛 CME</td>
-      <td>iterator.remove() / removeIf()</td>
+      <td><code>iterator.remove()</code> / <code>removeIf()</code></td>
     </tr>
     <tr>
-      <td><strong>LinkedList</strong></td>
+      <td><strong>HashMap / HashSet / TreeMap</strong></td>
       <td>fail-fast</td>
       <td>抛 CME</td>
-      <td>iterator.remove() / removeIf()</td>
-    </tr>
-    <tr>
-      <td><strong>HashMap</strong></td>
-      <td>fail-fast</td>
-      <td>抛 CME</td>
-      <td>iterator.remove() / entrySet().removeIf()</td>
-    </tr>
-    <tr>
-      <td><strong>HashSet</strong></td>
-      <td>fail-fast</td>
-      <td>抛 CME</td>
-      <td>iterator.remove() / removeIf()</td>
-    </tr>
-    <tr>
-      <td><strong>TreeMap / TreeSet</strong></td>
-      <td>fail-fast</td>
-      <td>抛 CME</td>
-      <td>iterator.remove() / removeIf()</td>
+      <td><code>iterator.remove()</code> / 视图 <code>removeIf()</code></td>
     </tr>
     <tr>
       <td><strong>CopyOnWriteArrayList</strong></td>
-      <td>快照（fail-safe）</td>
-      <td>不抛异常，看不到修改</td>
-      <td>直接 remove()，不影响进行中的遍历</td>
+      <td>快照（弱一致）</td>
+      <td>不抛，看不到修改</td>
+      <td>集合自身 remove（再复制一次）</td>
     </tr>
     <tr>
       <td><strong>ConcurrentHashMap</strong></td>
       <td>弱一致</td>
-      <td>不抛异常，可能看到修改</td>
-      <td>直接 remove() / forEach 中操作</td>
+      <td>不抛，可能看到修改</td>
+      <td>直接 put / remove / 视图 removeIf</td>
     </tr>
     <tr>
       <td><strong>ConcurrentLinkedQueue</strong></td>
       <td>弱一致</td>
-      <td>不抛异常</td>
-      <td>直接 poll() / remove()</td>
+      <td>不抛</td>
+      <td>poll() / 迭代器 remove</td>
     </tr>
   </tbody>
 </table>
@@ -662,28 +1196,58 @@ list.parallelStream()
 其中 <code>expectedModCount</code> 在 Iterator 创建时固定（<code>iterator.remove()</code> 后会同步更新），<code>modCount</code> 随每次结构性修改递增。
 </div>
 
-<div class="recap">
-<h3>面试回答模板</h3>
-<p><strong>Q：什么是 fail-fast 机制？</strong></p>
-<p>"fail-fast 是 Java 集合框架的一种错误检测机制。每个集合类内部维护一个 modCount 计数器，任何结构性修改（add、remove、clear）都会使其递增。Iterator 在创建时记录当前 modCount 为 expectedModCount，每次调用 next() 时检查两者是否相等。如果不等，说明集合在遍历期间被修改过，立即抛出 ConcurrentModificationException。需要注意的是，fail-fast 是尽力而为的，不保证 100% 检测，JDK 文档明确说不能依赖它做正确性保证。"</p>
+<div class="takeaway">
+<div class="takeaway-label">Code Review 检查清单</div>
+<ul>
+  <li><strong>foreach 循环体内出现 <code>list.add/remove/clear</code></strong> → 必改，大概率 CME</li>
+  <li><strong>共享集合跨线程遍历</strong> → 换成并发集合，或遍历前拷贝快照</li>
+  <li><strong>filter / map 里修改源集合</strong> → 禁止（尤其 parallelStream）</li>
+  <li><strong>subList 长期持有</strong> → 确认期间父集合不再被结构性修改</li>
+  <li><strong>遍历删除一律 <code>removeIf</code> / <code>iterator.remove()</code></strong>，不要在循环里碰运气</li>
+</ul>
+</div>
+</section>
 
-<p><strong>Q：fail-fast 和 fail-safe 有什么区别？</strong></p>
-<p>"fail-fast 集合（如 ArrayList、HashMap）在遍历中修改会抛 CME；fail-safe（更准确叫弱一致性）集合（如 CopyOnWriteArrayList、ConcurrentHashMap）不会抛 CME。CopyOnWriteArrayList 的迭代器是快照语义，看到的是创建时的数组副本；ConcurrentHashMap 的迭代器是弱一致的，可能看到也可能看不到后续修改。代价上，COW 每次写都要复制整个数组，适合读多写少；ConcurrentHashMap 用分段锁 + CAS，适合高并发读写。"</p>
+<!-- ═══════════════ 第12站：总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
+
+<div class="recap">
+<h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>Iterator 模式</strong>：遍历逻辑从集合抽离，<code>hasNext()</code>/<code>next()</code>/<code>remove()</code> 统一接口，让算法与数据结构解耦；ListIterator 支持双向遍历</li>
+  <li><strong>modCount</strong>：定义在 <code>AbstractList</code> 的结构性修改计数器，add/remove/clear 每次 +1；<code>set()</code> 不改结构不 +1；ArrayList 里"每次 add 都无条件 +1"，扩容只是恰好发生在某次 add 内部</li>
+  <li><strong>Itr 三件套</strong>：<code>cursor</code>（下一个下标）、<code>lastRet</code>（上一个下标）、<code>expectedModCount</code>（创建时快照）；<code>next()</code> 第一行执行 <code>checkForComodification()</code>，不一致即抛 CME</li>
+  <li><strong>增强 for 的本质</strong>：javac 翻译成 iterator()/hasNext()/next() 循环（javap 可见），迭代器引用被藏在局部变量表——所以 foreach 里既不能调 list.remove()，也调不到 it.remove()</li>
+  <li><strong>Iterator.remove() 为何安全</strong>：删除后 <code>expectedModCount = modCount</code> 同步 + <code>cursor</code> 回退不跳元素；没 next() 就 remove 或连续两次 remove 抛 <code>IllegalStateException</code></li>
+  <li><strong>removeIf 不误报的真相</strong>：ArrayList 覆写版用 BitSet 记下标、双指针原地压缩、<code>modCount</code> 整个操作只 +1 一次；Collection 默认版用自家迭代器删，expectedModCount 自动同步</li>
+  <li><strong>CopyOnWriteArrayList</strong>：volatile 数组 + ReentrantLock + 写时复制快照，永不 CME，但迭代器只读（remove 抛 UnsupportedOperationException），适合读多写极少</li>
+  <li><strong>ConcurrentHashMap</strong>：弱一致迭代器，永不 CME，遍历中可能看到部分修改；底层 Traverser 遇 ForwardingNode 切 nextTable</li>
+  <li><strong>fail-fast 的边界</strong>：hasNext() 不校验 modCount、删除后不再 next() 就检测不到、偶数次修改抵消、int 溢出——尽力而为，非线程安全</li>
+</ul>
+</div>
+
+<h3>面试回答模板</h3>
+
+<div class="recap">
+<p><strong>Q：什么是 fail-fast 机制？</strong></p>
+<p>"fail-fast 是 Java 集合框架的一种错误检测机制。每个集合类内部维护一个 modCount 计数器，任何结构性修改（add、remove、clear）都会使其递增。Iterator 在创建时记录当前 modCount 为 expectedModCount，每次调用 next() 时通过 checkForComodification() 检查两者是否相等。如果不等，说明集合在遍历期间被修改过，立即抛出 ConcurrentModificationException。注意 fail-fast 是尽力而为的，不保证 100% 检测，JDK 文档明确说不能依赖它做正确性保证。"</p>
+
+<p><strong>Q：fail-fast 和 fail-safe（弱一致）有什么区别？</strong></p>
+<p>"fail-fast 集合（如 ArrayList、HashMap）在遍历中修改会抛 CME；弱一致集合（如 CopyOnWriteArrayList、ConcurrentHashMap）不会抛 CME。CopyOnWriteArrayList 的迭代器是快照语义，看到的是创建时的数组副本，且迭代器只读；ConcurrentHashMap 的迭代器是弱一致的，可能看到也可能看不到后续修改。代价上，COW 每次写都要复制整个数组，适合读多写少；ConcurrentHashMap 用 CAS + 桶级同步，适合高并发读写。"</p>
 
 <p><strong>Q：遍历中如何安全删除元素？</strong></p>
-<p>"有三种方式：第一，使用 Iterator.remove()，它在内部会同步 expectedModCount = modCount；第二，使用 Java 8 的 removeIf()，底层也是用 Iterator.remove()；第三，倒序索引遍历后直接 list.remove(i)。在 foreach 循环中直接调 list.remove() 是最常见的错误写法。"</p>
+<p>"有三种方式：第一，使用 Iterator.remove()，它在内部会同步 expectedModCount = modCount，且游标回退不跳元素；第二，使用 Java 8 的 removeIf()，ArrayList 的覆写实现用 BitSet 一趟批量删除，modCount 只加一次；第三，倒序索引遍历后直接 list.remove(i)。在 foreach 循环中直接调 list.remove() 是最常见的错误写法——单线程也会抛 CME。"</p>
 </div>
 
 <div class="takeaway">
 <div class="takeaway-label">本篇核心要点</div>
 <ul>
-  <li><strong>Iterator</strong> 是 GoF 迭代器模式的 Java 实现，提供统一的 hasNext()/next()/remove() 接口</li>
-  <li><strong>modCount</strong> 是 AbstractList 中的结构性修改计数器，add/remove/clear 时递增</li>
-  <li><strong>fail-fast</strong> 通过 checkForComodification() 比较 modCount 和 expectedModCount，不一致时抛 CME</li>
-  <li><strong>fail-fast 是尽力而为</strong>，不能保证检测所有并发修改，不是线程安全机制</li>
-  <li><strong>CopyOnWriteArrayList</strong> 用写时复制实现快照迭代器，读多写少场景首选</li>
-  <li><strong>ConcurrentHashMap</strong> 用弱一致性迭代器，高并发读写场景首选</li>
-  <li><strong>安全删除三法</strong>：iterator.remove()、removeIf()、倒序索引遍历</li>
+  <li><strong>modCount</strong> 是结构性修改计数器，<code>expectedModCount</code> 是迭代器创建时的快照，两者不等 → CME</li>
+  <li><strong>fail-fast 是尽力而为</strong>：检测 bug 的哨兵，不是线程安全机制，有明确盲区</li>
+  <li><strong>安全删除三法</strong>：<code>iterator.remove()</code>、<code>removeIf()</code>、倒序索引删除</li>
+  <li><strong>选型</strong>：单线程用 ArrayList + removeIf；读多写少用 COW；高并发 KV 用 ConcurrentHashMap</li>
+  <li><strong>写代码的底线</strong>：foreach 里不删、Stream 里不改源、subList 不长期持有</li>
 </ul>
 </div>
 </section>
