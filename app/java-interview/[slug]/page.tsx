@@ -35,7 +35,9 @@ export function generateStaticParams() {
   const seen = new Set<string>();
   return JAVA_ARTICLES
     .filter((a) => { if (seen.has(a.slug)) return false; seen.add(a.slug); return true; })
-    .map((a) => ({ slug: encodeURIComponent(a.slug) }));
+    // 返回原始 slug（勿再 encodeURIComponent）：Next 16 静态导出时会把 segment
+    // 值再编码一次传给组件，双重编码会导致组件 decode 一次后仍对不上元数据 → notFound。
+    .map((a) => ({ slug: a.slug }));
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {

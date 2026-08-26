@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/fix-cjk-paths.mjs out",
     "start": "next start",
     "lint": "eslint"
   },
