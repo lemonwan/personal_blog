@@ -15,7 +15,7 @@
 <p>在并发编程中，<strong>synchronized 和 Lock 是悲观策略</strong>——假定冲突一定会发生，所以先加锁再操作。而 <strong>CAS（Compare And Swap）是乐观策略</strong>——假定冲突很少发生，更新时检查是否被别人改过，没改过就原子更新，改过就重试。</p>
 <p>基于 CAS 实现的原子类（<code>AtomicInteger</code>、<code>AtomicLong</code>、<code>AtomicReference</code> 等）是 Java 并发工具箱中最高效的同步手段。它们无需加锁、无需线程上下文切换，在低竞争场景下性能远超锁方案。但 CAS 并非银弹——<strong>ABA 问题、自旋开销、只能保证单个变量原子性</strong>是它的三大局限。</p>
 <p>本文从 CPU 指令级原理出发，逐层拆解 CAS → AtomicInteger → ABA 问题 → Unsafe → LongAdder，构建完整的无锁并发知识体系。</p>
-<div class="formula"><strong>本文主线</strong><br/>CPU 指令 CMPXCHG → CAS 算法 → AtomicInteger 源码 → ABA 问题与解决方案 → Unsafe 与 VarHandle → LongAdder 分段优化</div>
+<div class="formula"><strong>本文主线</strong><br/>CPU 指令 CMPXCHG → CAS 算法 → AtomicInteger 源码 → ABA 问题与解决方案 → Unsafe 与 VarHandle → LongAdder 分段优化 → 生产打点实践</div>
 </section>
 
 <!-- ═══════════════ 第2站：CAS 原理 ═══════════════ -->
@@ -55,7 +55,7 @@
 <figure class="fig">
 <svg viewBox="0 0 720 310" role="img" aria-label="CAS 操作流程">
   <defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker><marker id="arr-g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#16A34A"/></marker><marker id="arr-r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#DC2626"/></marker></defs>
-  <text x="360" y="22" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">CAS 操作流程：读取 → 计算 → 比较交换</text>
+  <text x="360" y="24" text-anchor="middle" font-family="system-ui,sans-serif" font-size="15" fill="#1C1C1C" font-weight="700">CAS 操作流程：乐观锁的核心循环</text>
   <!-- 流程框 -->
   <rect x="40" y="50" width="130" height="50" rx="8" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.5"/>
   <text x="105" y="72" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="600">1. 读取当前值</text>
@@ -67,8 +67,8 @@
   <line x1="345" y1="75" x2="385" y2="75" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr)"/>
   <rect x="390" y="45" width="180" height="60" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
   <text x="480" y="67" text-anchor="middle" font-size="12" fill="#1C1C1C" font-weight="700">3. CAS(V, 10, 11)</text>
-  <text x="480" y="85" text-anchor="middle" font-size="10" fill="#8C8676">内存值仍=10？</text>
-  <text x="480" y="98" text-anchor="middle" font-size="10" fill="#8C8676">= expected(10)?</text>
+  <text x="480" y="85" text-anchor="middle" font-family="monospace" font-size="10" fill="#8C8676">内存值仍=10？</text>
+  <text x="480" y="98" text-anchor="middle" font-family="monospace" font-size="10" fill="#8C8676">= expected(10)?</text>
   <!-- 成功路径 -->
   <line x1="480" y1="105" x2="480" y2="140" stroke="#16A34A" stroke-width="1.8" marker-end="url(#arr-g)"/>
   <text x="430" y="128" font-size="11" fill="#16A34A" font-weight="600">YES</text>
@@ -91,15 +91,24 @@
 </svg>
 <figcaption><span class="fig-no">图 1</span>CAS 操作流程：读取当前值 → 计算新值 → 原子比较交换，失败则自旋重试</figcaption>
 </figure>
-<div class="crack"><div class="crack-label">CAS 为什么是"原子"的？</div>
-<p>x86 的 <code>CMPXCHG</code> 指令在执行时会<strong>锁定总线或缓存行</strong>（多核上通过 MESI 协议锁住对应缓存行），保证"读-比较-写"三步在同一总线周期内完成，其他核心在此期间无法访问同一内存地址。这就是 CAS 的硬件级原子性保障。</p>
-</div>
 </section>
 
-<!-- ═══════════════ 第3站：AtomicInteger 源码 ═══════════════ -->
+<!-- ═══════════════ 第3站：CMPXCHG 硬件真相 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>AtomicInteger 源码：volatile + CAS 自旋</h2></div>
-<p><code>AtomicInteger</code> 是 CAS 最经典的应用。它的全部核心建立在两个要素之上：<strong>volatile 保证可见性，CAS 保证原子性</strong>。</p>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>CMPXCHG 的硬件真相：一条指令怎么做到「不可打断」</h2></div>
+<p>第 2 站说「读-比较-写三步原子完成」，但 CPU 是多核的，别的核凭什么不插进来？答案在 <code>lock</code> 前缀指令——和「volatile 深入」篇讲的<strong>同一个东西</strong>：</p>
+<ul>
+  <li>x86 上，Java 的 <code>compareAndSwapInt</code> 最终编译成 <code>lock cmpxchg</code>。普通 <code>cmpxchg</code> 只保证「单核内不被打断」，加上 <code>lock</code> 前缀后，硬件保证整个操作期间<strong>独占这条缓存行</strong>：其他核要么看不到操作前的旧值、要么看到操作后的新值，不存在中间态。</li>
+  <li>独占的手段就是缓存一致性协议（MESI）：执行 <code>lock cmpxchg</code> 的核先把缓存行置为 Modified 状态并向总线广播「我要独占」，其他核的副本作废——和 volatile 写的「锁缓存行 + 广播失效」是<strong>同一套硬件机制</strong>。</li>
+</ul>
+<p>所以 CAS 的原子性不是 JVM 的魔法，是硬件承诺：<strong>一条带 lock 前缀的指令，在一个 CPU 核上执行期间，别的核对该地址的访问被硬件排队</strong>。这也解释了为什么 CAS 快又稳：没有软件锁的「申请-排队-唤醒」流程，失败的成本只是一条指令返回 false，线程连停都不用停，继续下一次 CAS 即可。</p>
+<div class="think"><div class="think-q">串一下知识链：volatile 写 = lock 前缀指令（可见性/有序性）；CAS = lock cmpxchg（原子性）；JMM 的「原子性、可见性、有序性」三件套，在硬件层最终都收敛到 lock 前缀这一个点上。面试能把这条链说出来，volatile 篇 + CAS 篇 + JMM 篇就打通了。</div></div>
+</section>
+
+<!-- ═══════════════ 第4站：AtomicInteger 结构 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>AtomicInteger 结构：volatile + CAS 的标配组合</h2></div>
+<p><code>AtomicInteger</code> 是 CAS 最经典的应用。它的全部核心建立在两个要素之上：<strong>volatile 保证可见性，CAS 保证原子性</strong>——两者缺一不可：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>AtomicInteger.java</b> · 核心字段与构造</span></div>
 <pre><code><span class="k">public class</span> <span class="t">AtomicInteger</span> <span class="k">extends</span> <span class="t">Number</span> <span class="k">implements</span> <span class="t">java.io.Serializable</span> {
@@ -112,6 +121,13 @@
     <span class="k">public final int</span> get() { <span class="k">return</span> value; }  <span class="c">// volatile 读，无需加锁</span>
 }</code></pre>
 </div>
+<p>为什么 value 必须是 volatile？CAS 指令本身只保证「比较-交换」这一步原子，<strong>不保证你读到的 oldVal 是最新值</strong>——如果读取走的是普通语义，可能拿到缓存里的旧值，拿旧值去做 CAS 的 expected，白白失败甚至误判。volatile 读保证「每次读的都是最新」，volatile 写保证「CAS 成功后别人立刻看得到新值」。一句话：<strong>CAS 管「改的原子性」，volatile 管「读的及时性」</strong>。</p>
+<div class="takeaway"><span class="takeaway-label">记忆点</span>凡是「无锁 + 共享可变」的类（Atomic 全家、LongAdder 的 base/Cell.value、AQS 的 state），字段全是 volatile——这不是巧合，是这套组合拳的固定搭配。</div>
+</section>
+
+<!-- ═══════════════ 第5站：循环 CAS 详解 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>循环 CAS 详解：getAndIncrement 为什么是 while 循环</h2></div>
 <p>逐行拆解 <code>getAndIncrement()</code>（等价于 i++）的实现：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>AtomicInteger.java</b> · getAndIncrement() 自旋 CAS</span></div>
@@ -158,6 +174,12 @@
     <span class="k">return</span> next;
 }</code></pre>
 </div>
+<p>注意 <code>updateAndGet</code> 把「怎么算新值」也放进了循环：如果 next 的计算依赖 prev 的最新值，就必须每轮重试都重新算——这和第 2 站伪代码里「读取→计算→CAS」是一个模式：<strong>期望值（expected）从哪来，哪一步就必须放进循环里重做</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第6站：CAS vs 锁 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>CAS vs 锁：同一件事的两种性格</h2></div>
 <table class="nb-table">
   <thead><tr><th>维度</th><th>AtomicInteger（CAS）</th><th>synchronized</th></tr></thead>
   <tbody>
@@ -166,16 +188,38 @@
     <tr><td><strong>竞争高时</strong></td><td>自旋浪费 CPU</td><td>park 让出 CPU，更合理</td></tr>
     <tr><td><strong>阻塞</strong></td><td>不会阻塞线程</td><td>可能阻塞（上下文切换）</td></tr>
     <tr><td><strong>原子变量数</strong></td><td>只能保证一个变量</td><td>可保护多个变量</td></tr>
+    <tr><td><strong>可中断/超时</strong></td><td>不支持（自旋直到成功）</td><td>lockInterruptibly / tryLock(timeout)</td></tr>
   </tbody>
 </table>
-<div class="takeaway"><div class="takeaway-label">面试回答要点</div>
-<p>"AtomicInteger 底层是 volatile int value 加 CAS 自旋。getAndIncrement() 用 do-while 循环，先 volatile 读当前值，再 CAS 尝试将其加 1，失败则重新读重试。低竞争时性能远超 synchronized，高竞争时自旋开销增大。"</p>
+<p>选型的心法就一句话：<strong>临界区越短、竞争越低，CAS 越划算；临界区越长、竞争越高，锁越划算</strong>。临界区长意味着每次 CAS 失败后「重新读+重算」的窗口大、失败率高，自旋烧掉的 CPU 比 park 一次的代价高得多——这是「乐观 vs 悲观」的本质：赌冲突发生的概率。</p>
+<div class="takeaway"><span class="takeaway-label">面试回答要点</span>"AtomicInteger 底层是 volatile int value 加 CAS 自旋。getAndIncrement() 用 do-while 循环，先 volatile 读当前值，再 CAS 尝试将其加 1，失败则重新读重试。低竞争时性能远超 synchronized，高竞争时自旋开销增大——所以高并发计数器要用 LongAdder 分散竞争（第 13 站）。</div>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：ABA 问题 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>ABA 问题：CAS 最大的隐患</h2></div>
+<!-- ═══════════════ 第7站：自旋的艺术 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>自旋的艺术：什么时候值得空转，什么时候该睡觉</h2></div>
+<p>CAS 的失败处理方式是「自旋重试」——线程不睡、不停，原地转圈再试。自旋是把双刃剑，什么时候值得转、什么时候该去睡，是这一篇最容易答浅的地方：</p>
+<table class="nb-table">
+<thead><tr><th>场景</th><th>推荐</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>临界区极短（几条指令）、竞争低</td><td><strong>自旋（CAS）</strong></td><td>冲突窗口小，通常 1~2 次 CAS 就过；park/unpark 的上下文切换（几十~几百微秒）反而是大开销</td></tr>
+<tr><td>临界区短但竞争很高（16+ 线程抢同一变量）</td><td><strong>分散竞争（LongAdder）</strong>或退避自旋</td><td>单点自旋 15/16 线程空转烧 CPU；分片后每片竞争降低，自旋成功率回升</td></tr>
+<tr><td>临界区长（IO、复杂计算）</td><td><strong>锁（park 挂起）</strong></td><td>等锁时间远超上下文切换成本，自旋纯浪费；线程挂起让 CPU 去跑别人</td></tr>
+<tr><td>等待外部事件（队列取任务）</td><td><strong>park / wait</strong></td><td>事件多久来不知道，没有重试语义可自旋</td></tr>
+</tbody>
+</table>
+<p>两个实践细节：</p>
+<ul>
+  <li><strong>自旋可以「退避」</strong>：盲目原地重试会让所有失败线程在同一个 CPU 周期撞车。更聪明的做法是失败后短暂让路（x86 的 <code>pausing</code> / <code>Thread.onSpinWait()</code>，JDK 9+ 提示编译器「我在自旋」，JIT 可做专门优化）——线程池的 Worker、某些 CAS 库内部都这么做。</li>
+  <li><strong>自旋有「次数兜底」</strong>：JVM 的轻量级锁（synchronized 升级链路的第一级）就是「先自旋 N 次再 park」的混合策略——短冲突自旋解决，长冲突交给操作系统。JDK 15+ 移除了偏向锁，但「短则自旋、长则挂起」的思路贯穿整个并发设计。</li>
+</ul>
+<div class="think"><div class="think-q">面试追问「自旋和 park 的代价怎么量化」：一次 park/unpark ≈ 一次上下文切换 ≈ 10~100 微秒级（取决于 OS 负载）；一次失败的 CAS ≈ 几十纳秒。临界区耗时在微秒级以下时，哪怕竞争率 50%，自旋的期望成本也往往低于 park 一次——这就是「临界区短 → CAS」的定量依据。</div></div>
+</section>
+
+<!-- ═══════════════ 第8站：ABA 问题 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>ABA 问题：CAS 最大的隐患</h2></div>
 <p>CAS 只检查"值有没有变"，但<strong>不关心值是否变过又变回来了</strong>。这就是 ABA 问题：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ABA 问题时序</b></span></div>
@@ -214,6 +258,12 @@
   <span class="c">// 栈变成 top → B（已被释放的节点），A.next 仍指向 B</span>
   <span class="c">// 链表结构被破坏，可能访问已回收内存！</span></code></pre>
 </div>
+<p>注意这里 Java 和 C++ 有个微妙差别：Java 有 GC，「访问已回收内存」不会像 C++ 那样直接段错误，但<strong>逻辑结构照样被破坏</strong>——top 指向了一个早该出栈的节点，数据错乱且极难排查。所以别以为「Java 没有悬垂指针所以 ABA 无关紧要」，它照样致命，只是死法从崩溃变成了脏数据。</p>
+</section>
+
+<!-- ═══════════════ 第9站：ABA 解决方案 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>ABA 的解法：给值配一个版本号</h2></div>
 <p><strong>解决方案：加版本号</strong>。每次修改不仅比较值，还比较版本号（stamp），即使值相同，版本号不同也视为"被改过"。</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>AtomicStampedReference.java</b> · 带版本号的 CAS</span></div>
@@ -245,18 +295,41 @@ ref.compareAndSet(<span class="n">"B"</span>, <span class="n">"A"</span>, stamp 
 <span class="c">// compareAndSet(expectedRef, newRef, expectedMark, newMark)</span>
 ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">true</span>);</code></pre>
 </div>
-<div class="crack"><div class="crack-label">AtomicStampedReference 的底层原理</div>
-<p>AtomicStampedReference 内部将值和版本号封装成一个 <code>Pair</code> 对象（<code>private static class Pair&lt;T&gt; { final T reference; final int stamp; }</code>），通过 <code>AtomicReference&lt;Pair&lt;T&gt;&gt;</code> 实现 CAS。每次修改都创建新的 Pair，版本号递增。CAS 比较的是 Pair 引用，因此即使"值"变回原样，Pair 对象不同，CAS 就能检测到变化。</p>
+<div class="crack"><span class="crack-label">AtomicStampedReference 的底层原理</span>
+<p>AtomicStampedReference 内部将值和版本号封装成一个 <code>Pair</code> 对象（<code>private static class Pair&lt;T&gt; { final T reference; final int stamp; }</code>），通过 <code>AtomicReference&lt;Pair&lt;T&gt;&gt;</code> 实现 CAS。每次修改都创建新的 Pair，版本号递增。CAS 比较的是 Pair 引用，因此即使"值"变回原样，Pair 对象不同，CAS 就能检测到变化。代价是每次更新多一次 Pair 对象分配——高并发下这也是一笔 GC 成本，所以只在<strong>真的存在 ABA 风险</strong>（无锁结构、跨线程读改写）时才用它。</p>
 </div>
-<div class="takeaway"><div class="takeaway-label">ABA 问题面试回答</div>
-<p>"CAS 只比较值，如果值从 A 变成 B 再变回 A，CAS 会认为没变过，这就是 ABA 问题。典型危害场景是无锁栈/链表，可能导致节点被回收后仍被引用。解决方案是使用 AtomicStampedReference，每次修改递增版本号，即使值相同版本不同也算被改过。底层是 CAS 一个包含值和版本号的 Pair 对象。"</p>
-</div>
+<div class="takeaway"><span class="takeaway-label">ABA 问题面试回答</span>"CAS 只比较值，如果值从 A 变成 B 再变回 A，CAS 会认为没变过，这就是 ABA 问题。典型危害场景是无锁栈/链表，可能导致节点被弹出后仍被引用、结构破坏。解决方案是使用 AtomicStampedReference，每次修改递增版本号，即使值相同版本不同也算被改过。底层是 CAS 一个包含值和版本号的 Pair 对象；只关心改没改过可以用 AtomicMarkableReference。</div>
 </section>
 
-<!-- ═══════════════ 第5站：Unsafe 类 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>Unsafe 类：CAS 的 JVM 层实现</h2></div>
-<p><code>sun.misc.Unsafe</code> 是 JDK 内部类，提供了直接操作内存、线程调度、CAS 等"不安全"的底层能力。所有 Atomic 类的 CAS 操作最终都通过 Unsafe 完成。</p>
+<!-- ═══════════════ 第10站：单变量限制 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>CAS 第三大问题：一次只能保护一个变量</h2></div>
+<p>前两个问题（ABA、自旋）大家背得熟，第三个问题最容易漏答：<strong>CAS 只能保证单个共享变量的原子性</strong>。当「逻辑上的一个操作」需要同时改多个变量时，两条 CAS 之间没有原子性可言：</p>
+<div class="srcbox">
+<div class="srcbox-head"><b>反例：两个变量必须一起改</b></span>
+<pre><code><span class="k">class</span> <span class="t">Config</span> {
+    <span class="k">volatile int</span> version;    <span class="c">// 配置版本号</span>
+    <span class="k">volatile</span> <span class="t">String</span> content; <span class="c">// 配置内容</span>
+}
+
+<span class="c">// ❌ 更新线程：两条 CAS 之间可能被读线程插进来</span>
+config.content = <span class="s">"v2-内容"</span>;   <span class="c">// ① 先写了内容</span>
+config.version = <span class="n">2</span>;           <span class="c">// ② 再改版本号
+<span class="c">// 读线程在 ① 和 ② 之间看到：version=1 + content="v2-内容" —— 版本和内容错配！</span></code></pre>
+</div>
+<p>三种标准解法：</p>
+<ul>
+  <li><strong>把多个字段封装成不可变对象，CAS 一个引用</strong>（最常用）：每次更新都 new 一个新对象，用 <code>AtomicReference&lt;Config&gt;</code> 原子换指针。读线程拿到的引用要么全旧、要么全新，永远不会错配——和第 14 站讲 volatile 引用「安全发布」是同一招。</li>
+  <li><strong>用锁</strong>：两个字段必须一致地更新，直接 synchronized / ReentrantLock 包住两条赋值——锁天然保护任意多个变量。</li>
+  <li><strong>单字段承载全部状态</strong>：能建模成一个值（比如「版本号+状态」压成一个 int 的不同位段，像 AQS 的 ctl、线程池的 ctl 那样），一次 CAS 搞定。</li>
+</ul>
+<div class="formula"><strong>判断口诀</strong><br/>改 1 个变量 → AtomicXxx / CAS 就够<br/>改 N 个变量要「同时」→ 封装不可变对象 + AtomicReference，或用锁<br/>N 个变量其实是「一个状态的多视角」→ 压成一个 int，一次 CAS</div>
+</section>
+
+<!-- ═══════════════ 第11站：Unsafe 类 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>Unsafe 类：CAS 的 JVM 层实现</h2></div>
+<p><code>sun.misc.Unsafe</code> 是 JDK 内部类，提供了直接操作内存、线程调度、CAS 等"不安全"的底层能力。所有 Atomic 类的 CAS 操作最终都通过 Unsafe 完成：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>Unsafe</b> · CAS 相关方法</span></div>
 <pre><code><span class="k">public final class</span> <span class="t">Unsafe</span> {
@@ -280,7 +353,13 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
     <span class="k">public native void</span> unpark(<span class="t">Object</span> thread);
 }</code></pre>
 </div>
-<p>Unsafe 的问题在于它是 <strong>JDK 内部 API</strong>，Oracle 从未承诺其稳定性，且命名本身就在警告开发者："这些操作可能破坏 JVM 安全模型"。从 JDK 9 开始，Java 引入了正式的替代方案：</p>
+<p>注意最后两个方法：<code>park/unpark</code>——AQS 整个队列同步的底层就是它们。Unsafe 一个类，同时是<strong>无锁并发（CAS）和阻塞并发（park）</strong>的地基，整个 JUC 站在它肩膀上。但 Unsafe 的问题在于它是 <strong>JDK 内部 API</strong>，Oracle 从未承诺其稳定性，且命名本身就在警告开发者："这些操作可能破坏 JVM 安全模型"。</p>
+</section>
+
+<!-- ═══════════════ 第12站：VarHandle ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>VarHandle：JDK 9+ 的官方替代</h2></div>
+<p>从 JDK 9 开始，Java 引入了正式的替代方案 <code>java.lang.invoke.VarHandle</code>：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>VarHandle</b> · JDK 9+ 的官方替代</span></div>
 <pre><code><span class="c">// java.lang.invoke.VarHandle（JDK 9 引入）</span>
@@ -296,7 +375,8 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
         <span class="k">try</span> {
             COUNT = MethodHandles.lookup()
                 .findVarHandle(<span class="t">Counter</span>.<span class="k">class</span>, <span class="n">"count"</span>, <span class="k">int</span>.<span class="k">class</span>);
-        } <span class="k">catch</span> (<span class="t">Exception</span> e) { <span class="k">throw new</span> <span class="t">Error</span>(e); }
+        }
+        <span class="k">catch</span> (<span class="t">Exception</span> e) { <span class="k">throw new</span> <span class="t">Error</span>(e); }
     }
 
     <span class="k">public void</span> increment() {
@@ -315,18 +395,18 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
     <tr><td><strong>稳定性</strong></td><td>随时可能变更或移除</td><td>标准库，长期稳定</td></tr>
     <tr><td><strong>能力范围</strong></td><td>CAS、内存读写、线程调度、内存分配等全部</td><td>聚焦于变量访问模式（plain/volatile/acquire-release）</td></tr>
     <tr><td><strong>安全性</strong></td><td>可绕过访问控制、直接操作内存</td><td>类型安全，受访问控制约束</td></tr>
-    <tr><td><strong>未来</strong></td><td>JEP 471 已计划弃用和移除</td><td>官方推荐的替代方案</td></tr>
+    <tr><td><strong>未来</strong></td><td>JEP 471 已计划逐步弃用移除</td><td>官方推荐的替代方案</td></tr>
   </tbody>
 </table>
-<div class="crack"><div class="crack-label">为什么不直接开放 Unsafe？</div>
-<p>Unsafe 提供 <code>allocateMemory</code>、<code>putAddress</code> 等 C 语言级别的内存操作，绕过类型系统和 GC，极易导致内存泄漏和 JVM 崩溃。VarHandle 的设计哲学是：<strong>只暴露必要的安全子集</strong>（CAS、volatile 读写、acquire/release 语义），不暴露危险操作，将底层能力纳入标准 API 管理体系。</p>
+<div class="crack"><span class="crack-label">为什么不直接开放 Unsafe？</span>
+<p>Unsafe 提供 <code>allocateMemory</code>、<code>putAddress</code> 等 C 语言级别的内存操作，绕过类型系统和 GC，极易导致内存泄漏和 JVM 崩溃。VarHandle 的设计哲学是：<strong>只暴露必要的安全子集</strong>（CAS、volatile 读写、acquire/release 语义），不暴露危险操作，将底层能力纳入标准 API 管理体系。业务代码现在写新的底层访问逻辑，首选 VarHandle；Atomic 类源码从 JDK 9 起也逐步迁移到 VarHandle 实现。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：LongAdder vs AtomicLong ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>LongAdder vs AtomicLong：分段思想的又一次胜利</h2></div>
-<p>AtomicLong 在高并发下有一个严重问题：<strong>所有线程都对同一个 volatile 变量做 CAS</strong>。16 个线程同时递增，只有一个能 CAS 成功，其余 15 个全部自旋重试——大量 CPU 时间浪费在空转上。</p>
+<!-- ═══════════════ 第13站：LongAdder 结构 ═══════════════ -->
+<section class="station reveal" id="s13">
+<div class="station-head"><span class="station-no">第 13 站</span><h2>LongAdder 结构：把热点拆成一排 Cell</h2></div>
+<p>AtomicLong 在高并发下有一个严重问题：<strong>所有线程都对同一个 volatile 变量做 CAS</strong>。16 个线程同时递增，只有一个能 CAS 成功，其余 15 个全部自旋重试——大量 CPU 时间浪费在空转上（第 7 站说的「高竞争自旋」的实锤）。</p>
 <div class="think"><div class="think-q">"AtomicLong 高并发下性能差，怎么优化？" —— 面试官在等你说出 LongAdder，以及它背后的分段累加思想。</div></div>
 <p><code>LongAdder</code>（JDK 8）的核心思想借鉴自 ConcurrentHashMap：<strong>把单个热点变量分散到多个 Cell 中，每个线程更新自己的 Cell，求和时聚合</strong>。</p>
 <div class="srcbox">
@@ -375,6 +455,7 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
     }
 }</code></pre>
 </div>
+<p>读这段代码的主线：<strong>先走 base 快速路径，CAS 失败了才「升级」到 Cell 分片，分片还撞了就扩容</strong>——和「synchronized 轻量级→重量级升级」是同一种设计哲学：竞争出现之前，成本趋近于零。</p>
 <figure class="fig">
 <svg viewBox="0 0 720 340" role="img" aria-label="LongAdder 分段累加结构">
   <defs><marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker></defs>
@@ -392,9 +473,9 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
   <text x="620" y="67" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">Thread-5</text>
   <!-- 连接线 -->
   <line x1="100" y1="80" x2="160" y2="130" stroke="#3E6B8F" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
-  <line x1="230" y1="80" x2="270" y2="130" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr2)"/>
+  <line x1="230" y1="80" x2="270" y2="130" stroke="#3E6B8F" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
   <line x1="360" y1="80" x2="360" y2="130" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr2)"/>
-  <line x1="490" y1="80" x2="450" y2="130" stroke="#3E6B8F" stroke-width="1.3" marker-end="url(#arr2)"/>
+  <line x1="490" y1="80" x2="450" y2="130" stroke="#3E6B8F" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
   <line x1="620" y1="80" x2="560" y2="130" stroke="#3E6B8F" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
   <!-- Cell 数组 -->
   <text x="80" y="122" font-size="10" fill="#8C8676">hash 分散</text>
@@ -427,8 +508,13 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
 </svg>
 <figcaption><span class="fig-no">图 2</span>LongAdder 分段累加：每个线程通过 hash 映射到不同 Cell，sum() 聚合所有分段</figcaption>
 </figure>
-<div class="crack"><div class="crack-label">Cell 为什么要做伪共享（False Sharing）优化？</div>
-<p>CPU 缓存以缓存行（通常 64 字节）为单位加载。如果两个 Cell 恰好落在同一缓存行，一个线程修改 Cell[0] 会导致另一个线程的 Cell[1] 缓存行失效（MESI 协议），即使它们互不相关。LongAdder 的 Cell 类使用了 <code>@Contended</code> 注解（或 JDK 8 中的手动 padding），<strong>在每个 Cell 前后填充空字段</strong>，确保每个 Cell 独占一条缓存行，消除伪共享。</p>
+</section>
+
+<!-- ═══════════════ 第14站：伪共享与代价 ═══════════════ -->
+<section class="station reveal" id="s14">
+<div class="station-head"><span class="station-no">第 14 站</span><h2>伪共享、@Contended 与 LongAdder 的代价</h2></div>
+<div class="crack"><span class="crack-label">Cell 为什么要做伪共享（False Sharing）优化？</span>
+<p>CPU 缓存以缓存行（通常 64 字节）为单位加载。如果两个 Cell 恰好落在同一缓存行，一个线程修改 Cell[0] 会导致另一个线程的 Cell[1] 缓存行失效（MESI 协议），即使它们互不相关。LongAdder 的 Cell 类使用了 <code>@Contended</code> 注解（JVM 启动参数 <code>-XX:+RestrictContended</code> 开启后生效），<strong>在每个 Cell 前后填充空字段</strong>，确保每个 Cell 独占一条缓存行，消除伪共享。讽刺的是：不填 padding，分片本身就会被硬件「重新合并」成竞争——省了内存，赔了性能。</p>
 </div>
 <p><strong>基准测试</strong>（16 线程并发递增 1 亿次，JDK 17，Intel i7-12700H）：</p>
 <table class="nb-table">
@@ -440,17 +526,52 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
   </tbody>
 </table>
 <p>LongAdder 在高竞争下比 AtomicLong 快 <strong>5~10 倍</strong>，核心原因：<strong>用空间换时间</strong>——牺牲额外的 Cell[] 内存，将单点竞争分散到多个 Cell 上。</p>
-<div class="crack"><div class="crack-label">LongAdder 的代价是什么？</div>
-<p>① <code>sum()</code> 返回的不是精确值——遍历 Cell[] 过程中其他线程仍在更新，得到的是<strong>弱一致性快照</strong>。② 额外内存开销——Cell[] 数组 + 缓存行填充。③ 不适合需要精确原子读的场景（如 compareAndSet），因为无法原子地读取所有 Cell 的总和。</p>
-</div>
-<div class="takeaway"><div class="takeaway-label">LongAdder 面试回答</div>
-<p>"AtomicLong 在高竞争下所有线程 CAS 同一个变量，大量自旋浪费 CPU。LongAdder 借鉴 ConcurrentHashMap 的分段思想，内部维护 Cell[] 数组，每个线程通过 hash 映射到自己的 Cell 上独立 CAS 累加，sum() 时遍历所有 Cell 加 base。Cell 还通过 @Contended 消除伪共享。高竞争下吞吐量可达 AtomicLong 的 5~10 倍，代价是 sum() 不保证强一致性。"</p>
+<div class="crack"><span class="crack-label">LongAdder 的代价是什么？</span>
+<p>① <code>sum()</code> 返回的不是精确值——遍历 Cell[] 过程中其他线程仍在更新，得到的是<strong>弱一致性快照</strong>。② 额外内存开销——Cell[] 数组 + 缓存行填充。③ 不适合需要精确原子读的场景（如 compareAndSet），因为无法原子地读取所有 Cell 的总和。选型因此很清晰：<strong>只写不读（打点、计数）→ LongAdder；读写都要且要强一致 → AtomicLong</strong>。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：原子类全景与选型指南</h2></div>
+<!-- ═══════════════ 第15站：生产落地 ═══════════════ -->
+<section class="station reveal" id="s15">
+<div class="station-head"><span class="station-no">第 15 站</span><h2>生产落地：接口打点与 QPS 计数</h2></div>
+<p>CAS 家族在真实系统里的第一落点就是<strong>指标打点</strong>——每个请求都可能来自不同线程，高频累加，典型的高竞争计数器场景：</p>
+<div class="srcbox">
+<div class="srcbox-head"><b>MetricsCounter.java</b> —— 可直接抄的打点模板</span>
+<pre><code><span class="k">public final class</span> <span class="t">MetricsCounter</span> {
+    <span class="c">// 高竞争计数：LongAdder（只写不读，sum 弱一致完全够）</span>
+    <span class="k">private final</span> <span class="t">LongAdder</span> qps = <span class="k">new</span> <span class="t">LongAdder</span>();
+    <span class="k">private final</span> <span class="t">LongAdder</span> errors = <span class="k">new</span> <span class="t">LongAdder</span>();
+
+    <span class="k">public void</span> <span class="n">onRequest</span>() {
+        qps.increment();          <span class="c">// 每次请求 +1，分散到 Cell，几乎零竞争</span>
+    }
+
+    <span class="k">public void</span> <span class="n">onError</span>() {
+        errors.increment();
+    }
+
+    <span class="c">// 监控线程 10s 读一次：sum() 弱一致快照，打点场景完全够用</span>
+    <span class="k">public</span> <span class="k">long</span> <span class="n">drainQps</span>() {
+        <span class="k">return</span> qps.sum();   <span class="c">// 或用 sumThenReset() 取「区间增量」做秒级 QPS</span>
+    }
+}
+
+<span class="c">// 接入 Micrometer 的写法（Spring Boot 环境）：</span>
+<span class="c">// Counter.builder("api.request")</span>
+<span class="c">//     .register(meterRegistry);  // 内部就是 LongAdder/DoubleAdder 累加</span></code></pre>
+</div>
+<p>四条生产经验，全是踩出来的：</p>
+<ul>
+  <li><strong>打点/计数用 LongAdder，业务状态用 AtomicXxx</strong>：区分标准是「读要不要精确」。QPS 曲线差一点没关系，库存扣减差一点就是资损——后者必须 AtomicLong/锁，甚至数据库层兜底。</li>
+  <li><strong>sumThenReset() 比 sum() 更适合做秒级指标</strong>：每次取「上次读数以来的增量」，天然对齐统计窗口，不用自己记上次值。</li>
+  <li><strong>别在请求路径里读 sum()</strong>：sum() 要遍历所有 Cell，O(分段数)，放请求路径里等于把监控成本摊给每个请求——读操作放定时任务/监控线程。</li>
+  <li><strong>计数器爆炸是隐形事故</strong>：给每个 orderId 建一个 LongAdder 的「动态打点」写法，内存会被计数器本身撑爆。维度多了就该用带限流的聚合结构（或干脆交给监控系统做聚合）。</li>
+</ul>
+</section>
+
+<!-- ═══════════════ 第16站：原子类全景 ═══════════════ -->
+<section class="station reveal" id="s16">
+<div class="station-head"><span class="station-no">第 16 站</span><h2>原子类全景与选型决策树</h2></div>
 <p>Java 的 <code>java.util.concurrent.atomic</code> 包提供了完整的原子类家族，按功能分为四大类：</p>
 <table class="nb-table">
   <thead><tr><th>类别</th><th>类名</th><th>用途</th></tr></thead>
@@ -475,15 +596,37 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
 高竞争 + 自定义聚合 → LongAccumulator<br/>
 需要 CAS 引用 + 防 ABA → AtomicStampedReference<br/>
 需要原子更新对象字段 → AtomicIntegerFieldUpdater（零额外对象开销）<br/>
-需要精确原子读 → AtomicLong（LongAdder 的 sum 是弱一致的）</div>
+需要精确原子读 → AtomicLong（LongAdder 的 sum 是弱一致的）<br/>
+多个变量要一起改 → 封装不可变对象 + AtomicReference，或用锁</div>
+</section>
+
+<!-- ═══════════════ 第17站：总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
 <div class="recap">
-<h3>面试回答模板</h3>
+<h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>CAS 本质</strong>：CPU 的 <code>lock cmpxchg</code> 单条指令，读-比较-写原子完成；和 volatile 写共用「lock 前缀 + MESI 缓存行独占」这套硬件。</li>
+  <li><strong>AtomicXxx 标配</strong>：volatile 字段（管读及时）+ CAS 自旋（管改原子）；getAndIncrement 是 do-while 循环，expected 从哪来哪一步就得重做。</li>
+  <li><strong>自旋的艺术</strong>：临界区短/竞争低 → 自旋；临界区长/竞争高 → park 挂起或分片分散；失败重试可以退避（onSpinWait）。</li>
+  <li><strong>三大问题</strong>：ABA（版本号 AtomicStampedReference 解，Pair 对象实现）、自旋开销（LongAdder 分片解）、单变量限制（封装不可变对象 + AtomicReference 解）。</li>
+  <li><strong>LongAdder</strong>：base 快速路径 + Cell[] 分段 + hash 分散 + @Contended 防伪共享；sum() 弱一致，只写不读场景吞吐 5~10x。</li>
+  <li><strong>Unsafe → VarHandle</strong>：Unsafe 是地基但非公开 API，VarHandle 是 JDK 9+ 官方安全子集，JEP 471 推动迁移。</li>
+  <li><strong>生产</strong>：打点计数 LongAdder（sumThenReset 做秒级指标，读放监控线程）；业务状态 AtomicXxx/锁；计数器维度别爆炸。</li>
+</ul>
+</div>
+<div class="recap">
+<h3>一句话总结</h3>
+<p>CAS 是「赌没人和我抢」的乐观锁：一条 lock cmpxchg 指令赢下单变量的原子更新；赌输了三件事要接住——值变回去（版本号）、抢不过（自旋/分片）、变量不止一个（封装引用）。</p>
+</div>
+<div class="recap">
+<h3>🎤 面试 30 秒总结</h3>
 <p><strong>Q：CAS 是什么？有什么问题？怎么解决？</strong></p>
-<p>"CAS（Compare And Swap）是 CPU 原子指令 CMPXCHG 的 Java 封装，通过比较内存值与预期值是否一致来决定是否更新。优点是无锁、无阻塞、低竞争时性能极好。三个问题：① ABA 问题——值变过又变回来，CAS 无法感知，用 AtomicStampedReference 加版本号解决；② 自旋开销——高竞争时大量线程 CAS 失败空转，浪费 CPU，用 LongAdder 分段解决；③ 只能保证单个变量原子性——多个变量需要用锁或 AtomicReference 包装成单个对象。"</p>
+<p>"CAS（Compare And Swap）是 CPU 原子指令 CMPXCHG 的 Java 封装（x86 上带 lock 前缀，独占缓存行），通过比较内存值与预期值是否一致来决定是否更新，AtomicXxx 内部就是 volatile 读 + CAS 自旋循环。优点是无锁、无阻塞、低竞争时性能极好。三个问题：① ABA 问题——值变过又变回来，CAS 无法感知，无锁栈里会导致结构破坏，用 AtomicStampedReference 加版本号解决（底层是 CAS 一个 Pair 对象）；② 自旋开销——高竞争时大量线程 CAS 失败空转，临界区短才适合自旋，计数器场景用 LongAdder 分段；③ 只能保证单个变量原子性——多变量要么封装成不可变对象 CAS 引用，要么用锁。"</p>
 <p><strong>Q：LongAdder 为什么比 AtomicLong 快？</strong></p>
-<p>"AtomicLong 所有线程 CAS 同一个 volatile long，高竞争下 16 个线程只有 1 个成功，其余自旋。LongAdder 用 Cell[] 数组分散竞争，每个线程通过 hash 映射到自己的 Cell 独立 CAS 累加，sum() 时聚合所有 Cell + base。Cell 还通过 @Contended 消除伪共享。高竞争下快 5~10 倍，但 sum() 是弱一致的，不适合需要精确原子读的场景。"</p>
+<p>"AtomicLong 所有线程 CAS 同一个 volatile long，高竞争下 16 个线程只有 1 个成功，其余自旋。LongAdder 用 Cell[] 数组分散竞争：无竞争走 base 快速路径，有竞争按线程 hash 映射到各自 Cell 独立 CAS，还撞就扩容；Cell 通过 @Contended 独占缓存行消除伪共享。高竞争下快 5~10 倍，但 sum() 是弱一致快照，只适合打点计数这类只写不读的场景，要强一致读用 AtomicLong。"</p>
 <p><strong>Q：Unsafe 和 VarHandle 的区别？</strong></p>
-<p>"Unsafe 是 JDK 内部类，提供 CAS、内存操作等全部底层能力，但非公开 API，随时可能变更。VarHandle 是 JDK 9 引入的官方替代，只暴露安全的变量访问模式（CAS、volatile 读写、acquire-release），类型安全且长期稳定。JEP 471 已计划逐步移除 Unsafe。"</p>
+<p>"Unsafe 是 JDK 内部类，提供 CAS、内存操作等全部底层能力，但非公开 API，JEP 471 计划逐步移除。VarHandle 是 JDK 9 引入的官方替代，只暴露安全的变量访问模式（plain/volatile/acquire-release 的读、写、CAS），类型安全且长期稳定，业务代码新写底层访问首选它。"</p>
 </div>
 </section>
 

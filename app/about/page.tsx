@@ -65,7 +65,7 @@ export default function AboutPage() {
             <div className="mt-6" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <p style={{ fontSize: "17px", lineHeight: 1.9, color: "var(--ink-soft)", margin: 0 }}>
                 做了很多年 Java 后端，熟悉集合框架、并发编程、JVM 调优那一整套东西——它们是我的基本盘，
-                也是这个博客里「Java 面试笔记」板块的来源。
+                也是这个博客里「Java 学习笔记」板块的来源。
               </p>
               <p style={{ fontSize: "17px", lineHeight: 1.9, color: "var(--ink-soft)", margin: 0 }}>
                 现在，AI Agent 正在重写「应用工程师」的定义。我不想只做一个调用 API 的人，
@@ -73,7 +73,7 @@ export default function AboutPage() {
               </p>
               <p style={{ fontSize: "17px", lineHeight: 1.9, color: "var(--ink-soft)", margin: 0 }}>
                 这个网站就是我的公开笔记本：左边是「LLM 基础」——从向量一路推到 Transformer；
-                右边是「Java 面试」——几年的功底沉淀。一个往未来走，一个把过去钉牢。
+                右边是「Java 学习笔记」——几年的功底沉淀。一个往未来走，一个把过去钉牢。
               </p>
             </div>
           </section>

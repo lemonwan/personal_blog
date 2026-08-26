@@ -3,10 +3,33 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getJavaContent, getJavaArticle, JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume } from "@/lib/content";
 import CommentSection from "../../CommentSection";
+import ArticleToc from "../../ArticleToc";
 
 type Props = { params: Promise<{ slug: string }> };
 
 const ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII"];
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+/** 从正文 HTML 提取 station 的 id + 标题，生成右侧大纲 */
+function extractToc(html: string): { id: string; title: string }[] {
+  const items: { id: string; title: string }[] = [];
+  const re = /<section class="station[^"]*"\s+id="([^"]+)"[^>]*>[\s\S]*?<div class="station-head[^"]*"[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const title = decodeEntities(m[2].replace(/<[^>]+>/g, "").trim());
+    if (title) items.push({ id: m[1], title });
+  }
+  return items;
+}
 
 export function generateStaticParams() {
   const seen = new Set<string>();
@@ -19,7 +42,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const decoded = decodeURIComponent(slug);
   const meta = getJavaArticle(decoded);
-  return { title: meta ? `${meta.title} | Java 面试笔记` : "Java 笔记" };
+  return { title: meta ? `${meta.title} | Java 学习笔记` : "Java 笔记" };
 }
 
 export default async function JavaArticlePage({ params }: Props) {
@@ -30,6 +53,7 @@ export default async function JavaArticlePage({ params }: Props) {
 
   const content = getJavaContent(decoded);
   const ready = content !== null;
+  const tocItems = content ? extractToc(content) : [];
 
   const vol = JAVA_VOLUMES.find((v) => v.num === meta.volume);
   const idx = JAVA_ARTICLES.findIndex((a) => a.slug === decoded);
@@ -50,7 +74,7 @@ export default async function JavaArticlePage({ params }: Props) {
             <div style={{ position: "sticky", top: "80px", maxHeight: "calc(100vh - 100px)", overflowY: "auto", paddingRight: "4px" }}>
 
               <div style={{ fontFamily: "var(--mono)", fontSize: "11px", fontWeight: 700, letterSpacing: "0.18em", color: "var(--ink-faint)", marginBottom: "16px" }}>
-                Java 面试笔记
+                Java 学习笔记
               </div>
 
               {JAVA_VOLUMES.map((v) => {
@@ -115,7 +139,7 @@ export default async function JavaArticlePage({ params }: Props) {
             <div className="lesson-breadcrumb" style={{ fontSize: "14px", color: "var(--ink-faint)", marginBottom: "28px" }}>
               <Link href="/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>首页</Link>
               {" / "}
-              <Link href="/java-basics/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>Java 面试笔记</Link>
+              <Link href="/java-basics/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>Java 学习笔记</Link>
               {" / "}第 {String(meta.lessonNum).padStart(2, "0")} 篇
             </div>
 
@@ -258,6 +282,9 @@ export default async function JavaArticlePage({ params }: Props) {
             {/* 评论区（giscus → GitHub Discussions） */}
             <CommentSection />
           </article>
+
+          {/* ═══ 右侧边栏：本文大纲（scroll-spy）═══ */}
+          <ArticleToc items={tocItems} />
 
         </div>
       </div>

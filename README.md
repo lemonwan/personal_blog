@@ -7,7 +7,7 @@ Neo-brutalist 风格的个人技术笔记站 —— 暖纸底、粗黑边、硬�
 | 板块 | 路由 | 规模 |
 |---|---|---|
 | LLM 基础概念 | `/ai-llm/` | 32 课 × 5 卷（向量 → Transformer → 前沿） |
-| Java 面试笔记 | `/java-basics/` | 70 篇 × 7 卷（集合/并发/JVM/Spring/中间件/分布式） |
+| Java 学习笔记 | `/java-basics/` | 70 篇 × 7 卷（集合/并发/JVM/Spring/中间件/分布式） |
 | 家庭指南 | `/family-guide/` | 1 页（手工 HTML） |
 
 ## 技术栈
@@ -30,7 +30,7 @@ app/                    # 路由与组件
 lib/content.ts          # 内容注册表 + HTML 加载/清洗
 content/                # 纯内容 HTML（唯一内容源）
 ├─ ai-llm/*.html        # 32 篇课程
-├─ java-basics/*.html   # 70 篇面试笔记
+├─ java-basics/*.html   # 70 篇学习笔记
 └─ family-guide.html
 
 public/                 # 静态资源（头像、favicon、KaTeX 公式字体）

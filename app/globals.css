@@ -457,6 +457,33 @@ html, body { overflow-x: clip; max-width: 100%; }
 .article-pager { display: flex; justify-content: space-between; gap: 12px; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .pager-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 999px; border: 2px solid var(--line); color: var(--ink-soft); font-weight: 700; font-size: 13px; text-decoration: none; max-width: 100%; }
 
+/* ── 右侧文章大纲（scroll-spy）── */
+.article-toc { width: 200px; flex-shrink: 0; padding-top: 56px; }
+.article-toc-inner { position: sticky; top: 88px; max-height: calc(100vh - 112px); overflow-y: auto; padding-left: 6px; }
+.article-toc-title {
+  font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  color: var(--ink-faint); text-transform: uppercase;
+  padding-bottom: 10px; margin-bottom: 12px; border-bottom: 2px solid var(--line);
+}
+.article-toc-list { list-style: none; margin: 0; padding: 0; }
+.article-toc-list a {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 5px 8px; border-left: 2px solid transparent;
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); text-decoration: none;
+}
+.article-toc-list a:hover { color: var(--ink); background: var(--accent-wash); }
+.article-toc-list a.active { color: var(--accent); font-weight: 700; border-left-color: var(--accent); background: var(--accent-wash); }
+.article-toc-num { font-family: var(--mono); font-size: 10px; font-weight: 700; color: var(--ink-faint); min-width: 20px; flex-shrink: 0; }
+.article-toc-list a.active .article-toc-num { color: var(--accent); }
+
+/* 站内锚点：给固定 header 预留高度 */
+.ai-llm-scope .lesson-body .station { scroll-margin-top: 96px; }
+
+/* 1280px 以下隐藏右侧大纲（侧栏+正文已占满宽度） */
+@media (max-width: 1279px) {
+  .article-toc { display: none; }
+}
+
 /* ── nb-card · 通用精致卡片 ── */
 .nb-card {
   background: #fff;

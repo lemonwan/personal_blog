@@ -11,7 +11,7 @@
 
 <!-- ═══════════════ 第1站：开场 ═══════════════ -->
 <section class="station reveal" id="s1">
-<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道高频面试题开始</h2></div>
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道高频面试题和一场线上事故开始</h2></div>
 
 <p>面试官放下简历，抬起头问你：</p>
 
@@ -19,30 +19,39 @@
 
 <p>大多数候选人会脱口而出：<strong>"两种！继承 Thread 类和实现 Runnable 接口。"</strong>好一点的会补上 Callable。面试官微微点头，然后在心里给你打了个"初级"标签。</p>
 
-<p>但实际上，Java 中创建线程有 <strong>5 种生产级方式</strong>，从最早的 <code>extends Thread</code> 到现代的 <code>CompletableFuture.supplyAsync</code>，跨越了 JDK 1.0 到 JDK 8+ 的演进。面试官想听到的不是数字，而是你对每种方式<strong>适用场景、局限性、工程选型</strong>的理解。</p>
+<p>先别急着背答案，看一个真实事故，你就明白为什么这道题值得认真对待：</p>
 
-<p>这篇文章，我们从最基础的方式讲起，一路走到生产环境的最佳实践。读完之后，你能回答：</p>
+<div class="crack"><div class="crack-label">真实线上事故：for 循环里 new Thread</div>
+<p>某活动系统要给 10 万用户批量推送站内信。开发图省事，在 for 循环里给每个用户 <code>new Thread(task).start()</code>。上线当晚：服务线程数瞬间冲到 10 万+，CPU 100%、频繁 Full GC，短信网关被并发打挂，最后服务 OOM 重启。排查定位到那行代码时，所有人都沉默了。</p>
+</div>
+
+<p>10 万线程是什么概念？HotSpot 中每个线程默认栈约 1MB（<code>-Xss</code> 参数，Linux x64 默认值），10 万线程光栈就要消耗<strong>百 GB 量级的地址空间</strong>；线程创建本身是 native 系统调用，要分配内核栈、线程控制块；而 10 万线程抢几十个 CPU 核，光<strong>上下文切换（Context Switch）</strong>就能把机器拖垮。这就是"直接 new Thread"最典型的一种死法。</p>
+
+<p>实际上，Java 里能创建线程的方式远不止两种：从 JDK 1.0 的 <code>extends Thread</code> / <code>implements Runnable</code>，到 JDK 5 的 <code>Callable + FutureTask</code> 和线程池，再到 JDK 8 的 <code>CompletableFuture.supplyAsync</code>，一共 <strong>5 种生产级方式</strong>。面试官想听的从来不是数字，而是你对每种方式的<strong>适用场景、局限性、工程选型</strong>的理解。</p>
+
+<p>读完这篇文章，你能回答：</p>
 
 <ul>
   <li>为什么企业代码里几乎看不到 <code>extends Thread</code>？</li>
-  <li>Callable 和 Runnable 的本质区别是什么？</li>
-  <li>线程池提交和直接 new Thread 有什么根本差异？</li>
-  <li>CompletableFuture 比 Future 强在哪里？</li>
+  <li><code>Callable</code> 和 <code>Runnable</code> 的本质区别是什么？<code>Future.get()</code> 有哪些坑？</li>
+  <li>为什么说"别直接 new Thread"？线程池到底强在哪？</li>
+  <li><code>runAsync</code> 和 <code>supplyAsync</code> 怎么选？</li>
+  <li>生产环境线程池的线程，为什么都起了一个"正经名字"？</li>
 </ul>
 </section>
 
 <!-- ═══════════════ 第2站：继承 Thread ═══════════════ -->
 <section class="station reveal" id="s2">
-<div class="station-head"><span class="station-no">第 2 站</span><h2>方式一：继承 Thread 类</h2></div>
+<div class="station-head"><span class="station-no">第 2 站</span><h2>方式一：继承 Thread —— start() 和 run() 的天壤之别</h2></div>
 
 <p>这是教科书上的第一种方式——继承 <code>Thread</code> 类，重写 <code>run()</code> 方法，然后调用 <code>start()</code>：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>MyThread.java</b></span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>MyThread.java</b> · 继承 Thread</span></div>
 <pre><code><span class="k">public class</span> <span class="t">MyThread</span> <span class="k">extends</span> <span class="t">Thread</span> {
     <span class="k">@Override</span>
     <span class="k">public void</span> <span class="n">run</span>() {
-        System.out.println(<span class="t">"线程运行中: "</span> + Thread.currentThread().getName());
+        System.out.println(<span class="s">"线程运行中: "</span> + Thread.currentThread().getName());
     }
 }
 
@@ -51,35 +60,106 @@
 t.start();  <span class="c">// 注意：不是 t.run()！run() 只是普通方法调用</span></code></pre>
 </div>
 
-<div class="crack"><div class="crack-label">start() 和 run() 的区别</div>
-<p><code>start()</code> 会调用 native 方法让操作系统创建新线程，然后在新线程中执行 <code>run()</code>。直接调用 <code>run()</code> 只是在当前线程同步执行，<strong>没有创建新线程</strong>。这是初学者最常犯的错误。</p>
+<p>这里藏着面试官最爱挖的第一个坑：<strong><code>start()</code> 和 <code>run()</code> 到底有什么区别？</strong></p>
+
+<div class="crack"><div class="crack-label">start() vs run()：一个开新线程，一个只是调方法</div>
+<p><code>start()</code> 内部会调用 native 方法 <code>start0()</code>，由 JVM 向操作系统申请创建一条<strong>新的内核线程</strong>，然后在新线程里回调你的 <code>run()</code>。而直接调用 <code>run()</code>，只是把 <code>run()</code> 当成一个普通方法，在<strong>当前线程</strong>里同步执行——根本没创建新线程。这是初学者最常犯的错误，也是面试官判断你是否真懂线程的第一道关卡。</p>
 </div>
 
-<p>这种方式简单直接，但有一个致命缺陷——<strong>Java 是单继承</strong>。一旦继承了 <code>Thread</code>，你的类就不能再继承其他类了。在实际项目中，这几乎不可接受。</p>
+<figure class="fig">
+<svg viewBox="0 0 720 240" role="img" aria-label="start 与 run 的执行差异对比图">
+  <defs>
+    <marker id="arrowS" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+  </defs>
+
+  <!-- 左：run() -->
+  <rect x="20" y="15" width="330" height="205" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="185" y="45" text-anchor="middle" font-family="monospace" font-size="14" fill="#C2410C" font-weight="700">t.run() —— 普通方法调用</text>
+
+  <rect x="60" y="70" width="250" height="34" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="185" y="92" text-anchor="middle" font-size="12" fill="#1C1C1C">在【当前线程】里同步执行</text>
+
+  <line x1="185" y1="104" x2="185" y2="126" stroke="#C2410C" stroke-width="1.2" marker-end="url(#arrowS)"/>
+  <rect x="60" y="128" width="250" height="34" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="185" y="150" text-anchor="middle" font-size="12" fill="#1C1C1C">谁调用，谁执行（通常是 main）</text>
+
+  <line x1="185" y1="162" x2="185" y2="184" stroke="#C2410C" stroke-width="1.2" marker-end="url(#arrowS)"/>
+  <rect x="60" y="186" width="250" height="28" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <text x="185" y="205" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">没有任何新线程诞生</text>
+
+  <!-- 右：start() -->
+  <rect x="370" y="15" width="330" height="205" rx="8" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="535" y="45" text-anchor="middle" font-family="monospace" font-size="14" fill="#3E6B8F" font-weight="700">t.start() —— 真的开线程</text>
+
+  <rect x="410" y="70" width="250" height="34" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="535" y="92" text-anchor="middle" font-size="12" fill="#1C1C1C">内部调用 native start0()</text>
+
+  <line x1="535" y1="104" x2="535" y2="126" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arrowS)"/>
+  <rect x="410" y="128" width="250" height="34" rx="6" fill="#fff" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="535" y="150" text-anchor="middle" font-size="12" fill="#1C1C1C">JVM 创建一条 OS 内核线程</text>
+
+  <line x1="535" y1="162" x2="535" y2="184" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arrowS)"/>
+  <rect x="410" y="186" width="250" height="28" rx="6" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.2"/>
+  <text x="535" y="205" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">新线程（Thread-0）里回调 run()</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span>run() 只是"就地执行"，start() 才会真正创建一条新线程</figcaption>
+</figure>
+
+<p>用一段代码立刻验证：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>StartVsRun.java</b> · 亲手验证</span></div>
+<pre><code><span class="k">public class</span> <span class="t">StartVsRun</span> {
+    <span class="k">public static void</span> <span class="n">main</span>(String[] args) {
+        <span class="t">Thread</span> t = <span class="k">new</span> <span class="t">Thread</span>(() -&gt;
+            System.out.println(<span class="s">"干活的是: "</span> + Thread.currentThread().getName()));
+
+        t.run();    <span class="c">// 输出"干活的是: main" —— 主线程自己把活干了</span>
+        t.start();  <span class="c">// 输出"干活的是: Thread-0" —— 真的新开了一条线程</span>
+    }
+}</code></pre>
+</div>
+
+<p>再追问一层：为什么 <code>start()</code> 只能调用一次？因为线程对象和操作系统线程是一一绑定的，<code>start()</code> 成功后线程进入 <strong>NEW → RUNNABLE</strong> 状态转换，第二次调用 <code>start()</code> 会直接抛 <code>IllegalThreadStateException</code>。</p>
+
+<p>还有一个源码细节值得知道：<code>Thread.run()</code> 的默认实现是这样的——</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Thread.java</b> · run() 的默认实现（JDK 8 源码）</span></div>
+<pre><code><span class="k">@Override</span>
+<span class="k">public void</span> <span class="n">run</span>() {
+    <span class="k">if</span> (target != <span class="k">null</span>) {   <span class="c">// target 就是构造时传入的 Runnable</span>
+        target.run();
+    }
+}</code></pre>
+</div>
+
+<p>也就是说：<strong>继承 Thread 重写 run()，本质是覆盖掉"委托给 target"这段默认逻辑</strong>；而 <code>new Thread(runnable)</code> 是把任务存进 target，由默认 run() 转调。殊途同归，但后者更优雅——这就是下一站的主题。</p>
 
 <div class="takeaway">
 <div class="takeaway-label">继承 Thread 的局限</div>
 <ul>
-  <li><strong>单继承限制</strong>：无法再继承业务基类</li>
-  <li><strong>耦合度高</strong>：线程执行逻辑与 Thread 类绑定在一起</li>
-  <li><strong>无法返回结果</strong>：<code>run()</code> 返回 void</li>
-  <li><strong>无法抛出受检异常</strong>：<code>run()</code> 签名不允许 throws</li>
+  <li><strong>单继承限制</strong>：Java 类只能继承一个父类，继承了 Thread 就再也没法继承业务基类；</li>
+  <li><strong>耦合度高</strong>：任务逻辑与 Thread 类绑死，无法复用给其它线程；</li>
+  <li><strong>无法返回结果</strong>：<code>run()</code> 的签名是 void；</li>
+  <li><strong>无法抛出受检异常</strong>：<code>run()</code> 的签名没有 throws，受检异常只能吞掉或包成 RuntimeException；</li>
+  <li><strong>start() 只能调一次</strong>：重复调用抛 IllegalThreadStateException。</li>
 </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第3站：实现 Runnable ═══════════════ -->
+<!-- ═══════════════ 第3站：Runnable ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>方式二：实现 Runnable 接口</h2></div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>方式二：实现 Runnable —— 把"活"和"人"分开</h2></div>
 
-<p>为了解决单继承的问题，Java 提供了 <code>Runnable</code> 接口。它只有一个方法 <code>run()</code>，将"要做什么"和"怎么做线程"解耦：</p>
+<p>为了解决单继承和耦合的问题，JDK 1.0 提供了 <code>Runnable</code> 接口。它只有一个抽象方法 <code>run()</code>，职责非常纯粹：<strong>描述"要做什么"</strong>，至于"谁来做、怎么做线程"，交给 Thread 去管：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>MyTask.java</b></span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>MyTask.java</b> · 实现 Runnable</span></div>
 <pre><code><span class="k">public class</span> <span class="t">MyTask</span> <span class="k">implements</span> <span class="t">Runnable</span> {
     <span class="k">@Override</span>
     <span class="k">public void</span> <span class="n">run</span>() {
-        System.out.println(<span class="t">"Runnable 任务运行中: "</span> + Thread.currentThread().getName());
+        System.out.println(<span class="s">"Runnable 任务运行中: "</span> + Thread.currentThread().getName());
     }
 }
 
@@ -87,146 +167,409 @@ t.start();  <span class="c">// 注意：不是 t.run()！run() 只是普通方�
 <span class="t">Thread</span> t = <span class="k">new</span> <span class="t">Thread</span>(<span class="k">new</span> <span class="t">MyTask</span>());
 t.start();
 
-<span class="c">// Lambda 简写（JDK 8+）</span>
-<span class="t">Thread</span> t2 = <span class="k">new</span> <span class="t">Thread</span>(() -> System.out.println(<span class="t">"Lambda 写法"</span>));
+<span class="c">// Runnable 是函数式接口（@FunctionalInterface），JDK 8+ 可以写 Lambda</span>
+<span class="t">Thread</span> t2 = <span class="k">new</span> <span class="t">Thread</span>(() -&gt; System.out.println(<span class="s">"Lambda 写法"</span>));
 t2.start();</code></pre>
 </div>
 
-<p>Runnable 优于继承 Thread 的三个原因：</p>
+<p>用一个类比帮你建立直觉：</p>
+
+<div class="crack"><div class="crack-label">类比：Runnable 是"活"，Thread 是"人"</div>
+<p>Runnable 就像一张写好的<strong>任务单</strong>（"把这三箱货搬到二楼"），Thread 是<strong>工人</strong>。任务单本身不干活，得有人拿着它去干；一个人拿不同的任务单能干不同的活，同一张任务单也可以让好几个人轮流干。继承 Thread 的写法，相当于"把任务单贴在工人脑门上"——这个工人就只能干这一种活，也没法再当别的角色的工人了。</p>
+</div>
+
+<p>Runnable 优于继承 Thread，具体有三个理由：</p>
 
 <div class="formula">
 <strong>Runnable 的优势</strong><br/>
-1. <strong>解耦</strong>：任务逻辑（Runnable）与线程机制（Thread）分离<br/>
-2. <strong>灵活</strong>：实现接口的同时还可以继承其他类<br/>
-3. <strong>共享</strong>：同一个 Runnable 实例可传给多个 Thread，实现任务共享
+1. <strong>解耦</strong>：任务逻辑（Runnable）与线程机制（Thread）分离，任务可以被任意载体执行<br/>
+2. <strong>灵活</strong>：实现接口的同时还能继承其它类，突破单继承限制<br/>
+3. <strong>共享</strong>：同一个 Runnable 实例可以传给多个 Thread，实现任务共享
 </div>
 
-<p>但 Runnable 仍然有两个硬伤：<strong>没有返回值</strong>（<code>run()</code> 是 void），也<strong>无法抛出受检异常</strong>。如果你的任务需要返回计算结果，就需要第三种方式。</p>
+<p>第 3 点要提醒一句：任务共享是"同一份任务逻辑多处执行"，<strong>如果 Runnable 里有可变字段，多个线程同时跑就会产生竞态</strong>。比如一个 Runnable 里有个 <code>count</code> 计数器，两个线程同时 <code>count++</code>，结果就不可控了——这是并发编程第一篇就要警惕的事。</p>
+
+<p>但 Runnable 仍然有两个硬伤：<strong>没有返回值</strong>（<code>run()</code> 是 void），也<strong>无法抛出受检异常（Checked Exception，编译器强制要求处理的异常）</strong>，因为接口签名里没有 throws。如果你的任务需要返回计算结果，就需要第三种方式。</p>
+
+<div class="think"><div class="think-q">追问：Runnable 的 run() 不能声明 throws，那任务里必须调一个抛受检异常的方法（比如 Thread.sleep）怎么办？</div></div>
+
+<div class="crack"><div class="crack-label">点破</div>
+<p>只能自己 try-catch 吞掉，或者包装成 <code>RuntimeException</code> 往上抛——异常信息就这样"丢了"，调用方根本拿不到。这也是 Runnable 只适合"干完就完"的简单任务的原因。想要异常也能完整地传回调用方，用下一站的 Callable。</p>
+</div>
 </section>
 
-<!-- ═══════════════ 第4站：Callable + Future ═══════════════ -->
+<!-- ═══════════════ 第4站：Callable + FutureTask ═══════════════ -->
 <section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>方式三：Callable + Future</h2></div>
+<div class="station-head"><span class="station-no">第 4 站</span><h2>方式三：Callable + FutureTask —— 有返回值的任务</h2></div>
 
-<p>JDK 5 引入了 <code>Callable&lt;V&gt;</code> 接口，解决了 Runnable 的两大痛点：<strong>有返回值</strong>、<strong>可抛异常</strong>。</p>
+<p>JDK 5 引入了 <code>Callable&lt;V&gt;</code> 接口，专门解决 Runnable 的两大痛点：<strong>有返回值</strong>、<strong>能抛异常</strong>。</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>CallableDemo.java</b></span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>CallableDemo.java</b> · Callable + FutureTask</span></div>
 <pre><code><span class="k">import</span> java.util.concurrent.*;
 
-<span class="c">// 1. 实现 Callable 接口，指定返回类型</span>
+<span class="c">// 1. 实现 Callable，指定返回类型；call() 可以 throws Exception</span>
 <span class="k">public class</span> <span class="t">CalcTask</span> <span class="k">implements</span> <span class="t">Callable</span>&lt;<span class="t">Integer</span>&gt; {
     <span class="k">@Override</span>
     <span class="k">public</span> <span class="t">Integer</span> <span class="n">call</span>() <span class="k">throws</span> <span class="t">Exception</span> {
-        <span class="c">// 模拟耗时计算</span>
-        Thread.sleep(<span class="n">2000</span>);
+        Thread.sleep(<span class="n">2000</span>);   <span class="c">// 模拟耗时计算，受检异常直接往外抛</span>
         <span class="k">return</span> <span class="n">42</span>;
     }
 }
 
-<span class="c">// 2. 用 FutureTask 包装 Callable</span>
+<span class="c">// 2. 用 FutureTask 包装 Callable（FutureTask 本身实现了 Runnable）</span>
 <span class="t">FutureTask</span>&lt;<span class="t">Integer</span>&gt; futureTask = <span class="k">new</span> <span class="t">FutureTask</span>&lt;&gt;(<span class="k">new</span> <span class="t">CalcTask</span>());
 
-<span class="c">// 3. 传给 Thread 并启动</span>
+<span class="c">// 3. 传给 Thread 并启动（Thread 的构造器只收 Runnable，而 FutureTask 正是 Runnable）</span>
 <span class="k">new</span> <span class="t">Thread</span>(futureTask).start();
 
 <span class="c">// 4. 阻塞等待结果</span>
-<span class="t">Integer</span> result = futureTask.get();  <span class="c">// 阻塞当前线程，直到计算完成</span>
-System.out.println(<span class="t">"计算结果: "</span> + result);</code></pre>
+<span class="t">Integer</span> result = futureTask.get();   <span class="c">// 阻塞当前线程，直到计算完成</span>
+System.out.println(<span class="s">"计算结果: "</span> + result);</code></pre>
 </div>
 
-<p>核心关系链是：<code>Callable</code> 定义任务 → <code>FutureTask</code> 包装它（FutureTask 实现了 Runnable） → 传给 <code>Thread</code> → <code>get()</code> 阻塞拿结果。</p>
+<p>核心关系链是：<code>Callable</code> 定义任务 → <code>FutureTask</code> 包装它 → 传给 <code>Thread</code> → <code>get()</code> 阻塞拿结果。为什么中间非要隔一个 FutureTask？</p>
 
-<div class="think"><div class="think-q">为什么不能直接把 Callable 传给 Thread？因为 Thread 的构造函数只接受 Runnable。FutureTask 充当了适配器——它实现了 RunnableFuture 接口，而 RunnableFuture 同时继承了 Runnable 和 Future。</div></div>
+<div class="think"><div class="think-q">为什么不能直接把 Callable 传给 Thread？</div></div>
 
-<p><code>Future.get()</code> 是<strong>阻塞调用</strong>——线程没算完，调用方就一直等。此外还可以通过 <code>get(timeout, unit)</code> 设置超时，避免无限等待。</p>
+<div class="crack"><div class="crack-label">FutureTask 的地位：一个"既是 Runnable 又是 Future"的适配器</div>
+<p><code>Thread</code> 的构造函数只接受 <code>Runnable</code>，而 <code>Callable</code> 不是 Runnable。FutureTask 就是那个"翻译官"（适配器，Adapter）：它实现了 <code>RunnableFuture&lt;V&gt;</code> 接口，而 <code>RunnableFuture</code> 同时继承了 <code>Runnable</code> 和 <code>Future</code>——</p>
+<p style="text-align:center;font-family:monospace;font-size:13px;">
+FutureTask implements RunnableFuture extends Runnable + Future
+</p>
+<p>所以 FutureTask <strong>既能当 Runnable 扔给线程/线程池执行，又能当 Future 查结果、查状态、取消任务</strong>。在 JDK 8 之前，这就是"提交一个能拿结果的任务"的标准姿势；线程池的 <code>submit()</code> 方法内部，干的也是"把 Callable 包成 FutureTask"这件事。</p>
+</div>
+
+<p>Callable 和 Runnable 的差异，用一张表说清（这是面试高频对比）：</p>
+
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>Runnable</th><th>Callable&lt;V&gt;</th></tr></thead>
+  <tbody>
+    <tr><td><strong>抽象方法</strong></td><td><code>void run()</code></td><td><code>V call() throws Exception</code></td></tr>
+    <tr><td><strong>返回值</strong></td><td>无</td><td>有（泛型 V）</td></tr>
+    <tr><td><strong>受检异常</strong></td><td>不能抛，只能自己吞</td><td>可以抛，调用方从 Future 拿 ExecutionException</td></tr>
+    <tr><td><strong>函数式接口</strong></td><td>是（JDK 8 起可写 Lambda）</td><td>是（JDK 8 起可写 Lambda）</td></tr>
+    <tr><td><strong>引入版本</strong></td><td>JDK 1.0</td><td>JDK 5</td></tr>
+    <tr><td><strong>典型用途</strong></td><td>异步执行，不关心结果</td><td>异步计算，需要拿结果或异常</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第5站：Future API ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Future 的 API 细节：get() 的三种死法</h2></div>
+
+<p><code>Future</code> 接口一共 5 个方法，面试常考的是前 4 个：</p>
+
+<table class="nb-table">
+  <thead><tr><th>方法</th><th>作用</th><th>注意</th></tr></thead>
+  <tbody>
+    <tr><td><code>get()</code></td><td>阻塞等待结果</td><td>永久阻塞，等到天荒地老</td></tr>
+    <tr><td><code>get(timeout, unit)</code></td><td>限时等待结果</td><td>超时抛 TimeoutException</td></tr>
+    <tr><td><code>isDone()</code></td><td>任务是否完成</td><td>完成含"正常结束 / 抛异常 / 被取消"</td></tr>
+    <tr><td><code>isCancelled()</code></td><td>是否已取消</td><td>配合 cancel() 使用</td></tr>
+    <tr><td><code>cancel(boolean)</code></td><td>请求取消任务</td><td>mayInterruptIfRunning 决定是否中断运行中的线程</td></tr>
+  </tbody>
+</table>
+
+<p><code>Future.get()</code> 是<strong>阻塞调用</strong>——任务没算完，调用方线程就挂在那一直等。这里有一个生产里非常常见的坑：</p>
+
+<div class="crack"><div class="crack-label">真实场景：get() 没有超时，把请求线程全部挂死</div>
+<p>某系统用线程池 submit 了一个查询任务，然后直接 <code>future.get()</code> 等结果。结果下游服务雪崩、任务永远不返回，而 <code>get()</code> 没有超时——<strong>所有请求线程全部阻塞在 get() 上，线程池被占满，接口整体不可用</strong>，故障一直持续到下游恢复才缓解。正确姿势是给 get() 加超时：</p>
+</div>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>FutureGetDemo.java</b> · get() 的三种异常</span></div>
+<pre><code><span class="t">Future</span>&lt;<span class="t">String</span>&gt; future = executor.submit(() -&gt; doRemoteCall());
+
+<span class="k">try</span> {
+    <span class="c">// 限时等待：最多等 3 秒，超时立刻抛 TimeoutException，别干等</span>
+    String result = future.get(<span class="n">3</span>, TimeUnit.<span class="n">SECONDS</span>);
+} <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {
+    <span class="c">// ① 当前线程在等待时被中断</span>
+} <span class="k">catch</span> (<span class="t">ExecutionException</span> e) {
+    <span class="c">// ② 任务内部抛了异常，包在 ExecutionException 里（getCause() 才是真异常）</span>
+} <span class="k">catch</span> (<span class="t">TimeoutException</span> e) {
+    <span class="c">// ③ 超时了 —— 通常要配合 future.cancel(true) 把任务取消掉</span>
+}</code></pre>
+</div>
+
+<p>三个细节值得背下来：</p>
+
+<ul>
+  <li><strong>ExecutionException 是"包装盒"</strong>：任务里抛的任何异常，get() 时都会被包成 ExecutionException，真正的异常在 <code>e.getCause()</code> 里——这是"Runnable 吞异常、Callable 能还你异常"的关键机制。</li>
+  <li><strong>isDone() 不等于"成功"</strong>：任务抛异常、被取消，isDone() 都返回 true。想区分，得靠 isCancelled() 或捕获 ExecutionException / CancellationException。</li>
+  <li><strong>cancel(true) 只是"请求"中断</strong>：它调用线程的 interrupt()，如果任务不响应中断（比如在死循环里不检查中断标志），线程照样跑完。别指望 cancel 一定能停。</li>
+</ul>
+
+<p>最后总结 Future 的三大局限——它们正是催生 CompletableFuture 的原因：</p>
 
 <div class="crack"><div class="crack-label">Future 的局限性</div>
 <ul>
-  <li><strong>阻塞获取结果</strong>：只能 <code>get()</code> 傻等，无法注册回调</li>
-  <li><strong>无法组合</strong>：多个异步任务的串联（A 完成后用结果启动 B）需要手动嵌套</li>
-  <li><strong>取消困难</strong>：<code>cancel()</code> 只是设置标志位，不保证线程能停下来</li>
+  <li><strong>阻塞获取结果</strong>：只能 <code>get()</code> 傻等，无法注册回调（"算完了通知我"）；用 isDone() 轮询又是浪费 CPU 的忙等；</li>
+  <li><strong>无法组合</strong>：多个异步任务串联（A 完成 → 用 A 的结果启动 B）需要手动嵌套、层层 get()；</li>
+  <li><strong>取消困难</strong>：<code>cancel()</code> 只是设置标志位/发中断，不保证线程能停下来。</li>
 </ul>
-<p>这些痛点催生了线程池和 CompletableFuture。</p>
+<p>这些痛点，一部分被线程池解决（复用、管理），剩下的被 CompletableFuture 解决（回调、组合）。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第5站：线程池提交 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>方式四：线程池提交（生产标准）</h2></div>
+<!-- ═══════════════ 第6站：别直接 new Thread ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>为什么别直接 new Thread：四个理由</h2></div>
 
-<p>前三种方式都是手动 <code>new Thread</code>——每来一个任务就创建一个线程，用完就销毁。线程的创建和销毁是<strong>昂贵的</strong>（涉及操作系统调用、内存分配），在并发量大时会成为性能瓶颈。</p>
+<p>前三种方式都是手动 <code>new Thread</code>——每来一个任务就创建一条线程，用完就销毁。第 1 站的线上事故已经用 10 万线程的代价演示了后果。把"为什么别直接 new Thread"归纳成四个理由，面试时逐条讲：</p>
 
-<p><strong>线程池</strong>的思路是：提前创建好一组线程，任务来了直接提交给线程池复用已有线程。这是企业项目的标准做法。</p>
+<h3>理由一：创建销毁开销大</h3>
+<p>Java 的平台线程（Platform Thread）与操作系统线程是 <strong>1:1 映射</strong>的，<code>new Thread</code> 底层是 native 系统调用：要分配线程栈（默认约 1MB 地址空间）、创建内核线程控制块，用完还得销毁。一次两次无所谓，<strong>高频次、大批量创建时，这个开销会实打实吃掉 CPU 和内存</strong>，还会加剧 GC 压力。</p>
+
+<h3>理由二：无法复用</h3>
+<p>线程是"一次性的"：跑完 run() 就进入 TERMINATED，不能再次 start()。任务多的时候就只能反复创建、销毁、创建、销毁——把最贵的两件事重复做了 N 遍。</p>
+
+<h3>理由三：数量无上限</h3>
+<p>没人限制你 new 多少条线程。任务一多，线程数可以无限膨胀，直到内存耗尽（OOM）或者把 CPU 拖进上下文切换的泥潭。第 1 站的事故就是最典型的例子。</p>
+
+<h3>理由四：无法统一管理、监控、优雅关闭</h3>
+<p>散落的 Thread 对象没人统计：并发量多少？队列积压多少？谁能优雅地通知所有线程停止？出了问题 jstack 一看，几百条 <code>Thread-xxx</code>，连哪个业务起的都不知道。线程池则天生自带这些能力。</p>
+
+<div class="crack"><div class="crack-label">类比：餐厅的后厨</div>
+<p>直接 new Thread，就像一家餐厅<strong>每来一桌客人就现招一个临时工</strong>：忙起来大堂能站 500 个临时工，互相撞来撞去（上下文切换），用完还得当场结算遣散（销毁）。线程池则是<strong>固定编制的员工 + 排队叫号</strong>：后厨就 10 个灶台（核心线程），客人多了先排队（阻塞队列），实在忙不过来再临时加几个帮厨（最大线程），再有客人直接婉拒或让老板自己上（拒绝策略）。资源有上限、节奏可控、账目清晰——这就是工程化的力量。</p>
+</div>
+
+<p>把"new Thread"和线程池放一起对比：</p>
+
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>new Thread</th><th>线程池（ThreadPoolExecutor）</th></tr></thead>
+  <tbody>
+    <tr><td><strong>线程复用</strong></td><td>❌ 用完即毁</td><td>✅ 常驻复用</td></tr>
+    <tr><td><strong>数量上限</strong></td><td>❌ 无上限，可无限膨胀</td><td>✅ 核心数 + 最大数可控</td></tr>
+    <tr><td><strong>任务排队</strong></td><td>❌ 没有队列，直接创建</td><td>✅ 阻塞队列缓冲</td></tr>
+    <tr><td><strong>统一管理</strong></td><td>❌ 无法统计、无法限流</td><td>✅ 可监控活跃数/队列/完成数</td></tr>
+    <tr><td><strong>优雅关闭</strong></td><td>❌ 只能等线程自己结束</td><td>✅ shutdown() / awaitTermination()</td></tr>
+    <tr><td><strong>适合场景</strong></td><td>Demo、一次性简单任务</td><td>几乎一切生产场景</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway"><div class="takeaway-label">结论</div>
+<p>生产代码里，<strong>"创建线程"这个动作本身就应该交给线程池</strong>，你要做的是"提交任务"。这就是五种方式里生产最常用的一种——方式四：线程池提交。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：线程池提交 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>方式四：线程池提交（生产标准）</h2></div>
+
+<p><strong>线程池（Thread Pool）</strong>的思路是：提前创建好一组线程常驻待命，任务来了直接提交，线程复用，用完了也不销毁。这是企业项目的标准做法。</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ThreadPoolDemo.java</b></span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>ThreadPoolDemo.java</b> · 自定义线程池（生产模板）</span></div>
 <pre><code><span class="k">import</span> java.util.concurrent.*;
 
-<span class="c">// 创建自定义线程池（不要用 Executors 工具类，后面会讲为什么）</span>
+<span class="c">// 不要用 Executors 工厂（原因见第 8 站），用 ThreadPoolExecutor 手动建</span>
 <span class="t">ThreadPoolExecutor</span> pool = <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>(
-    <span class="n">2</span>,                            <span class="c">// 核心线程数</span>
-    <span class="n">4</span>,                            <span class="c">// 最大线程数</span>
-    <span class="n">60L</span>, TimeUnit.<span class="n">SECONDS</span>,       <span class="c">// 空闲线程存活时间</span>
-    <span class="k">new</span> <span class="t">LinkedBlockingQueue</span>&lt;&gt;(<span class="n">100</span>), <span class="c">// 任务队列</span>
-    <span class="k">new</span> <span class="t">ThreadPoolExecutor.CallerRunsPolicy</span>()  <span class="c">// 拒绝策略</span>
+    <span class="n">2</span>,                            <span class="c">// corePoolSize    核心线程数</span>
+    <span class="n">4</span>,                            <span class="c">// maximumPoolSize 最大线程数</span>
+    <span class="n">60L</span>, TimeUnit.<span class="n">SECONDS</span>,       <span class="c">// keepAliveTime   非核心线程空闲存活时间</span>
+    <span class="k">new</span> <span class="t">LinkedBlockingQueue</span>&lt;&gt;(<span class="n">100</span>), <span class="c">// workQueue        任务队列（生产建议有界）</span>
+    <span class="k">new</span> <span class="t">NamedThreadFactory</span>(<span class="s">"biz-pool"</span>), <span class="c">// threadFactory  线程工厂（命名，见第 9 站）</span>
+    <span class="k">new</span> <span class="t">ThreadPoolExecutor.CallerRunsPolicy</span>()  <span class="c">// handler         拒绝策略</span>
 );
 
-<span class="c">// 提交 Runnable（无返回值）</span>
-pool.execute(() -> System.out.println(<span class="t">"Runnable 任务"</span>));
+<span class="c">// execute：提交 Runnable，没有返回值</span>
+pool.execute(() -&gt; System.out.println(<span class="s">"Runnable 任务"</span>));
 
-<span class="c">// 提交 Callable（有返回值）</span>
-<span class="t">Future</span>&lt;<span class="t">String</span>&gt; future = pool.submit(() -> {
+<span class="c">// submit：提交 Callable/Runnable，返回 Future 可以拿结果、拿异常</span>
+<span class="t">Future</span>&lt;<span class="t">String</span>&gt; future = pool.submit(() -&gt; {
     Thread.sleep(<span class="n">1000</span>);
-    <span class="k">return</span> <span class="t">"线程池返回的结果"</span>;
+    <span class="k">return</span> <span class="s">"线程池返回的结果"</span>;
 });
 System.out.println(future.get());
 
-<span class="c">// 用完关闭</span>
+<span class="c">// 用完关闭（生产里通常是应用关闭钩子里做两阶段优雅关闭）</span>
 pool.shutdown();</code></pre>
 </div>
 
-<div class="takeaway">
-<div class="takeaway-label">为什么禁用 Executors 工具类</div>
+<p>这一站先记住两个最核心的点，7 大参数的细节和调优公式在《线程池 ThreadPoolExecutor 深挖》那篇展开：</p>
+
+<div class="crack"><div class="crack-label">execute vs submit：一个不给你结果，一个把结果包进 Future</div>
 <ul>
-  <li><code>newFixedThreadPool</code> / <code>newSingleThreadPool</code>：队列长度为 <code>Integer.MAX_VALUE</code>，任务堆积时 OOM</li>
-  <li><code>newCachedThreadPool</code>：最大线程数为 <code>Integer.MAX_VALUE</code>，可能创建过多线程导致 OOM</li>
-  <li><code>newScheduledThreadPool</code>：延迟任务队列无界，同样有 OOM 风险</li>
-  <li>阿里 Java 开发手册明确要求：<strong>使用 ThreadPoolExecutor 手动创建线程池</strong></li>
+  <li><code>execute(Runnable)</code>：只执行，<strong>没有返回值</strong>；任务异常会直接抛给工作线程，处理不当可能被吞掉（该话题详见线程池篇）；</li>
+  <li><code>submit(Callable/Runnable)</code>：返回 <code>Future</code>，异常会被捕获并塞进 Future，等 <code>get()</code> 时以 ExecutionException 抛给你——想拿结果、想优雅处理异常，就用 submit。</li>
+</ul>
+</div>
+
+<div class="formula">
+<strong>线程池收到任务的执行顺序（决策树一句话版）</strong><br/>
+先跑核心线程 → 核心满了进阻塞队列排队 → 队列满了才扩到最大线程 → 还是满就触发拒绝策略
+</div>
+
+<p>注意一个反直觉的点：<strong>线程池不是"任务来了就加线程"，而是优先让任务排队</strong>。核心线程满 → 队列满 → 才创建新线程到最大线程数。很多人以为 maximumPoolSize 是"并发上限"，其实它是"队列也扛不住之后的最后防线"。完整决策树、拒绝策略选型和调优公式，见线程池专题篇。</p>
+
+<div class="takeaway">
+<div class="takeaway-label">本站要点</div>
+<ul>
+  <li>线程池提交是生产默认姿势：execute() 无返回值，submit() 返回 Future 可拿结果/异常；</li>
+  <li>执行顺序一句话：核心线程 → 队列 → 最大线程 → 拒绝策略；</li>
+  <li>7 大参数、决策树、调优公式，见《线程池 ThreadPoolExecutor 深挖》篇；</li>
+  <li>别用 Executors 工厂建池，原因下一站展开。</li>
 </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：CompletableFuture ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>方式五：CompletableFuture.supplyAsync</h2></div>
+<!-- ═══════════════ 第8站：Executors 的坑 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>Executors 工厂：方便，但生产禁用</h2></div>
 
-<p>JDK 8 引入了 <code>CompletableFuture</code>，它是 <code>Future</code> 的全面升级：<strong>非阻塞、可链式组合、支持回调</strong>。</p>
+<p>JDK 5 顺手给了 <code>Executors</code> 工具类，一行代码就能建线程池：<code>Executors.newFixedThreadPool(10)</code>。为什么阿里规约强制禁用？因为它把关键参数藏起来了，而藏起来的默认值恰好都是"毒药"：</p>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>CompletableFutureDemo.java</b></span></div>
-<pre><code><span class="k">import</span> java.util.concurrent.*;
+<table class="nb-table">
+  <thead><tr><th>工厂方法</th><th>队列</th><th>最大线程</th><th>隐患</th></tr></thead>
+  <tbody>
+    <tr><td><code>newFixedThreadPool(n)</code></td><td>LinkedBlockingQueue（<strong>无界</strong>）</td><td>n</td><td>任务无限堆积 → 内存 OOM</td></tr>
+    <tr><td><code>newSingleThreadExecutor()</code></td><td>LinkedBlockingQueue（<strong>无界</strong>）</td><td>1</td><td>同上，单线程串行 + 堆积 OOM</td></tr>
+    <tr><td><code>newCachedThreadPool()</code></td><td>SynchronousQueue</td><td><strong>Integer.MAX_VALUE</strong></td><td>线程无限创建 → 线程爆炸 OOM</td></tr>
+    <tr><td><code>newScheduledThreadPool(n)</code></td><td>DelayedWorkQueue（无界）</td><td>Integer.MAX_VALUE</td><td>延迟任务堆积 + 线程无上限</td></tr>
+  </tbody>
+</table>
 
-<span class="c">// 1. 基本用法：supplyAsync 提交有返回值的任务</span>
-<span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt; cf = <span class="t">CompletableFuture</span>.supplyAsync(() -> {
-    <span class="c">// 默认在 ForkJoinPool.commonPool() 中执行</span>
-    <span class="k">try</span> { Thread.sleep(<span class="n">1000</span>); } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {}
-    <span class="k">return</span> <span class="t">"查询完成"</span>;
-});
-
-<span class="c">// 2. 链式处理：拿到结果后继续转换（非阻塞）</span>
-cf.thenApply(result -> result + <span class="t">"，已处理"</span>)
-  .thenAccept(finalResult -> System.out.println(finalResult))
-  .exceptionally(ex -> { System.out.println(<span class="t">"出错了: "</span> + ex); <span class="k">return null</span>; });
-
-<span class="c">// 3. 组合多个异步任务</span>
-<span class="t">CompletableFuture</span>&lt;<span class="t">Integer</span>&gt; cf1 = <span class="t">CompletableFuture</span>.supplyAsync(() -> <span class="n">10</span>);
-<span class="t">CompletableFuture</span>&lt;<span class="t">Integer</span>&gt; cf2 = <span class="t">CompletableFuture</span>.supplyAsync(() -> <span class="n">20</span>);
-cf1.thenCombine(cf2, (a, b) -> a + b)
-   .thenAccept(sum -> System.out.println(<span class="t">"合计: "</span> + sum));  <span class="c">// 输出 30</span></code></pre>
+<div class="crack"><div class="crack-label">无界队列 vs 线程爆炸，两条 OOM 路径</div>
+<p><strong>无界队列</strong>：fixed 线程池核心线程只有 n 个，任务进来全往无界队列里塞。队列是纯内存结构，塞 1000 万个任务就是 1000 万个对象——内存先爆（OOM），而且任务永远得不到执行，还查不出原因。<strong>线程爆炸</strong>：cached 线程池来一个任务建一个线程，最大线程数是 <code>Integer.MAX_VALUE</code>（约 21 亿），第 1 站那种"10 万线程"事故，用 cached 池一样能复现。</p>
 </div>
 
-<p><code>CompletableFuture</code> 与 <code>Future</code> 的核心对比：</p>
+<p>阿里 Java 开发手册原文：【强制】线程池不允许使用 <code>Executors</code> 去创建，而是通过 <code>ThreadPoolExecutor</code> 的方式，这样的处理方式让写的同学更加明确线程池的运行规则，规避资源耗尽的风险。</p>
+
+<div class="takeaway"><div class="takeaway-label">最佳实践</div>
+<p>生产代码一律 <code>new ThreadPoolExecutor(...)</code> 手动创建，把 7 个参数全部显式写清楚（见第 7 站模板），并用<strong>有界队列</strong>（如 <code>ArrayBlockingQueue</code> 或指定容量的 <code>LinkedBlockingQueue</code>）+ 明确的拒绝策略，让"队列满"这个状态能被感知、被处理，而不是悄悄堆积到 OOM。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第9站：线程工厂与命名 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>生产细节：线程工厂（ThreadFactory）与线程命名规范</h2></div>
+
+<p>这一站是"面试不会单独考、但生产天天用"的加分项：<strong>给线程起名字</strong>。</p>
+
+<p>想象一下排障现场：线上出问题，你 <code>jstack</code> 一下，看到 200 条 <code>Thread-17</code>、<code>Thread-88</code>……完全不知道它们是哪个业务的。而如果线程名叫 <code>order-push-pool-1</code>、<code>metrics-collector-2</code>，一眼就能定位是哪个模块在跑什么。线程池的默认线程工厂只会按 <code>pool-1-thread-1</code> 递增命名，所以生产里几乎都要自定义 <code>ThreadFactory</code>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>NamedThreadFactory.java</b> · 带业务名的线程工厂</span></div>
+<pre><code><span class="k">import</span> java.util.concurrent.*;
+<span class="k">import</span> java.util.concurrent.atomic.*;
+
+<span class="k">public class</span> <span class="t">NamedThreadFactory</span> <span class="k">implements</span> <span class="t">ThreadFactory</span> {
+    <span class="k">private final</span> <span class="t">AtomicInteger</span> seq = <span class="k">new</span> <span class="t">AtomicInteger</span>(<span class="n">1</span>);
+    <span class="k">private final</span> String prefix;
+
+    <span class="k">public</span> <span class="t">NamedThreadFactory</span>(String prefix) {
+        <span class="k">this</span>.prefix = prefix;
+    }
+
+    <span class="k">@Override</span>
+    <span class="k">public</span> <span class="t">Thread</span> newThread(<span class="t">Runnable</span> r) {
+        <span class="t">Thread</span> t = <span class="k">new</span> <span class="t">Thread</span>(r, prefix + <span class="s">"-"</span> + seq.getAndIncrement());
+        t.setDaemon(<span class="k">false</span>);       <span class="c">// 按业务需要设置是否守护线程</span>
+        t.setPriority(<span class="t">Thread</span>.<span class="n">NORM_PRIORITY</span>);
+        <span class="k">return</span> t;
+    }
+}
+
+<span class="c">// 使用：线程池的第五个参数传入</span>
+<span class="t">ThreadPoolExecutor</span> pool = <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>(
+    <span class="n">2</span>, <span class="n">4</span>, <span class="n">60L</span>, TimeUnit.<span class="n">SECONDS</span>,
+    <span class="k">new</span> <span class="t">LinkedBlockingQueue</span>&lt;&gt;(<span class="n">100</span>),
+    <span class="k">new</span> <span class="t">NamedThreadFactory</span>(<span class="s">"order-push"</span>),   <span class="c">// 线程名: order-push-1, order-push-2...</span>
+    <span class="k">new</span> <span class="t">ThreadPoolExecutor.CallerRunsPolicy</span>()
+);</code></pre>
+</div>
+
+<p>命名规范，行业内比较通用的是<strong>"业务模块-具体用途"</strong>：比如订单推送线程池叫 <code>order-push-pool</code>、日志采集叫 <code>log-collector</code>、指标上报叫 <code>metrics-sender</code>。如果项目里引了 Guava，可以直接用 <code>ThreadFactoryBuilder</code> 一行搞定：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Guava 版本</b> · 一行命名</span></div>
+<pre><code><span class="k">import</span> com.google.common.util.concurrent.ThreadFactoryBuilder;
+
+<span class="t">ThreadFactory</span> named = <span class="k">new</span> <span class="t">ThreadFactoryBuilder</span>()
+    .setNameFormat(<span class="s">"order-push-%d"</span>)   <span class="c">// %d 会自动替换为序号</span>
+    .setDaemon(<span class="k">false</span>)
+    .build();</code></pre>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">为什么命名这么重要</div>
+<ul>
+  <li><strong>排障</strong>：jstack / Arthas 一眼认出线程属于哪个业务，不用猜；</li>
+  <li><strong>监控</strong>：按线程名前缀聚合指标，能看清每个池的活跃线程数；</li>
+  <li><strong>协作</strong>：别人接手你的代码，看到线程名就懂了这个池的用途。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第10站：CompletableFuture ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>方式五：CompletableFuture —— runAsync 与 supplyAsync</h2></div>
+
+<p>JDK 8 引入的 <code>CompletableFuture</code> 是 <code>Future</code> 的全面升级：<strong>非阻塞、可链式组合、支持回调（Callback）</strong>。作为"创建异步任务"的方式，它提供了两个静态工厂方法，对应"要不要返回值"两种需求：</p>
+
+<table class="nb-table">
+  <thead><tr><th>方法</th><th>入参</th><th>返回</th><th>场景</th></tr></thead>
+  <tbody>
+    <tr><td><code>runAsync(Runnable)</code></td><td>Runnable（无返回值）</td><td><code>CompletableFuture&lt;Void&gt;</code></td><td>只执行不关心结果：发日志、埋点、异步刷缓存</td></tr>
+    <tr><td><code>supplyAsync(Supplier&lt;U&gt;)</code></td><td>Supplier&lt;U&gt;（有返回值）</td><td><code>CompletableFuture&lt;U&gt;</code></td><td>异步计算要拿结果：并行查询、异步汇总</td></tr>
+  </tbody>
+</table>
+
+<p>两个方法都有带线程池的重载：<code>runAsync(task, executor)</code>、<code>supplyAsync(task, executor)</code>。默认不传时用的是 <code>ForkJoinPool.commonPool()</code>。先看基本用法：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CompletableFutureDemo.java</b> · runAsync 与 supplyAsync</span></div>
+<pre><code><span class="k">import</span> java.util.concurrent.*;
+
+<span class="c">// 1. runAsync：没有返回值，干完拉倒（默认在 ForkJoinPool.commonPool 执行）</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">Void</span>&gt; f1 = <span class="t">CompletableFuture</span>.runAsync(() -&gt; {
+    <span class="c">// 异步刷缓存、写日志之类，不需要结果</span>
+    cache.refresh(<span class="s">"hot-key"</span>);
+});
+
+<span class="c">// 2. supplyAsync：有返回值，像 Callable 一样能拿到结果</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt; f2 = <span class="t">CompletableFuture</span>.supplyAsync(() -&gt; {
+    <span class="k">try</span> { Thread.sleep(<span class="n">1000</span>); } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {}
+    <span class="k">return</span> <span class="s">"查询完成"</span>;
+});
+
+<span class="c">// 3. 拿结果：join() 和 get() 类似，但抛的是非受检的 CompletionException</span>
+System.out.println(f2.join());</code></pre>
+</div>
+
+<div class="think"><div class="think-q">runAsync 和 supplyAsync 怎么选？</div></div>
+
+<div class="crack"><div class="crack-label">一句话选型</div>
+<p>跟 Runnable / Callable 的选择同一个道理：<strong>需要返回值或后续要"接着算"，用 <code>supplyAsync</code>；只是"干一件事、不关心产出"，用 <code>runAsync</code></strong>。另外注意一个细节：无论哪个，<strong>默认线程池都是 <code>ForkJoinPool.commonPool()</code></strong>——它是全 JVM 共享的公共池，并行度默认只有"CPU 核数 - 1"，一旦被某个阻塞任务占满，会影响所有用它的异步代码。所以生产环境必须传自定义线程池，这一点第 12 站会演示。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第11站：CF 链式编排 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>CompletableFuture 强在哪：回调与链式编排</h2></div>
+
+<p>前面说 Future 有三大局限，CompletableFuture 逐个击破。核心思想就一句话：<strong>别用 get() 阻塞等着，把"结果到了之后干什么"提前注册好</strong>——这叫回调（Callback）。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ChainDemo.java</b> · 链式编排（非阻塞）</span></div>
+<pre><code><span class="t">CompletableFuture</span>.supplyAsync(() -&gt; <span class="s">"查询完成"</span>)
+    <span class="c">// 拿到结果后继续转换（有参有返回）</span>
+    .thenApply(result -&gt; result + <span class="s">"，已处理"</span>)
+    <span class="c">// 消费结果，不再返回（有参无返回）</span>
+    .thenAccept(finalResult -&gt; System.out.println(finalResult))
+    <span class="c">// 异常兜底：任何一环抛异常都会走到这里</span>
+    .exceptionally(ex -&gt; { System.out.println(<span class="s">"出错了: "</span> + ex); <span class="k">return null</span>; });
+
+<span class="c">// 组合两个独立的异步任务</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">Integer</span>&gt; cf1 = <span class="t">CompletableFuture</span>.supplyAsync(() -&gt; <span class="n">10</span>);
+<span class="t">CompletableFuture</span>&lt;<span class="t">Integer</span>&gt; cf2 = <span class="t">CompletableFuture</span>.supplyAsync(() -&gt; <span class="n">20</span>);
+cf1.thenCombine(cf2, (a, b) -&gt; a + b)
+   .thenAccept(sum -&gt; System.out.println(<span class="s">"合计: "</span> + sum));  <span class="c">// 30</span></code></pre>
+</div>
+
+<p>这一站点到为止——<code>thenApply / thenAccept / thenCombine / allOf / anyOf</code> 的完整对比、<code>thenCompose</code> 扁平化、以及从"回调地狱"到"流式编排"的演进，是《CompletableFuture 异步编程》那篇的专题，这里只记住它与 Future 的本质差异：</p>
 
 <table class="nb-table">
   <thead>
@@ -241,72 +584,143 @@ cf1.thenCombine(cf2, (a, b) -> a + b)
 </table>
 
 <div class="formula">
-<strong>生产建议</strong><br/>
-<code>supplyAsync</code> 默认使用 <code>ForkJoinPool.commonPool()</code>，生产环境应传入<strong>自定义线程池</strong>：<br/>
-<code>CompletableFuture.supplyAsync(() -> doWork(), myExecutor);</code>
+<strong>生产铁律</strong><br/>
+<code>supplyAsync</code> / <code>runAsync</code> 默认使用 <code>ForkJoinPool.commonPool()</code>，生产必须传<strong>自定义线程池</strong>：<br/>
+<code>CompletableFuture.supplyAsync(() -&gt; doWork(), myExecutor);</code>
 </div>
 </section>
 
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>五种方式全景对比</h2></div>
+<!-- ═══════════════ 第12站：完整示例 ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>一个需求两种写法：Future 时代 vs CompletableFuture 时代</h2></div>
 
-<p>让我们用一张表把五种方式放在一起看：</p>
+<p>用一个真实常见的需求串起全文：<strong>商品详情页要并行查询价格、库存、评价三个数据源，最后汇总展示，并且整体不能超过 3 秒</strong>。</p>
+
+<p>先看"Future 时代"的写法（JDK 5 风格，线程池 submit + get 超时）：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>FutureStyle.java</b> · 线程池 + Future</span></div>
+<pre><code><span class="t">ThreadPoolExecutor</span> pool = buildPool(<span class="s">"detail-query"</span>);   <span class="c">// 自定义线程池</span>
+
+<span class="c">// 三个查询并行提交，拿到三个 Future</span>
+<span class="t">Future</span>&lt;<span class="t">BigDecimal</span>&gt; priceF = pool.submit(() -&gt; queryPrice(id));
+<span class="t">Future</span>&lt;<span class="t">Integer</span>&gt;  stockF = pool.submit(() -&gt; queryStock(id));
+<span class="t">Future</span>&lt;<span class="t">String</span>&gt;  reviewF = pool.submit(() -&gt; queryReview(id));
+
+<span class="c">// 逐个限时取结果：任何一个超过 1 秒都不等它</span>
+<span class="t">BigDecimal</span> price  = priceF.get(<span class="n">1</span>, TimeUnit.<span class="n">SECONDS</span>);
+<span class="t">Integer</span>   stock  = stockF.get(<span class="n">1</span>, TimeUnit.<span class="n">SECONDS</span>);
+String     review = reviewF.get(<span class="n">1</span>, TimeUnit.<span class="n">SECONDS</span>);
+<span class="c">// 问题：三个 get 是串行阻塞的！price 等 1 秒、stock 又等 1 秒……最坏总耗时 3 秒相加</span></code></pre>
+</div>
+
+<p>注意上面的坑：三个 <code>get()</code> 是<strong>依次阻塞</strong>的，最坏情况总耗时是 3 个 1 秒相加，而不是并行 1 秒。Future 时代想真正并行等待，得靠 CountDownLatch 之类的辅助类硬凑，代码越写越绕。</p>
+
+<p>再看 CompletableFuture 时代（JDK 8 风格）：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>CompletableStyle.java</b> · CompletableFuture 并行 + 汇总 + 超时</span></div>
+<pre><code><span class="c">// pool：同上一段的自定义线程池（生产必须传，别用 commonPool）</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">BigDecimal</span>&gt; priceF = <span class="t">CompletableFuture</span>.supplyAsync(() -&gt; queryPrice(id), pool);
+<span class="t">CompletableFuture</span>&lt;<span class="t">Integer</span>&gt;  stockF = <span class="t">CompletableFuture</span>.supplyAsync(() -&gt; queryStock(id), pool);
+<span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt;  reviewF = <span class="t">CompletableFuture</span>.supplyAsync(() -&gt; queryReview(id), pool);
+
+<span class="c">// 三个任务并发执行，全部完成后触发回调（真正的并行等待）</span>
+<span class="t">CompletableFuture</span>.allOf(priceF, stockF, reviewF)
+    .thenApply(v -&gt; <span class="s">"价格 "</span> + priceF.join() + <span class="s">"，库存 "</span> + stockF.join()
+                 + <span class="s">"，评价 "</span> + reviewF.join())
+    .orTimeout(<span class="n">3</span>, TimeUnit.<span class="n">SECONDS</span>)   <span class="c">// 整体超时 3 秒，到点抛 TimeoutException</span>
+    .exceptionally(ex -&gt; <span class="s">"查询超时，返回兜底数据"</span>)
+    .thenAccept(System.out::println);</code></pre>
+</div>
+
+<p>同样一个需求，后者把"并行提交、全部等待、超时兜底、异常降级"四个诉求用一条链表达清楚，可读性高一个量级。这就是 CompletableFuture 成为现代 Java 异步标配的原因。</p>
+
+<div class="takeaway"><div class="takeaway-label">落地要点</div>
+<ul>
+  <li>并行任务 <strong>永远传自定义线程池</strong>，别用 commonPool（并行度只有核数 - 1，还被全 JVM 共享）；</li>
+  <li>涉及外部调用，<strong>必加超时</strong>：CompletableFuture 用 <code>orTimeout</code> / <code>completeOnTimeout</code>（注意：这俩是 JDK 9+ 才提供的，JDK 8 上要么用 <code>get(timeout, unit)</code> + 手动兜底，要么引入第三方实现）；Future 则用 <code>get(timeout, unit)</code>；</li>
+  <li>用 <code>join()</code> 还是 <code>get()</code>？join 抛非受检的 CompletionException（代码清爽），get 抛受检异常（调用方必须处理）。生产里如果异常有统一兜底，常用 join。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第13站：全景对比 ═══════════════ -->
+<section class="station reveal" id="s13">
+<div class="station-head"><span class="station-no">第 13 站</span><h2>五种方式全景对比：一张表回答面试题</h2></div>
+
+<p>把五种方式放一起，按面试官最关心的维度对比：</p>
 
 <table class="nb-table">
   <thead>
     <tr>
       <th>方式</th>
-      <th>返回值</th>
-      <th>抛异常</th>
-      <th>可复用</th>
-      <th>生产可用</th>
+      <th>能否返回值</th>
+      <th>能否抛受检异常</th>
+      <th>是否复用线程</th>
+      <th>适用场景</th>
       <th>引入版本</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td>继承 Thread</td>
+      <td>① 继承 Thread</td>
       <td>否</td>
       <td>否</td>
-      <td>否（单继承）</td>
-      <td>不推荐</td>
+      <td>否（一次性）</td>
+      <td>教学 Demo；生产不推荐（单继承 + 耦合）</td>
       <td>JDK 1.0</td>
     </tr>
     <tr>
-      <td>实现 Runnable</td>
+      <td>② 实现 Runnable</td>
       <td>否</td>
       <td>否</td>
-      <td>是</td>
-      <td>简单场景</td>
+      <td>否（需配合 Thread）</td>
+      <td>简单异步任务；配合线程池 execute() 使用</td>
       <td>JDK 1.0</td>
     </tr>
     <tr>
-      <td>Callable + Future</td>
+      <td>③ Callable + FutureTask</td>
       <td>是</td>
       <td>是</td>
-      <td>是</td>
-      <td>需返回值时</td>
+      <td>否（一次性，需配合 Thread/线程池）</td>
+      <td>JDK 8 之前"要结果"的异步任务；理解 Future 机制</td>
       <td>JDK 5</td>
     </tr>
     <tr>
-      <td>线程池提交</td>
-      <td>可选</td>
-      <td>可选</td>
-      <td>是</td>
-      <td>推荐</td>
+      <td>④ 线程池提交（execute/submit）</td>
+      <td>execute 否 / submit 是</td>
+      <td>submit 可捕获</td>
+      <td><strong>是（核心价值）</strong></td>
+      <td>生产标配：高频任务、资源受限、需要管理监控</td>
       <td>JDK 5</td>
     </tr>
     <tr>
-      <td>CompletableFuture</td>
-      <td>是</td>
-      <td>回调处理</td>
-      <td>是</td>
-      <td>强烈推荐</td>
+      <td>⑤ CompletableFuture.supplyAsync</td>
+      <td>是（runAsync 否）</td>
+      <td>是（exceptionally 兜底）</td>
+      <td>是（配合线程池）</td>
+      <td>复杂异步编排：并行聚合、链式回调、超时降级</td>
       <td>JDK 8</td>
     </tr>
   </tbody>
 </table>
+
+<p>三条结论，背下来面试就稳了：</p>
+
+<div class="formula">
+<strong>选型口诀</strong><br/>
+1. <strong>单任务、要结果、JDK 5~7 老项目</strong> → Callable + 线程池 submit<br/>
+2. <strong>多任务并行、要编排、JDK 8+</strong> → CompletableFuture + 自定义线程池<br/>
+3. <strong>任何"重复提交任务"的生产场景</strong> → 线程池（永远别裸 new Thread）
+</div>
+</section>
+
+<!-- ═══════════════ 第14站：选型决策树 ═══════════════ -->
+<section class="station reveal" id="s14">
+<div class="station-head"><span class="station-no">第 14 站</span><h2>选型决策树：一张图看清怎么选</h2></div>
+
+<p>把上面的口诀画成决策树，面试时照着这个思路说，逻辑就是完整的：</p>
 
 <figure class="fig">
 <svg viewBox="0 0 780 380" role="img" aria-label="线程创建方式选型决策图">
@@ -379,27 +793,102 @@ cf1.thenCombine(cf2, (a, b) -> a + b)
   <line x1="390" y1="330" x2="390" y2="340" stroke="#B85450" stroke-width="1" stroke-dasharray="3,2"/>
   <text x="425" y="335" font-size="9" fill="#B85450">单继承限制，不推荐</text>
 </svg>
-<figcaption><span class="fig-no">图 1</span>根据是否需要返回值、是否高并发、是否需要链式组合来选择线程创建方式</figcaption>
+<figcaption><span class="fig-no">图 2</span>根据是否需要返回值、是否高并发、是否需要链式组合来选择线程创建方式</figcaption>
 </figure>
 
 <div class="recap">
-<h3>面试回答模板</h3>
-<p><strong>Q：Java 有几种创建线程的方式？</strong></p>
-<p>"严格来说有五种常用方式。最基础的是继承 Thread 类和实现 Runnable 接口，但 Thread 受限于单继承，所以实际开发中更倾向 Runnable。JDK 5 引入 Callable + Future，可以获取返回值和异常。生产环境中，我们通常通过 ThreadPoolExecutor 提交任务，避免反复创建销毁线程。JDK 8 之后推荐用 CompletableFuture.supplyAsync，它支持链式调用和非阻塞回调，适合复杂的异步编排场景。总结就是：简单任务用 Runnable，生产环境用线程池，复杂异步用 CompletableFuture。"</p>
-</div>
-
-<div class="takeaway">
-<div class="takeaway-label">本篇核心要点</div>
+<h3>决策逻辑一句话</h3>
 <ul>
-  <li><strong>继承 Thread</strong>：最简单但受单继承限制，实际项目不推荐</li>
-  <li><strong>Runnable</strong>：解耦任务与线程，Lambda 写法简洁，适合简单场景</li>
-  <li><strong>Callable + Future</strong>：支持返回值和异常，<code>get()</code> 阻塞等待</li>
-  <li><strong>线程池</strong>：生产标准做法，复用线程、控制并发、防止 OOM</li>
-  <li><strong>CompletableFuture</strong>：JDK 8 引入，非阻塞链式组合，现代异步编程首选</li>
+  <li>不需要返回值 → 看并发量：低并发简单任务用 Runnable，生产场景一律线程池 execute；</li>
+  <li>需要返回值 → 看编排复杂度：简单"提交-等待"用 Callable + 线程池 submit，复杂链式编排用 CompletableFuture；</li>
+  <li>继承 Thread 全程淘汰。</li>
 </ul>
 </div>
 </section>
 
+<!-- ═══════════════ 第15站：面试总结 ═══════════════ -->
+<section class="station reveal" id="s15">
+<div class="station-head"><span class="station-no">第 15 站</span><h2>面试 30 秒总结与连环追问</h2></div>
+
+<div class="recap">
+<h3>30 秒版标准答案</h3>
+<p><strong>Q：Java 有几种创建线程的方式？</strong></p>
+<p>"严格来说有五种：最基础的是继承 Thread 类和实现 Runnable 接口，但 Thread 受单继承限制，实际开发倾向 Runnable；JDK 5 引入 Callable + FutureTask，可以获取返回值和异常，FutureTask 实现了 RunnableFuture，既是 Runnable 又是 Future；生产环境我们通过 ThreadPoolExecutor 提交任务，复用线程、避免反复创建销毁，execute 无返回值、submit 返回 Future；JDK 8 之后推荐 CompletableFuture.supplyAsync，它支持非阻塞回调和链式编排，适合复杂异步场景。总结：简单任务用 Runnable，生产用线程池，复杂异步编排用 CompletableFuture，永远不要直接 new Thread。"</p>
+</div>
+
+<p>面试官大概率会顺着你的回答连环追问，提前备好：</p>
+
+<table class="nb-table">
+  <thead><tr><th>追问</th><th>参考答案</th></tr></thead>
+  <tbody>
+    <tr><td>start() 调用两次会怎样？</td><td>抛 <code>IllegalThreadStateException</code>——线程已启动，不能二次 start</td></tr>
+    <tr><td>直接调用 run() 会怎样？</td><td>不创建新线程，在当前线程（如 main）里同步执行，等于普通方法调用</td></tr>
+    <tr><td>为什么 Runnable 的 run() 不能抛受检异常？</td><td>接口签名 <code>void run()</code> 没有 throws；受检异常只能内部处理</td></tr>
+    <tr><td>FutureTask 是 Runnable 还是 Future？</td><td>都是——它实现 RunnableFuture，RunnableFuture 继承 Runnable 和 Future</td></tr>
+    <tr><td>Future.get() 一直等不到结果会怎样？</td><td>永久阻塞；必须用 <code>get(timeout, unit)</code> 限时等待并处理 TimeoutException</td></tr>
+    <tr><td>execute 和 submit 的区别？</td><td>execute 无返回值、异常可能被吞；submit 返回 Future，异常在 get() 时以 ExecutionException 抛出</td></tr>
+    <tr><td>为什么禁止用 Executors 建线程池？</td><td>默认队列无界（OOM）或最大线程无上限（线程爆炸）；阿里规约要求手动 ThreadPoolExecutor + 有界队列</td></tr>
+    <tr><td>runAsync 和 supplyAsync 的区别？</td><td>前者无返回值（Runnable），后者有返回值（Supplier）；生产都要传自定义线程池</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第16站：虚拟线程 ═══════════════ -->
+<section class="station reveal" id="s16">
+<div class="station-head"><span class="station-no">第 16 站</span><h2>番外：JDK 21 虚拟线程 —— 线程创建的新生态</h2></div>
+
+<p>2023 年 9 月，JDK 21（LTS）正式发布了<strong>虚拟线程（Virtual Thread，Project Loom 的成果）</strong>，这是"线程创建"这个主题上十年一遇的大变化，面试聊到前沿可以加分。</p>
+
+<p>前面说过：平台线程（Platform Thread）与操作系统线程 1:1，所以创建 10 万线程会把机器打爆。虚拟线程的思路是<strong>让 JVM 自己调度海量轻量级线程，挂载在少量平台线程（载体线程）上</strong>——创建开销极小，百万级虚拟线程是常态。创建方式：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>VirtualThreadDemo.java</b> · JDK 21 虚拟线程</span></div>
+<pre><code><span class="c">// 方式一：工厂方法，等价于"每条虚拟线程跑一个 Runnable"</span>
+<span class="t">Thread</span> vt = <span class="t">Thread</span>.ofVirtual().name(<span class="s">"vt-1"</span>).start(() -&gt; doWork());
+
+<span class="c">// 方式二：配合 Executors 新工厂（虚拟线程版"线程池"，几乎无限量）</span>
+<span class="k">try</span> (<span class="t">ExecutorService</span> pool = Executors.newVirtualThreadPerTaskExecutor()) {
+    pool.submit(() -&gt; doWork());
+    pool.submit(() -&gt; doWork());
+}   <span class="c">// try-with-resources 关闭时会等所有任务结束（JDK 19+ 支持）</span></code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">虚拟线程解决了什么、没解决什么</div>
+<ul>
+  <li><strong>解决</strong>：IO 密集 + 阻塞多的任务（HTTP 调用、RPC、JDBC），以前要手调线程池大小，现在虚拟线程"要多少有多少"，阻塞不再浪费平台线程；</li>
+  <li><strong>没解决</strong>：CPU 密集计算不会更快（还是那几核）；synchronized 阻塞仍可能钉住载体线程（需要把 synchronized 换成 ReentrantLock 等）；共享可变状态的线程安全问题一个都没少；</li>
+  <li><strong>迁移注意</strong>：ThreadLocal 在百万虚拟线程下开销被放大，官方建议谨慎使用。</li>
+</ul>
+</div>
+
+<p>一句话定位：虚拟线程是"创建线程"的终极形态——<strong>把线程从稀缺资源变成廉价商品</strong>，但本文讲的选型思路（任务与执行分离、结果怎么拿、异常怎么传）依然适用，只是把"线程池大小怎么调"这个问题省掉了。</p>
+</section>
+
+<!-- ═══════════════ 总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
+
+<div class="recap"><h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>五种方式</strong>：继承 Thread（单继承、耦合，不推荐）→ 实现 Runnable（任务与线程解耦，简单场景）→ Callable + FutureTask（有返回值、能抛异常，FutureTask 实现 RunnableFuture）→ 线程池提交（复用、上限、管理，生产标配）→ CompletableFuture.supplyAsync（非阻塞回调、链式编排，现代异步首选）；</li>
+  <li><strong>start() vs run()</strong>：start() 通过 native start0() 创建 OS 线程并回调 run()，只能调一次（否则 IllegalThreadStateException）；直接调 run() 只是当前线程里同步执行；</li>
+  <li><strong>Callable vs Runnable</strong>：有无返回值、能否抛受检异常；Future 的 get() 阻塞、get(timeout) 超时抛 TimeoutException、isDone() 不等于成功、ExecutionException 里的 getCause() 才是真异常；</li>
+  <li><strong>为什么别 new Thread</strong>：创建销毁开销大、无法复用、数量无上限、无法统一管理与监控 → 交给线程池（execute 无返回值 / submit 返回 Future）；</li>
+  <li><strong>runAsync vs supplyAsync</strong>：无返回值 vs 有返回值；两者默认 commonPool，生产必须传自定义线程池并加超时；</li>
+  <li><strong>生产规范</strong>：Executors 工厂禁用（无界队列/线程无上限）、ThreadFactory 命名（jstack 可读）、异常与超时兜底、JDK 21 虚拟线程是"线程廉价化"的新方向。</li>
+</ul>
+</div>
+
+<div class="recap"><h3>一句话总结</h3>
+<p>创建线程的演进史，就是一部"<strong>把线程从'一次性消耗品'变成'可复用资源'，再把'手动等待'变成'自动回调'</strong>"的历史：new Thread 是最初级的"要什么自己造"，线程池是工程化的"造好了按需复用"，CompletableFuture 是声明式的"我要什么你异步算好告诉我"，而虚拟线程则是把"造线程"这个成本本身降到了零。</p>
+</div>
+
+<p style="margin-top:28px;text-align:center;font-size:18px;font-weight:700;color:var(--ink)">
+  👉 下一篇预告：《Java 学习笔记 · 卷二》线程状态与转换 —— 6 种状态、状态机与 jstack 实战。
+</p>
+</section>
+
 </main>
+
 </body>
 </html>

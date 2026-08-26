@@ -12,7 +12,7 @@
 <section class="station reveal" id="s1">
 <div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：你知道 Java 里的锁底层是怎么实现的吗？</h2></div>
 <div class="think"><div class="think-q">"synchronized 你说了 JVM 层面的 Monitor，那 ReentrantLock 呢？CountDownLatch、Semaphore 底层又是什么？它们之间有没有共通的东西？" —— 面试官想考察的不是某个 API 用法，而是你对 java.util.concurrent 底层框架的理解深度。</div></div>
-<p>在 <code>java.util.concurrent</code>（JUC）包中，几乎所有同步工具背后都站着同一个"幕后大佬"——<strong>AQS（AbstractQueuedSynchronizer）</strong>。这个由并发大师 Doug Lea 设计的抽象框架，是整个 JUC 锁体系的基石：</p>
+<p>在 <code>java.util.concurrent</code>（JUC）包中，几乎所有同步工具背后都站着同一个"幕后大佬"——<strong>AQS（AbstractQueuedSynchronizer，抽象队列同步器）</strong>。这个由并发大师 Doug Lea 设计的抽象框架，是整个 JUC 锁体系的基石：</p>
 <ul>
   <li><strong>ReentrantLock</strong> —— 可重入的独占锁，AQS 最经典的实现</li>
   <li><strong>CountDownLatch</strong> —— 倒计数器，state 从 N 递减到 0 时释放所有等待线程</li>
@@ -22,7 +22,7 @@
 </ul>
 <p>理解 AQS = 理解 JUC 的一半。核心思想极其精炼：</p>
 <div class="formula"><strong>AQS 核心公式</strong><br/>一个 volatile int state（同步状态） + 一条 FIFO 双向队列（CLH 变体） + 模板方法模式（子类重写 tryAcquire / tryRelease）</div>
-<p>本文以 ReentrantLock 为主线，从 AQS 数据结构讲起，逐行拆解 lock()、unlock()、公平/非公平、Condition 全流程，最后横向串联其他 AQS 工具。</p>
+<p>本文以 ReentrantLock 为主线，先用一个「餐厅排号」类比把整套机制串起来，再逐行拆解 lock()、unlock()、公平/非公平、Condition 全流程，最后横向串联其他 AQS 工具和生产落地要点。</p>
 </section>
 
 <!-- ═══════════════ 第2站：AQS 核心结构 ═══════════════ -->
@@ -53,7 +53,7 @@
     <span class="k">static final int</span> SIGNAL    = <span class="n">-1</span>;   <span class="c">// 后继需要被 unpark</span>
     <span class="k">static final int</span> CONDITION = <span class="n">-2</span>;   <span class="c">// 在 Condition 队列中</span>
     <span class="k">static final int</span> PROPAGATE = <span class="n">-3</span>;   <span class="c">// 共享模式传播唤醒</span>
-    <span class="k">volatile int</span> waitStatus;
+    <span class="volatile int</span> waitStatus;
     <span class="k">volatile</span> <span class="t">Node</span> prev;       <span class="c">// 前驱（取消时回溯找有效节点）</span>
     <span class="k">volatile</span> <span class="t">Node</span> next;       <span class="c">// 后继（unpark 目标）</span>
     <span class="k">volatile</span> <span class="t">Thread</span> thread;
@@ -100,18 +100,37 @@
 <figcaption><span class="fig-no">图 1</span>AQS 核心结构：volatile state 管理同步状态，CLH 变体队列管理等待线程</figcaption>
 </figure>
 <div class="crack"><div class="crack-label">为什么 state 必须是 volatile？</div>
-<p>state 的修改通过 <code>compareAndSetState()</code> CAS 操作保证原子性，但 volatile 保证了<strong>可见性</strong>：当一个线程 CAS 修改 state 后，其他线程通过普通读（<code>getState()</code>）能立刻看到最新值，而不需要额外加锁。没有 volatile，线程可能读到 CPU 缓存中的旧值。</p>
+<p>state 的修改通过 <code>compareAndSetState()</code> CAS 操作保证原子性，但 volatile 保证了<strong>可见性</strong>：当一个线程 CAS 修改 state 后，其他线程通过普通读（<code>getState()</code>）能立刻看到最新值，而不需要额外加锁。没有 volatile，线程可能读到 CPU 缓存中的旧值。这也呼应了 JMM 篇的结论：<strong>并发工具的正确性 = 原子性（CAS）+ 可见性（volatile）</strong>，一个都不能少。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第3站：CLH 队列 ═══════════════ -->
+<!-- ═══════════════ 第3站：餐厅排号类比 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>CLH 队列：从自旋到 park 的进化</h2></div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>餐厅排号：把 AQS 一次讲透</h2></div>
+<p>在逐行读源码之前，先花三分钟用一个餐厅把整套机制映射一遍——后面每段源码你都能对上图：</p>
+<table class="nb-table">
+  <thead><tr><th>餐厅场景</th><th>AQS 对应</th><th>一句话解释</th></tr></thead>
+  <tbody>
+    <tr><td>「今天还有没有空位」的牌子（0=满，N=还有 N 个）</td><td><code>volatile int state</code></td><td>所有线程都看这块牌子决定自己能不能坐下</td></tr>
+    <tr><td>取号 → 排队 → 等叫号</td><td>CLH 变体队列</td><td>抢不到位置的线程排进 FIFO 队列</td></tr>
+    <tr><td>顾客坐下休息（不是站着原地转圈）</td><td><code>LockSupport.park()</code></td><td>等叫号时线程挂起，不烧 CPU</td></tr>
+    <tr><td>服务员喊号、领位</td><td><code>unpark()</code> + <code>acquireQueued</code></td><td>空位出来后唤醒队首线程去抢</td></tr>
+    <tr><td>每家店的「座位规则」不同：单人桌一家一客 / 卡座可拼桌</td><td><code>tryAcquire / tryAcquireShared</code></td><td>state 的语义由子类定义（独占 vs 共享）</td></tr>
+    <tr><td>领位台（统一管排队、喊号、处理弃号）</td><td>AQS 父类框架</td><td>排队/挂起/唤醒逻辑写一次，所有店复用</td></tr>
+    <tr><td>「等位区」可以开好几个：等包间的、等卡座的分开等</td><td>多个 <code>Condition</code> 队列</td><td>同一把锁可以挂多条独立等待队列，精确唤醒</td></tr>
+  </tbody>
+</table>
+<p>这个类比里最关键的洞察是：<strong>「座位规则」和「排队管理」被彻底分开了</strong>。一家新餐厅开张（新同步工具），只需要定义自己的座位规则（重写 4 个 tryXxx 方法），排队、喊号、处理弃号这些最繁琐最容易出错的活儿，全部交给领位台（AQS 父类）——这就是模板方法模式，第 13 站展开。</p>
+</section>
+
+<!-- ═══════════════ 第4站：CLH 队列 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>CLH 队列：从自旋到 park 的进化</h2></div>
 <p>原始 CLH（Craig, Landin, Hagersten）是一种<strong>自旋锁队列</strong>：每个节点只包含一个 <code>locked</code> 字段，线程通过自旋（<code>while(node.prev.locked)</code>）检查前驱状态。自旋的优点是响应快（无需内核态切换），但在锁竞争激烈的场景下，大量线程持续空转，<strong>CPU 利用率极高但有效吞吐为零</strong>。</p>
 <p>AQS 做了三个关键改造，从根本上解决了自旋锁的缺陷：</p>
 <ul>
   <li><strong>变单向为双向</strong>：增加 <code>prev</code> 指针，用于取消节点时向前回溯跳过已取消的前驱</li>
-  <li><strong>自旋改 park/unpark</strong>：不再忙等，调用 <code>LockSupport.park()</code> 将线程挂起（OS 层面进入 BLOCKED 状态），<code>unpark()</code> 唤醒（恢复到 RUNNABLE）。park/unpark 底层依赖操作系统的 Mutex/Condition 或 Linux 的 futex</li>
+  <li><strong>自旋改 park/unpark</strong>：不再忙等，调用 <code>LockSupport.park()</code> 将线程挂起——注意线程状态进入的是 <strong>WAITING</strong>（等通知），而不是等锁的 BLOCKED；<code>unpark()</code> 唤醒（恢复到 RUNNABLE）。park/unpark 底层依赖操作系统的 Mutex/Condition 或 Linux 的 futex</li>
   <li><strong>增加 waitStatus</strong>：节点携带 SIGNAL、CANCELLED、CONDITION、PROPAGATE 等精细状态，精确控制唤醒时机</li>
 </ul>
 <figure class="fig">
@@ -153,9 +172,9 @@
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：lock() 流程 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>ReentrantLock.lock() 全流程拆解（NonfairSync）</h2></div>
+<!-- ═══════════════ 第5站：lock() 流程 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>ReentrantLock.lock() 全流程拆解（NonfairSync）</h2></div>
 <p>ReentrantLock 默认是<strong>非公平锁</strong>（NonfairSync）。调用 <code>lock()</code> 时的完整流程：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ReentrantLock.NonfairSync</b> · lock()</span></div>
@@ -229,12 +248,50 @@
 <div class="takeaway"><div class="takeaway-label">lock() 关键路径</div>
 <p><code>lock()</code> → CAS(0→1) 成功则直接获得锁；失败 → <code>acquire(1)</code> → <code>tryAcquire</code>（CAS + 重入检查）→ 失败 → <code>addWaiter</code> 入队 → <code>acquireQueued</code> 自旋+park → 被 unpark 后重试 → 成功则将自身设为 head。</p>
 </div>
-<p>除了 <code>lock()</code>，ReentrantLock 还提供两个重要变体：<code>lockInterruptibly()</code> 在等待过程中响应中断（内部调用 <code>acquireInterruptibly</code>，park 后检查中断状态并抛出 InterruptedException）；<code>tryLock(timeout, unit)</code> 支持超时等待（内部调用 <code>tryAcquireNanos</code>，计算 deadline，每次 park 后检查是否超时）。这两个能力是 synchronized 不具备的，也是 ReentrantLock 在实际开发中的核心优势之一。</p>
 </section>
 
-<!-- ═══════════════ 第5站：公平 vs 非公平 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>公平锁 vs 非公平锁：一行代码的差异</h2></div>
+<!-- ═══════════════ 第6站：可重入性 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>可重入性：同一把锁，自己人进来自如</h2></div>
+<div class="think"><div class="think-q">「可重入」三个字人人都会说，但追问一句"为什么需要可重入？"就很少有人能答出场景了。</div></div>
+<p>先看一个没有可重入性会直接死锁的场景：</p>
+<div class="srcbox">
+<div class="srcbox-head">没有可重入性 = 死锁</span>
+<pre><code><span class="k">public void</span> a() {
+    lock.lock();
+    <span class="k">try</span> {
+        b();          <span class="c">// b() 内部还要 lock.lock() —— 同一线程抢自己持有的锁</span>
+    } <span class="k">finally</span> {
+        lock.unlock();
+    }
+}
+<span class="k">public void</span> b() {
+    lock.lock();      <span class="c">// 若锁不可重入：当前线程永远等不到"释放"，死锁</span>
+    <span class="k">try</span> {
+        <span class="c">// ...</span>
+    } <span class="k">finally</span> {
+        lock.unlock();
+    }
+}</code></pre>
+</div>
+<p>递归算法、持有锁的方法调用另一个也加锁的方法——Java 代码里这种嵌套极其常见。可重入性让「同一线程重复加锁」合法化，靠的就是 <code>nonfairTryAcquire()</code> 里那个分支：</p>
+<div class="formula"><strong>可重入的两步账</strong><br/>加锁：owner == 当前线程 → state + 1（不抢 CAS，直接 setState）<br/>解锁：state - 1；<strong>只有减到 0 才真正释放</strong>（清 owner + unpark 后继）</div>
+<div class="srcbox">
+<div class="srcbox-head">重入计数的完整生命周期</span>
+<pre><code>outerThread:  lock.lock();   <span class="c">// state: 0 → 1（CAS 抢占，owner = outerThread）</span>
+outerThread:      lock.lock();  <span class="c">// state: 1 → 2（重入检查通过，owner 还是自己）</span>
+outerThread:      lock.unlock(); <span class="c">// state: 2 → 1 ★ 锁没真正释放，没人被唤醒</span>
+outerThread:  lock.unlock();   <span class="c">// state: 1 → 0 ★ 真正释放，unparkSuccessor 唤醒队首</span></code></pre>
+</div>
+<p>注意第二站源码里的细节：重入分支用的是 <code>setState(nextc)</code> 而不是 CAS——因为只有 owner 自己才会走这个分支改 state，不存在竞争，省掉一次 CAS。<code>unlock()</code> 时的 <code>tryRelease</code> 同样直接 <code>setState</code>，并先校验 <code>Thread.currentThread() == getExclusiveOwnerThread()</code>，不是持有者就抛 <code>IllegalMonitorStateException</code>（线程 A 锁了线程 B 的锁，直接拒绝）。</p>
+<div class="takeaway"><div class="takeaway-label">和 synchronized 的对比</div>
+<p>synchronized 也是可重入的（重入计数存在 monitor 里，JVM 管），行为一致。区别在解锁：synchronized 出代码块自动减计数，ReentrantLock 必须手动 <code>unlock()</code>——少调一次，锁就永远不释放（第 15 站的坑）。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：公平 vs 非公平 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>公平锁 vs 非公平锁：一行代码的差异</h2></div>
 <p>通过构造函数选择模式，默认非公平：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ReentrantLock</b> · 构造函数 + FairSync.tryAcquire()</span></div>
@@ -274,7 +331,7 @@
   <tbody>
     <tr><td><strong>lock() 第一步</strong></td><td>无条件 CAS(0→1)，直接抢锁</td><td>先 hasQueuedPredecessors()，没人排队才 CAS</td></tr>
     <tr><td><strong>吞吐量</strong></td><td>高（减少 park/unpark 上下文切换）</td><td>较低（严格按序，即使锁刚释放也排队）</td></tr>
-    <tr><td><strong>饥饿风险</strong></td><td>存在（某些线程可能长期抢不到）</td><td>不存在（FIFO 保证公平）</td></tr>
+    <tr><td><strong>饥饿风险</strong></td><td>存在（某些线程可能长期抢不到）</td><td>基本没有（FIFO 保证公平）</td></tr>
     <tr><td><strong>适用场景</strong></td><td>绝大多数场景（默认选择）</td><td>资源分配需严格公平（订单处理、任务调度）</td></tr>
   </tbody>
 </table>
@@ -284,14 +341,70 @@
   <li><strong>非公平</strong>：B 直接 CAS(0→1) 成功，立刻执行。省去 park → unpark → 调度 → 恢复的全部开销</li>
   <li><strong>公平</strong>：B 发现队列中有线程 C，必须入队。最终 C 被 unpark → 调度 → 获锁 → 释放 → 再 unpark B，多一次完整上下文切换</li>
 </ul>
+<p>还要补一句常被忽略的：非公平的「插队」是<strong>尽力而为</strong>——B 只是多了一次 CAS 机会，抢不到照样排队，不会一直插到系统崩溃；而公平锁也并非「绝对无饥饿」，它保证的是请求顺序，唤醒后仍要竞争。面试时说清「非公平 ≠ 乱来，公平 ≠ 绝对」，区分度立刻拉满。</p>
 <div class="takeaway"><div class="takeaway-label">面试回答要点</div>
 <p>"公平和非公平的区别在于 tryAcquire 中是否调用 hasQueuedPredecessors()。非公平允许刚到的线程直接 CAS 抢锁，减少 park/unpark 开销，吞吐量更高；缺点是可能饥饿。公平严格按 FIFO，保证不饥饿但性能较低。绝大多数场景用非公平即可。"</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：unlock() ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>unlock() 流程：释放锁与唤醒后继</h2></div>
+<!-- ═══════════════ 第8站：可中断 / 超时 / 非阻塞 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>lockInterruptibly / tryLock：synchronized 给不了的能力</h2></div>
+<p><code>lock()</code> 一旦调用就是「死等」——等多久不知道，中断信号也照单不拒（只是最终补个标记）。生产里经常需要更灵活的控制，ReentrantLock 给出三个变体：</p>
+<div class="srcbox">
+<div class="srcbox-head">三种变体 + 典型用法</span>
+<pre><code><span class="c">// ① 可中断：等待锁的过程中响应中断（内部 acquireInterruptibly，</span>
+<span class="c">//    park 后检查中断状态并抛 InterruptedException）</span>
+<span class="k">try</span> {
+    lock.lockInterruptibly();
+} <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {
+    <span class="t">Thread</span>.currentThread().interrupt();  <span class="c">// 惯例：恢复中断标记，交给上层决策</span>
+    <span class="k">return</span>;                              <span class="c">// 本轮不抢了（比如任务已被取消）</span>
+}
+<span class="k">try</span> {
+    <span class="c">// ...临界区</span>
+} <span class="k">finally</span> {
+    lock.unlock();
+}
+
+<span class="c">// ② 超时：最多等 N 秒，抢不到就走兜底</span>
+<span class="k">if</span> (lock.tryLock(<span class="n">1</span>, <span class="t">TimeUnit</span>.SECONDS)) {
+    <span class="k">try</span> {
+        <span class="c">// ...临界区</span>
+    } <span class="k">finally</span> {
+        lock.unlock();
+    }
+} <span class="k">else</span> {
+    log.warn(<span class="t">"抢锁超时，走降级逻辑"</span>);
+    <span class="c">// 返回缓存 / 降级数据 / 交给重试队列</span>
+}
+
+<span class="c">// ③ 非阻塞：抢到就干，抢不到立刻走人</span>
+<span class="k">if</span> (lock.tryLock()) {
+    <span class="k">try</span> {
+        <span class="c">// ...临界区</span>
+    } <span class="k">finally</span> {
+        lock.unlock();
+    }
+}</code></pre>
+</div>
+<table class="nb-table">
+  <thead><tr><th>方法</th><th>等不到锁时</th><th>响应中断</th><th>典型场景</th></tr></thead>
+  <tbody>
+    <tr><td><code>lock()</code></td><td>无限期等待</td><td>不响应（事后补标记）</td><td>必须拿到锁才能干，且任务可无限等</td></tr>
+    <tr><td><code>lockInterruptibly()</code></td><td>无限期等待，但可被中断</td><td>响应，抛 InterruptedException</td><td>可取消的长任务（订单履约、批处理）</td></tr>
+    <tr><td><code>tryLock(timeout, unit)</code></td><td>超时放弃</td><td>响应</td><td>有兜底策略的抢锁（缓存刷新、分布式协调）</td></tr>
+    <tr><td><code>tryLock()</code></td><td>立刻放弃</td><td>不等待</td><td>乐观尝试：行就行，不行走别的路径</td></tr>
+  </tbody>
+</table>
+<div class="crack"><div class="crack-label">为什么这是 ReentrantLock 相对 synchronized 的核心优势</div>
+<p>synchronized 的等待是「黑箱等待」：进去就要等，等不等到、等多久，业务代码完全无法干预。而「可中断 + 可超时」让锁等待变成<strong>业务流程的一部分</strong>——可以被取消、可以设上限、可以降级。凡是「锁等待可能很长」或「任务生命周期受外部控制」的场景（MQ 消费、定时任务、用户可取消的操作），都应该优先想到这三个变体。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第9站：unlock() ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>unlock() 流程：释放锁与唤醒后继</h2></div>
 <p><code>unlock()</code> 委托给 AQS 的 <code>release()</code> 模板方法：</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ReentrantLock + AQS</b> · unlock 全流程</span></div>
@@ -342,9 +455,84 @@
 </div>
 </section>
 
-<!-- ═══════════════ 第7站：Condition ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>Condition 条件队列：两条队列的协作</h2></div>
+<!-- ═══════════════ 第10站：acquire/release 全景图 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>acquire / release 全景：一张图串起前后五站</h2></div>
+<p>前面五站把 lock 和 unlock 拆开讲了，这一站把两条路径合成一张图。面试时能徒手画出这张图，AQS 就算过关了：</p>
+<figure class="fig">
+<svg viewBox="0 0 740 400" role="img" aria-label="acquire/release 全流程">
+  <defs><marker id="arr6" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker><marker id="arr7" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker></defs>
+  <text x="370" y="22" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">AQS 独占锁：获取与释放全景</text>
+  <rect x="20" y="45" width="700" height="160" rx="8" fill="none" stroke="#3E6B8F" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="40" y="65" font-size="12" fill="#3E6B8F" font-weight="700">获取路径 acquire(arg)</text>
+  <rect x="45" y="85" width="120" height="46" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="105" y="104" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">tryAcquire</text>
+  <text x="105" y="120" text-anchor="middle" font-size="9" fill="#8C8676">CAS / 重入检查</text>
+  <rect x="235" y="85" width="120" height="46" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="295" y="104" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">addWaiter+enq</text>
+  <text x="295" y="120" text-anchor="middle" font-size="9" fill="#8C8676">CAS 入队尾</text>
+  <rect x="425" y="85" width="120" height="46" rx="6" fill="#fff" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="485" y="104" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">acquireQueued</text>
+  <text x="485" y="120" text-anchor="middle" font-size="9" fill="#8C8676">前驱==head? 再试</text>
+  <rect x="610" y="85" width="95" height="46" rx="6" fill="#3E6B8F" opacity="0.15" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="657" y="104" text-anchor="middle" font-size="11" fill="#3E6B8F" font-weight="700">park</text>
+  <text x="657" y="120" text-anchor="middle" font-size="9" fill="#3E6B8F">WAITING</text>
+  <line x1="165" y1="108" x2="233" y2="108" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr6)"/>
+  <text x="199" y="100" text-anchor="middle" font-size="9" fill="#C2410C">失败</text>
+  <line x1="355" y1="108" x2="423" y2="108" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr6)"/>
+  <line x1="545" y1="108" x2="608" y2="108" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr6)"/>
+  <text x="576" y="100" text-anchor="middle" font-size="9" fill="#3E6B8F">该睡了</text>
+  <path d="M657,131 L657,168 Q657,180 645,180 L120,180 Q105,180 105,165 L105,133" fill="none" stroke="#3E6B8F" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr6)"/>
+  <text x="380" y="172" text-anchor="middle" font-size="10" fill="#3E6B8F">unpark 后回到 tryAcquire 重试（被中断则补标记后返回）</text>
+  <rect x="45" y="225" width="660" height="36" rx="6" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="375" y="248" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">成功：setHead(node) —— 持有锁的线程节点成为新哨兵，旧哨兵 next=null 帮助 GC</text>
+  <rect x="20" y="285" width="700" height="95" rx="8" fill="none" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="40" y="305" font-size="12" fill="#C2410C" font-weight="700">释放路径 release(arg)</text>
+  <rect x="45" y="320" width="130" height="44" rx="6" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="110" y="338" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">tryRelease</text>
+  <text x="110" y="354" text-anchor="middle" font-size="9" fill="#8C8676">state-1，校验 owner</text>
+  <rect x="265" y="320" width="150" height="44" rx="6" fill="#fff" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="340" y="338" text-anchor="middle" font-size="11" fill="#1C1C1C" font-weight="600">state 减到 0?</text>
+  <text x="340" y="354" text-anchor="middle" font-size="9" fill="#8C8676">重入未耗尽则到此为止</text>
+  <rect x="505" y="320" width="170" height="44" rx="6" fill="#C2410C" opacity="0.15" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="590" y="338" text-anchor="middle" font-size="11" fill="#C2410C" font-weight="700">unparkSuccessor</text>
+  <text x="590" y="354" text-anchor="middle" font-size="9" fill="#C2410C">从 tail 往前找有效节点</text>
+  <line x1="175" y1="342" x2="263" y2="342" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr7)"/>
+  <line x1="415" y1="342" x2="503" y2="342" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr7)"/>
+  <text x="458" y="334" text-anchor="middle" font-size="9" fill="#C2410C">是</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span>独占锁 acquire / release 全景：获取失败入队 park，释放归零唤醒后继</figcaption>
+</figure>
+<div class="think"><div class="think-q">为什么被唤醒的线程不能直接认为「锁是我的」？</div>
+<p>unpark 只是「你被叫到号了，去抢」——被唤醒的线程要回到 <code>acquireQueued</code> 循环里重新 <code>tryAcquire</code>。因为 unpark 和它实际被调度执行之间有延迟，这期间锁可能已被别人抢走（比如释放方 unpark 了队首，队首却还没跑起来，而另一个新来的线程非公平 CAS 抢成功了）。<strong>park/unpark 是「唤醒」不是「授予」，锁永远靠竞争获得</strong>——这是 AQS 和「信号量式直接分配」的本质区别。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第11站：waitStatus 四状态 ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>waitStatus 四状态：每个节点头上的「小纸条」</h2></div>
+<p>队列节点上的 <code>waitStatus</code> 是每个节点携带的状态标记，面试最爱考「SIGNAL 是谁的状态」。一张表说清：</p>
+<table class="nb-table">
+  <thead><tr><th>状态</th><th>值</th><th>含义</th><th>谁在什么时候写它</th></tr></thead>
+  <tbody>
+    <tr><td><code>0</code></td><td>0</td><td>初始值；tail 节点默认 0；head 哨兵成功后置 0</td><td>节点创建时</td></tr>
+    <tr><td><code>SIGNAL</code></td><td>-1</td><td>「我释放锁时会 unpark 你」——<strong>写在前驱节点上，给后继看的承诺</strong></td><td>后继入队/获取失败时，CAS 到前驱上</td></tr>
+    <tr><td><code>CANCELLED</code></td><td>1</td><td>节点已取消（被中断、超时、取消），必须被后续操作跳过</td><td><code>cancelAcquire()</code></td></tr>
+    <tr><td><code>CONDITION</code></td><td>-2</td><td>节点此刻在 Condition 条件队列里，不在 sync 队列</td><td><code>await()</code> 加入条件队列时</td></tr>
+    <tr><td><code>PROPAGATE</code></td><td>-3</td><td>共享模式专用：「这次释放的唤醒已经传播完毕」，防止最后一个等待者漏唤醒</td><td><code>doReleaseShared()</code></td></tr>
+  </tbody>
+</table>
+<p>两个易错点：</p>
+<ul>
+  <li><strong>负数 = 正常，正数 = 异常</strong>。判断代码里到处是 <code>waitStatus &lt; 0</code>（正常节点）、<code>waitStatus &gt; 0</code>（取消节点），CANCELLED 是唯一正数，用大小比较而不是等值比较来筛。</li>
+  <li><strong>SIGNAL 是前驱的承诺，不是自己的状态</strong>。「节点 A 的 waitStatus == SIGNAL」意思是「A 释放后会唤醒 A 的后继」。面试答反了就前功尽弃。</li>
+</ul>
+<p>PROPAGATE 只在共享模式（Semaphore、ReadWriteLock 的读锁）里出现：共享释放可能要连续唤醒多个等待者，JDK 用「唤醒传播 + 最后一个节点置 PROPAGATE」的方式保证新入队的线程不会漏掉这次释放——独占锁（ReentrantLock）永远用不到它，知道「它是共享模式的补丁」即可，不必深究每个分支。</p>
+</section>
+
+<!-- ═══════════════ 第12站：Condition ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>Condition 条件队列：两条队列的协作</h2></div>
 <p><code>newCondition()</code> 创建的 <code>ConditionObject</code> 是 AQS 内部类，维护一条<strong>独立于 sync 队列</strong>的条件等待队列——AQS 最精巧的设计之一。</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>ConditionObject</b> · await() / signal()</span></div>
@@ -365,7 +553,7 @@
         <span class="k">if</span> ((firstWaiter = first.nextWaiter) == <span class="k">null</span>) lastWaiter = <span class="k">null</span>;
         first.nextWaiter = <span class="k">null</span>;
     } <span class="k">while</span> (!transferForSignal(first) &amp;&amp;   <span class="c">// 转移到 sync 队列</span>
-             (first = firstWaiter) != <span class="k">null</span>);
+              (first = firstWaiter) != <span class="k">null</span>);
 }</code></pre>
 </div>
 <figure class="fig">
@@ -411,15 +599,53 @@
   <text x="360" y="323" text-anchor="middle" font-size="11" fill="#57544E">await()：释放锁 → 入条件队列 → park → 被 signal 后转入 sync 队列 → 重新竞争</text>
   <text x="360" y="341" text-anchor="middle" font-size="11" fill="#57544E">signal()：取条件队列 firstWaiter → 转入 sync 队列 → unpark 该线程</text>
 </svg>
-<figcaption><span class="fig-no">图 3</span>Condition 双队列协作：await 将线程从 sync 队列移入条件队列，signal 将其转回</figcaption>
+<figcaption><span class="fig-no">图 4</span>Condition 双队列协作：await 将线程从 sync 队列移入条件队列，signal 将其转回</figcaption>
 </figure>
 <div class="crack"><div class="crack-label">await() vs Object.wait()</div>
 <p>两者都需要持锁调用、都释放锁并阻塞。关键差异：Object.wait() 只有一个 waitSet，Condition 可以创建<strong>多个</strong>实现精确唤醒（如 ArrayBlockingQueue 的 notFull/notEmpty）；Condition 支持超时、不可中断等变体；底层机制不同——wait 基于 monitor，Condition 基于 AQS park/unpark。</p>
 </div>
-<div class="takeaway"><div class="takeaway-label">Condition 面试回答</div>
-<p>"Condition 是 AQS 内部类 ConditionObject，维护独立条件队列。await() 释放锁、入条件队列、park；signal() 将头部节点转到 sync 队列、unpark。被唤醒后在 sync 队列重新竞争锁。多个 Condition 可实现精确唤醒，如 BlockingQueue 中的 notFull 和 notEmpty。"</p>
+<p>用 ReentrantLock + 双 Condition 手写一个有界生产者-消费者，是面试白板题的高频变体，直接背下这个骨架：</p>
+<div class="srcbox">
+<div class="srcbox-head">生产者-消费者：ReentrantLock 版（可直接运行）</span>
+<pre><code><span class="k">class</span> <span class="t">BoundedQueue</span>&lt;<span class="t">T</span>&gt; {
+    <span class="k">private final</span> <span class="t">Deque</span>&lt;<span class="t">T</span>&gt; deque = <span class="k">new</span> <span class="t">ArrayDeque</span>&lt;&gt;();
+    <span class="k">private final int</span> cap;
+    <span class="k">private final</span> <span class="t">Lock</span> lock = <span class="k">new</span> <span class="t">ReentrantLock</span>();
+    <span class="k">private final</span> <span class="t">Condition</span> notFull  = lock.newCondition();  <span class="c">// 生产者等</span>
+    <span class="k">private final</span> <span class="t">Condition</span> notEmpty = lock.newCondition();  <span class="c">// 消费者等</span>
+
+    <span class="k">public</span> <span class="t">BoundedQueue</span>(<span class="k">int</span> cap) { <span class="k">this</span>.cap = cap; }
+
+    <span class="k">public void</span> <span class="n">put</span>(<span class="t">T</span> v) <span class="k">throws</span> <span class="t">InterruptedException</span> {
+        lock.lock();
+        <span class="k">try</span> {
+            <span class="k">while</span> (deque.size() == cap) notFull.await();   <span class="c">// ★ while 不是 if</span>
+            deque.addLast(v);
+            notEmpty.signal();   <span class="c">// 精确唤醒一个消费者</span>
+        } <span class="k">finally</span> {
+            lock.unlock();
+        }
+    }
+
+    <span class="k">public</span> <span class="t">T</span> <span class="n">take</span>() <span class="k">throws</span> <span class="t">InterruptedException</span> {
+        lock.lock();
+        <span class="k">try</span> {
+            <span class="k">while</span> (deque.isEmpty()) notEmpty.await();
+            <span class="t">T</span> v = deque.removeFirst();
+            notFull.signal();    <span class="c">// 精确唤醒一个生产者</span>
+            <span class="k">return</span> v;
+        } <span class="k">finally</span> {
+            lock.unlock();
+        }
+    }
+}</code></pre>
 </div>
-<p>除了 <code>signal()</code> 只唤醒一个节点，<code>signalAll()</code> 会将条件队列中<strong>所有节点</strong>转移到 sync 队列并逐一 unpark。典型场景如生产者-消费者模式中，生产者生产一个产品后调用 <code>signal()</code>（只需唤醒一个消费者），而条件变化影响所有等待者时用 <code>signalAll()</code>。</p>
+<p>两个必须答出来的细节：</p>
+<ul>
+  <li><strong>为什么 <code>while</code> 而不是 <code>if</code>？</strong> 被唤醒 ≠ 条件成立：① 虚假唤醒（JVM 允许）；② 多个消费者被唤醒后只有一个能拿到元素，其他必须重新检查。synchronized 版的经典「flag 变量 + 单一 waitSet」写法，正是用两个布尔标志模拟这种双队列——Condition 把它原生化了。</li>
+  <li><strong>为什么 signal 而不是 signalAll？</strong> put 只新增一个元素，唤醒一个消费者就够了；signalAll 会把所有等待线程都拉起来重新抢锁，多出来的全部白跑一趟。性能敏感场景，能 signal 就别 signalAll。</li>
+</ul>
+<p>除了 <code>signal()</code> 只唤醒一个节点，<code>signalAll()</code> 会将条件队列中<strong>所有节点</strong>转移到 sync 队列并逐一 unpark——条件变化影响所有等待者时（比如队列容量动态调整）用它。</p>
 <table class="nb-table">
   <thead><tr><th>维度</th><th>Object.wait()</th><th>Condition.await()</th></tr></thead>
   <tbody>
@@ -433,9 +659,26 @@
 </table>
 </section>
 
-<!-- ═══════════════ 第8站：AQS 家族 ═══════════════ -->
-<section class="station reveal" id="s8">
-<div class="station-head"><span class="station-no">第 8 站</span><h2>AQS 家族：CountDownLatch、Semaphore、ReadWriteLock</h2></div>
+<!-- ═══════════════ 第13站：模板方法模式 ═══════════════ -->
+<section class="station reveal" id="s13">
+<div class="station-head"><span class="station-no">第 13 站</span><h2>模板方法模式：哪些钉死，哪些留白</h2></div>
+<p>回到第 3 站的餐厅类比——「领位台」和「座位规则」的分工，在代码上就是模板方法模式（Template Method）：</p>
+<table class="nb-table">
+  <thead><tr><th>钉死在父类（AQS）</th><th>留给子类（tryXxx 钩子）</th></tr></thead>
+  <tbody>
+    <tr><td>排队：<code>addWaiter</code> / <code>enq</code>（CAS 入队）</td><td>独占：什么是「获取成功」→ <code>tryAcquire(arg)</code></td></tr>
+    <tr><td>挂起/唤醒：<code>acquireQueued</code> / <code>unparkSuccessor</code></td><td>独占：什么是「释放成功」→ <code>tryRelease(arg)</code></td></tr>
+    <tr><td>取消处理：<code>cancelAcquire</code>（跳过 CANCELLED 节点）</td><td>共享：共享获取 → <code>tryAcquireShared(arg)</code></td></tr>
+    <tr><td>模板骨架：<code>acquire</code> / <code>release</code> / <code>acquireShared</code> / <code>releaseShared</code></td><td>共享：共享释放 → <code>tryReleaseShared(arg)</code></td></tr>
+  </tbody>
+</table>
+<p>为什么这样切分？因为<strong>排队、挂起、唤醒是并发代码里最容易写错的部分</strong>（竞态、漏唤醒、死循环），Doug Lea 把它写成一次、调试到稳，所有同步工具复用；而「什么算拿到锁」每个工具的定义完全不同，必须留给子类。这正是开闭原则（Open-Closed Principle）的教科书级体现——对扩展开放（新工具），对修改关闭（队列逻辑不再动）。</p>
+<p>推论：你以后自己写一个同步工具（比如限流器），<strong>不需要碰队列和 park</strong>，只需要继承 AQS，想清楚两件事——state 怎么定义（比如 state = 剩余令牌数）、tryAcquireShared 怎么写（state &gt;= acquires 就 CAS 扣减）。Semaphore 就是这么来的（第 14 站）。</p>
+</section>
+
+<!-- ═══════════════ 第14站：AQS 家族 ═══════════════ -->
+<section class="station reveal" id="s14">
+<div class="station-head"><span class="station-no">第 14 站</span><h2>AQS 家族：CountDownLatch、Semaphore、ReadWriteLock</h2></div>
 <p>理解了 AQS 三板斧，其他工具迎刃而解——差异仅在于<strong>state 的语义</strong>和<strong>tryAcquire/tryRelease 的实现</strong>。</p>
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>CountDownLatch.Sync</b> · 核心逻辑</span></div>
@@ -479,7 +722,7 @@
 <span class="k">static int</span> exclusiveCount(<span class="k">int</span> c) { <span class="k">return</span> c &amp; EXCLUSIVE_MASK; }</code></pre>
 </div>
 <div class="crack"><div class="crack-label">ReadWriteLock 为什么拆高 16 位和低 16 位？</div>
-<p>在同一个 state 中同时记录读写锁持有数，只需一次 CAS 操作就能完成状态变更，避免维护两个独立变量的一致性问题和额外同步开销。代价是每种锁最多支持 65535 次重入。</p>
+<p>在同一个 state 中同时记录读写锁持有数，只需一次 CAS 操作就能完成状态变更，避免维护两个独立变量的一致性问题和额外同步开销。代价是每种锁最多支持 65535 次重入。这和线程池的 ctl（高 3 位状态 + 低 29 位线程数）是同一个设计手法：<strong>一个 volatile int 打包多份状态，一次 CAS 原子更新</strong>——JUC 里到处都是这个套路。</p>
 </div>
 <table class="nb-table">
   <thead><tr><th>工具</th><th>state 语义</th><th>模式</th><th>tryAcquire 逻辑</th></tr></thead>
@@ -493,16 +736,54 @@
 <p>除了上述四个经典工具，<strong>ThreadPoolExecutor 的 Worker</strong> 也内部继承了 AQS，实现了一个不可重入的独占锁（state 只有 0 和 1），用于保护工作线程的状态。<strong>FutureTask</strong> 的 Sync 同样基于 AQS，state 表示任务生命周期（NEW → COMPLETING → NORMAL/CANCELLED/EXCEPTIONAL）。AQS 是整个 JUC 包真正的"地基"。</p>
 </section>
 
-<!-- ═══════════════ 第9站：总结 ═══════════════ -->
-<section class="station reveal" id="s9">
-<div class="station-head"><span class="station-no">第 9 站</span><h2>总结：AQS 的设计哲学与全景图</h2></div>
+<!-- ═══════════════ 第15站：生产坑 + 选型 ═══════════════ -->
+<section class="station reveal" id="s15">
+<div class="station-head"><span class="station-no">第 15 站</span><h2>生产落地：最大的坑是忘记 unlock</h2></div>
+<p>AQS 再精巧，也救不了业务代码里最常见的一手——<strong>异常路径漏掉 unlock</strong>：</p>
+<div class="srcbox">
+<div class="srcbox-head">反例：一个异常，锁泄漏，全员死等</span>
+<pre><code>lock.lock();
+<span class="c">// 业务代码抛了异常（NPE / 超时 / DB 断了……）</span>
+doSomething();          <span class="c">// ← 这里炸了</span>
+lock.unlock();          <span class="c">// ← 永远执行不到！锁被永久占用</span></code></pre>
+</div>
+<p>锁泄漏的表现非常隐蔽：服务不报错、不 OOM，只是某个功能慢慢变慢——所有后续请求都排在 CLH 队列里 WAITING，jstack 一抓全是一排 <code>waiting to acquire lock</code>。唯一规范写法：</p>
+<div class="srcbox">
+<div class="srcbox-head">唯一正确姿势：try-finally</span>
+<pre><code>lock.lock();
+<span class="k">try</span> {
+    <span class="c">// 临界区</span>
+} <span class="k">finally</span> {
+    lock.unlock();   <span class="c">// 无论成功失败、抛什么异常，必走</span>
+}</code></pre>
+</div>
+<p>synchronized 没有这个坑（出块自动释放），这是它最实际的优势之一。生产选型速查：</p>
+<table class="nb-table">
+  <thead><tr><th>维度</th><th>synchronized</th><th>ReentrantLock</th></tr></thead>
+  <tbody>
+    <tr><td><strong>释放</strong></td><td>自动（出块即释放，异常也安全）</td><td>手动，必须 try-finally</td></tr>
+    <tr><td><strong>可中断</strong></td><td>✗</td><td>✓ lockInterruptibly()</td></tr>
+    <tr><td><strong>超时</strong></td><td>✗</td><td>✓ tryLock(timeout, unit)</td></tr>
+    <tr><td><strong>公平锁</strong></td><td>✗（只能非公平）</td><td>✓ new ReentrantLock(true)</td></tr>
+    <tr><td><strong>多条件队列</strong></td><td>✗（单一 waitSet）</td><td>✓ 多个 Condition</td></tr>
+    <tr><td><strong>性能</strong></td><td>JDK 6 后与 ReentrantLock 接近；无竞争时略优</td><td>竞争激烈的复杂逻辑下更灵活</td></tr>
+    <tr><td><strong>代码量</strong></td><td>少，不易出错</td><td>多，有漏 unlock 风险</td></tr>
+  </tbody>
+</table>
+<div class="takeaway"><div class="takeaway-label">生产选型决策</div>
+<p><strong>默认 synchronized</strong>：简单临界区、锁持有时间极短、没有特殊需求——自动释放让你少一类 bug。出现以下任一需求再换 ReentrantLock：① 需要可中断/超时（长等待、可取消任务）；② 需要公平性（严格 FIFO）；③ 需要多条件精确唤醒（自定义生产者-消费者）；④ 需要 tryLock 做乐观/降级逻辑。换过去之后，<strong>try-finally 是红线</strong>，Code Review 里看到没有 finally 的 unlock 直接打回。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第16站：总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
 <p>AQS 的设计哲学归结为三个核心原则：</p>
 <ul>
   <li><strong>状态驱动</strong>：所有同步语义通过一个 <code>volatile int state</code> 表达，CAS 保证原子修改</li>
   <li><strong>队列兜底</strong>：获取失败的线程统一进入 CLH 变体队列，park/unpark 管理生命周期，避免忙等</li>
   <li><strong>模板方法</strong>：AQS 定义 acquire/release 骨架，子类只需重写 tryAcquire/tryRelease 实现定制语义</li>
 </ul>
-<p>模板方法模式是 AQS 设计的精髓所在。AQS 将<strong>不变的排队、park、unpark 逻辑</strong>固化在父类中（acquire、release、acquireQueued），将<strong>可变的同步语义</strong>开放给子类（tryAcquire、tryRelease）。这正是开闭原则（Open-Closed Principle）的经典体现——对扩展开放，对修改关闭。新增一个同步工具，不需要理解复杂的队列管理和线程调度细节，只需定义"什么是获取成功"和"什么是释放成功"即可。Doug Lea 用这套设计，将并发编程中最容易出错的底层细节全部封装在了 AQS 内部。</p>
 <figure class="fig">
 <svg viewBox="0 0 720 250" role="img" aria-label="AQS 工具全景图">
   <text x="360" y="22" text-anchor="middle" font-size="15" fill="#1C1C1C" font-weight="700">AQS 工具全景图：同一框架，不同语义</text>
@@ -529,15 +810,28 @@
   <text x="360" y="215" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">一个 AQS，多种同步语义</text>
   <text x="360" y="232" text-anchor="middle" font-size="10" fill="#57544E">差异仅在 state 的含义和 tryAcquire/tryRelease 的实现</text>
 </svg>
-<figcaption><span class="fig-no">图 4</span>AQS 工具全景图：所有同步工具共享同一个底层框架</figcaption>
+<figcaption><span class="fig-no">图 5</span>AQS 工具全景图：所有同步工具共享同一个底层框架</figcaption>
 </figure>
-<div class="formula">
-<strong>ReentrantLock vs synchronized 选型指南</strong><br/>
-synchronized：JVM 层面实现，自动释放，代码简洁，JDK 6 后性能大幅提升（偏向锁、轻量级锁、锁升级）<br/>
-ReentrantLock：API 层面实现，需手动 unlock()，但提供公平锁、可中断、超时、Condition 等高级功能
+<div class="recap">
+<h3>核心知识点回顾</h3>
+<ul>
+  <li><strong>三大件</strong>：volatile state（CAS 原子修改）+ CLH 变体双向队列（park/unpark 不忙等）+ 模板方法（排队逻辑钉死，语义钩子留给子类）。</li>
+  <li><strong>state 语义因工具而异</strong>：ReentrantLock=重入次数、CountDownLatch=倒计时、Semaphore=许可数、ReadWriteLock=高16读+低16写。</li>
+  <li><strong>lock() 路径</strong>：CAS(0→1) 抢 → 失败 tryAcquire（含重入）→ 失败入队 → acquireQueued 自旋+park → unpark 后重新竞争。</li>
+  <li><strong>unlock() 路径</strong>：state-1，减到 0 才清 owner + unparkSuccessor（从 tail 往前找有效节点）。</li>
+  <li><strong>可重入</strong>：owner==自己则 state+1，解锁逐步减，减到 0 才真释放。</li>
+  <li><strong>公平 vs 非公平</strong>：差在 hasQueuedPredecessors()；默认非公平吞吐更高，但有饥饿可能。</li>
+  <li><strong>synchronized 给不了的</strong>：lockInterruptibly / tryLock 超时 / 多 Condition。</li>
+  <li><strong>waitStatus</strong>：SIGNAL 是前驱的承诺；CANCELLED 唯一正数；PROPAGATE 只管共享模式。</li>
+  <li><strong>生产红线</strong>：unlock 必须在 finally；默认 synchronized，有进阶需求再换 ReentrantLock。</li>
+</ul>
 </div>
 <div class="recap">
-<h3>面试回答模板</h3>
+<h3>一句话总结</h3>
+<p>AQS = 「state 决定你能不能赢，队列决定你输的时候怎么等，模板方法决定『赢』对每个工具意味着什么」。</p>
+</div>
+<div class="recap">
+<h3>🎤 面试 30 秒总结</h3>
 <p><strong>Q：请介绍 AQS 的原理以及 ReentrantLock 的实现。</strong></p>
 <p>"AQS 是 JUC 包的核心框架，内部维护 volatile int state 和 CLH 改造的双向 FIFO 队列。AQS 采用模板方法模式，子类重写 tryAcquire/tryRelease 实现不同同步语义。</p>
 <p>ReentrantLock 基于 AQS 实现独占锁。state=0 空闲，&gt;0 重入次数。lock() 先 CAS(0→1)，失败则 tryAcquire（含重入检查），仍失败则入 CLH 队列 park。unlock() 时 state-1，减到 0 释放并 unparkSuccessor 唤醒后继。</p>
@@ -545,6 +839,8 @@ ReentrantLock：API 层面实现，需手动 unlock()，但提供公平锁、可
 <p>Condition 通过独立条件队列实现 wait/notify。await() 释放锁入条件队列 park，signal() 转移节点到 sync 队列并 unpark。支持多个 Condition 实现精确唤醒。"</p>
 <p><strong>Q：公平锁和非公平锁如何选择？</strong></p>
 <p>"绝大多数场景用非公平锁（默认），性能更好。只有需要严格保证不饥饿或业务要求 FIFO 顺序时才用公平锁。"</p>
+<p><strong>Q：ReentrantLock 和 synchronized 怎么选？</strong></p>
+<p>"默认 synchronized——自动释放没有锁泄漏风险。需要可中断、超时、公平、多 Condition 时用 ReentrantLock，但 unlock 必须放 finally。"</p>
 </div>
 </section>
 

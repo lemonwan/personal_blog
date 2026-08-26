@@ -26,10 +26,10 @@
   </div>
 
   <div class="think">
-    <p class="think-q">"一个商品详情页，用户打开后需要等多久才能看到完整内容？"</p>
+    <p class="think-q">某次大促压测，商品详情页接口 P99 高达 1.2 秒，是竞品的三倍。架构师打开链路监控一看：四路后端调用是串行跑的。为什么不能一起发出去？</p>
   </div>
 
-  <p>打开某电商 App 的商品详情页，页面渲染需要 4 个后端数据：</p>
+  <p>一个商品详情页，页面渲染需要 4 个后端数据，它们之间<strong>完全没有依赖关系</strong>：</p>
 
   <table class="nb-table">
     <thead>
@@ -43,18 +43,18 @@
     </tbody>
   </table>
 
-  <p>如果按顺序串行调用，总耗时 = 4 × 200ms = <strong>800ms</strong>。但实际上这 4 个调用之间<strong>完全没有依赖关系</strong>——它们可以同时发起，等全部完成后再组装页面。</p>
+  <p>如果按顺序串行调用，总耗时 = 4 × 200ms = <strong>800ms</strong>；而这 4 个调用彼此独立，完全可以在<strong>同一个时刻一起发出</strong>，等全部完成后再组装页面——这就是典型的「扇出 / 扇入（Fan-out / Fan-in）」。CompletableFuture 正是为这类「异步编排」而生的。</p>
 
   <div class="srcbox">
-    <div class="srcbox-head">串行 vs 并行——耗时对比</div>
-    <pre class="srcbox-file"><span class="c">// 串行：800ms</span>
-<span class="t">Product</span> product  = productService.getById(id);       <span class="c">// 200ms</span>
-<span class="t">Price</span>   price    = priceService.getPrice(id);        <span class="c">// 200ms</span>
-<span class="t">List</span>&lt;<span class="t">Review</span>&gt; reviews = reviewService.list(id);   <span class="c">// 200ms</span>
-<span class="t">List</span>&lt;<span class="t">Recommend</span>&gt; recs = recommendService.list(id); <span class="c">// 200ms</span>
+    <div class="srcbox-head">串行 vs 并行——同一个接口的两种写法</div>
+    <pre class="srcbox-file"><span class="c">// 串行：800ms —— 前一个没回来，后一个不能出发</span>
+<span class="t">Product</span> product = productService.getById(id);          <span class="c">// 200ms</span>
+<span class="t">Price</span>   price   = priceService.getPrice(id);           <span class="c">// 200ms</span>
+<span class="t">List</span>&lt;<span class="t">Review</span>&gt;   reviews = reviewService.list(id);     <span class="c">// 200ms</span>
+<span class="t">List</span>&lt;<span class="t">Recommend</span>&gt; recs = recommendService.list(id);    <span class="c">// 200ms</span>
 <span class="c">// 总计 ≈ 800ms</span>
 
-<span class="c">// 并行 + 编排：≈ 300ms（max + 组装开销）</span>
+<span class="c">// 并行 + 编排：≈ 300ms（四路同时发，等最慢的一路）</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">Product</span>&gt;   f1 = supplyAsync(() -&gt; productService.getById(id));
 <span class="t">CompletableFuture</span>&lt;<span class="t">Price</span>&gt;     f2 = supplyAsync(() -&gt; priceService.getPrice(id));
 <span class="t">CompletableFuture</span>&lt;<span class="t">List</span>&lt;<span class="t">Review</span>&gt;&gt;   f3 = supplyAsync(() -&gt; reviewService.list(id));
@@ -62,25 +62,226 @@
 
 <span class="t">CompletableFuture</span>.allOf(f1, f2, f3, f4).join();  <span class="c">// 等全部完成 ≈ 200ms</span>
 <span class="t">DetailVO</span> vo = assemble(f1.get(), f2.get(), f3.get(), f4.get()); <span class="c">// 组装 ≈ 100ms</span>
-<span class="c">// 总计 ≈ 300ms</span></pre>
+<span class="c">// 总计 ≈ 300ms —— RT 直接砍到原来的 1/3</span></pre>
   </div>
 
   <div class="crack">
     <span class="crack-label">面试考点</span>
-    <p>CompletableFuture 是 JDK 8 引入的异步编程利器，面试官考它的原因：① 生产环境中"多 RPC 聚合"是最常见的 IO 场景；② 它能体现你对异步编排、异常处理、线程池协作的综合理解；③ 用得好能直接把接口 RT 砍到原来的 1/N。</p>
+    <p>CompletableFuture 是 JDK 8 引入的异步编排利器，面试官考它的原因：① 「多路 RPC 聚合」是生产里最常见的 IO 场景，做没做过、怎么做，一问便知；② 它串起了异步编程的全部知识点——线程池、回调（Callback）、异常传播、超时控制；③ 用得好能把接口 RT 砍到原来的 1/N，这是实打实的架构价值。</p>
   </div>
+
+  <p>但在动手之前，先问一个问题：<strong>JDK 5 就有 Future 了，为什么还要等到 JDK 8 的 CompletableFuture？</strong>下一站，我们先看看传统 Future 到底差在哪。</p>
 </section>
 
 <!-- ================================================================
-     第 2 站 — 创建 CompletableFuture
+     第 2 站 — 传统 Future 的三大痛点
      ================================================================ -->
 <section class="station reveal" id="s2">
   <div class="station-head">
     <span class="station-no">第 2 站</span>
-    <h2>创建 CompletableFuture：三种姿势</h2>
+    <h2>传统 Future 的三大痛点：阻塞、无回调、不能组合</h2>
   </div>
 
-  <p>创建 <code>CompletableFuture</code> 有三种常用方式，核心区别在于<strong>是否有返回值</strong>以及<strong>是否已经完成了</strong>。</p>
+  <p>JDK 5 引入的 <code>Future</code> 已经能做到「任务丢到线程池、之后取结果」，但用它写「多个异步任务的编排」非常别扭。先看代码，再总结痛点：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>Future 的用法</b> · 能并行，但不会编排</span></div>
+    <pre class="srcbox-file"><span class="t">ExecutorService</span> pool = <span class="t">Executors</span>.newFixedThreadPool(<span class="n">4</span>);
+
+<span class="t">Future</span>&lt;<span class="t">Product</span>&gt; f1 = pool.submit(() -&gt; productService.getById(id));
+<span class="t">Future</span>&lt;<span class="t">Price</span>&gt;   f2 = pool.submit(() -&gt; priceService.getPrice(id));
+
+<span class="c">// ① get() 会阻塞调用线程 —— 无论 f2 多快，只要 f1 慢，这条线程就干等着</span>
+<span class="t">Product</span> p = f1.get();            <span class="c">// 阻塞，最多等 800ms，期间线程啥也干不了</span>
+
+<span class="c">// ② 想"结果一出来就处理"？没有回调，只能轮询 isDone()</span>
+<span class="k">while</span> (!f2.isDone()) {          <span class="c">// 轮询浪费 CPU，且延迟不可控</span>
+    <span class="t">Thread</span>.sleep(<span class="n">10</span>);
+}
+
+<span class="c">// ③ 想组合？f3 依赖 f1 和 f2 的结果 —— 只能先 get 出来，再手动 submit 一个新任务</span>
+<span class="t">Price</span> pr = f2.get();             <span class="c">// 取结果的顺序被代码写死，无法"谁先好先处理谁"</span>
+<span class="t">Future</span>&lt;<span class="t">Coupon</span>&gt; f3 = pool.submit(() -&gt; couponService.get(p, pr));</pre>
+  </div>
+
+  <p>三个痛点点名：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>痛点</th><th>Future 的表现</th><th>带来的问题</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>阻塞</strong></td><td><code>get()</code> 会挂起调用线程</td><td>Tomcat 线程池里一条线程被白白占住；本该处理 20 个请求的时间只处理了 1 个</td></tr>
+      <tr><td><strong>无回调</strong></td><td>结果就绪时不会通知你</td><td>只能阻塞 <code>get()</code> 或轮询 <code>isDone()</code>，前者占线程、后者耗 CPU 且不及时</td></tr>
+      <tr><td><strong>不能组合</strong></td><td>没有「合并两个 Future」「等全部完成」的 API</td><td>依赖关系要手写：先 get 再 submit，代码变成一串脆弱的串行步骤；等全部完成只能自己上 <code>CountDownLatch</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">类比：点外卖的三种等法</span>
+    <p><strong>阻塞</strong> = 站在店门口干等，啥也别干；<strong>轮询</strong> = 每 5 分钟刷一次手机，又累又慢还可能错过；<strong>回调</strong> = 下单时留下手机号，外卖到了骑手自动打电话通知你——你的时间完全解放。<code>Future</code> 只支持前两种，<code>CompletableFuture</code> 才支持第三种。</p>
+  </div>
+
+  <div class="think">
+    <p class="think-q">面试追问：那第 1 站用 4 个 Future + 4 次 get() 不也能并行吗？为什么说它不行？</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">点破</span>
+    <p>能并行、不能<strong>编排</strong>。4 个 <code>Future</code> 一起 submit，确实能同时跑；但取结果的代码必须按固定顺序 <code>f1.get() → f2.get() → …</code>，如果 f1 是最慢的那路，即使 f4 早就好了，你也得等 f1 结束才能走到下一行——「谁先好先处理谁」做不到，更别说「f2 的结果要喂给 f3」这种依赖链。另外 <code>Future.get()</code> 抛的是受检异常（<code>InterruptedException</code> + <code>ExecutionException</code>），每个调用点都要 try-catch，代码里全是噪音。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 3 站 — 回调地狱
+     ================================================================ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>回调地狱：嵌套回调为什么让人抓狂</h2>
+  </div>
+
+  <p>既然 Future 没有回调，当年没有 CompletableFuture 的开发者是怎么解决「结果就绪自动处理」的？答案是<strong>回调（Callback）</strong>——把「下一步做什么」作为参数传给异步方法。但回调一旦嵌套，就成了著名的<strong>回调地狱（Callback Hell）</strong>：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>回调嵌套示例</b> · 三个有依赖的异步步骤（以 Guava ListenableFuture 风格示意）</span></div>
+    <pre class="srcbox-file"><span class="c">// 查用户 → 查会员价 → 查优惠券，每步都依赖上一步</span>
+<span class="t">ListenableFuture</span>&lt;<span class="t">User</span>&gt; userF = executor.submit(() -&gt; userService.get(userId));
+<span class="t">Futures</span>.addCallback(userF, <span class="k">new</span> <span class="t">FutureCallback</span>&lt;<span class="t">User</span>&gt;() {
+    <span class="k">public void</span> onSuccess(<span class="t">User</span> user) {                    <span class="c">// 第 1 层</span>
+        <span class="t">ListenableFuture</span>&lt;<span class="t">Price</span>&gt; priceF = executor.submit(() -&gt; priceService.get(user));
+        <span class="t">Futures</span>.addCallback(priceF, <span class="k">new</span> <span class="t">FutureCallback</span>&lt;<span class="t">Price</span>&gt;() {
+            <span class="k">public void</span> onSuccess(<span class="t">Price</span> price) {              <span class="c">// 第 2 层</span>
+                <span class="t">ListenableFuture</span>&lt;<span class="t">Coupon</span>&gt; couponF = executor.submit(() -&gt; couponService.get(price));
+                <span class="t">Futures</span>.addCallback(couponF, <span class="k">new</span> <span class="t">FutureCallback</span>&lt;<span class="t">Coupon</span>&gt;() {
+                    <span class="k">public void</span> onSuccess(<span class="t">Coupon</span> coupon) {      <span class="c">// 第 3 层，才拿到全部数据</span>
+                        render(user, price, coupon);
+                    }
+                    <span class="k">public void</span> onFailure(<span class="t">Throwable</span> t) { <span class="c">// 每层都要写一遍错误处理</span>
+                        log.error(<span class="t">"查询优惠券失败"</span>, t);
+                    }
+                }, executor);
+            }
+            <span class="k">public void</span> onFailure(<span class="t">Throwable</span> t) { log.error(<span class="t">"查询价格失败"</span>, t); }
+        }, executor);
+    }
+    <span class="k">public void</span> onFailure(<span class="t">Throwable</span> t) { log.error(<span class="t">"查询用户失败"</span>, t); }
+}, executor);</pre>
+  </div>
+
+  <p>这段代码的问题肉眼可见：</p>
+
+  <ul>
+    <li><strong>横向膨胀</strong>：每多一个依赖步骤，代码就往右缩进一层，三层之后可读性归零——业务逻辑被「括号」淹没；</li>
+    <li><strong>错误处理重复</strong>：每层都要单独写一遍 <code>onFailure</code>，漏一层异常就静默丢失；</li>
+    <li><strong>依赖关系不可见</strong>：谁依赖谁被埋在嵌套结构里，想抽出来复用、想调整顺序，牵一发动全身。</li>
+  </ul>
+
+  <div class="crack">
+    <span class="crack-label">类比：俄罗斯套娃</span>
+    <p>每打开一层，发现里面还有一层。回调地狱的本质是：<strong>把「流程」写成了「嵌套的盒子」</strong>。CompletableFuture 的答案是把盒子拆开、拍平成一维的链——这个对比我们留到第 14 站，同一段需求两种写法摆在一起看，你会立刻明白它解决了什么。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 4 站 — CompletableFuture 是什么
+     ================================================================ -->
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>CompletableFuture 是什么：Future + 完成即触发</h2>
+  </div>
+
+  <p><code>CompletableFuture</code> 同时实现了两个接口：<code>Future</code>（能拿结果、能取消）+ <code>CompletionStage</code>（完成阶段：能在「完成」这个事件上挂一串后续动作）。它的核心机制一句话——<strong>完成即触发（Completion）</strong>：任务完成的那一刻，所有提前登记好的依赖动作会被自动逐个触发，不需要你手动通知、不需要轮询。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" style="max-width:720px;width:100%">
+      <defs>
+        <marker id="arw1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#475569"/></marker>
+      </defs>
+
+      <!-- 左侧：完成方 -->
+      <rect x="20" y="65" width="175" height="115" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="107" y="90" text-anchor="middle" font-size="13" font-weight="700" fill="#1e293b">任务线程</text>
+      <text x="107" y="112" text-anchor="middle" font-size="11" fill="#475569">跑完任务 / 或外部线程</text>
+      <text x="107" y="135" text-anchor="middle" font-size="11" fill="#1e293b">f.complete(结果)</text>
+      <text x="107" y="158" text-anchor="middle" font-size="10" fill="#64748b">写结果 + 唤醒所有回调</text>
+
+      <!-- 中间：Future 本体 -->
+      <rect x="275" y="55" width="180" height="135" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="365" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">CompletableFuture</text>
+      <text x="365" y="105" text-anchor="middle" font-family="monospace" font-size="10" fill="#475569">volatile Object result</text>
+      <text x="365" y="122" text-anchor="middle" font-size="10" fill="#64748b">（结果 或 异常）</text>
+      <text x="365" y="152" text-anchor="middle" font-family="monospace" font-size="10" fill="#475569">依赖动作栈</text>
+      <text x="365" y="170" text-anchor="middle" font-size="10" fill="#64748b">（无锁 Treiber 栈）</text>
+
+      <!-- 右侧：回调 -->
+      <rect x="545" y="20" width="160" height="46" rx="6" fill="#f0fdf4" stroke="#22c55e"/>
+      <text x="625" y="38" text-anchor="middle" font-size="11" fill="#166534">回调 1：thenAccept</text>
+      <text x="625" y="55" text-anchor="middle" font-size="10" fill="#64748b">消费结果</text>
+
+      <rect x="545" y="80" width="160" height="46" rx="6" fill="#f0fdf4" stroke="#22c55e"/>
+      <text x="625" y="98" text-anchor="middle" font-size="11" fill="#166534">回调 2：thenApply</text>
+      <text x="625" y="115" text-anchor="middle" font-size="10" fill="#64748b">转换结果</text>
+
+      <rect x="545" y="140" width="160" height="46" rx="6" fill="#f0fdf4" stroke="#22c55e"/>
+      <text x="625" y="158" text-anchor="middle" font-size="11" fill="#166534">回调 3：exceptionally</text>
+      <text x="625" y="175" text-anchor="middle" font-size="10" fill="#64748b">捕获异常</text>
+
+      <!-- 箭头 -->
+      <line x1="195" y1="125" x2="271" y2="125" stroke="#475569" stroke-width="1.5" marker-end="url(#arw1)"/>
+      <line x1="455" y1="100" x2="541" y2="60" stroke="#475569" stroke-width="1.5" marker-end="url(#arw1)"/>
+      <line x1="455" y1="130" x2="541" y2="103" stroke="#475569" stroke-width="1.5" marker-end="url(#arw1)"/>
+      <line x1="455" y1="150" x2="541" y2="163" stroke="#475569" stroke-width="1.5" marker-end="url(#arw1)"/>
+
+      <text x="365" y="220" text-anchor="middle" font-size="12" fill="#1e293b">谁先 complete，谁负责唤醒全部登记过的回调 —— 无需轮询、无需手动通知</text>
+    </svg>
+    <div class="figcaption"><span class="fig-no">图 1</span>CompletableFuture 的「完成即触发」模型：结果是字段，回调是栈，完成时统一唤醒</div>
+  </div>
+
+  <p>内部实现上（JDK 8），它就是两个字段：一个 <code>volatile Object result</code> 存结果（或异常），一个 <code>volatile Completion stack</code> 存所有依赖动作——用无锁的 Treiber 栈组织，谁调 <code>complete()</code>，谁负责把这个栈弹出来逐个执行。所以「注册回调」和「完成任务」完全解耦，可以发生在任何线程、任何顺序：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>手动完成示例</b> · 先注册回调，后 complete</span></div>
+    <pre class="srcbox-file"><span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt; f = <span class="k">new</span> <span class="t">CompletableFuture</span>&lt;&gt;();  <span class="c">// 手动创建，此刻还没有任务</span>
+
+f.thenAccept(result -&gt; log.info(<span class="t">"收到结果：{}"</span>, result));  <span class="c">// ① 先"登记"依赖动作</span>
+
+<span class="k">new</span> <span class="t">Thread</span>(() -&gt; {                                    <span class="c">// ② 另一个线程 1 秒后完成</span>
+    <span class="t">Thread</span>.sleep(<span class="n">1000</span>);
+    f.complete(<span class="t">"hello"</span>);                               <span class="c">// ③ 触发上面的回调（幂等，只有第一次生效）</span>
+}).start();
+
+log.info(<span class="t">"主线程继续做自己的事"</span>);                       <span class="c">// ④ 主线程不用等、不用轮询</span>
+<span class="c">// 输出顺序：先"主线程继续做自己的事"，1 秒后"收到结果：hello"</span></pre>
+  </div>
+
+  <p>这也是 <code>complete()</code> / <code>completeExceptionally()</code> 的意义：<strong>CompletableFuture 不一定要绑一个任务</strong>，它可以被任何线程在任何时刻手动完成——第 12 站的超时降级，本质就是「定时器线程帮它 complete」。三个接口的关系一张表看清：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>维度</th><th>Future（JDK 5）</th><th>CompletableFuture（JDK 8）</th><th>CompletionStage（JDK 8）</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>角色</strong></td><td>异步结果的占位符</td><td>Future + CompletionStage 的实现类</td><td>「完成阶段」接口：定义各种编排方法</td></tr>
+      <tr><td><strong>回调</strong></td><td>❌ 无</td><td>✅ thenXxx 系列</td><td>✅（接口方法）</td></tr>
+      <tr><td><strong>组合</strong></td><td>❌ 无</td><td>✅ thenCombine / allOf / anyOf</td><td>✅</td></tr>
+      <tr><td><strong>手动完成</strong></td><td>❌ 不能</td><td>✅ complete() / completeExceptionally()</td><td>—</td></tr>
+      <tr><td><strong>线程池控制</strong></td><td>提交时指定</td><td>创建 + 每个编排动作都能指定</td><td>—</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ================================================================
+     第 5 站 — 创建 CompletableFuture
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>创建 CompletableFuture：三种姿势 + 手动完成</h2>
+  </div>
+
+  <p>创建 <code>CompletableFuture</code> 有三种常用方式，核心区别在于<strong>是否有返回值</strong>以及<strong>是否已经完成</strong>：</p>
 
   <div class="srcbox">
     <div class="srcbox-head">三种创建方式对比</div>
@@ -92,16 +293,69 @@
 
 <span class="c">// ② runAsync —— 无返回值（Runnable → CompletableFuture&lt;Void&gt;）</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">Void</span>&gt; f2 = <span class="t">CompletableFuture</span>.runAsync(() -&gt; {
-    <span class="c">// 只执行操作，不返回结果（如发通知、写日志）</span>
+    <span class="c">// 只执行操作，不返回结果（如发通知、写日志、埋点）</span>
     notifyService.send(<span class="t">"order_created"</span>);
 });
 
-<span class="c">// ③ completedFuture —— 已经完成的 Future（常用于测试或默认值）</span>
+<span class="c">// ③ completedFuture —— 已经完成的 Future（测试、默认值、短路）</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt; f3 = <span class="t">CompletableFuture</span>.completedFuture(<span class="t">"cached-value"</span>);
-f3.isDone();  <span class="c">// true，立即完成</span></pre>
+f3.isDone();  <span class="c">// true，立即完成，后面接 thenXxx 会立刻执行</span></pre>
   </div>
 
-  <p><strong>线程池选择：</strong><code>supplyAsync</code> / <code>runAsync</code> 不传 Executor 时，默认使用 <code>ForkJoinPool.commonPool()</code>（线程数 = CPU 核数 - 1，且全 JVM 共享）。生产环境<strong>必须传入自定义线程池</strong>，避免互相干扰：</p>
+  <p>除此之外，还有两个「手动完成」的方法——上一站见过 <code>complete()</code>，与之对应的是 <code>completeExceptionally(Throwable)</code>：把异常作为完成结果。注意 <code>complete()</code> 的返回值：<code>true</code> 表示这次调用真的完成了它（第一次），<code>false</code> 表示它早已完成、本次调用被忽略——<strong>幂等</strong>。它有个很实用的应用：本地缓存命中时，用 <code>completedFuture</code> 短路，下游完全不用感知「这次是缓存还是真的查了」：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>completedFuture 的应用</b> · 本地缓存短路</span></div>
+    <pre class="srcbox-file"><span class="t">CompletableFuture</span>&lt;<span class="t">Price</span>&gt; loadPrice(<span class="k">long</span> id) {
+    <span class="t">Price</span> cached = localCache.get(id);
+    <span class="k">if</span> (cached != <span class="k">null</span>) {
+        <span class="k">return</span> <span class="t">CompletableFuture</span>.completedFuture(cached);  <span class="c">// 命中缓存：立即完成</span>
+    }
+    <span class="k">return</span> <span class="t">CompletableFuture</span>.supplyAsync(() -&gt; priceService.getPrice(id), pool);
+}</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>方式</th><th>入参</th><th>返回</th><th>是否异步执行</th><th>典型场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>supplyAsync</code></td><td><code>Supplier&lt;T&gt;</code></td><td><code>CompletableFuture&lt;T&gt;</code></td><td>是</td><td>有返回值的异步任务（查 DB、调 RPC）</td></tr>
+      <tr><td><code>runAsync</code></td><td><code>Runnable</code></td><td><code>CompletableFuture&lt;Void&gt;</code></td><td>是</td><td>无返回值的异步动作（发通知、写日志）</td></tr>
+      <tr><td><code>completedFuture</code></td><td><code>T</code></td><td><code>CompletableFuture&lt;T&gt;</code></td><td>否（立即完成）</td><td>测试替身、缓存短路、默认值</td></tr>
+      <tr><td><code>new + complete()</code></td><td>—</td><td>—</td><td>否</td><td>手动控制完成时机（配合定时器做超时）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心记忆</span>
+    <p>supplyAsync 有返回值，runAsync 无返回值，completedFuture 立即可用。补充：两个 Async 创建方法都有带 <code>Executor</code> 的重载——生产环境必须用这个重载，原因下一站讲。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — 线程池选择
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>线程池选择：为什么生产必须传自定义线程池</h2>
+  </div>
+
+  <p><code>supplyAsync</code> / <code>runAsync</code> 不传 Executor 时，默认使用 <code>ForkJoinPool.commonPool()</code>——这是全 JVM 共享的一个公共线程池，线程数 = <strong>CPU 核数 - 1</strong>（可用 <code>-Djava.util.concurrent.ForkJoinPool.common.parallelism</code> 覆盖）。听起来很方便，生产里却是个大坑：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>commonPool 的危险用法</b> · IO 密集任务挤爆公共池</span></div>
+    <pre class="srcbox-file"><span class="c">// 4 核机器 → commonPool 只有 3 个线程</span>
+<span class="t">CompletableFuture</span>.supplyAsync(() -&gt; rpcA.call());   <span class="c">// 默认丢进 commonPool，等 RPC 200ms</span>
+<span class="t">CompletableFuture</span>.supplyAsync(() -&gt; rpcB.call());   <span class="c">// 又占 1 个</span>
+<span class="t">CompletableFuture</span>.supplyAsync(() -&gt; rpcC.call());   <span class="c">// 又占 1 个 —— 3 个全在阻塞等 IO</span>
+
+<span class="c">// 此时全项目的 parallelStream() 和所有不传线程池的 CF 一起饿死排队！</span>
+list.parallelStream().map(...).collect(...);           <span class="c">// ← 也被拖垮</span></pre>
+  </div>
+
+  <p>RPC / DB 这类 <strong>IO 密集</strong>任务的特点是「线程大部分时间在等」，等的时候线程池线程被占着不放。commonPool 只有核数 - 1 条线程，一旦被几个慢 RPC 占满，<strong>你的 parallelStream、别人模块的异步任务、甚至 JDK 内部依赖 commonPool 的机制</strong>全部一起遭殃——一个服务的异步代码，把全 JVM 的公共池污染了。这就像公共泳池：一个人抽筋，全池子的人都得绕着走。</p>
 
   <div class="srcbox">
     <div class="srcbox-head">生产环境：传入自定义线程池</div>
@@ -111,78 +365,139 @@ f3.isDone();  <span class="c">// true，立即完成</span></pre>
     <span class="k">new</span> <span class="t">ThreadPoolExecutor</span>.<span class="t">CallerRunsPolicy</span>());
 
 <span class="t">CompletableFuture</span>&lt;<span class="t">Product</span>&gt; f = <span class="t">CompletableFuture</span>.supplyAsync(
-    () -&gt; productService.getById(<span class="n">123</span>), bizPool);  <span class="c">// ← 第二个参数指定线程池</span></pre>
+    () -&gt; productService.getById(<span class="n">123</span>), bizPool);   <span class="c">// ← 第二个参数指定线程池</span></pre>
+  </div>
+
+  <p>两个生产要点：</p>
+
+  <ul>
+    <li><strong>线程池按业务隔离</strong>：查询聚合、异步写、定时任务各用各的池子，参数按各自场景调（IO 密集适当放大，参考卷二线程池篇的 <code>N*(1+W/C)</code> 公式），互相不拖累、监控也清晰；</li>
+    <li><strong>拒绝策略的坑</strong>：示例里用了 <code>CallerRunsPolicy</code>——队列满了会在「提交任务的那条线程」上直接跑。如果提交方是请求线程，一个慢任务可能把请求线程也拖住，所以<strong>必须配合超时兜底</strong>（第 12 站）；对异步链路而言，也可以考虑丢弃 + 降级。</li>
+  </ul>
+
+  <div class="think">
+    <p class="think-q">追问：thenApply 这类回调到底跑在哪条线程上？</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">点破：完成线程 vs 线程池</span>
+    <p>不带 <code>Async</code> 后缀的方法（<code>thenApply</code> / <code>thenAccept</code> 等）在「<strong>触发完成的那条线程</strong>」上同步执行——谁 complete 的，谁顺手把回调也跑了；带 <code>Async</code> 后缀的方法（<code>thenApplyAsync</code> 等）才丢进线程池。所以：回调里如果要做耗时操作，要么用 Async 变体、要么保证完成线程不阻塞（比如别在 RPC 的 IO 线程里做重活）。这也是很多线上 bug 的来源：回调在 IO 线程里跑了 500ms 的 CPU 计算，把下游连接池拖垮。</p>
   </div>
 
   <div class="takeaway">
     <span class="takeaway-label">核心记忆</span>
-    <p>supplyAsync 有返回值，runAsync 无返回值，completedFuture 立即可用。生产环境必须传入自定义 Executor，不要用默认的 ForkJoinPool.commonPool()——线程数不可控且互相干扰。</p>
+    <p>生产环境必须传自定义 Executor，不要用默认的 ForkJoinPool.commonPool()——线程数不可控、全 JVM 共享、互相干扰。Async 变体换线程池执行，非 Async 变体在完成线程上执行。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 3 站 — 链式转换
+     第 7 站 — 链式转换
      ================================================================ -->
-<section class="station reveal" id="s3">
+<section class="station reveal" id="s7">
   <div class="station-head">
-    <span class="station-no">第 3 站</span>
-    <h2>链式转换：thenApply / thenCompose / thenAccept</h2>
+    <span class="station-no">第 7 站</span>
+    <h2>链式转换：thenApply / thenAccept / thenRun</h2>
   </div>
 
-  <p>CompletableFuture 最强大的特性是<strong>链式组合</strong>——像 Stream 一样把多个异步步骤串成流水线。面试最爱考的三个方法：<code>thenApply</code>、<code>thenCompose</code>、<code>thenAccept</code>。</p>
+  <p>CompletableFuture 最强大的特性是<strong>链式组合</strong>——像 Stream 一样把多个异步步骤串成流水线（Pipeline）。面试最爱问的三个方法：<code>thenApply</code>（转换）、<code>thenAccept</code>（消费）、<code>thenRun</code>（执行动作）。</p>
 
   <div class="srcbox">
-    <div class="srcbox-head">thenApply vs thenCompose——最关键的区别</div>
-    <pre class="srcbox-file"><span class="c">// thenApply：同步转换（Function&lt;T, U&gt; → CompletableFuture&lt;U&gt;）</span>
-<span class="c">// 类比 Stream.map()：输入 T，输出 U</span>
+    <div class="srcbox-head">thenApply / thenApplyAsync / thenAccept / thenRun</div>
+    <pre class="srcbox-file"><span class="c">// thenApply：同步转换（Function&lt;T, U&gt;），类比 Stream.map()：输入 T，输出 U</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt; nameFuture =
     supplyAsync(() -&gt; productService.getById(<span class="n">123</span>))   <span class="c">// CompletableFuture&lt;Product&gt;</span>
     .thenApply(product -&gt; product.getName());           <span class="c">// CompletableFuture&lt;String&gt;</span>
 
-<span class="c">// thenCompose：扁平化转换（Function&lt;T, CompletableFuture&lt;U&gt;&gt; → CompletableFuture&lt;U&gt;）</span>
-<span class="c">// 类比 Stream.flatMap()：下一步本身也是异步的，需要"拍平"嵌套</span>
-<span class="t">CompletableFuture</span>&lt;<span class="t">Price</span>&gt; priceFuture =
-    supplyAsync(() -&gt; productService.getById(<span class="n">123</span>))       <span class="c">// CompletableFuture&lt;Product&gt;</span>
-    .thenCompose(product -&gt;
-        priceService.getPriceAsync(product.getSkuId()));   <span class="c">// 返回 CompletableFuture&lt;Price&gt;</span>
-    <span class="c">// 如果用 thenApply，结果会是 CompletableFuture&lt;CompletableFuture&lt;Price&gt;&gt; ← 嵌套！</span></pre>
-  </div>
-
-  <div class="srcbox">
-    <div class="srcbox-head">thenApplyAsync / thenAccept / thenRun</div>
-    <pre class="srcbox-file"><span class="c">// thenApply（同步转换）vs thenApplyAsync（异步转换）</span>
-f.thenApply(result -&gt; result.toUpperCase());         <span class="c">// 在上一步线程中同步执行</span>
-f.thenApplyAsync(result -&gt; callRPC(result));           <span class="c">// 提交到线程池异步执行（转换本身耗时）</span>
+<span class="c">// thenApplyAsync：转换本身是耗时操作时，丢进线程池异步执行</span>
+f.thenApply(result -&gt; result.toUpperCase());            <span class="c">// 在完成线程上同步执行（快操作）</span>
+f.thenApplyAsync(result -&gt; callRPC(result));            <span class="c">// 提交到线程池执行（慢操作）</span>
 
 <span class="c">// thenAccept：消费结果，无返回值（类比 forEach）</span>
 supplyAsync(() -&gt; orderService.create(dto))
     .thenAccept(orderId -&gt; log.info(<span class="t">"订单创建成功: {}"</span>, orderId));
 
-<span class="c">// thenRun：不关心上一步结果，只执行后续动作</span>
+<span class="c">// thenRun：不关心上一步结果，只执行后续动作（上一步结果被丢弃）</span>
 supplyAsync(() -&gt; orderService.create(dto))
     .thenRun(() -&gt; metricsService.increment(<span class="t">"order.created"</span>));</pre>
   </div>
 
   <div class="formula">
-    <code>thenApply</code> ≈ <code>map</code> &nbsp;|&nbsp; <code>thenCompose</code> ≈ <code>flatMap</code> &nbsp;|&nbsp; <code>thenAccept</code> ≈ <code>forEach</code>
+    <code>thenApply</code> ≈ <code>map</code>（T → U，有返回值）&nbsp;|&nbsp; <code>thenAccept</code> ≈ <code>forEach</code>（T → void，消费）&nbsp;|&nbsp; <code>thenRun</code>（跟结果无关，跑个动作）
   </div>
 
-  <div class="crack">
-    <span class="crack-label">面试高频追问</span>
-    <p>"thenApply 和 thenCompose 的区别是什么？" 回答要点：thenApply 的回调返回普通值 U，thenCompose 的回调返回 <code>CompletableFuture&lt;U&gt;</code>。如果下一步也是异步操作（返回 Future），必须用 thenCompose 来"拍平"，否则会得到嵌套的 <code>CompletableFuture&lt;CompletableFuture&lt;T&gt;&gt;</code>。</p>
+  <p>选型口诀：<strong>要转换结果用 thenApply，要消费结果用 thenAccept，跟结果没关系用 thenRun</strong>。方法名后缀规律也要记住：<code>Async</code> 表示丢线程池、不带则同步执行（执行线程的语义见第 6 站）。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心记忆</span>
+    <p>thenApply 有参有返回、thenAccept 有参无返回、thenRun 无参无返回。它们都只适合「下一步是同步操作」——如果下一步本身是异步的（返回 CompletableFuture），就要用下一站的 thenCompose。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 4 站 — 组合与聚合
+     第 8 站 — thenCompose vs thenApply
      ================================================================ -->
-<section class="station reveal" id="s4">
+<section class="station reveal" id="s8">
   <div class="station-head">
-    <span class="station-no">第 4 站</span>
+    <span class="station-no">第 8 站</span>
+    <h2>thenCompose vs thenApply：嵌套与拍平</h2>
+  </div>
+
+  <p>这是面试出现频率最高的追问：<strong>「thenApply 和 thenCompose 有什么区别？」</strong>一句话版：thenApply 的回调返回普通值 U，thenCompose 的回调返回 <code>CompletableFuture&lt;U&gt;</code>——thenCompose 会把返回的 Future 自动「拍平」，避免嵌套。</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">thenApply vs thenCompose——最关键的区别</div>
+    <pre class="srcbox-file"><span class="c">// thenApply：同步转换（Function&lt;T, U&gt;）—— 回调里做的是同步操作</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt; nameF =
+    supplyAsync(() -&gt; productService.getById(<span class="n">123</span>))   <span class="c">// CompletableFuture&lt;Product&gt;</span>
+    .thenApply(product -&gt; product.getName());           <span class="c">// getName() 是同步方法 → CompletableFuture&lt;String&gt;</span>
+
+<span class="c">// thenCompose：扁平化转换（Function&lt;T, CompletableFuture&lt;U&gt;&gt;）—— 回调里做的是异步操作</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">Price</span>&gt; priceF =
+    supplyAsync(() -&gt; productService.getById(<span class="n">123</span>))        <span class="c">// CompletableFuture&lt;Product&gt;</span>
+    .thenCompose(product -&gt;
+        priceService.getPriceAsync(product.getSkuId()));    <span class="c">// 返回 CompletableFuture&lt;Price&gt;，自动拍平</span></pre>
+  </div>
+
+  <p>如果用 thenApply 去接一个异步操作，会发生什么？<strong>嵌套</strong>——结果变成 <code>CompletableFuture&lt;CompletableFuture&lt;Price&gt;&gt;</code>，取结果要多等一层：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">错误用法演示：thenApply 接异步操作</div>
+    <pre class="srcbox-file"><span class="c">// ✗ 错误：用 thenApply 串联异步步骤，得到套娃</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">CompletableFuture</span>&lt;<span class="t">Price</span>&gt;&gt; nested =
+    supplyAsync(() -&gt; productService.getById(<span class="n">123</span>))
+    .thenApply(product -&gt; priceService.getPriceAsync(product.getSkuId()));  <span class="c">// 嵌套！</span>
+
+<span class="t">Price</span> price = nested.join().join();   <span class="c">// 只能再 join 一层 —— 又阻塞又难看</span>
+
+<span class="c">// ✓ 正确：thenCompose 自动拍平，链上始终只有一层</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">Price</span>&gt; flat =
+    supplyAsync(() -&gt; productService.getById(<span class="n">123</span>))
+    .thenCompose(product -&gt; priceService.getPriceAsync(product.getSkuId()));
+
+<span class="t">Price</span> price = flat.join();   <span class="c">// 一层搞定</span></pre>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">类比：Stream 的 map vs flatMap</span>
+    <p><code>thenCompose</code> 就是异步版的 <code>flatMap</code>：<code>flatMap</code> 把「元素 → 集合」拍平成一层流，<code>thenCompose</code> 把「值 → Future」拍平成一层 Future。判断口诀：<strong>回调里是同步方法用 thenApply，回调里返回 Future 用 thenCompose</strong>——永远不要让链上出现 <code>CompletableFuture&lt;CompletableFuture&lt;…&gt;&gt;</code>。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心记忆</span>
+    <p>thenApply 回调返回普通值（map），thenCompose 回调返回 Future 并自动拍平（flatMap）。下一步是异步操作用 thenCompose，否则会得到嵌套的 CompletableFuture，取结果被迫二次阻塞。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 9 站 — 组合与聚合
+     ================================================================ -->
+<section class="station reveal" id="s9">
+  <div class="station-head">
+    <span class="station-no">第 9 站</span>
     <h2>组合与聚合：thenCombine / allOf / anyOf</h2>
   </div>
 
-  <p>链式转换解决的是"串行流水线"，但真实场景中经常需要<strong>多个独立 Future 的聚合</strong>。这就是 <code>thenCombine</code>、<code>allOf</code>、<code>anyOf</code> 的舞台。</p>
+  <p>链式转换解决的是「串行流水线」，但真实场景中经常需要<strong>多个独立 Future 的聚合</strong>。这就是 <code>thenCombine</code>、<code>allOf</code>、<code>anyOf</code> 的舞台。</p>
 
   <div class="fig">
     <svg viewBox="0 0 800 400" xmlns="http://www.w3.org/2000/svg" style="max-width:800px;width:100%">
@@ -256,7 +571,7 @@ supplyAsync(() -&gt; orderService.create(dto))
       <rect x="400" y="325" width="160" height="40" rx="8" fill="url(#gPurple)"/>
       <text x="480" y="350" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">thenCombine → VO</text>
     </svg>
-    <figcaption><span class="fig-no">图 1</span> CompletableFuture 三种组合模式——thenCombine / allOf / anyOf</figcaption>
+    <div class="figcaption"><span class="fig-no">图 2</span>CompletableFuture 三种组合模式——thenCombine / allOf / anyOf</div>
   </div>
 
   <div class="srcbox">
@@ -275,11 +590,11 @@ supplyAsync(() -&gt; orderService.create(dto))
     <div class="srcbox-head">allOf：等待全部完成</div>
     <pre class="srcbox-file"><span class="t">CompletableFuture</span>&lt;<span class="t">Void</span>&gt; all = <span class="t">CompletableFuture</span>.allOf(f1, f2, f3, f4);
 all.thenRun(() -&gt; {
-    <span class="c">// 所有 Future 已完成，安全 get()</span>
+    <span class="c">// 所有 Future 已完成，安全 join()</span>
     <span class="t">DetailVO</span> vo = assemble(f1.join(), f2.join(), f3.join(), f4.join());
     response.complete(vo);
 });
-<span class="c">// 注意：allOf 返回 CompletableFuture&lt;Void&gt;，不携带结果，必须手动 join</span></pre>
+<span class="c">// 注意：allOf 返回 CompletableFuture&lt;Void&gt;，不携带结果，必须手动 join 每个子 Future</span></pre>
   </div>
 
   <div class="srcbox">
@@ -291,41 +606,48 @@ all.thenRun(() -&gt; {
 <span class="c">// 注意：anyOf 返回 CompletableFuture&lt;Object&gt;，需要强转</span></pre>
   </div>
 
+  <div class="crack">
+    <span class="crack-label">allOf / anyOf 的两个细节</span>
+    <p>① <strong>allOf 的失败语义</strong>：只要其中一个 Future 异常完成，返回的 all 也异常完成——所以 <code>all.thenRun(...)</code> 里的回调不会执行；但其它已经成功完成的任务不受影响，各自的 <code>join()</code> 仍然能取到结果（谁失败谁抛）。② <strong>anyOf 的应用</strong>：不止「缓存 vs DB」双读，多机房容灾「取最快到达的那路」也是它——但注意要配合超时，否则最慢那路永远不完成，anyOf 本身不设超时也会一直等。</p>
+  </div>
+
   <div class="takeaway">
     <span class="takeaway-label">核心记忆</span>
-    <p>thenCombine 是"两路合并"，allOf 是"等所有"，anyOf 是"抢最快"。allOf 返回 Void 需要手动取结果，anyOf 返回 Object 需要强转。</p>
+    <p>thenCombine 是「两路合并」，allOf 是「等所有」，anyOf 是「抢最快」。allOf 返回 Void 需要手动取结果，anyOf 返回 Object 需要强转。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 5 站 — 异常处理
+     第 10 站 — 异常处理
      ================================================================ -->
-<section class="station reveal" id="s5">
+<section class="station reveal" id="s10">
   <div class="station-head">
-    <span class="station-no">第 5 站</span>
-    <h2>异常处理：exceptionally / handle / whenComplete</h2>
+    <span class="station-no">第 10 站</span>
+    <h2>异常处理三兄弟：exceptionally / handle / whenComplete</h2>
   </div>
 
-  <p>异步编程最容易被忽视的就是异常处理。<code>CompletableFuture</code> 中的异常不会抛到调用方线程——如果你不主动处理，它会<strong>静默吞掉</strong>，直到你调 <code>get()</code> / <code>join()</code> 时才以 <code>CompletionException</code> 的形式爆发。</p>
+  <p>异步编程最容易被忽视的就是异常处理。<code>CompletableFuture</code> 中的异常不会抛到调用方线程——如果你不主动处理，它会<strong>静默吞掉</strong>：异常被存进 result 字段（异常完成），后续依赖动作全部跳过，直到你调 <code>get()</code> / <code>join()</code> 时才以 <code>CompletionException</code> 的形式爆发。所以每条链都要有「兜底」。</p>
 
   <div class="srcbox">
     <div class="srcbox-head">三种异常处理方式对比</div>
-    <pre class="srcbox-file"><span class="c">// ① exceptionally —— 异常兜底，返回同类型默认值</span>
+    <pre class="srcbox-file"><span class="c">// ① exceptionally —— 异常兜底，返回同类型默认值（类比 catch + return 默认值）</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">List</span>&lt;<span class="t">Review</span>&gt;&gt; reviewsF =
     supplyAsync(() -&gt; reviewService.list(productId))
     .exceptionally(ex -&gt; {
         log.warn(<span class="t">"评价服务异常"</span>, ex);
         <span class="k">return</span> <span class="t">Collections</span>.emptyList();  <span class="c">// ← 必须返回同类型</span>
     });
-<span class="c">// ② handle —— 成功和异常都处理，可返回不同类型</span>
+
+<span class="c">// ② handle —— 成功和异常都处理，可返回不同类型（类比 try-catch-finally 里统一加工）</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">String</span>&gt; resultF = supplyAsync(() -&gt; riskyCall())
     .handle((result, ex) -&gt; ex != <span class="k">null</span> ? <span class="t">"fallback"</span> : result);
-<span class="c">// ③ whenComplete —— 副作用（日志/埋点），不改变结果</span>
+
+<span class="c">// ③ whenComplete —— 只读副作用（日志/埋点），不改变结果（类比 finally）</span>
 supplyAsync(() -&gt; orderService.create(dto))
     .whenComplete((orderId, ex) -&gt; {
         <span class="k">if</span> (ex != <span class="k">null</span>) log.error(<span class="t">"创建订单失败"</span>, ex);
         <span class="k">else</span> log.info(<span class="t">"创建订单成功: {}"</span>, orderId);
-    });  <span class="c">// 结果不变</span></pre>
+    });  <span class="c">// 结果原样往下传，异常也原样往下传</span></pre>
   </div>
 
   <table class="nb-table">
@@ -341,44 +663,102 @@ supplyAsync(() -&gt; orderService.create(dto))
 
   <div class="crack">
     <span class="crack-label">常见踩坑：exceptionally 的返回类型</span>
-    <p><code>exceptionally</code> 的回调<strong>必须返回与原 Future 相同泛型类型的值</strong>。新手常犯的错误是在 exceptionally 中写 <code>return null</code>，导致下游收到 null 引发 NPE。正确做法是返回有意义的默认值（如空列表、空对象）。</p>
+    <p><code>exceptionally</code> 的回调<strong>必须返回与原 Future 相同泛型类型的值</strong>。新手常犯的错误是在 exceptionally 中写 <code>return null</code>，导致下游收到 null 引发 NPE。正确做法是返回有意义的默认值（如空列表、空对象），或者干脆在源头用 <code>completeOnTimeout</code> 兜底（第 12 站）。</p>
   </div>
 
   <div class="srcbox">
     <div class="srcbox-head">异常传播链——链式调用中的异常会"穿透"</div>
     <pre class="srcbox-file"><span class="c">// 异常会跳过中间步骤，直接传到最近的 exceptionally</span>
 supplyAsync(() -&gt; { <span class="k">throw new</span> <span class="t">RuntimeException</span>(<span class="t">"boom"</span>); })
-    .thenApply(s -&gt; s.toUpperCase())   <span class="c">// ← 跳过</span>
-    .thenCompose(s -&gt; callRPC(s))      <span class="c">// ← 跳过</span>
+    .thenApply(s -&gt; s.toUpperCase())   <span class="c">// ← 跳过，不执行</span>
+    .thenCompose(s -&gt; callRPC(s))      <span class="c">// ← 跳过，不执行</span>
     .exceptionally(ex -&gt; { log.error(<span class="t">"链路异常"</span>, ex); <span class="k">return</span> <span class="t">"default"</span>; });</pre>
   </div>
 
+  <p>这张图要刻在脑子里：<strong>异常沿依赖链向下传播，中间步骤全部短路，直到遇到 exceptionally / handle 才被接住</strong>；如果一路都没有处理者，异常就「沉底」——看起来任务静静结束了，其实是个哑弹，等 get/join 才炸。</p>
+
   <div class="takeaway">
     <span class="takeaway-label">核心记忆</span>
-    <p>exceptionally 是兜底降级（必须返回同类型值），handle 是成功/失败双通道处理，whenComplete 是只读副作用。链式调用中异常会"穿透"中间步骤，直到被 exceptionally 或 handle 捕获。</p>
+    <p>exceptionally 是兜底降级（必须返回同类型值），handle 是成功/失败双通道处理（可换类型），whenComplete 是只读副作用。链式调用中异常会「穿透」中间步骤，直到被 exceptionally 或 handle 捕获；没人接住就会沉底，等到 get/join 才爆发。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 6 站 — 超时控制
+     第 11 站 — get() vs join()
      ================================================================ -->
-<section class="station reveal" id="s6">
+<section class="station reveal" id="s11">
   <div class="station-head">
-    <span class="station-no">第 6 站</span>
-    <h2>超时控制：JDK 9+ 与 JDK 8 的不同做法</h2>
+    <span class="station-no">第 11 站</span>
+    <h2>get() vs join()：受检异常与运行时异常</h2>
   </div>
 
-  <p>生产环境中，异步调用<strong>必须有超时</strong>——否则一个下游服务 hang 住，你的线程会被无限阻塞，最终线程池耗尽、服务雪崩。</p>
+  <p><code>get()</code> 和 <code>join()</code> 都能「阻塞地取结果」，区别全在<strong>异常处理方式</strong>上，这也是面试爱问的细节：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head"><span class="srcbox-file"><b>get() vs join()</b> · 异常处理对比</span></div>
+    <pre class="srcbox-file"><span class="c">// get()：抛两个受检异常，编译器逼你处理</span>
+<span class="k">try</span> {
+    <span class="t">Product</span> p = f1.get();                        <span class="c">// throws InterruptedException, ExecutionException</span>
+} <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {          <span class="c">// 等待期间线程被中断</span>
+    <span class="t">Thread</span>.currentThread().interrupt();          <span class="c">// 最佳实践：恢复中断标志</span>
+} <span class="k">catch</span> (<span class="t">ExecutionException</span> e) {            <span class="c">// 任务执行失败</span>
+    <span class="t">Throwable</span> cause = e.getCause();              <span class="c">// 原始异常在这里（要剥一层）</span>
+    log.error(<span class="t">"任务执行失败"</span>, cause);
+}
+
+<span class="c">// join()：只抛 CompletionException（运行时异常），不写 try 也能编译</span>
+<span class="t">Product</span> p = f2.join();                          <span class="c">// 失败了直接抛出来，自己接住</span>
+<span class="c">// cause 同样在 e.getCause() 里，异常类型是 CompletionException</span></pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>维度</th><th><code>get()</code></th><th><code>join()</code></th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>抛出的异常</strong></td><td><code>InterruptedException</code> + <code>ExecutionException</code></td><td><code>CompletionException</code></td></tr>
+      <tr><td><strong>是否受检</strong></td><td>受检（checked），必须 try-catch</td><td>非受检（unchecked），可不处理</td></tr>
+      <tr><td><strong>中断语义</strong></td><td>可中断：等待中被 interrupt 会抛异常</td><td>不可中断：中断只被记下，等完再恢复标志</td></tr>
+      <tr><td><strong>异常包装</strong></td><td>原始异常在 <code>ExecutionException.getCause()</code></td><td>原始异常在 <code>CompletionException.getCause()</code></td></tr>
+      <tr><td><strong>典型场景</strong></td><td>最外层 Controller 取最终结果，显式处理异常</td><td>链式内部、测试代码，追求简洁</td></tr>
+    </tbody>
+  </table>
+
+  <p>还有一个不阻塞的变体值得记住——<code>getNow(valueIfAbsent)</code>：Future 已完成就返回结果，未完成就直接返回你给的默认值，<strong>绝不阻塞</strong>。适合「尽力而为」的读取：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">getNow：不阻塞的"尽力而为"读取</div>
+    <pre class="srcbox-file"><span class="c">// 缓存异步预热中：读到了就用，没读到先返回默认值，绝不阻塞请求线程</span>
+<span class="t">CompletableFuture</span>&lt;<span class="t">Price</span>&gt; preheating = loadPrice(id);          <span class="c">// 可能还没完成</span>
+<span class="t">Price</span> price = preheating.getNow(<span class="t">Price</span>.UNKNOWN);                <span class="c">// 未完成 → 立即返回 UNKNOWN</span></pre>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">核心记忆</span>
+    <p>get() 抛受检异常（InterruptedException + ExecutionException），join() 抛非受检的 CompletionException；两者都把原始异常包在 <code>getCause()</code> 里。链路内部建议统一 join()，最外层用 get() 显式兜底；需要「不阻塞拿结果」用 getNow()。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 12 站 — 超时控制
+     ================================================================ -->
+<section class="station reveal" id="s12">
+  <div class="station-head">
+    <span class="station-no">第 12 站</span>
+    <h2>超时控制：orTimeout / completeOnTimeout 与 JDK 8 方案</h2>
+  </div>
+
+  <p>生产环境中，异步调用<strong>必须有超时</strong>——否则一个下游服务 hang 住，你的线程会被无限阻塞，最终线程池耗尽、服务雪崩。没有超时的异步调用，就像挂机等一个永远不会来的电话。</p>
 
   <div class="srcbox">
     <div class="srcbox-head">JDK 9+：orTimeout 与 completeOnTimeout</div>
-    <pre class="srcbox-file"><span class="c">// orTimeout —— 超时则标记为 TimeoutException</span>
+    <pre class="srcbox-file"><span class="c">// orTimeout —— 超时则把 future 标记为"异常完成"（TimeoutException）</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">Product</span>&gt; f = supplyAsync(() -&gt; productService.getById(id))
     .orTimeout(<span class="n">500</span>, <span class="t">TimeUnit</span>.MILLISECONDS);
 <span class="c">// 500ms 内未完成 → future 以 TimeoutException 完成</span>
-<span class="c">// 后续 exceptionally/handle 可以捕获该异常</span>
+<span class="c">// 后续 exceptionally / handle 可以捕获该异常做降级</span>
 
-<span class="c">// completeOnTimeout —— 超时则用默认值完成（不会抛异常）</span>
+<span class="c">// completeOnTimeout —— 超时则用默认值"正常完成"（不会抛异常）</span>
 <span class="t">CompletableFuture</span>&lt;<span class="t">List</span>&lt;<span class="t">Review</span>&gt;&gt; reviewsF =
     supplyAsync(() -&gt; reviewService.list(id))
     .completeOnTimeout(<span class="t">Collections</span>.emptyList(), <span class="n">300</span>, <span class="t">TimeUnit</span>.MILLISECONDS);
@@ -390,15 +770,22 @@ supplyAsync(() -&gt; { <span class="k">throw new</span> <span class="t">RuntimeE
       <tr><th>方法</th><th>超时后行为</th><th>适用场景</th></tr>
     </thead>
     <tbody>
-      <tr><td><code>orTimeout</code></td><td>以 TimeoutException 完成</td><td>超时需要报错 / 触发 exceptionally</td></tr>
-      <tr><td><code>completeOnTimeout</code></td><td>以指定默认值完成</td><td>超时降级返回默认值（推荐评价、推荐等非核心模块）</td></tr>
+      <tr><td><code>orTimeout</code></td><td>以 TimeoutException 异常完成</td><td>超时需要报错 / 触发 exceptionally 做复杂兜底</td></tr>
+      <tr><td><code>completeOnTimeout</code></td><td>以指定默认值正常完成</td><td>超时直接降级返回默认值（评价、推荐等非核心模块）</td></tr>
     </tbody>
   </table>
 
+  <p>一个小细节：<code>orTimeout</code> / <code>completeOnTimeout</code> 内部靠一个共享的静态 <code>ScheduledThreadPoolExecutor</code>（Delayer）定时「叫醒」——本质还是第 4 站说的「定时器线程调 complete() / completeExceptionally()」，幂等性保证了它不会覆盖真正的结果。</p>
+
   <div class="srcbox">
     <div class="srcbox-head">JDK 8 兼容方案：ScheduledExecutorService</div>
-    <pre class="srcbox-file"><span class="c">// JDK 8 没有 orTimeout / completeOnTimeout，需手动实现</span>
-<span class="k">private static final</span> <span class="t">ScheduledExecutorService</span> scheduler = <span class="t">Executors</span>.newScheduledThreadPool(<span class="n">2</span>);
+    <pre class="srcbox-file"><span class="c">// JDK 8 没有 orTimeout / completeOnTimeout，需手动实现（原理一模一样）</span>
+<span class="k">private static final</span> <span class="t">ScheduledExecutorService</span> scheduler =
+    <span class="t">Executors</span>.newScheduledThreadPool(<span class="n">2</span>, r -&gt; {
+        <span class="t">Thread</span> t = <span class="k">new</span> <span class="t">Thread</span>(r, <span class="t">"cf-timeout-scheduler"</span>);
+        t.setDaemon(<span class="k">true</span>);
+        <span class="k">return</span> t;
+    });
 
 <span class="k">public static</span> &lt;<span class="t">T</span>&gt; <span class="t">CompletableFuture</span>&lt;<span class="t">T</span>&gt; <span class="n">withTimeout</span>(
         <span class="t">CompletableFuture</span>&lt;<span class="t">T</span>&gt; future, <span class="k">long</span> timeout, <span class="t">TimeUnit</span> unit) {
@@ -415,25 +802,25 @@ supplyAsync(() -&gt; { <span class="k">throw new</span> <span class="t">RuntimeE
 
   <div class="takeaway">
     <span class="takeaway-label">核心记忆</span>
-    <p>JDK 9+ 用 orTimeout（超时异常）和 completeOnTimeout（超时降级）。JDK 8 用 ScheduledExecutorService + completeExceptionally 手动实现。生产环境<strong>每个异步调用都必须设超时</strong>。</p>
+    <p>JDK 9+ 用 orTimeout（超时异常）和 completeOnTimeout（超时降级）。JDK 8 用 ScheduledExecutorService + completeExceptionally 手动实现。生产环境<strong>每个异步调用都必须设超时</strong>——这是防止线程池耗尽雪崩的底线。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 7 站 — 生产实战模式
+     第 13 站 — 生产实战
      ================================================================ -->
-<section class="station reveal" id="s7">
+<section class="station reveal" id="s13">
   <div class="station-head">
-    <span class="station-no">第 7 站</span>
-    <h2>生产实战模式：Pipeline / Fan-out Fan-in / Timeout+Retry</h2>
+    <span class="station-no">第 13 站</span>
+    <h2>生产实战：商品详情页完整编排</h2>
   </div>
 
-  <p>面试中如果能写出以下完整模式，会非常有加分。我们用商品详情页串联三种核心编排模式。</p>
+  <p>面试中如果能写出以下完整模式，会非常有加分。我们用商品详情页把三种核心编排模式串起来（以下模板假设 JDK 9+；JDK 8 请把 orTimeout / completeOnTimeout 换成第 12 站的 withTimeout 工具方法）：</p>
 
   <div class="srcbox">
-    <div class="srcbox-head">完整实战：商品详情页编排（Pipeline + Fan-out Fan-in + 超时降级）</div>
+    <div class="srcbox-head">完整实战：商品详情页编排（Pipeline + Fan-out/Fan-in + 超时降级）</div>
     <pre class="srcbox-file"><span class="k">public</span> <span class="t">CompletableFuture</span>&lt;<span class="t">DetailVO</span>&gt; <span class="n">getProductDetail</span>(<span class="k">long</span> productId) {
-    <span class="c">// Pipeline：查用户 → 查会员价（有依赖，用 thenCompose）</span>
+    <span class="c">// Pipeline：查用户 → 查会员价（有依赖，用 thenCompose 串联）</span>
     <span class="t">CompletableFuture</span>&lt;<span class="t">PriceVO</span>&gt; priceF = supplyAsync(() -&gt; userService.getCurrentUser(), pool)
         .thenCompose(user -&gt; priceService.getMemberPriceAsync(productId, user.getLevel()))
         .orTimeout(<span class="n">300</span>, <span class="t">TimeUnit</span>.MILLISECONDS)
@@ -480,61 +867,201 @@ supplyAsync(() -&gt; { <span class="k">throw new</span> <span class="t">RuntimeE
     </thead>
     <tbody>
       <tr><td>Pipeline</td><td>thenCompose 串联，前一步输出是后一步输入</td><td>有依赖的多步异步（如：查用户 → 查会员价）</td></tr>
-      <tr><td>Fan-out / Fan-in</td><td>allOf 并行发起，等全部完成</td><td>无依赖的多路聚合（如：商品 + 评价 + 推荐）</td></tr>
+      <tr><td>Fan-out / Fan-in</td><td>allOf 并行发起，等全部完成再聚合</td><td>无依赖的多路聚合（如：商品 + 评价 + 推荐）</td></tr>
       <tr><td>Timeout + Retry</td><td>orTimeout + exceptionally 递归重试</td><td>不稳定的下游调用，需要容错</td></tr>
     </tbody>
   </table>
 
   <div class="crack">
     <span class="crack-label">面试官追问：如果推荐服务挂了怎么办？</span>
-    <p>推荐是非核心模块。用 <code>completeOnTimeout</code> 超时降级为空列表 + <code>exceptionally</code> 捕获异常也返回空列表。核心模块（商品、价格）才需要重试。原则：<strong>核心模块重试 + 超时，非核心模块降级 + 超时</strong>。</p>
+    <p>推荐是非核心模块。用 <code>completeOnTimeout</code> 超时降级为空列表 + <code>exceptionally</code> 捕获异常也返回空列表。核心模块（商品、价格）才需要重试。原则：<strong>核心模块重试 + 超时，非核心模块降级 + 超时</strong>——重试也要设上限，且最好退避，否则雪崩时你的重试就是在补刀。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">生产坑：traceId 串号</span>
+    <p>CF 的回调经常在<strong>别的线程</strong>上执行（线程池线程、完成线程），而日志框架的 traceId 通常放在 ThreadLocal 里——跨线程就丢了，全链路追踪在异步段断链，排查问题抓瞎。解决：① 提交任务前把 traceId 抓出来，回调里手动塞回；② 用阿里开源的 <code>TransmittableThreadLocal</code> 做线程池透传（卷二 ThreadLocal 篇有专题）。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 8 站 — 总结
+     第 14 站 — 回调地狱 vs 流式编排
      ================================================================ -->
-<section class="station reveal" id="s8">
+<section class="station reveal" id="s14">
   <div class="station-head">
-    <span class="station-no">第 8 站</span>
-    <h2>总结：方法速查表 + 常见坑</h2>
+    <span class="station-no">第 14 站</span>
+    <h2>回调地狱 vs 流式编排：同一个需求两种写法</h2>
   </div>
 
-  <div class="recap">
-    <h3>CompletableFuture 方法速查</h3>
-    <table class="nb-table">
-      <thead>
-        <tr><th>类别</th><th>方法</th><th>一句话说明</th><th>Stream 类比</th></tr>
-      </thead>
-      <tbody>
-        <tr><td rowspan="3">创建</td><td><code>supplyAsync</code></td><td>有返回值的异步任务</td><td>—</td></tr>
-        <tr><td><code>runAsync</code></td><td>无返回值的异步任务</td><td>—</td></tr>
-        <tr><td><code>completedFuture</code></td><td>已完成的 Future（测试/默认值）</td><td>Stream.of()</td></tr>
-        <tr><td rowspan="3">链式转换</td><td><code>thenApply</code></td><td>同步转换 T → U</td><td>map</td></tr>
-        <tr><td><code>thenCompose</code></td><td>异步扁平转换 T → CF&lt;U&gt;</td><td>flatMap</td></tr>
-        <tr><td><code>thenAccept / thenRun</code></td><td>消费结果 / 执行动作</td><td>forEach</td></tr>
-        <tr><td rowspan="3">组合聚合</td><td><code>thenCombine</code></td><td>两个 Future 合并为一个结果</td><td>—</td></tr>
-        <tr><td><code>allOf</code></td><td>等所有 Future 完成</td><td>—</td></tr>
-        <tr><td><code>anyOf</code></td><td>最先完成的胜出</td><td>—</td></tr>
-        <tr><td rowspan="3">异常处理</td><td><code>exceptionally</code></td><td>异常兜底，返回同类型默认值</td><td>—</td></tr>
-        <tr><td><code>handle</code></td><td>成功/失败双通道处理</td><td>—</td></tr>
-        <tr><td><code>whenComplete</code></td><td>只读副作用（日志/埋点）</td><td>peek</td></tr>
-        <tr><td rowspan="2">超时 (9+)</td><td><code>orTimeout</code></td><td>超时 → TimeoutException</td><td>—</td></tr>
-        <tr><td><code>completeOnTimeout</code></td><td>超时 → 默认值</td><td>—</td></tr>
-      </tbody>
-    </table>
+  <p>把第 3 站那个「查用户 → 查会员价 → 算实付」的需求，用两种方式各写一遍。先看对比，再谈感受：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">写法 A：回调嵌套 —— 三层缩进，错误处理重复</div>
+    <pre class="srcbox-file"><span class="c">// 每一步都要：传回调 + 传错误处理，越嵌越深</span>
+fetchUser(userId, user -&gt;
+    fetchMemberPrice(user, price -&gt;
+        calcPay(price, pay -&gt; render(pay), onError),
+    onError),
+onError);</pre>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">写法 B：CompletableFuture 流式编排 —— 一维链，异常集中处理</div>
+    <pre class="srcbox-file"><span class="t">CompletableFuture</span>.supplyAsync(() -&gt; userService.get(userId), pool)
+    .thenCompose(user -&gt; priceService.getMemberPriceAsync(user, pool))
+    .thenApply(price -&gt; calcService.calcPay(price))
+    .exceptionally(ex -&gt; defaultPay())
+    .thenAccept(pay -&gt; render(pay));</pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>维度</th><th>回调嵌套</th><th>流式编排</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>代码形态</strong></td><td>横向膨胀，括号层层包裹</td><td>一维链，每步一行，从上往下读就是流程</td></tr>
+      <tr><td><strong>异常处理</strong></td><td>每层单独写一遍 onFailure</td><td>链尾一个 exceptionally 统一兜底</td></tr>
+      <tr><td><strong>组合能力</strong></td><td>手动拼，改一步动全链</td><td>thenCombine / allOf / anyOf 随意拼装</td></tr>
+      <tr><td><strong>线程控制</strong></td><td>靠外部 executor 参数传递</td><td>每步可指定 Async + 线程池</td></tr>
+      <tr><td><strong>调试排查</strong></td><td>回调栈信息支离破碎</td><td>链式结构清晰，异常 cause 可追溯</td></tr>
+    </tbody>
+  </table>
+
+  <div class="crack">
+    <span class="crack-label">一句话点破</span>
+    <p>回调地狱的问题是<strong>「流程」被写成了「嵌套」</strong>；CompletableFuture 把嵌套拍平，让<strong>数据沿着一维的链流动</strong>——上一站的输出自动成为下一站的输入，异常自动向下传播。这就是「从回调地狱到流式编排（Reactive-style Chaining）」的全部意义：不是少了几个括号，而是让流程可读、可复用、可组合。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 15 站 — 方法速查表
+     ================================================================ -->
+<section class="station reveal" id="s15">
+  <div class="station-head">
+    <span class="station-no">第 15 站</span>
+    <h2>方法速查表：一张表记住全部 API</h2>
+  </div>
+
+  <p>面试前把这张表过一遍，主要 API 就不会漏：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">CompletableFuture 方法速查</div>
+    <pre class="srcbox-file"><span class="c">// 还没列全的"双 Future 变体"：thenAcceptBoth（两个都完成再消费）、</span>
+<span class="c">// applyToEither / acceptEither（两个任一完成就处理）。面试提到"还有变体"即可加分。</span></pre>
+  </div>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>类别</th><th>方法</th><th>一句话说明</th><th>Stream 类比</th></tr>
+    </thead>
+    <tbody>
+      <tr><td rowspan="3">创建</td><td><code>supplyAsync</code></td><td>有返回值的异步任务</td><td>—</td></tr>
+      <tr><td><code>runAsync</code></td><td>无返回值的异步任务</td><td>—</td></tr>
+      <tr><td><code>completedFuture</code></td><td>已完成的 Future（测试/默认值/短路）</td><td>Stream.of()</td></tr>
+      <tr><td rowspan="3">链式转换</td><td><code>thenApply</code></td><td>同步转换 T → U</td><td>map</td></tr>
+      <tr><td><code>thenCompose</code></td><td>异步扁平转换 T → CF&lt;U&gt;，自动拍平</td><td>flatMap</td></tr>
+      <tr><td><code>thenAccept / thenRun</code></td><td>消费结果 / 执行动作</td><td>forEach</td></tr>
+      <tr><td rowspan="3">组合聚合</td><td><code>thenCombine</code></td><td>两个 Future 合并为一个结果</td><td>—</td></tr>
+      <tr><td><code>allOf</code></td><td>等所有 Future 完成（返回 Void）</td><td>—</td></tr>
+      <tr><td><code>anyOf</code></td><td>最先完成的胜出（返回 Object）</td><td>—</td></tr>
+      <tr><td rowspan="3">异常处理</td><td><code>exceptionally</code></td><td>异常兜底，返回同类型默认值</td><td>—</td></tr>
+      <tr><td><code>handle</code></td><td>成功/失败双通道处理，可换类型</td><td>—</td></tr>
+      <tr><td><code>whenComplete</code></td><td>只读副作用（日志/埋点），结果不变</td><td>peek</td></tr>
+      <tr><td rowspan="2">结果获取</td><td><code>get() / join()</code></td><td>阻塞取结果（受检 / 非受检异常）</td><td>—</td></tr>
+      <tr><td><code>getNow(default)</code></td><td>已完成返回结果，未完成返回默认值，不阻塞</td><td>—</td></tr>
+      <tr><td rowspan="2">手动完成</td><td><code>complete(v)</code></td><td>用值完成（幂等）</td><td>—</td></tr>
+      <tr><td><code>completeExceptionally(t)</code></td><td>用异常完成（幂等）</td><td>—</td></tr>
+      <tr><td rowspan="2">超时 (9+)</td><td><code>orTimeout</code></td><td>超时 → TimeoutException 异常完成</td><td>—</td></tr>
+      <tr><td><code>completeOnTimeout</code></td><td>超时 → 用默认值正常完成</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">记忆口诀</span>
+    <p>后缀决定一切：<code>Apply</code> 有参有返回、<code>Accept</code> 有参无返回、<code>Run</code> 无参无返回、<code>Compose</code> 拍平嵌套；带 <code>Async</code> 丢线程池；<code>Exceptionally / Handle</code> 处理异常、<code>WhenComplete</code> 只读副作用；<code>Combine / AllOf / AnyOf</code> 处理多 Future。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 16 站 — 常见坑与最佳实践
+     ================================================================ -->
+<section class="station reveal" id="s16">
+  <div class="station-head">
+    <span class="station-no">第 16 站</span>
+    <h2>常见坑清单与最佳实践</h2>
   </div>
 
   <div class="crack">
     <span class="crack-label">常见坑清单</span>
     <ol>
-      <li><strong>忘记传自定义线程池</strong>——默认 ForkJoinPool.commonPool() 线程数 = CPU-1，IO 密集场景必炸</li>
+      <li><strong>忘记传自定义线程池</strong>——默认 ForkJoinPool.commonPool() 线程数 = CPU 核数 - 1，IO 密集场景必炸，还拖垮别人的 parallelStream</li>
       <li><strong>allOf 返回 Void</strong>——不能直接从 allOf 拿结果，必须手动 join() 每个子 Future</li>
-      <li><strong>exceptionally 返回 null</strong>——下游会收到 NPE，应返回有意义的默认值</li>
-      <li><strong>没有设超时</strong>——下游 hang 住会导致线程永久阻塞，最终线程池耗尽</li>
-      <li><strong>thenApply vs thenCompose 混用</strong>——下一步是异步操作用 thenCompose，否则得到嵌套 Future</li>
-      <li><strong>join() vs get()</strong>——join() 抛 unchecked CompletionException，get() 抛 checked ExecutionException；链式调用中推荐 join()</li>
+      <li><strong>exceptionally 返回 null</strong>——下游收到 null 引发 NPE，应返回有意义的默认值</li>
+      <li><strong>没有设超时</strong>——下游 hang 住导致线程永久阻塞，最终线程池耗尽、服务雪崩</li>
+      <li><strong>thenApply vs thenCompose 混用</strong>——下一步是异步操作用 thenCompose，否则得到嵌套 Future，取结果二次阻塞</li>
+      <li><strong>join() / get() 选错</strong>——get() 是受检异常必须处理；链路内部统一 join() 更干净</li>
+      <li><strong>在非 Async 回调里做耗时操作</strong>——回调在完成线程上跑，会阻塞那条线程（可能是 RPC 的 IO 线程）</li>
+      <li><strong>ThreadLocal 不传递</strong>——回调跨线程，traceId 丢失、全链路追踪断链（用 TransmittableThreadLocal）</li>
+      <li><strong>异常被吞</strong>——没接住也没 get/join 的异常静默沉底，线上只剩"结果不对"的谜案；记得打日志或上报</li>
+      <li><strong>重试无上限 / 无退避</strong>——雪崩时疯狂重试等于补刀，重试必须设上限 + 退避 + 熔断</li>
     </ol>
+  </div>
+
+  <div class="srcbox">
+    <div class="srcbox-head">最佳实践：把超时 + 重试封装成统一工具</div>
+    <pre class="srcbox-file"><span class="c">// 团队内统一封装，禁止裸写 supplyAsync</span>
+<span class="k">public class</span> <span class="t">Asyncs</span> {
+    <span class="k">public static</span> &lt;<span class="t">T</span>&gt; <span class="t">CompletableFuture</span>&lt;<span class="t">T</span>&gt; <span class="n">supply</span>(<span class="t">Supplier</span>&lt;<span class="t">T</span>&gt; task,
+            <span class="k">long</span> timeoutMs, <span class="t">Supplier</span>&lt;<span class="t">T</span>&gt; fallback) {
+        <span class="k">return</span> <span class="t">CompletableFuture</span>.supplyAsync(task, <span class="t">BizPools</span>.ASYNC)
+            .completeOnTimeout(fallback.get(), timeoutMs, <span class="t">TimeUnit</span>.MILLISECONDS)
+            .exceptionally(ex -&gt; { log.warn(<span class="t">"async task failed, fallback"</span>, ex); <span class="k">return</span> fallback.get(); });
+    }
+}
+<span class="c">// 调用方一行搞定：Asyncs.supply(() -&gt; rpc.call(), 500, () -&gt; defaultV)</span></pre>
+  </div>
+
+  <p>监控也别忘：聚合接口要对每路子调用打点（耗时、成功率、超时率），谁慢了、谁抖了，一眼可见——异步化之后，<strong>单路延迟被并行掩盖，反而更需要逐路监控</strong>，否则慢接口会悄悄藏进 P99 里。</p>
+
+  <div class="takeaway">
+    <span class="takeaway-label">生产落地清单</span>
+    <ul>
+      <li>每个 <code>supplyAsync</code> 都传自定义线程池，线程池按业务隔离、命名规范；</li>
+      <li>每个异步调用都设超时：核心模块 orTimeout + 重试（有上限、有退避），非核心模块 completeOnTimeout 降级；</li>
+      <li>链路末端必须有异常处理者（exceptionally / handle），至少打日志；</li>
+      <li>回调里不做耗时操作，需要就上 Async 变体；</li>
+      <li>跨线程传值用 TransmittableThreadLocal，保住 traceId。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================================
+     总结
+     ================================================================ -->
+<section class="station reveal" id="summary">
+  <div class="station-head">
+    <span class="station-no">总结</span>
+    <h2>这一篇你掌握了什么</h2>
+  </div>
+
+  <div class="recap">
+    <h3>核心知识点回顾</h3>
+    <ul>
+      <li><strong>为什么需要它</strong>：传统 Future 三大痛点——get() 阻塞、无回调（只能轮询）、不能组合；回调嵌套则形成回调地狱（Callback Hell），流程被埋进括号里；</li>
+      <li><strong>核心模型</strong>：CompletableFuture = Future + CompletionStage，完成即触发（Completion）——结果是字段、依赖动作是栈，谁 complete 谁唤醒；complete() / completeExceptionally() 幂等，可被任何线程在任何时刻调用；</li>
+      <li><strong>创建</strong>：supplyAsync（有返回值）/ runAsync（无返回值）/ completedFuture（立即可用，缓存短路、测试）；</li>
+      <li><strong>线程池</strong>：默认 ForkJoinPool.commonPool()（核数 - 1、全 JVM 共享），生产必须传自定义线程池；非 Async 回调在完成线程执行、Async 变体才换线程池；</li>
+      <li><strong>链式转换</strong>：thenApply（map，有参有返回）/ thenAccept（有参无返回）/ thenRun（无参）；下一步是异步操作用 thenCompose（flatMap）拍平，避免 CompletableFuture&lt;CompletableFuture&lt;…&gt;&gt;；</li>
+      <li><strong>组合聚合</strong>：thenCombine（两路合并）、allOf（等全部，返回 Void 需手动 join）、anyOf（抢最快，返回 Object 需强转）；</li>
+      <li><strong>异常处理</strong>：exceptionally（兜底同类型值）/ handle（成败双通道可换类型）/ whenComplete（只读副作用）；异常沿依赖链穿透，没人接住就沉底，get/join 时才爆发；</li>
+      <li><strong>取结果</strong>：get() 抛受检 InterruptedException + ExecutionException，join() 抛非受检 CompletionException；getNow() 不阻塞；</li>
+      <li><strong>超时控制</strong>：JDK 9+ 用 orTimeout（异常完成）/ completeOnTimeout（默认值完成），JDK 8 用 ScheduledExecutorService 手动实现；每个异步调用都必须设超时；</li>
+      <li><strong>生产模式</strong>：Pipeline（thenCompose 串依赖）+ Fan-out/Fan-in（allOf 并行聚合）+ Timeout+Retry（核心模块重试、非核心模块降级）；注意 traceId 跨线程透传。</li>
+    </ul>
+  </div>
+
+  <div class="recap">
+    <h3>一句话总结</h3>
+    <p>CompletableFuture 把「<strong>阻塞等待</strong>」变成「<strong>完成即触发</strong>」，把「<strong>回调嵌套</strong>」拍平成「<strong>一维流式链</strong>」：创建（supplyAsync）→ 转换（thenApply/thenCompose）→ 聚合（thenCombine/allOf/anyOf）→ 兜底（exceptionally/handle）→ 超时（orTimeout/completeOnTimeout），配合自定义线程池，就能写出 RT 更低、可读性更高、可维护的异步编排代码。</p>
   </div>
 
   <div class="takeaway">
@@ -544,5 +1071,6 @@ supplyAsync(() -&gt; { <span class="k">throw new</span> <span class="t">RuntimeE
 </section>
 
 </main>
+
 </body>
 </html>

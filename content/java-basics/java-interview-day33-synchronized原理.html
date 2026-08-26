@@ -11,23 +11,32 @@
 
 <!-- ═══════════════ 第1站：开场 ═══════════════ -->
 <section class="station reveal" id="s1">
-<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道面试题开始</h2></div>
+<div class="station-head"><span class="station-no">第 1 站</span><h2>从一次线上事故说起</h2></div>
 
-<p>面试官微微一笑，抛出了这个经典问题：</p>
+<p>先讲一个真实发生过的线上事故。某天晚上大促压测，一个订单服务的接口 P99 从 80ms 一路飙到 3 秒，线程池被打满，新请求全部排队。运维 <code>jstack</code> 一抓，发现几百个线程齐刷刷卡在同一个状态：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>jstack 输出</b> · 事故现场</span></div>
+<pre><code><span class="s">"http-nio-8080-exec-42"</span> #42 prio=5 os_prio=31 ...
+   java.lang.Thread.State: <span class="hl">BLOCKED (on object monitor)</span>
+        at com.demo.order.OrderService.createOrder(OrderService.java:58)
+        - <span class="hl">waiting to lock &lt;0x00000007ff8f4d10&gt; (a java.lang.Object)</span>
+        at com.demo.order.OrderController.createOrder(...)</code></pre>
+</div>
+
+<p>一个对象的锁被某个线程长期持有，后面几百个线程都在排队等它——这就是最典型的<strong>锁竞争热点</strong>。等你学完这一篇，再看到这种日志，你一眼就能说出：这些线程正堵在 <strong>EntryList</strong> 上等锁，而锁大概率已经膨胀成了<strong>重量级锁</strong>。</p>
+
+<p>随后面试官微微一笑，抛出了那个经典问题：</p>
 
 <div class="think"><div class="think-q">"synchronized 和 ReentrantLock 有什么区别？"</div></div>
 
 <p>90% 的候选人会脱口而出：<strong>"synchronized 是重量级锁，ReentrantLock 是轻量级锁"</strong>。面试官心里已经给你打了标签——停留在 JDK 5 的认知。</p>
 
-<p>事实上，从 <strong>JDK 6 开始</strong>，JVM 团队对 synchronized 做了翻天覆地的优化。引入了<strong>偏向锁、轻量级锁、锁膨胀</strong>等机制，让 synchronized 在大多数场景下的性能已经不输甚至优于 ReentrantLock。HotSpot 虚拟机甚至为此重写了大半个 monitor 模块。</p>
+<p>事实上，从 <strong>JDK 6 开始</strong>，JVM 团队对 synchronized 做了翻天覆地的优化，引入了<strong>偏向锁、轻量级锁、锁膨胀</strong>等机制，让 synchronized 在大多数场景下的性能已经不输甚至优于 ReentrantLock。HotSpot 虚拟机甚至为此重写了大半个 monitor 模块。这篇文章，我们就来拆解 synchronized 背后的<strong>锁升级</strong>机制——从一把"笨锁"进化成"智能锁"的全过程。先给你一个 30 秒版答案，后面每一站都是在给这句话"上细节"：</p>
 
-<p>这篇文章，我们就来拆解 synchronized 背后的 <strong>锁升级</strong> 机制——从一把"笨锁"进化成"智能锁"的全过程。读完之后，你会理解：</p>
-
-<ul>
-  <li>对象头里到底藏了什么？</li>
-  <li>为什么同一个 synchronized 关键字，性能差异可以高达 10 倍？</li>
-  <li>偏向锁为什么在 JDK 15 被废弃、JDK 18 被彻底移除？</li>
-</ul>
+<div class="crack"><div class="crack-label">一句话点破</div>
+<p>synchronized 是 <strong>JVM 层面的内置锁</strong>，锁的信息存在<strong>对象头 Mark Word</strong> 里，会经历<strong>无锁 → 偏向锁 → 轻量级锁 → 重量级锁</strong>的升级，升级<strong>单向不可逆</strong>；JDK 6 之后经过大量优化，性能已不输 ReentrantLock，默认优先用它；只有当需要<strong>可中断、超时获取、公平锁、多条件队列</strong>这些能力时，才轮到 ReentrantLock 上场。</p>
+</div>
 
 <p>发车之前，先问自己三个问题：</p>
 
@@ -37,30 +46,97 @@
   <li>ObjectMonitor 的 EntryList 和 WaitSet 有什么区别？</li>
 </ul>
 
-<p>带着这些问题，我们从最底层的对象头开始。</p>
+<p>带着这些问题，我们从最底层开始，一步步拆解。</p>
 </section>
 
-<!-- ═══════════════ 第2站：对象头结构 ═══════════════ -->
+<!-- ═══════════════ 第2站：三种用法 ═══════════════ -->
 <section class="station reveal" id="s2">
-<div class="station-head"><span class="station-no">第 2 站</span><h2>对象头结构：锁信息藏在哪里？</h2></div>
+<div class="station-head"><span class="station-no">第 2 站</span><h2>三种用法：synchronized 到底锁的是谁？</h2></div>
 
-<p>在 HotSpot 虚拟机中，每一个 Java 对象在内存中都由三部分组成：<strong>对象头（Object Header）</strong>、实例数据（Instance Data）和对齐填充（Padding）。锁的所有状态信息，都存储在对象头的 <strong>Mark Word</strong> 里。</p>
+<p>很多人在面试第一关就翻车，不是不知道 synchronized，而是说不清"<strong>它到底锁在哪个对象上</strong>"。先背下这张表，它是整篇文章的地基：</p>
 
-<p>对象头的组成：</p>
+<table class="nb-table">
+<thead><tr><th>用法</th><th>锁的对象</th><th>等价写法</th></tr></thead>
+<tbody>
+<tr><td>修饰<strong>实例方法</strong></td><td><code>this</code>（当前实例对象）</td><td><code>synchronized (this) { … }</code></td></tr>
+<tr><td>修饰<strong>静态方法</strong></td><td><code>类名.class</code>（Class 对象）</td><td><code>synchronized (X.class) { … }</code></td></tr>
+<tr><td>修饰<strong>代码块</strong></td><td>任意指定的对象</td><td><code>synchronized (obj) { … }</code></td></tr>
+</tbody>
+</table>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>对象头组成</b></span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>SyncUsageDemo.java</b> · 三种用法（可直接运行）</span></div>
+<pre><code><span class="k">public class</span> <span class="t">SyncUsageDemo</span> {
+
+    <span class="k">private int</span> count = <span class="n">0</span>;
+    <span class="k">private final</span> <span class="t">Object</span> lock = <span class="k">new</span> <span class="t">Object</span>();
+
+    <span class="c">// 用法一：修饰实例方法 —— 锁的是 this（当前实例）</span>
+    <span class="k">public synchronized void</span> instanceMethod() {
+        count++;
+    }
+
+    <span class="c">// 用法二：修饰静态方法 —— 锁的是 SyncUsageDemo.class</span>
+    <span class="k">public static synchronized void</span> staticMethod() {
+        <span class="t">System</span>.out.println(<span class="s">"静态方法锁的是 Class 对象"</span>);
+    }
+
+    <span class="c">// 用法三：修饰代码块 —— 锁的是你指定的对象</span>
+    <span class="k">public void</span> blockMethod() {
+        <span class="k">synchronized</span> (lock) {
+            count++;
+        }
+    }
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">SyncUsageDemo</span> demo = <span class="k">new</span> <span class="t">SyncUsageDemo</span>();
+        demo.instanceMethod();        <span class="c">// 锁 this</span>
+        <span class="t">SyncUsageDemo</span>.staticMethod(); <span class="c">// 锁 Class 对象</span>
+        demo.blockMethod();           <span class="c">// 锁自定义 lock 对象</span>
+    }
+}</code></pre>
+</div>
+
+<p>背下用法只是第一步，真正考的是你知不知道<strong>它们之间互不互斥</strong>。这里有三个高频坑，每一个都值得单独记住：</p>
+
+<div class="crack"><div class="crack-label">三个高频坑</div>
+<ul>
+  <li><strong>坑一：两个实例的同步实例方法互不干扰。</strong>因为锁的 <code>this</code> 不同——new 出 10 个对象，就有 10 把独立的锁。所以"给实例方法加 synchronized 就能全局互斥"是错的。</li>
+  <li><strong>坑二：静态同步方法对"所有实例"都互斥。</strong>因为 Class 对象在 JVM 里全局唯一，一个类的所有实例共享这一把锁。</li>
+  <li><strong>坑三：静态同步方法和实例同步方法之间不互斥。</strong>一个锁 Class、一个锁 this，两者井水不犯河水。这也是面试最爱的追问点。</li>
+</ul>
+</div>
+
+<div class="think"><div class="think-q">追问："synchronized 修饰静态方法和修饰实例方法，锁的是同一个东西吗？"</div></div>
+
+<div class="crack"><div class="crack-label">点破</div>
+<p>不是。静态方法锁的是 <code>X.class</code>（Class 对象），实例方法锁的是 <code>this</code>。想在代码块里锁 Class 对象，可以写 <code>synchronized (X.class)</code> 或 <code>synchronized (this.getClass())</code>——同一运行时类，<code>getClass()</code> 返回的是同一个 Class 对象，等价于静态方法。另外记住：<strong>锁的对象必须是引用类型</strong>，基本类型（int、boolean）不能加锁，编译直接报错。</p>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">落地建议</div>
+<p>生产代码里，代码块 + 专用锁对象（第 14 站细讲）是主流写法，因为它能<strong>精确控制锁的粒度</strong>——只锁真正需要保护的几行，而不是整个方法。方法级 synchronized 适合"整个方法就是临界区"的简单场景。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：对象头与 Mark Word ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><span class="station-no">第 3 站</span><h2>对象头结构：锁信息藏在哪？</h2></div>
+
+<p>在 HotSpot 虚拟机中，每一个 Java 对象在内存中都由三部分组成：<strong>对象头（Object Header）</strong>、实例数据（Instance Data）和对齐填充（Padding）。<strong>锁的所有状态信息，都存储在对象头的 Mark Word 里</strong>——这就是"synchronized 是对象级锁"这句话的物理基础。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>对象头组成</b> · 64 位 JVM</span></div>
 <pre><code><span class="c">// 64 位 JVM 下的对象头结构</span>
 <span class="k">┌─────────────────────────────────────┐</span>
 <span class="k">│</span> <span class="t">Mark Word</span>（8 字节 = 64 位）        <span class="k">│</span>  <span class="c">← 锁状态、哈希码、GC 分代年龄</span>
 <span class="k">├─────────────────────────────────────┤</span>
-<span class="k">│</span> <span class="t">Klass Pointer</span>（4/8 字节）           <span class="k">│</span>  <span class="c">← 指向类元数据（开启压缩后 4 字节）</span>
+<span class="k">│</span> <span class="t">Klass Pointer</span>（4/8 字节）           <span class="k">│</span>  <span class="c">← 指向类元数据（开启指针压缩后 4 字节）</span>
 <span class="k">├─────────────────────────────────────┤</span>
 <span class="k">│</span> <span class="t">数组长度</span>（仅数组对象，4 字节）      <span class="k">│</span>  <span class="c">← 如果是普通对象则没有这部分</span>
 <span class="k">└─────────────────────────────────────┘</span></code></pre>
 </div>
 
-<p>重点在 <strong>Mark Word</strong>。它是一个 64 位的位图，不同锁状态下存储的内容完全不同：</p>
+<p>重点在 <strong>Mark Word</strong>。它是一个 64 位的位图，<strong>不同锁状态下存储的内容完全不同</strong>——同一个位置，无锁时放 hashCode，偏向锁时放线程 ID，轻量级锁时放指向 Lock Record 的指针，重量级锁时放指向 ObjectMonitor 的指针：</p>
 
 <figure class="fig">
 <svg viewBox="0 0 780 360" role="img" aria-label="64位 JVM Mark Word 结构图">
@@ -74,7 +150,7 @@
   <!-- 无锁态 -->
   <text x="15" y="60" font-size="11" fill="#57544E">无锁态:</text>
   <rect x="80" y="45" width="440" height="26" rx="3" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
-  <text x="300" y="63" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">unused (25 bits) + hashCode (31 bits)</text>
+  <text x="300" y="63" text-anchor="middle" font-family="monospace" font-size="11" fill="#2D5F2D">unused+cms_free (26 bits) + hashCode (31 bits)</text>
   <rect x="525" y="45" width="60" height="26" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.2"/>
   <text x="555" y="63" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">age(4)</text>
   <rect x="590" y="45" width="20" height="26" rx="3" fill="#FFF0E0" stroke="#E8A87C" stroke-width="1.2"/>
@@ -86,7 +162,7 @@
   <!-- 偏向锁态 -->
   <text x="15" y="105" font-size="11" fill="#57544E">偏向锁:</text>
   <rect x="80" y="90" width="440" height="26" rx="3" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
-  <text x="300" y="108" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C">Thread ID (54 bits) —— 持有偏向的线程</text>
+  <text x="300" y="108" text-anchor="middle" font-family="monospace" font-size="11" fill="#C2410C">Thread ID (54 bits) + epoch (2 bits)</text>
   <rect x="525" y="90" width="60" height="26" rx="3" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1.2"/>
   <text x="555" y="108" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">age(4)</text>
   <rect x="590" y="90" width="20" height="26" rx="3" fill="#FFF0E0" stroke="#E8A87C" stroke-width="1.2"/>
@@ -124,16 +200,143 @@
 <figcaption><span class="fig-no">图 1</span>64 位 JVM 的 Mark Word 在不同锁状态下存储不同内容，最低 2 位是锁标志位</figcaption>
 </figure>
 
-<p>注意一个细节：偏向锁和无锁的标志位都是 <code>01</code>，它们的区分靠<strong>第 3 低位</strong>（biased_lock 标志）。这个设计节省了标志位的空间。</p>
+<p>把位段分配整理成一张速查表，面试画图就靠它：</p>
+
+<table class="nb-table">
+<thead><tr><th>锁状态</th><th>Mark Word 位段（高位 → 低位）</th><th>锁标志位</th></tr></thead>
+<tbody>
+<tr><td>无锁</td><td>unused 25 + hashCode 31 + cms_free 1 + age 4 + biased_lock 1</td><td>01</td></tr>
+<tr><td>偏向锁</td><td>thread 54 + epoch 2 + age 4 + biased_lock 1（另 1 位保留）</td><td>01</td></tr>
+<tr><td>轻量级锁</td><td>指向 Lock Record 的指针 62</td><td>00</td></tr>
+<tr><td>重量级锁</td><td>指向 ObjectMonitor 的指针 62</td><td>10</td></tr>
+<tr><td>GC 标记</td><td>转发指针（forwarding pointer）62</td><td>11</td></tr>
+</tbody>
+</table>
+
+<p>几个容易被追问的细节，一次讲透：</p>
+
+<ul>
+  <li><strong>age（4 bit）</strong>：GC 分代年龄，最大 15。对象每熬过一次 Minor GC 年龄 +1，达到阈值（默认 15）晋升老年代。这就是为什么 JVM 调优时晋升阈值最大只能设 15——位段只有 4 bit。</li>
+  <li><strong>hashCode（31 bit）</strong>：存的是 identity hash code（<code>System.identityHashCode</code> / 未重写的 <code>hashCode()</code>），而且是<strong>懒计算</strong>的——第一次调用才写入 Mark Word。</li>
+  <li><strong>biased_lock + lock（1 + 2 bit）</strong>：偏向锁和无锁的标志位都是 01，靠第 3 低位区分——这个设计省了标志位空间。</li>
+</ul>
+
+<div class="crack"><div class="crack-label">为什么"调用过 hashCode() 的对象进不了偏向锁"？</div>
+<p>无锁态的 Mark Word 里放的是 hashCode（31 bit），偏向锁态放的是线程 ID（54 bit）——一个对象既想存 hashCode 又想存线程 ID，64 位根本放不下。所以一旦某个对象调用过 identity hash code（<code>hashCode()</code> 被写入），它就<strong>不能进入偏向锁</strong>；反过来，偏向锁期间调用 <code>hashCode()</code>，必须先<strong>撤销偏向</strong>，把 Mark Word 恢复成能放 hashCode 的形态。JDK 15 废弃偏向锁（JDK 18 彻底移除）后，这个限制也随之消失。这个点答出来，面试官会眼前一亮。</p>
+</div>
+
+<p>顺带一提：Mark Word 的大小随 JVM 位数变化——32 位 JVM 是 32 bit（8 字节对象头），64 位 JVM 是 64 bit；而 Klass Pointer 在开启指针压缩（<code>-XX:+UseCompressedOops</code>，JDK 8 默认）时只占 4 字节。面试默认按 64 位、未压缩或压缩场景说清楚即可。</p>
 </section>
 
-<!-- ═══════════════ 第3站：偏向锁 ═══════════════ -->
-<section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>偏向锁 (Biased Locking)：一个人的独角戏</h2></div>
+<!-- ═══════════════ 第4站：管程 Monitor ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>管程 Monitor：Owner / EntryList / WaitSet</h2></div>
+
+<p>先补一个操作系统课上的概念：<strong>管程（Monitor）</strong>。它是并发编程里最经典的一等公民——把「互斥」和「条件等待」打包在一起的管理机制。Java 里每个对象都天生带一个 monitor，<code>synchronized</code> 加锁，本质就是去抢这个对象的 monitor；而重量级锁的底层实现，就是 HotSpot 的 <code>ObjectMonitor</code> 对象。</p>
+
+<p>用<strong>餐厅叫号</strong>的类比来理解 ObjectMonitor 的内部结构，三组"人"各司其职：</p>
+
+<ul>
+  <li><strong>Owner</strong>：当前正在"用餐"的线程——同一时刻只能有一个，也就是持锁者；</li>
+  <li><strong>EntryList</strong>：门口排队等位的线程——想吃饭（抢锁）没抢到，先排队等着叫号；</li>
+  <li><strong>WaitSet</strong>：已经坐下、但点的菜还没上、暂时"让出座位"的线程——调用了 <code>wait()</code>，等 <code>notify()</code> 上菜才能继续。</li>
+</ul>
+
+<figure class="fig">
+<svg viewBox="0 0 760 400" role="img" aria-label="ObjectMonitor 结构图">
+  <defs>
+    <marker id="arrow4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="arrow4r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+  </defs>
+
+  <text x="380" y="24" text-anchor="middle" font-family="monospace" font-size="14" fill="#1C1C1C" font-weight="700">ObjectMonitor 内部结构</text>
+
+  <!-- 对象头 -->
+  <rect x="280" y="40" width="200" height="35" rx="4" fill="#F5D5D5" stroke="#B85450" stroke-width="1.5"/>
+  <text x="380" y="62" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450">Mark Word → 指向 ObjectMonitor</text>
+
+  <!-- ObjectMonitor 主体 -->
+  <rect x="200" y="95" width="360" height="280" rx="8" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="2"/>
+  <text x="380" y="118" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">ObjectMonitor</text>
+
+  <!-- Owner -->
+  <rect x="225" y="130" width="310" height="32" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.2"/>
+  <text x="380" y="150" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F">_owner: Thread* (当前持有锁的线程)</text>
+
+  <!-- count -->
+  <rect x="225" y="170" width="310" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="380" y="188" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">_count: int (重入计数器)</text>
+
+  <!-- cxq -->
+  <rect x="225" y="206" width="310" height="28" rx="4" fill="#E8E8E8" stroke="#999" stroke-width="1"/>
+  <text x="380" y="224" text-anchor="middle" font-family="monospace" font-size="10" fill="#666">_cxq: ObjectWaiter* (竞争链表，新来线程先入此)</text>
+
+  <!-- EntryList -->
+  <rect x="225" y="242" width="310" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
+  <text x="380" y="260" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">_EntryList: ObjectWaiter* (阻塞队列，等待获取锁)</text>
+
+  <!-- WaitSet -->
+  <rect x="225" y="278" width="310" height="28" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
+  <text x="380" y="296" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">_WaitSet: ObjectWaiter* (已获取锁但调用了 wait() 的线程)</text>
+
+  <!-- recursions -->
+  <rect x="225" y="314" width="310" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="380" y="332" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">_recursions: int (递归/重入次数)</text>
+
+  <!-- 线程示意 -->
+  <rect x="15" y="235" width="100" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
+  <text x="65" y="253" text-anchor="middle" font-size="9" fill="#C2410C">Thread-B</text>
+  <line x1="115" y1="249" x2="220" y2="256" stroke="#C2410C" stroke-width="1" marker-end="url(#arrow4)"/>
+
+  <rect x="15" y="271" width="100" height="28" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1"/>
+  <text x="65" y="289" text-anchor="middle" font-size="9" fill="#2D5F2D">Thread-C</text>
+  <text x="65" y="300" text-anchor="middle" font-size="8" fill="#2D5F2D">(已 wait())</text>
+  <line x1="115" y1="285" x2="220" y2="292" stroke="#7BA87B" stroke-width="1" marker-end="url(#arrow4)"/>
+
+  <!-- 说明 -->
+  <rect x="575" y="130" width="170" height="135" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="660" y="150" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="700">三个队列的区别</text>
+  <text x="585" y="170" font-size="9" fill="#C2410C">cxq: 刚被 park 的线程</text>
+  <text x="585" y="187" font-size="9" fill="#C2410C">  (无锁链表入队，性能优化)</text>
+  <text x="585" y="207" font-size="9" fill="#C2410C">EntryList: 从 cxq 转移</text>
+  <text x="585" y="224" font-size="9" fill="#C2410C">  等待被 unpark 竞争锁</text>
+  <text x="585" y="244" font-size="9" fill="#2D5F2D">WaitSet: 持有锁后调了</text>
+  <text x="585" y="261" font-size="9" fill="#2D5F2D">  wait()，等 notify() 唤醒</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span>ObjectMonitor 管理三组队列：Owner 持锁、EntryList 排队等锁、WaitSet 等待条件</figcaption>
+</figure>
+
+<p>围绕这三组结构，synchronized 的每个动作都有了明确落点：</p>
+
+<table class="nb-table">
+<thead><tr><th>操作</th><th>行为</th><th>涉及队列</th></tr></thead>
+<tbody>
+<tr><td>加锁（monitorenter）</td><td>如果 _owner 为空则获取；否则 park 线程</td><td>cxq → EntryList</td></tr>
+<tr><td>解锁（monitorexit）</td><td>释放 _owner，从 EntryList 唤醒一个线程</td><td>EntryList 出队</td></tr>
+<tr><td>wait()</td><td>释放 _owner，当前线程进入 WaitSet</td><td>→ WaitSet</td></tr>
+<tr><td>notify()</td><td>从 WaitSet 移一个线程到 EntryList</td><td>WaitSet → EntryList</td></tr>
+<tr><td>notifyAll()</td><td>将 WaitSet 所有线程移到 EntryList</td><td>WaitSet → EntryList</td></tr>
+</tbody>
+</table>
+
+<p>顺便解释一下图里的 <code>_cxq</code>：新来的竞争线程会先进入这个<strong>无锁链表</strong>，避免大家同时往 EntryList 上加锁造成二次竞争；解锁时再批量转移到 EntryList。这是 HotSpot 的性能细节，面试时主动提一句是明显加分项。</p>
+
+<div class="takeaway"><div class="takeaway-label">核心要点</div>
+<p>一句话记牢三者的分工：<strong>Owner 是"正在持锁"、EntryList 是"排队等锁"、WaitSet 是"等条件"</strong>。后面第 11 站讲 wait/notify 时，你会反复用到这张图。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：偏向锁 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>偏向锁 (Biased Locking)：一个人的独角戏</h2></div>
 
 <p>HotSpot 团队在大量真实应用中发现了一个关键观察：<strong>大多数锁在整个生命周期中只被同一个线程访问</strong>。比如一个 <code>StringBuffer</code> 对象几乎总是在同一个线程里被 append，一个连接池的内部状态通常由单个管理线程操作。</p>
 
 <p>基于这个观察，偏向锁的设计思路非常直接：<strong>既然只有一个线程来，那就把锁"偏向"给它，后续访问连 CAS 都不需要做。</strong></p>
+
+<div class="crack"><div class="crack-label">生活类比：专属停车位</div>
+<p>想象一个小区物业，给每辆车安排了专属停车位：第一次停车时，物业在车位上写上你的车牌号（CAS 把线程 ID 写入 Mark Word）；之后你每次来，直接停进去就行，<strong>连登记都不需要</strong>（零开销放行）。只有别的车来停，物业才需要处理——撤销你的专属权（偏向撤销），然后按普通车位规则来。</p>
+</div>
 
 <div class="think"><div class="think-q">偏向锁的核心：第一次加锁用 CAS 把线程 ID 写入 Mark Word，后续同一线程再次进入同步块时，只需要比较 Mark Word 中的线程 ID 是否是自己——如果是，直接放行，零开销。</div></div>
 
@@ -159,25 +362,38 @@ revokeBias();</code></pre>
 
 <p>关键优势在于 <strong>零 CAS 开销</strong>。传统加锁每次进入同步块都需要 CAS 操作，偏向锁只需要第一次 CAS，之后就是普通的内存读比较——这比 CAS 快一个数量级。</p>
 
-<div class="crack"><div class="crack-label">JDK 15 废弃、JDK 18 移除偏向锁</div>
-<p>偏向锁的设计初衷是好的，但它带来了巨大的<strong>代码复杂度</strong>。HotSpot 中与偏向锁相关的代码超过 2 万行，涉及 GC、类加载、锁撤销等多个子系统的协调。</p>
-<p>JEP 374（JDK 15）正式废弃了偏向锁，默认关闭（<code>-XX:-UseBiasedLocking</code>）。JDK 18 之后彻底移除。原因是：</p>
+<p>偏向锁撤销（revocation）有个重要细节：<strong>撤销必须等到安全点（SafePoint）</strong>。JVM 要停住所有线程，检查持有偏向的线程状态：</p>
+
 <ul>
-  <li>现代应用更多是多线程并发，"只有一个线程访问"的场景变少</li>
-  <li>偏向锁撤销涉及 SafePoint，可能导致 STW 暂停</li>
-  <li>维护成本高，收益递减——轻量级锁本身已经很快了</li>
+  <li>偏向线程<strong>已结束</strong>（或不再使用该对象）→ 恢复为无锁、可重新偏向；</li>
+  <li>偏向线程<strong>还活着且在临界区内</strong> → 撤销偏向，升级为轻量级锁。</li>
 </ul>
-<p>面试时要说：<strong>偏向锁在 JDK 15+ 已被废弃，JDK 18 彻底移除，现代 JVM 从轻量级锁起步。</strong></p>
+
+<p>正因为撤销要走安全点、可能引发短暂的 Stop-The-World 暂停，偏向锁在高竞争场景下反而是负优化——这也是它最终被废弃的核心原因之一。</p>
+
+<div class="crack"><div class="crack-label">JDK 15 废弃、JDK 18 移除偏向锁（准确版本事实）</div>
+<p>偏向锁的设计初衷是好的，但它带来了巨大的<strong>代码复杂度</strong>。HotSpot 中与偏向锁相关的代码超过 2 万行，涉及 GC、类加载、锁撤销等多个子系统的协调。</p>
+<p><strong>JEP 374（JDK 15）</strong>正式废弃偏向锁并<strong>默认关闭</strong>（<code>-XX:-UseBiasedLocking</code>）；<strong>JDK 18 起彻底移除</strong>，连开关都不再支持。原因：</p>
+<ul>
+  <li>现代应用更多是多线程并发，"只有一个线程访问"的场景变少；</li>
+  <li>偏向锁撤销涉及 SafePoint，可能导致 STW 暂停；</li>
+  <li>维护成本高，收益递减——轻量级锁本身已经很快了。</li>
+</ul>
+<p>面试时要说：<strong>偏向锁在 JDK 15+ 默认关闭并废弃，JDK 18 彻底移除；现代 JVM 直接从轻量级锁起步。</strong>千万别再说"synchronized 永远很慢"这种过时结论。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：轻量级锁 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>轻量级锁 (Lightweight Lock)：短暂竞争的最优解</h2></div>
+<!-- ═══════════════ 第6站：轻量级锁 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>轻量级锁 (Lightweight Lock)：短暂竞争的最优解</h2></div>
 
 <p>当偏向锁遇到竞争（另一个线程也来加锁），或者 JDK 15+ 直接跳过偏向锁阶段，锁就会进入<strong>轻量级锁</strong>状态。</p>
 
-<p>轻量级锁的设计假设是：<strong>锁的竞争是短暂的</strong>——线程 A 马上就会释放，线程 B 只需要稍微"自旋"等一下就拿到了。这种情况下，不值得动用操作系统级别的线程挂起（这涉及用户态到内核态的切换，代价高昂）。</p>
+<p>轻量级锁的设计假设是：<strong>锁的竞争是短暂的</strong>——线程 A 马上就会释放，线程 B 只需要稍微"等"一下就拿到了。这种情况下，不值得动用操作系统级别的线程挂起（那涉及用户态到内核态的切换，代价高昂）。</p>
+
+<div class="crack"><div class="crack-label">生活类比：等电梯 vs 叫保安</div>
+<p>竞争很短暂，就像等电梯：A 马上从 5 楼下来，你在门口等一两秒就行，没必要呼叫物业（OS 内核）派人来处理。等电梯就是<strong>自旋（spin）</strong>——用户态空转等待；叫保安处理就是<strong>挂起（park）</strong>——线程进入内核态阻塞，等系统调度唤醒。</p>
+</div>
 
 <p>核心机制是 <strong>Lock Record</strong>（锁记录），它位于线程栈帧中：</p>
 
@@ -256,23 +472,25 @@ revokeBias();</code></pre>
   <text x="525" y="220" font-size="10" fill="#3E6B8F" font-weight="700">CAS 成功 → 释放锁，恢复 Mark Word</text>
   <text x="525" y="242" font-size="10" fill="#B85450" font-weight="700">CAS 失败 → 有线程在等，唤醒它们</text>
 </svg>
-<figcaption><span class="fig-no">图 2</span>轻量级锁通过 CAS 操作在线程栈帧和对象头之间交换 Mark Word，避免了操作系统级别的线程挂起</figcaption>
+<figcaption><span class="fig-no">图 3</span>轻量级锁通过 CAS 在线程栈帧和对象头之间交换 Mark Word，避免操作系统级别的线程挂起</figcaption>
 </figure>
 
+<p>这里要澄清一个常见的模糊表述：<strong>轻量级锁加锁用的是 CAS，竞争失败后 JVM 并不会立刻挂起线程，而是先短暂自旋（spin）等待持锁者释放</strong>，这就是<strong>自适应自旋（Adaptive Spinning）</strong>——JVM 根据历史上该锁的竞争情况动态调整自旋次数：上次自旋成功，这次就多转几圈；上次失败，这次就少转。自旋还是拿不到锁，才走锁膨胀。记住这条分界线：</p>
+
 <div class="formula">
-<strong>轻量级锁适用场景</strong><br/>
-线程交替执行（竞争短暂），同步块执行时间短。<br/>
-性能比重量级锁高约 <strong>5 倍</strong>（无用户态/内核态切换）。
+<strong>轻量级锁 = CAS + 自旋（用户态忙等）</strong><br/>
+重量级锁 = 线程挂起/唤醒（内核态阻塞，park/unpark）<br/><br/>
+竞争不激烈时，轻量级锁通常比重量级锁快一个数量级<br/>（省掉了用户态 ↔ 内核态的切换）
 </div>
 </section>
 
-<!-- ═══════════════ 第5站：锁膨胀 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>锁膨胀 (Lock Inflation)：从轻到重的临界点</h2></div>
+<!-- ═══════════════ 第7站：锁膨胀 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>锁膨胀 (Lock Inflation)：从轻到重的临界点</h2></div>
 
-<p>当轻量级锁的 CAS 操作失败——意味着有另一个线程也在尝试获取同一把锁，竞争已经从"短暂"变成了"持续"。此时 JVM 会执行<strong>锁膨胀</strong>，将轻量级锁升级为<strong>重量级锁</strong>。</p>
+<p>当轻量级锁的 CAS 操作失败、自旋也等不到锁——意味着有另一个线程也在持续竞争同一把锁，竞争已经从"短暂"变成了"持续"。此时 JVM 会执行<strong>锁膨胀</strong>，将轻量级锁升级为<strong>重量级锁</strong>。</p>
 
-<p>膨胀过程不可逆（在绝大多数 JDK 版本中），这就是"锁升级"中"升级"的含义——一旦变重，就回不去了。</p>
+<p>膨胀过程不可逆（在绝大多数 JDK 版本中），这就是"锁升级"中"升级"的含义——<strong>一旦变重，就回不去了</strong>。</p>
 
 <p>膨胀的核心步骤：</p>
 
@@ -299,85 +517,19 @@ revokeBias();</code></pre>
 <div class="crack"><div class="crack-label">为什么锁不能降级？</div>
 <p>理论上，当竞争消失后，重量级锁可以"降级"回轻量级锁以恢复性能。但实际上，HotSpot 的实现中<strong>锁降级非常有限</strong>。原因：</p>
 <ul>
-  <li>降级逻辑复杂——需要确认 EntryList 为空、没有线程在 wait() 等</li>
-  <li>降级本身有开销——CAS 修改 Mark Word、清理 ObjectMonitor</li>
-  <li>经验数据表明：竞争激烈过的锁，未来大概率还会竞争</li>
+  <li>降级逻辑复杂——需要确认 EntryList 为空、没有线程在 wait() 等；</li>
+  <li>降级本身有开销——CAS 修改 Mark Word、清理 ObjectMonitor；</li>
+  <li>经验数据表明：竞争激烈过的锁，未来大概率还会竞争。</li>
 </ul>
-<p>JDK 8u20 之后引入了有限的锁降级，但只在安全点（SafePoint）批量进行，不是实时降级。</p>
+<p>JDK 8u20 之后引入了有限的锁降级，但只在安全点（SafePoint）批量进行，不是实时降级。面试答"锁升级单向不可逆，仅有安全点批量降级"就到位了。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：重量级锁 ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>重量级锁 (Heavyweight Lock)：ObjectMonitor 全解析</h2></div>
+<!-- ═══════════════ 第8站：重量级锁与字节码 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>重量级锁 (Heavyweight Lock)：为什么它最慢</h2></div>
 
-<p>重量级锁的底层实现是 HotSpot 的 <code>ObjectMonitor</code> 对象。它管理着三组线程队列，并通过操作系统的 Mutex 和 Condition Variable 来实现线程的阻塞与唤醒。</p>
-
-<figure class="fig">
-<svg viewBox="0 0 760 400" role="img" aria-label="ObjectMonitor 结构图">
-  <defs>
-    <marker id="arrow4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
-    <marker id="arrow4r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
-  </defs>
-
-  <text x="380" y="24" text-anchor="middle" font-family="monospace" font-size="14" fill="#1C1C1C" font-weight="700">ObjectMonitor 内部结构</text>
-
-  <!-- 对象头 -->
-  <rect x="280" y="40" width="200" height="35" rx="4" fill="#F5D5D5" stroke="#B85450" stroke-width="1.5"/>
-  <text x="380" y="62" text-anchor="middle" font-family="monospace" font-size="11" fill="#B85450">Mark Word → 指向 ObjectMonitor</text>
-
-  <!-- ObjectMonitor 主体 -->
-  <rect x="200" y="95" width="360" height="280" rx="8" fill="#FFF8F0" stroke="#D8CEB6" stroke-width="2"/>
-  <text x="380" y="118" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">ObjectMonitor</text>
-
-  <!-- Owner -->
-  <rect x="225" y="130" width="310" height="32" rx="4" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.2"/>
-  <text x="380" y="150" text-anchor="middle" font-family="monospace" font-size="11" fill="#3E6B8F">_owner: Thread* (当前持有锁的线程)</text>
-
-  <!-- count -->
-  <rect x="225" y="170" width="310" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
-  <text x="380" y="188" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">_count: int (重入计数器)</text>
-
-  <!-- cxq -->
-  <rect x="225" y="206" width="310" height="28" rx="4" fill="#E8E8E8" stroke="#999" stroke-width="1"/>
-  <text x="380" y="224" text-anchor="middle" font-family="monospace" font-size="10" fill="#666">_cxq: ObjectWaiter* (竞争链表，新来线程先入此)</text>
-
-  <!-- EntryList -->
-  <rect x="225" y="242" width="310" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.2"/>
-  <text x="380" y="260" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">_EntryList: ObjectWaiter* (阻塞队列，等待获取锁)</text>
-
-  <!-- WaitSet -->
-  <rect x="225" y="278" width="310" height="28" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.2"/>
-  <text x="380" y="296" text-anchor="middle" font-family="monospace" font-size="10" fill="#2D5F2D">_WaitSet: ObjectWaiter* (已获取锁但调用了 wait() 的线程)</text>
-
-  <!-- recursions -->
-  <rect x="225" y="314" width="310" height="28" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
-  <text x="380" y="332" text-anchor="middle" font-family="monospace" font-size="10" fill="#57544E">_recursions: int (递归/重入次数)</text>
-
-  <!-- 线程示意 -->
-  <rect x="15" y="235" width="100" height="28" rx="4" fill="#FBE6C7" stroke="#C2410C" stroke-width="1"/>
-  <text x="65" y="253" text-anchor="middle" font-size="9" fill="#C2410C">Thread-B</text>
-  <line x1="115" y1="249" x2="220" y2="256" stroke="#C2410C" stroke-width="1" marker-end="url(#arrow4)"/>
-
-  <rect x="15" y="271" width="100" height="28" rx="4" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1"/>
-  <text x="65" y="289" text-anchor="middle" font-size="9" fill="#2D5F2D">Thread-C</text>
-  <text x="65" y="300" text-anchor="middle" font-size="8" fill="#2D5F2D">(已 wait())</text>
-  <line x1="115" y1="285" x2="220" y2="292" stroke="#7BA87B" stroke-width="1" marker-end="url(#arrow4)"/>
-
-  <!-- 说明 -->
-  <rect x="575" y="130" width="170" height="135" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
-  <text x="660" y="150" text-anchor="middle" font-size="10" fill="#1C1C1C" font-weight="700">三个队列的区别</text>
-  <text x="585" y="170" font-size="9" fill="#C2410C">cxq: 刚被 park 的线程</text>
-  <text x="585" y="187" font-size="9" fill="#C2410C">  (FIFO 入队，性能优化)</text>
-  <text x="585" y="207" font-size="9" fill="#C2410C">EntryList: 从 cxq 转移</text>
-  <text x="585" y="224" font-size="9" fill="#C2410C">  等待被 unpark 竞争锁</text>
-  <text x="585" y="244" font-size="9" fill="#2D5F2D">WaitSet: 持有锁后调了</text>
-  <text x="585" y="261" font-size="9" fill="#2D5F2D">  wait()，等 notify() 唤醒</text>
-</svg>
-<figcaption><span class="fig-no">图 3</span>ObjectMonitor 管理三个队列：cxq 接收新阻塞线程、EntryList 排队竞争、WaitSet 存放 wait() 线程</figcaption>
-</figure>
-
-<p>来看 synchronized 编译后的字节码——每个 synchronized 块会被翻译为 <code>monitorenter</code> 和 <code>monitorexit</code> 指令：</p>
+<p>重量级锁的底层是 <code>ObjectMonitor</code>（第 4 站的结构图），它通过操作系统的 Mutex 和 Condition Variable 实现线程的阻塞与唤醒。synchronized 编译后，每个同步块对应两条字节码指令 <code>monitorenter</code> 和 <code>monitorexit</code>：</p>
 
 <div class="srcbox">
 <div class="srcbox-head"><span class="srcbox-file"><b>字节码</b> · synchronized 编译结果</span></div>
@@ -406,25 +558,68 @@ revokeBias();</code></pre>
  <span class="n">23</span>: <span class="k">return</span></code></pre>
 </div>
 
-<p>注意字节码里有<strong>两个 monitorexit</strong>：一个是正常路径（第 14 行），一个是异常路径（第 20 行，由编译器自动生成的 finally 块）。这就是为什么 synchronized 能保证即使抛出异常，锁也一定会被释放。</p>
+<p>注意字节码里有<strong>两个 monitorexit</strong>：一个是正常路径（第 14 行），一个是异常路径（第 20 行，由编译器自动生成的 finally 块）。这就是为什么 synchronized 能保证即使抛出异常，锁也一定会被释放——语法层面的保证，不需要你写 finally。</p>
 
-<div class="takeaway"><div class="takeaway-label">ObjectMonitor 关键行为</div>
-<table class="nb-table">
-<thead><tr><th>操作</th><th>行为</th><th>涉及队列</th></tr></thead>
-<tbody>
-<tr><td>加锁（monitorenter）</td><td>如果 _owner 为空则获取；否则 park 线程</td><td>cxq → EntryList</td></tr>
-<tr><td>解锁（monitorexit）</td><td>释放 _owner，从 EntryList 唤醒一个线程</td><td>EntryList 出队</td></tr>
-<tr><td>wait()</td><td>释放 _owner，当前线程进入 WaitSet</td><td>→ WaitSet</td></tr>
-<tr><td>notify()</td><td>从 WaitSet 移一个线程到 EntryList</td><td>WaitSet → EntryList</td></tr>
-<tr><td>notifyAll()</td><td>将 WaitSet 所有线程移到 EntryList</td><td>WaitSet → EntryList</td></tr>
-</tbody>
-</table>
+<p>这也是 synchronized 与 ReentrantLock 最本质的差异：<strong>一个在 JVM 层（字节码指令），一个在 JDK 层（java.util.concurrent 的类）</strong>。前者由 JVM 解释执行加解锁语义，后者需要你手动 <code>lock()/unlock()</code> 并自己保证 finally 释放。</p>
+
+<div class="crack"><div class="crack-label">为什么重量级锁最慢？</div>
+<p>慢不在"锁"本身，而在<strong>线程的挂起与唤醒</strong>：</p>
+<ul>
+  <li><strong>用户态 ↔ 内核态切换</strong>：<code>park/unpark</code> 要陷入内核，一次切换代价在微秒级，频繁切换直接吃掉吞吐；</li>
+  <li><strong>线程上下文切换</strong>：被唤醒的线程要重新进入运行队列、竞争 CPU，涉及寄存器保存恢复、缓存失效；</li>
+  <li><strong>调度延迟</strong>：从"锁释放"到"等待线程真正拿到 CPU 继续执行"，中间隔了好几步系统调度，延迟远高于自旋。</li>
+</ul>
+<p>所以重量级锁只有在<strong>临界区长、竞争激烈</strong>（持锁时间远大于切换成本）时才是合理选择；临界区极短时，宁可让竞争者自旋。</p>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">核心要点</div>
+<p>整条链路的性能逻辑一句话：<strong>能用内存操作（CAS）解决就不用自旋，能用自旋解决就不用挂起线程</strong>——每一级优化都是在"少进一次内核"。第 1 站事故里几百个线程 BLOCKED，说明锁已经膨胀到重量级、线程全在挂起等锁，这就是性能雪崩的典型现场。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第7站：锁升级全景图 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>锁升级全景图：状态机总览</h2></div>
+<!-- ═══════════════ 第9站：可重入性 ═══════════════ -->
+<section class="station reveal" id="s9">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>可重入性 (Reentrancy)：同一线程能反复进</h2></div>
+
+<p>什么叫<strong>可重入（Reentrant）</strong>？就是<strong>同一个线程可以重复进入自己已经持有的锁</strong>。写业务代码时这几乎是必然发生的：一个 synchronized 方法调另一个 synchronized 方法，或者递归调用，都会"重复进入"。如果锁不可重入，那么方法一调用方法二，自己就把自己锁死了——这叫<strong>自死锁（self-deadlock）</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ReentrantDemo.java</b> · 可重入演示（可直接运行）</span></div>
+<pre><code><span class="k">public class</span> <span class="t">ReentrantDemo</span> {
+
+    <span class="c">// 场景一：synchronized 方法嵌套调用</span>
+    <span class="k">public synchronized void</span> a() {
+        <span class="t">System</span>.out.println(<span class="s">"进入 a()，持有锁"</span>);
+        b();  <span class="c">// 同一个线程再次进入 synchronized —— 可重入，不会死锁</span>
+    }
+
+    <span class="k">public synchronized void</span> b() {
+        <span class="t">System</span>.out.println(<span class="s">"进入 b()，锁可重入"</span>);
+    }
+
+    <span class="c">// 场景二：递归调用</span>
+    <span class="k">public synchronized int</span> factorial(<span class="t">int</span> n) {
+        <span class="k">return</span> n &lt;= <span class="n">1</span> ? <span class="n">1</span> : n * factorial(n - <span class="n">1</span>);
+    }
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="t">ReentrantDemo</span> demo = <span class="k">new</span> <span class="t">ReentrantDemo</span>();
+        demo.a();                          <span class="c">// 嵌套调用，正常运行不卡死</span>
+        <span class="t">System</span>.out.println(<span class="s">"10! = "</span> + demo.factorial(<span class="n">10</span>)); <span class="c">// 递归，正常运行</span>
+    }
+}</code></pre>
+</div>
+
+<p>原理一句话：JVM 在 monitor 里记录了<strong>持有者线程（_owner）</strong>和<strong>重入计数（_recursions）</strong>。同一线程再次进入，只做一次判断——<code>_owner == 当前线程</code>，成立就计数 +1 直接放行；每退出一层计数 -1，<strong>减到 0 才真正释放锁</strong>。所以在轻量级锁阶段，重入时 Mark Word 指向的 Lock Record 不需要变——这就是为什么同一个线程可以在同一个对象上加锁多次而不乱套。</p>
+
+<div class="crack"><div class="crack-label">追问："synchronized 和 ReentrantLock 都可重入吗？实现上有什么区别？"</div>
+<p>都可重入。synchronized 靠的是 JVM 内部的 <code>_owner + _recursions</code>；ReentrantLock 靠的是 AQS 的 <code>state</code> 字段——同一线程再次 <code>lock()</code> 时 state +1，释放时逐步减，减到 0 才算真正释放（详见 AQS 那一篇）。共同点：<strong>都通过"持有者身份 + 计数"实现可重入</strong>。反过来，不可重入的锁（如早期的自旋锁实现）遇到递归或嵌套调用就会自死锁——这也是面试官爱出的陷阱题。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第10站：锁升级全景图 ═══════════════ -->
+<section class="station reveal" id="s10">
+<div class="station-head"><span class="station-no">第 10 站</span><h2>锁升级全景图：状态机总览</h2></div>
 
 <p>现在把前几站的内容串联起来，看完整的锁升级状态机：</p>
 
@@ -494,75 +689,407 @@ revokeBias();</code></pre>
 <strong>锁升级触发条件</strong><br/>
 无锁 → 偏向锁：第一次加锁，CAS 写入线程 ID<br/>
 偏向锁 → 轻量级锁：另一个线程尝试加锁（撤销偏向）<br/>
-轻量级锁 → 重量级锁：CAS 替换 Mark Word 失败（检测到真实竞争）
+轻量级锁 → 重量级锁：CAS 替换 Mark Word 失败（检测到真实竞争）<br/><br/>
+<strong>JDK 15+ 之后：</strong>无锁 → 轻量级锁 → 重量级锁（偏向锁已移除）
+</div>
+
+<div class="crack"><div class="crack-label">关于"锁降级"，面试怎么说</div>
+<p>标准答案是：<strong>锁升级单向不可逆</strong>，重量级锁不会自动降级回轻量级锁。严格补充一句：JDK 8u20 之后存在<strong>有限的安全点批量降级</strong>，把已无竞争的重量级锁恢复为轻量级锁，但它不是实时的、也不面向普通业务代码，所以面试时先把"单向不可逆"答对，再提降级细节当加分项。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第8站：总结 ═══════════════ -->
-<section class="station reveal" id="s8">
-<div class="station-head"><span class="station-no">第 8 站</span><h2>总结与面试应对</h2></div>
+<!-- ═══════════════ 第11站：wait/notify 与 WaitSet ═══════════════ -->
+<section class="station reveal" id="s11">
+<div class="station-head"><span class="station-no">第 11 站</span><h2>wait / notify：与 Monitor 的 WaitSet 打交道</h2></div>
 
-<p>最后，把 synchronized 和 ReentrantLock 做一个全面对比——这是面试中的高频追问：</p>
+<p>前面第 4 站的图里，WaitSet 一直没细讲。现在来补上——<code>wait()</code>、<code>notify()</code>、<code>notifyAll()</code> 是 synchronized 体系里"线程间协作"的三板斧，它们全部围绕 WaitSet 工作。</p>
 
-<div class="takeaway"><div class="takeaway-label">synchronized vs ReentrantLock</div>
+<p>先记住第一条铁律：<strong>这三个方法必须持有锁才能调用</strong>（即在 synchronized 块/方法内），否则抛 <code>IllegalMonitorStateException</code>。原因很直白：<code>wait()</code> 要"释放锁并把线程放进 WaitSet"，<code>notify()</code> 要"操作 WaitSet 把线程移出去"——这俩动作都动 monitor 的内部结构，没有锁就没有操作资格。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 720 300" role="img" aria-label="wait notify 状态流转图">
+  <defs>
+    <marker id="arrow6g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#7BA87B"/></marker>
+    <marker id="arrow6b" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <text x="360" y="24" text-anchor="middle" font-size="13" fill="#1C1C1C" font-weight="700">线程在 Owner / EntryList / WaitSet 之间的流转</text>
+
+  <!-- Owner -->
+  <rect x="270" y="50" width="180" height="46" rx="8" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="360" y="69" text-anchor="middle" font-size="12" fill="#3E6B8F" font-weight="700">Owner</text>
+  <text x="360" y="86" text-anchor="middle" font-size="10" fill="#57544E">当前持锁线程（同一时刻一个）</text>
+
+  <!-- EntryList -->
+  <rect x="60" y="190" width="200" height="46" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="160" y="209" text-anchor="middle" font-size="12" fill="#C2410C" font-weight="700">EntryList</text>
+  <text x="160" y="226" text-anchor="middle" font-size="10" fill="#57544E">等锁线程（BLOCKED）</text>
+
+  <!-- WaitSet -->
+  <rect x="460" y="190" width="200" height="46" rx="8" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.5"/>
+  <text x="560" y="209" text-anchor="middle" font-size="12" fill="#2D5F2D" font-weight="700">WaitSet</text>
+  <text x="560" y="226" text-anchor="middle" font-size="10" fill="#57544E">等条件线程（WAITING）</text>
+
+  <!-- wait 箭头：Owner → WaitSet -->
+  <path d="M370,96 C420,150 500,150 553,186" fill="none" stroke="#7BA87B" stroke-width="1.6" marker-end="url(#arrow6g)"/>
+  <text x="490" y="138" text-anchor="middle" font-size="10" fill="#2D5F2D">wait()：释放锁 → 进 WaitSet 等条件</text>
+
+  <!-- notify 箭头：WaitSet → EntryList -->
+  <line x1="460" y1="213" x2="266" y2="213" stroke="#7BA87B" stroke-width="1.6" marker-end="url(#arrow6g)"/>
+  <text x="363" y="203" text-anchor="middle" font-size="10" fill="#2D5F2D">notify()/notifyAll()：移到 EntryList 重新等锁</text>
+
+  <!-- 抢锁箭头：EntryList → Owner -->
+  <path d="M180,190 C200,150 300,130 342,100" fill="none" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#arrow6b)"/>
+  <text x="240" y="152" text-anchor="middle" font-size="10" fill="#3E6B8F">唤醒后抢到锁 → 成为新 Owner</text>
+
+  <!-- 图例 -->
+  <rect x="60" y="258" width="600" height="30" rx="4" fill="#EDE3C4" stroke="#D8CEB6" stroke-width="1"/>
+  <text x="360" y="278" text-anchor="middle" font-size="11" fill="#57544E">BLOCKED = 在 EntryList 等锁；WAITING = 在 WaitSet 等条件；持锁线程在 Owner</text>
+</svg>
+<figcaption><span class="fig-no">图 5</span>wait/notify 的完整流转：wait 释放锁进 WaitSet，notify 移回 EntryList，抢到锁回到 Owner</figcaption>
+</figure>
+
+<p>完整流程走一遍：</p>
+
+<ul>
+  <li>线程持有锁（Owner）时调用 <code>wait()</code> → <strong>释放锁</strong>，线程进入 WaitSet，状态变为 WAITING；</li>
+  <li>另一个线程持锁后调用 <code>notify()</code> → 从 WaitSet 挑<strong>一个</strong>线程移到 EntryList（状态变 BLOCKED，重新排队等锁）；</li>
+  <li><code>notifyAll()</code> → 把 WaitSet 里<strong>所有</strong>线程都移到 EntryList；</li>
+  <li>被唤醒的线程在 EntryList 抢到锁后，才回到 Owner 继续执行 <code>wait()</code> 之后的代码。</li>
+</ul>
+
+<p>一个可以直接复制运行的经典生产者-消费者示例：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>WaitNotifyDemo.java</b> · wait/notifyAll 实现生产者消费者（可直接运行）</span></div>
+<pre><code><span class="k">public class</span> <span class="t">WaitNotifyDemo</span> {
+
+    <span class="k">private static final</span> <span class="t">Object</span> LOCK = <span class="k">new</span> <span class="t">Object</span>();
+    <span class="k">private static int</span> count = <span class="n">0</span>;
+    <span class="k">private static final int</span> CAP = <span class="n">5</span>;   <span class="c">// 容量上限</span>
+
+    <span class="k">public static void</span> main(<span class="t">String</span>[] args) {
+        <span class="c">// 生产者：满了就等，不满就生产并唤醒消费者</span>
+        <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+            <span class="k">while</span> (<span class="k">true</span>) {
+                <span class="k">synchronized</span> (LOCK) {
+                    <span class="k">while</span> (count == CAP) {          <span class="c">// 注意是 while，不是 if</span>
+                        <span class="k">try</span> { LOCK.wait(); } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {
+                            <span class="t">Thread</span>.currentThread().interrupt();
+                        }
+                    }
+                    <span class="t">System</span>.out.println(<span class="s">"生产，当前数量: "</span> + (++count));
+                    LOCK.notifyAll();                     <span class="c">// 唤醒消费者</span>
+                }
+            }
+        }, <span class="s">"生产者"</span>).start();
+
+        <span class="c">// 消费者：空了就等，不空就消费并唤醒生产者</span>
+        <span class="k">new</span> <span class="t">Thread</span>(() -&gt; {
+            <span class="k">while</span> (<span class="k">true</span>) {
+                <span class="k">synchronized</span> (LOCK) {
+                    <span class="k">while</span> (count == <span class="n">0</span>) {          <span class="c">// 注意是 while，不是 if</span>
+                        <span class="k">try</span> { LOCK.wait(); } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {
+                            <span class="t">Thread</span>.currentThread().interrupt();
+                        }
+                    }
+                    <span class="t">System</span>.out.println(<span class="s">"消费，剩余数量: "</span> + (--count));
+                    LOCK.notifyAll();                     <span class="c">// 唤醒生产者</span>
+                }
+            }
+        }, <span class="s">"消费者"</span>).start();
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">为什么条件判断必须用 while，不能用 if？</div>
+<p>因为存在<strong>虚假唤醒（spurious wakeup）</strong>：线程可能在没有被 notify 的情况下被唤醒（JVM/OS 允许这样做）。如果只用 <code>if</code> 判断一次条件，唤醒后直接往下走，很可能<strong>条件已经不成立</strong>（比如队列又满了/又空了），导致数据错乱。用 <code>while</code> 循环的话，被唤醒后会<strong>重新检查条件</strong>，不成立就继续 wait——这是所有 wait/notify 代码的硬性规范。</p>
+</div>
+
+<p>还有两个高频对比，面试必考：</p>
+
+<table class="nb-table">
+<thead><tr><th>维度</th><th>wait()</th><th>sleep()</th></tr></thead>
+<tbody>
+<tr><td>谁的静态方法</td><td>Object 的实例方法</td><td>Thread 的静态方法</td></tr>
+<tr><td>是否释放锁</td><td><strong>释放</strong>（进 WaitSet）</td><td>不释放（抱着锁睡）</td></tr>
+<tr><td>是否需要 synchronized</td><td>必须（否则 IllegalMonitorStateException）</td><td>不需要</td></tr>
+<tr><td>如何唤醒</td><td>notify/notifyAll（或虚假唤醒）</td><td>时间到自动醒（可被 interrupt）</td></tr>
+<tr><td>典型用途</td><td>线程间协作（等条件）</td><td>定时/暂停（不涉及协作）</td></tr>
+</tbody>
+</table>
+
+<div class="think"><div class="think-q">追问："notify() 和 notifyAll() 怎么选？"</div></div>
+
+<div class="crack"><div class="crack-label">点破</div>
+<p><code>notify()</code> 只唤醒 WaitSet 里<strong>一个</strong>线程——如果唤醒的不是恰好等到了自己条件的那个，被唤醒的线程会重新 wait，甚至可能<strong>饿死</strong>；<code>notifyAll()</code> 全部唤醒，让它们重新竞争、各自重新检查条件，最安全。生产实践：<strong>条件简单、只有一个消费者时用 notify() 可以；条件复杂或不确定时，一律用 notifyAll()</strong>，牺牲一点"惊群"开销换正确性。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第12站：JIT 锁优化 ═══════════════ -->
+<section class="station reveal" id="s12">
+<div class="station-head"><span class="station-no">第 12 站</span><h2>JIT 锁优化：锁消除与锁粗化</h2></div>
+
+<p>除了加锁时的锁升级，JIT 编译器还会在<strong>运行时</strong>做两类"拆锁"优化——这是面试官验证你是否真的懂 synchronized 性能的试金石。</p>
+
+<h3>锁消除（Lock Elision）</h3>
+
+<p>JIT 通过<strong>逃逸分析（Escape Analysis）</strong>判断一个对象会不会"逃逸"出当前线程/方法。如果对象是方法内的局部变量、没有被其他线程看到（不逃逸），那么对它的 synchronized 加锁就<strong>完全可以安全地抹掉</strong>：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>锁消除</b> · 局部 StringBuffer</span></div>
+<pre><code><span class="k">public</span> <span class="t">String</span> joinNames(<span class="t">List</span>&lt;<span class="t">String</span>&gt; names) {
+    <span class="t">StringBuffer</span> sb = <span class="k">new</span> <span class="t">StringBuffer</span>();  <span class="c">// sb 是局部变量，不会逃逸出方法</span>
+    <span class="k">for</span> (<span class="t">String</span> name : names) {
+        sb.append(name).append(<span class="s">","</span>);      <span class="c">// append 是 synchronized 的</span>
+    }
+    <span class="k">return</span> sb.toString();                  <span class="c">// 但 sb 没被别的线程看到 → 锁可被消除</span>
+}</code></pre>
+</div>
+
+<p>这段代码里每次 <code>append</code> 都带锁，但因为 <code>sb</code> 根本不逃逸，JIT 会把这些 synchronized 全部消除——<strong>所以"StringBuffer 慢"在局部变量场景下是个伪命题</strong>。这也是为什么规范常说"局部拼串用 StringBuilder 就行"——它省的是语法层面的锁，而不是运行时优化兜底。</p>
+
+<h3>锁粗化（Lock Coarsening）</h3>
+
+<p>反过来，如果 JIT 发现同一个线程对同一把锁<strong>短时间内反复加解锁</strong>，它会把这些相邻的加解锁<strong>合并成一把大锁</strong>，减少加解锁的次数：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>锁粗化</b> · 循环内加锁</span></div>
+<pre><code><span class="c">// 优化前：每次循环都加锁/解锁</span>
+<span class="k">for</span> (<span class="t">int</span> i = <span class="n">0</span>; i &lt; <span class="n">1000</span>; i++) {
+    <span class="k">synchronized</span> (lock) {
+        sum += i;
+    }
+}
+
+<span class="c">// 优化后（JIT 自动粗化）：合并成一把大锁</span>
+<span class="k">synchronized</span> (lock) {
+    <span class="k">for</span> (<span class="t">int</span> i = <span class="n">0</span>; i &lt; <span class="n">1000</span>; i++) {
+        sum += i;
+    }
+}</code></pre>
+</div>
+
+<p>注意粗化是<strong>有代价的</strong>：持锁时间变长了，其他线程等待更久。所以 JIT 会权衡——临界区太长就不粗化。它是个"兜底优化"，不该成为你随意写锁的借口。</p>
+
+<div class="takeaway"><div class="takeaway-label">生产启示</div>
+<ul>
+  <li>锁消除、锁粗化依赖逃逸分析，JDK 8 服务端模式默认开启（<code>-XX:+DoEscapeAnalysis</code>、<code>-XX:+EliminateLocks</code>）；</li>
+  <li>它们是<strong>运行时兜底</strong>，别依赖它救性能——该用 StringBuilder 就用 StringBuilder，该缩小临界区就缩小；</li>
+  <li>也别因为"JIT 会优化"就乱加锁——优化只在特定场景生效，正确性永远靠自己。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第13站：synchronized vs ReentrantLock ═══════════════ -->
+<section class="station reveal" id="s13">
+<div class="station-head"><span class="station-no">第 13 站</span><h2>synchronized vs ReentrantLock：怎么选</h2></div>
+
+<p>这是整篇最常被面试官追着问的对比，把表格记牢：</p>
+
+<div class="takeaway"><div class="takeaway-label">synchronized vs ReentrantLock 全面对比</div>
 <table class="nb-table">
 <thead><tr><th>特性</th><th>synchronized</th><th>ReentrantLock</th></tr></thead>
 <tbody>
-<tr><td>实现层面</td><td>JVM 内置（字节码指令）</td><td>JDK 层面（java.util.concurrent）</td></tr>
-<tr><td>锁释放</td><td>自动释放（字节码保证）</td><td>必须手动 unlock()（通常在 finally 中）</td></tr>
-<tr><td>可中断</td><td>不可中断</td><td>lockInterruptibly() 支持中断</td></tr>
-<tr><td>超时获取</td><td>不支持</td><td>tryLock(timeout) 支持</td></tr>
-<tr><td>公平锁</td><td>不支持（非公平）</td><td>new ReentrantLock(true) 支持</td></tr>
-<tr><td>条件变量</td><td>一个（Object.wait/notify）</td><td>多个（Condition.await/signal）</td></tr>
-<tr><td>JDK 6+ 性能</td><td>锁升级后接近 ReentrantLock</td><td>基于 AQS + CAS</td></tr>
+<tr><td>实现层面</td><td>JVM 内置（字节码指令 monitorenter/monitorexit）</td><td>JDK 层面（AQS + CAS）</td></tr>
+<tr><td>锁释放</td><td>自动释放（字节码 finally 保证）</td><td>必须手动 unlock()（通常放 finally）</td></tr>
+<tr><td>可重入</td><td>支持（_owner + _recursions）</td><td>支持（AQS state 计数）</td></tr>
+<tr><td>可中断</td><td>不可中断</td><td>lockInterruptibly() 支持</td></tr>
+<tr><td>超时获取</td><td>不支持</td><td>tryLock(timeout, unit) 支持</td></tr>
+<tr><td>公平锁</td><td>不支持（非公平）</td><td>new ReentrantLock(true) 支持公平</td></tr>
+<tr><td>条件变量</td><td>一个（Object.wait/notify）</td><td>多个（newCondition()，可建多个条件队列）</td></tr>
+<tr><td>锁升级</td><td>有（无锁→偏向→轻量→重量）</td><td>无（state 直接计数）</td></tr>
+<tr><td>jstack 可读性</td><td>能看到 synchronized 方法名</td><td>能看到 lock 的线程及"parking to wait for"</td></tr>
+<tr><td>性能（JDK 6+）</td><td>锁升级后接近 ReentrantLock</td><td>基于 AQS + CAS，高竞争下稳定</td></tr>
 <tr><td>可读性</td><td>简洁，关键字语法</td><td>稍复杂，需要 try-finally</td></tr>
 </tbody>
 </table>
 </div>
 
-<div class="crack"><div class="crack-label">面试标准回答模板</div>
-<p><strong>面试官问：</strong>"synchronized 和 ReentrantLock 有什么区别？"</p>
-<p><strong>建议回答结构：</strong></p>
+<p>什么场景<strong>必须</strong>用 ReentrantLock？四个刚需，缺一个都用不上它：</p>
+
 <ul>
-  <li><strong>先纠正误区</strong>：JDK 6 之后 synchronized 不再是重量级锁，引入了偏向锁、轻量级锁、锁膨胀机制</li>
-  <li><strong>讲锁升级</strong>：无锁 → 偏向锁 → 轻量级锁 → 重量级锁，升级不可逆</li>
-  <li><strong>讲功能差异</strong>：ReentrantLock 提供可中断、超时、公平锁、多条件变量等高级功能</li>
-  <li><strong>讲使用建议</strong>：优先用 synchronized（简洁 + 自动释放 + JVM 持续优化）；需要高级功能时用 ReentrantLock</li>
-  <li><strong>加分项</strong>：提到 JDK 15 废弃偏向锁（JEP 374），说明你关注技术演进</li>
+  <li><strong>需要可中断地等锁</strong>：比如线程池 <code>shutdownNow()</code> 要打断正在等锁的线程，<code>synchronized</code> 做不到（等锁期间不可中断）；</li>
+  <li><strong>需要超时获取</strong>：<code>tryLock(3, TimeUnit.SECONDS)</code>——等 3 秒拿不到就放弃，避免无限阻塞；</li>
+  <li><strong>需要公平锁</strong>：防止线程饥饿，代价是吞吐下降；</li>
+  <li><strong>需要多个条件队列</strong>：一个锁配多个 <code>Condition</code>（如"队列不满"和"队列不空"两个条件），<code>wait/notify</code> 只有一套。</li>
+</ul>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LockDemo.java</b> · 可中断 + 超时获取（ReentrantLock 的刚需场景）</span></div>
+<pre><code><span class="k">import</span> java.util.concurrent.locks.ReentrantLock;
+<span class="k">import</span> java.util.concurrent.TimeUnit;
+
+<span class="k">public class</span> <span class="t">LockDemo</span> {
+    <span class="k">private final</span> <span class="t">ReentrantLock</span> lock = <span class="k">new</span> <span class="t">ReentrantLock</span>();
+
+    <span class="k">public void</span> doJob() {
+        <span class="k">try</span> {
+            <span class="c">// 等锁过程中可以被 interrupt，也可以超时放弃</span>
+            <span class="k">if</span> (lock.tryLock(<span class="n">3</span>, <span class="t">TimeUnit</span>.SECONDS)) {
+                <span class="k">try</span> {
+                    <span class="c">// 临界区</span>
+                } <span class="k">finally</span> {
+                    lock.unlock();   <span class="c">// 手动释放，必须 finally</span>
+                }
+            } <span class="k">else</span> {
+                <span class="t">System</span>.out.println(<span class="s">"3 秒没拿到锁，放弃"</span>);
+            }
+        } <span class="k">catch</span> (<span class="t">InterruptedException</span> e) {
+            <span class="t">Thread</span>.currentThread().interrupt();  <span class="c">// 恢复中断标志位</span>
+        }
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">选型建议（面试标准答案）</div>
+<p><strong>默认用 synchronized</strong>：简洁、自动释放、JVM 持续优化（锁升级），出错概率低；<strong>只有明确需要可中断 / 超时 / 公平 / 多条件队列之一时，才换 ReentrantLock</strong>。这句话说出口，面试官就知道你不是背的。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第14站：生产实践·锁对象怎么选 ═══════════════ -->
+<section class="station reveal" id="s14">
+<div class="station-head"><span class="station-no">第 14 站</span><h2>生产实践：锁对象怎么选</h2></div>
+
+<p>写 synchronized 最容易翻车的不是语法，而是<strong>选错了锁对象</strong>。三个真实生产坑，每一个都酿过线上事故。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>LockObjectDemo.java</b> · 锁对象的正确与错误示范</span></div>
+<pre><code><span class="k">public class</span> <span class="t">LockObjectDemo</span> {
+
+    <span class="c">// ❌ 错误示范 1：锁 String 字面量 —— 常量池陷阱</span>
+    <span class="k">private static final</span> <span class="t">String</span> LOCK = <span class="s">"pay"</span>;
+    <span class="c">// "pay" 在字符串常量池里全局只有一份！另一个模块也写 synchronized ("pay")，</span>
+    <span class="c">// 两把"不同的锁"其实是同一把锁 → 毫无关系的代码互相阻塞，甚至死锁。</span>
+
+    <span class="c">// ❌ 错误示范 2：锁 Integer / Long 包装类型 —— 缓存陷阱</span>
+    <span class="k">private static final</span> <span class="t">Integer</span> LOCK2 = <span class="n">1</span>;
+    <span class="c">// Integer.valueOf(1) 命中 -128~127 缓存：所有锁"1"的代码共享同一个 Integer 对象</span>
+    <span class="c">// 你的锁可能和 JDK 内部、第三方库的锁撞在一起。</span>
+
+    <span class="c">// ❌ 错误示范 3：锁的引用被重新赋值 —— 锁了个寂寞</span>
+    <span class="k">private static</span> <span class="t">Integer</span> counter = <span class="n">0</span>;
+    <span class="k">public static void</span> badIncr() {
+        <span class="k">synchronized</span> (counter) {   <span class="c">// 锁的是当前 counter 指向的对象</span>
+            counter++;                  <span class="c">// 拆箱 + 加 1 + 装箱 → counter 指向了另一个对象！</span>
+        }                               <span class="c">// 下一次加锁锁的是新对象 → 并发完全失效</span>
+    }
+
+    <span class="c">// ✅ 正确示范：private final 专用锁对象</span>
+    <span class="k">private final</span> <span class="t">Object</span> lock = <span class="k">new</span> <span class="t">Object</span>();  <span class="c">// 每个实例一把独立锁，谁也碰不到</span>
+    <span class="k">public void</span> pay() {
+        <span class="k">synchronized</span> (lock) {
+            <span class="c">// 临界区</span>
+        }
+    }
+}</code></pre>
+</div>
+
+<div class="crack"><div class="crack-label">三个坑的原理</div>
+<ul>
+  <li><strong>String 字面量</strong>：字符串字面量会 intern 进常量池，同一个 <code>"pay"</code> 在整个 JVM 里只有一个实例。所以"锁字面量"等于"全 JVM 共用一把锁"，作用范围完全失控；</li>
+  <li><strong>包装类型缓存</strong>：<code>Integer.valueOf()</code> 对 <code>-128 ~ 127</code> 返回缓存对象，<code>Long</code> 同理。锁一个"值"可能撞上别的代码锁同一个"值"；超出缓存范围时，自动装箱又可能产生新对象，导致<strong>加锁对象不一致、锁形同虚设</strong>；</li>
+  <li><strong>引用被重新赋值</strong>：<code>synchronized (counter)</code> 锁的是"引用当前指向的对象"，一旦 <code>counter++</code> 让引用指向新对象，下一次加锁就锁到了别的对象上——两个线程各锁各的，并发安全瞬间归零。这是包装类型锁里最阴的坑。</li>
 </ul>
 </div>
 
-<p>JDK 15+ 移除偏向锁后的影响：</p>
+<div class="takeaway"><div class="takeaway-label">锁对象选择清单</div>
+<ul>
+  <li><strong>首选</strong>：<code>private final Object lock = new Object()</code>——专用、独立、final 防重新赋值；</li>
+  <li><strong>别锁</strong>：String 字面量、包装类型（Integer/Long/Boolean）、this（范围太大）、Class 对象（全局唯一，等于全局锁，除非你就要全局互斥）；</li>
+  <li><strong>锁粒度</strong>：能锁代码块就别锁整个方法，能用细粒度锁（多个小锁对象/分段）就别用一把大锁；但多个锁同时出现时，务必保证<strong>全局一致的加锁顺序</strong>，否则就是死锁温床。</li>
+</ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第15站：锁竞争排查实战 ═══════════════ -->
+<section class="station reveal" id="s15">
+<div class="station-head"><span class="station-no">第 15 站</span><h2>锁竞争排查实战：jstack 怎么看</h2></div>
+
+<p>回到第 1 站的事故。学了整篇，现在教你怎么用 5 分钟定位锁竞争热点。</p>
+
+<p>jstack 里，线程在锁上的等待只有两种状态，一眼分清：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>JDK 版本演进</b> · 偏向锁的终结</span></div>
-<pre><code><span class="c">// JDK 6 ~ 14：完整的锁升级链路</span>
-<span class="c">// 无锁 → 偏向锁 → 轻量级锁 → 重量级锁</span>
+<div class="srcbox-head"><span class="srcbox-file"><b>jstack</b> · BLOCKED vs WAITING</span></div>
+<pre><code><span class="c">// 情况一：BLOCKED —— 在 EntryList 排队等锁（等"锁"）</span>
+<span class="s">"http-nio-8080-exec-42"</span> #42 ...
+   java.lang.Thread.State: <span class="hl">BLOCKED (on object monitor)</span>
+        at com.demo.order.OrderService.createOrder(OrderService.java:58)
+        - <span class="hl">waiting to lock &lt;0x00000007ff8f4d10&gt; (a java.lang.Object)</span>
 
-<span class="c">// JDK 15（JEP 374）：偏向锁默认关闭</span>
-<span class="c">// -XX:-UseBiasedLocking 成为默认值</span>
-<span class="c">// 实际升级链路变为：无锁 → 轻量级锁 → 重量级锁</span>
-
-<span class="c">// JDK 18+：偏向锁代码彻底移除</span>
-<span class="c">// 不再支持 -XX:+UseBiasedLocking</span>
-<span class="c">// 如果仍在使用偏向锁优化，需要评估是否迁移到 ReentrantLock</span>
-
-<span class="c">// 实践建议：</span>
-<span class="c">// ① 新项目直接用 JDK 17+，不需要关心偏向锁</span>
-<span class="c">// ② 老项目升级到 JDK 17 时，跑一遍 JMH 基准测试</span>
-<span class="c">// ③ 如果发现锁竞争密集型代码性能下降，考虑换成 ReentrantLock</span></code></pre>
+<span class="c">// 情况二：WAITING —— 在 WaitSet 等条件（等"通知"）</span>
+<span class="s">"pool-1-thread-3"</span> #13 ...
+   java.lang.Thread.State: <span class="hl">WAITING (parking)</span>
+        at jdk.internal.misc.Unsafe.park(Native Method)
+        - <span class="hl">parking to wait for &lt;0x00000007ff8f4d10&gt; (a java.lang.Object)</span>
+        at java.util.concurrent.locks.LockSupport.park(...)</code></pre>
 </div>
+
+<p><strong>BLOCKED 说明它在 EntryList 等锁</strong>（第 4 站的图）；<strong>WAITING (in Object.wait()) 说明它在 WaitSet 等条件</strong>（第 11 站的图）。大量 BLOCKED = 锁竞争热点，大量 WAITING 往往只是正常的等待。</p>
+
+<p>排查三步走：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>排查命令</b> · 三步定位锁热点</span></div>
+<pre><code><span class="c"># 1. 抓三把线程快照（间隔 5 秒），避免误判瞬时现象</span>
+jstack &lt;pid&gt; &gt; stack1.txt
+sleep 5 &amp;&amp; jstack &lt;pid&gt; &gt; stack2.txt
+
+<span class="c"># 2. 统计哪个锁对象被最多线程等待</span>
+grep <span class="s">"waiting to lock"</span> stack1.txt | sort | uniq -c | sort -rn | head
+
+<span class="c"># 3. 用锁地址反查持锁线程卡在哪</span>
+grep <span class="s">"locked &lt;0x00000007ff8f4d10&gt;"</span> stack1.txt stack2.txt stack3.txt</code></pre>
+</div>
+
+<p>找到持锁线程后，看它卡在临界区里干什么。第 1 站的订单事故，根因就是 <code>createOrder()</code> 的 synchronized 块里做了一次 300ms 的远程扣库存调用——锁被远程 IO 拽住，后面几百个线程全部陪葬。修复方案：</p>
+
+<table class="nb-table">
+<thead><tr><th>手段</th><th>做法</th><th>适用场景</th></tr></thead>
+<tbody>
+<tr><td><strong>缩小临界区</strong></td><td>把远程调用、IO、耗计算移出 synchronized</td><td>大部分锁竞争的<strong>第一步</strong></td></tr>
+<tr><td><strong>降低锁粒度</strong></td><td>分段锁、读写锁、ConcurrentHashMap</td><td>读多写少、热点分散</td></tr>
+<tr><td><strong>无锁化</strong></td><td>CAS、原子类、CopyOnWrite 容器</td><td>单变量更新、读多写极少</td></tr>
+<tr><td><strong>红线</strong></td><td>锁内不要 sleep、不要远程调用、不要等待</td><td>永远不要</td></tr>
+</tbody>
+</table>
+
+<div class="crack"><div class="crack-label">事故复盘</div>
+<p>把 <code>createOrder()</code> 里的扣库存远程调用移出临界区（先本地锁保护状态，再异步扣减），P99 从 3s 回到 80ms，几百个 BLOCKED 线程瞬间消失。记住这句话：<strong>锁竞争优化的第一原则，永远是把临界区缩到最小，而不是换更快的锁</strong>——锁再快，也扛不住你把远程 IO 锁在里面。</p>
+</div>
+
+<div class="takeaway"><div class="takeaway-label">监控指标</div>
+<p>线上常盯三个数：BLOCKED 线程占比（锁竞争强度）、持锁线程的临界区耗时、线程池的活跃线程数。配合 APM 的"锁等待时间"埋点，锁热点基本无处遁形。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 总结站 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">总结</span><h2>这一篇你掌握了什么</h2></div>
 
 <div class="recap"><h3>核心知识点回顾</h3>
 <ul>
-  <li><strong>Mark Word</strong>：64 位位图，根据锁状态存储不同内容（hashCode / 线程 ID / Lock Record 指针 / ObjectMonitor 指针）</li>
-  <li><strong>偏向锁</strong>：将线程 ID 写入 Mark Word，后续零开销进入；JDK 15 废弃，JDK 18 移除</li>
-  <li><strong>轻量级锁</strong>：Lock Record + CAS，适用于短暂竞争；比重量级锁快约 5 倍</li>
-  <li><strong>锁膨胀</strong>：CAS 失败触发，轻量级锁升级为重量级锁，创建 ObjectMonitor</li>
-  <li><strong>ObjectMonitor</strong>：Owner + EntryList + WaitSet + cxq，管理阻塞和等待线程</li>
-  <li><strong>锁升级单向</strong>：绝大多数 JDK 版本中膨胀不可逆</li>
-  <li><strong>选型建议</strong>：优先 synchronized；需要可中断/超时/公平/多条件时用 ReentrantLock</li>
+  <li><strong>三种用法</strong>：实例方法锁 <code>this</code>、静态方法锁 <code>Class</code> 对象、代码块锁指定对象；两个实例的实例锁互不干扰，静态锁和实例锁不互斥；</li>
+  <li><strong>Mark Word</strong>：64 位位图，按锁状态复用存储——无锁放 hashCode（31bit）+ age（4bit），偏向锁放线程 ID（54bit），轻量级锁放 Lock Record 指针，重量级锁放 ObjectMonitor 指针；最低 2 位锁标志位 01/00/10/11；调用过 hashCode() 的对象进不了偏向锁；</li>
+  <li><strong>管程 Monitor</strong>：ObjectMonitor 三组结构——Owner 持锁、EntryList 排队等锁、WaitSet 等条件；新竞争线程先入 cxq 再批量转移；</li>
+  <li><strong>锁升级链路</strong>：无锁 → 偏向锁 → 轻量级锁（CAS + 自旋）→ 重量级锁（挂起线程），<strong>单向不可逆</strong>，仅安全点有有限批量降级；</li>
+  <li><strong>准确版本事实</strong>：偏向锁 JDK 15（JEP 374）默认关闭并废弃、JDK 18 彻底移除，现代 JVM 从轻量级锁起步；</li>
+  <li><strong>可重入</strong>：_owner + _recursions 计数，同一线程重复进入，减到 0 才释放；不可重入会自死锁；</li>
+  <li><strong>wait/notify</strong>：必须持有锁（否则 IllegalMonitorStateException）；wait 释放锁进 WaitSet，notify 移到 EntryList；条件判断必须用 while 防虚假唤醒；notifyAll 更安全；</li>
+  <li><strong>JIT 锁优化</strong>：锁消除（逃逸分析，局部对象）与锁粗化（合并相邻加解锁）；</li>
+  <li><strong>选型</strong>：默认 synchronized；需要可中断/超时/公平/多条件队列时才用 ReentrantLock；</li>
+  <li><strong>锁对象</strong>：首选 <code>private final Object</code>；别锁 String 字面量（常量池）和包装类型（-128~127 缓存、引用重赋值陷阱）。</li>
 </ul>
+</div>
+
+<div class="recap"><h3>一句话总结</h3>
+<p>synchronized = <strong>JVM 内置锁：对象头 Mark Word 存锁状态，无锁 → 偏向锁 → 轻量级锁 → 重量级锁单向升级</strong>。它的性能演进史就是一句话：<strong>能用 CAS 就不用自旋，能用自旋就不用挂起线程</strong>。JDK 6 之后它早已不是"重量级锁"，默认优先用它；遇到锁竞争，第一原则永远是缩小临界区。</p>
+</div>
+
+<div class="recap"><h3>面试 30 秒总结</h3>
+<p><strong>30 秒版答案：</strong>「synchronized 是 JVM 层面的互斥锁，锁状态存在对象头的 Mark Word 里，会经历无锁 → 偏向锁 → 轻量级锁 → 重量级锁的升级，升级单向不可逆；偏向锁 JDK 15 默认关闭、JDK 18 移除。轻量级锁靠 CAS + 自旋，重量级锁才挂起线程。JDK 6 之后它性能已接近 ReentrantLock，默认优先用 synchronized；只有需要可中断、超时、公平、多条件队列时才换 ReentrantLock。」</p>
+<p><strong>追问预案：</strong>① 锁的到底是谁？实例方法锁 this、静态方法锁 Class、代码块锁指定对象；② 可重入吗？可，_owner + _recursions 计数；③ EntryList 和 WaitSet 区别？一个等锁一个等条件；④ 为什么重量级锁慢？线程挂起涉及用户态↔内核态切换；⑤ 锁对象怎么选？private final Object，别锁 String 和包装类型。</p>
 </div>
 
 </section>

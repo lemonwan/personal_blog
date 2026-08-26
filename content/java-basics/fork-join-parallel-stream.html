@@ -35,7 +35,7 @@
   <ul>
     <li>parallelStream 什么时候快、什么时候反而更慢？</li>
     <li>并行流的线程安全陷阱在哪里？</li>
-    <li>自定义并行任务怎么写？</li>
+    <li>自定义并行任务怎么写？fork() 和 join() 到底在干什么？</li>
   </ul>
 
   <div class="crack">
@@ -136,7 +136,7 @@
 
   <div class="think">
     <p class="think-q">阈值怎么定？</p>
-    <p>太小，任务拆分和调度的开销超过并行收益；太大，无法充分利用多核。经验值通常在 <strong>1000~10000</strong> 之间。Doug Lea（Fork/Join 框架作者）建议让每个子任务的计算量至少是顺序执行计算量的 100~10000 倍。</p>
+    <p>太小，任务拆分和调度的开销超过并行收益；太大，无法充分利用多核。经验值通常在 <strong>1000~10000</strong> 之间。判断标准不是"多小算小"，而是<strong>让每个叶子任务的计算时间明显大于一次 fork/join 的调度成本</strong>（后者约几十微秒级）——叶子任务太碎，并行度再高也在交调度税。</p>
   </div>
 </section>
 
@@ -210,9 +210,9 @@
       <!-- Worker Thread 4 -->
       <rect x="630" y="50" width="150" height="35" rx="6" fill="url(#ws4)"/>
       <text x="705" y="72" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Worker Thread 3</text>
-      <rect x="655" y="95" width="100" height="30" rx="4" fill="#ede9fe" stroke="#c4b5fd"/>
+      <rect x="655" y="95" width="100" height="30" rx="4" fill="#ede9de" stroke="#c4b5fd"/>
       <text x="705" y="115" text-anchor="middle" fill="#5b21b6" font-size="11">task D1</text>
-      <rect x="655" y="130" width="100" height="30" rx="4" fill="#ede9fe" stroke="#c4b5fd"/>
+      <rect x="655" y="130" width="100" height="30" rx="4" fill="#ede9de" stroke="#c4b5fd"/>
       <text x="705" y="150" text-anchor="middle" fill="#5b21b6" font-size="11" font-weight="600">task D0</text>
 
       <!-- Steal 箭头 -->
@@ -232,7 +232,7 @@
 
   <div class="think">
     <p class="think-q">为什么自己的任务从底部 pop（LIFO），偷来的从顶部取（FIFO）？</p>
-    <p><strong>LIFO 执行自己的任务</strong>：最新 fork 出来的子任务最"小"、最"新鲜"，优先处理它可以尽快完成并释放结果给 join。同时，先 fork 的大任务留在 Deque 顶部，正好方便被其他线程偷走。</p>
+    <p><strong>LIFO 执行自己的任务</strong>：最新 fork 出来的子任务最"小"、最"新鲜"，优先处理它可以尽快完成并释放结果给 join。同时，先 fork 的大任务留在 Deque 顶部，正好方便被其他线程偷走。还有一个硬件层面的好处：LIFO 访问的是队列顶部——刚 push 进来的任务还在 <strong>L1 缓存</strong>里，命中率远高于偷队列尾部的老任务。</p>
     <p><strong>FIFO 偷任务</strong>：顶部的任务是最早 fork 的，通常是"大块"任务。偷来之后它还会继续 fork 拆分，产生新的子任务填入偷窃者的 Deque，从而让偷窃者也有活干。</p>
   </div>
 
@@ -248,18 +248,23 @@
       <tr><td>适用场景</td><td>IO 密集、独立请求处理</td><td>CPU 密集、可分治的计算</td></tr>
     </tbody>
   </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">为什么 work-stealing 比共享队列强？</span>
+    <p>共享队列的竞争点在取任务时（所有线程抢同一个队列头，锁/CAS 竞争 + 缓存行乒乓）；work-stealing 的队列是私有的，取自己任务零竞争，只有"偷"时才有一次 CAS——把竞争频率从「每次取」降到「偶尔偷」。任务越多越均衡，这正是分治场景的理想模型。</p>
+  </div>
 </section>
 
 <!-- ================================================================
-     第 4 站 — RecursiveTask & RecursiveAction
+     第 4 站 — RecursiveTask &amp; RecursiveAction
      ================================================================ -->
 <section class="station reveal" id="s4">
   <div class="station-head">
     <span class="station-no">第 4 站</span>
-    <h2>RecursiveTask 与 RecursiveAction</h2>
+    <h2>RecursiveTask 与 RecursiveAction：框架的两个基类</h2>
   </div>
 
-  <p>Fork/Join 框架提供了两个抽象基类：</p>
+  <p>Fork/Join 框架提供了两个抽象基类，区别只有"要不要返回值"：</p>
 
   <table class="nb-table">
     <thead>
@@ -267,12 +272,29 @@
     </thead>
     <tbody>
       <tr><td><code>RecursiveTask&lt;V&gt;</code></td><td>有返回值 V</td><td>Callable</td><td>求和、查找最大值、归并排序</td></tr>
-      <tr><td><code>RecursiveAction</code></td><td>无返回值 (void)</td><td>Runnable</td><td>数组填充、批量修改、排序原地操作</td></tr>
+      <tr><td><code>RecursiveAction</code></td><td>无返回值 (void)</td><td>Runnable</td><td>数组填充、批量修改、原地排序</td></tr>
     </tbody>
   </table>
 
+  <p>两个类都是 <code>ForkJoinTask</code> 的子类，都实现了 <code>compute()</code> 抽象方法——你的全部算法逻辑都写在这里。类名里的 "Recursive" 不是限制，是<strong>提示</strong>：这个框架就是为「自己 fork 出同类子任务」设计的，但不递归直接计算也完全合法（比如一次性任务）。</p>
+
+  <div class="think">
+    <p class="think-q">追问：ForkJoinTask 还有第三个常用子类吗？</p>
+    <p>有——<code>CountedCompleter&lt;T&gt;</code>：fork 的子任务<strong>不需要等</strong>，而是靠"计数归零"触发完成回调。适合子任务彼此独立、父任务想在最后统一收口的场景（比所有 join 轻量得多，省掉每次 join 的挂起/唤醒）。JDK 里 parallelStream 的部分内部实现就用了它。面试能主动提这一嘴，算超出预期。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 5 站 — 完整示例
+     ================================================================ -->
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>完整示例：用 RecursiveTask 对大数组求和</h2>
+  </div>
+
   <div class="srcbox">
-    <div class="srcbox-head">完整示例：用 RecursiveTask 对大数组求和</div>
+    <div class="srcbox-head">ArraySumTask.java —— 一个可以跑的分治求和任务</div>
     <pre class="srcbox-file"><span class="k">import</span> java.util.concurrent.RecursiveTask;
 <span class="k">import</span> java.util.concurrent.ForkJoinPool;
 
@@ -335,24 +357,73 @@
     customPool.shutdown();
 }</pre>
   </div>
+</section>
+
+<!-- ================================================================
+     第 6 站 — fork 一侧 compute 一侧
+     ================================================================ -->
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>为什么只 fork 一个、compute 另一个？</h2>
+  </div>
 
   <div class="crack">
-    <span class="crack-label">关键细节：为什么只 fork 一个、compute 另一个？</span>
+    <span class="crack-label">关键细节</span>
     <p>如果左右两边都 <code>fork()</code>，当前线程就要 <code>join</code> 两次——它在等待的时候什么都做不了，浪费了一个线程。正确做法是：fork 左半部分（让其他线程偷走执行），当前线程自己 compute 右半部分，最后 join 左半部分。这样当前线程始终在干活，不浪费时间。</p>
   </div>
 
   <div class="takeaway">
     <span class="takeaway-label">最佳实践</span>
-    <p>在 RecursiveTask 的 compute() 中，只 fork 一侧，另一侧直接 compute()，最后 join fork 出去的那一侧。这是 Doug Lea 在 JDK 源码中反复使用的模式。</p>
+    <p>在 RecursiveTask 的 compute() 中，只 fork 一侧，另一侧直接 compute()，最后 join fork 出去的那一侧。这是 Doug Lea 在 JDK 源码中反复使用的模式。注意一个不对称点：<strong>fork 出去的那侧由"别的线程"执行，当前线程只做 join</strong>；自己 compute 的那侧不 join（结果在手里），所以全程只有一次 join。</p>
+  </div>
+
+  <div class="think">
+    <p class="think-q">需要 fork 多个子任务怎么办？</p>
+    <p>用 <code>invokeAll(t1, t2, ..., tn)</code>（JDK 8 起有 varargs 版本）：一次性提交全部子任务并等待完成，内部用 CountedCompleter 计数归零的方式收口，比逐个 fork + 逐个 join 高效。适用场景是"拆成 N 份并行跑完再合并"（不是二叉递归）。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 5 站 — parallelStream
+     第 7 站 — fork/join/invoke 语义
      ================================================================ -->
-<section class="station reveal" id="s5">
+<section class="station reveal" id="s7">
   <div class="station-head">
-    <span class="station-no">第 5 站</span>
+    <span class="station-no">第 7 站</span>
+    <h2>fork / join / invoke 三个动词的精确语义</h2>
+  </div>
+
+  <p>这三个词在源码注释里经常混着出现，面试被追问"它们到底有什么区别"时，要能一句话一个：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>方法</th><th>阻塞？</th><th>精确语义</th><th>谁调用</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>task.fork()</code></td><td><strong>不阻塞</strong></td><td>把子任务提交到<strong>当前线程所在池</strong>的 Deque，立即返回；任务由池里某个工作线程（不一定是别人）执行</td><td>必须在池的工作线程内部调用（commonPool 的工作线程里）</td></tr>
+      <tr><td><code>task.join()</code></td><td><strong>阻塞</strong>（仅到任务完成）</td><td>等待 task 完成并返回结果。特殊之处：等待期间<strong>当前线程会帮忙干活</strong>——偷别的队列的任务（compensating thread 补偿机制），而不是傻等</td><td>调 fork 的那个线程</td></tr>
+      <tr><td><code>pool.invoke(task)</code></td><td><strong>阻塞到完成</strong></td><td>把 task 作为"根任务"提交给池，<strong>调用线程直接参与执行</strong>它（而不是扔进队列），并阻塞到出结果</td><td>任何线程（通常主线程）</td></tr>
+    </tbody>
+  </table>
+
+  <p>两个容易说错的点：</p>
+  <ul>
+    <li><strong>fork() 不是"派给别的线程"</strong>：它只是把任务压入当前线程的 Deque 顶部。如果当前线程还有别的子任务要处理，这个 fork 出去的任务可能暂时留在队列里，甚至被<strong>别的线程偷走</strong>——"谁执行"由 work-stealing 决定，不由 fork 的调用者指定。</li>
+    <li><strong>join() 的"帮忙"机制是它比 wait() 高级的地方</strong>：普通 wait 是干等被通知；ForkJoinTask.join 在等待目标完成的同时，会顺手偷其他队列的活干（compensating）——等待时间被用来创造吞吐量，这是 Fork/Join 框架吞吐稳定的核心技巧之一。注意补偿有次数上限，防着无限帮忙。</li>
+  </ul>
+
+  <div class="think">
+    <p class="think-q">join() 能拿到子任务的异常吗？</p>
+    <p>compute() 里抛出的运行时异常/错误会被任务对象记住，<strong>join() 时重新抛给调用者</strong>（不会静默吞掉）。所以分治代码的异常处理惯例是：叶子节点尽量捕获并聚合，根任务的 join 处做最终兜底——和线程池 submit 后 future.get() 抛 ExecutionException 是一个思想。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 8 站 — parallelStream 用法
+     ================================================================ -->
+<section class="station reveal" id="s8">
+  <div class="station-head">
+    <span class="station-no">第 8 站</span>
     <h2>parallelStream：一行代码的并行化</h2>
   </div>
 
@@ -382,12 +453,27 @@
     .reduce(<span class="n">0L</span>, Long::sum);</pre>
   </div>
 
-  <p>底层流程：parallelStream 将数据源拆分成多个 <code>Spliterator</code>，每个子任务在 ForkJoinPool 的工作线程中并行执行，最后合并结果。</p>
+  <p>底层流程：parallelStream 将数据源通过 <code>Spliterator</code>（可分裂迭代器）拆分成多个分段，每个分段封装成一个 ForkJoinTask 投入 commonPool 并行执行，最后按<strong>分段合并（combine）</strong>规则汇总结果。拆分不是死板的对半分——Spliterator 带着数据的结构信息（数组可以精确切半，链表只能逐步分），这也是"数组并行流快、链表并行流慢"的底层原因之一。</p>
+
+  <div class="think">
+    <p class="think-q">追问：为什么 commonPool 是「核心数 - 1」而不是「核心数」？</p>
+    <p>给系统留一个核给<strong>不经过池</strong>的线程用（比如 main 线程在等池里的结果、JIT、GC）。如果池占满所有核，调用者线程自己都没核可跑，"等池出结果"的线程可能永远拿不到时间片——留一个核是防全局死锁的工程保险。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 9 站 — parallelStream 何时更快
+     ================================================================ -->
+<section class="station reveal" id="s9">
+  <div class="station-head">
+    <span class="station-no">第 9 站</span>
+    <h2>parallelStream 何时更快：经验公式与边界</h2>
+  </div>
 
   <div class="formula">
     <p><strong>parallelStream 何时更快？经验公式：</strong></p>
     <p style="text-align:center;font-size:1.1em;margin:12px 0"><code>N &gt; 10,000 &amp;&amp; 操作是 CPU 密集型</code></p>
-    <p>其中 N 是数据量。数据太少，线程拆分和合并的开销反而超过并行收益。</p>
+    <p>其中 N 是数据量。数据太少，线程拆分和合并的开销反而超过并行收益。更精确的判据是<strong>单次元素的平均处理时间 &gt; 并行化开销（约 1~10 微秒级）</strong>——每条记录处理要 1 微秒，1 万条就是 10 毫秒的总计算量，才值得拆给 8 个核。</p>
   </div>
 
   <table class="nb-table">
@@ -404,23 +490,61 @@
   </table>
 
   <div class="think">
-    <p class="think-q">面试官追问：parallelStream 里能调用 HTTP 接口吗？</p>
-    <p><strong>绝对不行！</strong>parallelStream 默认使用 <code>ForkJoinPool.commonPool()</code>，这个池是整个 JVM 共享的。如果你在 lambda 里发起 HTTP 调用（IO 阻塞），会阻塞公共池的工作线程，导致所有使用 commonPool 的任务（包括其他 parallelStream）全部被拖慢。IO 密集任务应该用 CompletableFuture + 自定义线程池。</p>
+    <p class="think-q">为什么"快 2~8 倍"而不是"快 8 倍"？</p>
+    <p>阿姆达尔定律的朴素版：并行加速比受"串行部分"限制——拆分、合并、结果收集都是串行的；加上分段不均衡（有的段先干完空等）、cache 冷启动，实际加速比 = 核数 × 一个折扣系数。8 核机器上 2~4 倍是常态，宣传"线性加速"的都是没实测过。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 6 站 — parallelStream 陷阱
+     第 10 站 — commonPool 深水区
      ================================================================ -->
-<section class="station reveal" id="s6">
+<section class="station reveal" id="s10">
   <div class="station-head">
-    <span class="station-no">第 6 站</span>
-    <h2>parallelStream 的 5 大陷阱</h2>
+    <span class="station-no">第 10 站</span>
+    <h2>commonPool 深水区：整个 JVM 共享的一颗雷</h2>
   </div>
 
-  <p>这是面试最高频的考点——知道怎么用不难，知道什么不能用才是功力。</p>
+  <p>commonPool 的危险性不在"慢"，在于<strong>它是全 JVM 单例</strong>——所有并行消费者共担它的死活：</p>
+  <ul>
+    <li>所有 <code>parallelStream()</code>（没指定池的话）</li>
+    <li>没传 executor 的 <code>CompletableFuture</code> 异步方法（<code>thenApply</code> 等）</li>
+    <li>JDK 内部部分并行实现（如 <code>Arrays.sort()</code> 的大数组并行快排）</li>
+  </ul>
 
-  <!-- 陷阱 1: 共享可变状态 -->
+  <div class="srcbox">
+    <div class="srcbox-head">一个真实形态的事故</div>
+    <pre class="srcbox-file"><span class="c">// ❌ 订单服务里某位同学的"优化"：</span>
+orders.<span class="n">parallelStream</span>()
+    .map(order -&gt; httpCall(<span class="s">"http://inventory/stock/"</span> + order.getSku()))  <span class="c">// 💥 lambda 里发 HTTP</span>
+    .collect(<span class="t">Collectors</span>.toList());
+
+<span class="c">// 库存服务那天响应从 20ms 涨到 3s：</span>
+<span class="c">// → 8 个 commonPool 工作线程全部卡在 HTTP 读上</span>
+<span class="c">// → 同一 JVM 里另一个报表模块的 parallelStream 求和：排队，无核可用</span>
+<span class="c">// → 报表导出超时告警——和订单毫无业务关系，但同一颗池子炸了</span>
+<span class="c">// 排查半天才发现：jstack 里 commonPool worker 全部 TIMED_WAITING (parking)</span>
+<span class="c">// 栈顶停在 HttpURLConnection 的 read 上</span></pre>
+  </div>
+
+  <p>三条生产纪律：</p>
+  <ul>
+    <li><strong>commonPool 只跑纯 CPU 短任务</strong>：任何阻塞（IO、锁、sleep、park）都不允许出现在它的 lambda 里。IO 密集走 CompletableFuture + 独立 IO 线程池（见「CompletableFuture 异步编程」篇）。</li>
+    <li><strong>重要业务流不要搭便车</strong>：核心链路的并行计算用<strong>自建 ForkJoinPool</strong>，把业务从"全 JVM 共担"里摘出来。第 15 站给出写法。</li>
+    <li><strong>把它当共享资源监控</strong>：<code>ForkJoinPool.commonPool().getActiveThreadCount()</code> / <code>getQueuedTaskCount()</code> 打点——活跃线程数持续贴近池大小、队列堆积，就是有人在占用它。</li>
+  </ul>
+</section>
+
+<!-- ================================================================
+     第 11 站 — 陷阱 1~2
+     ================================================================ -->
+<section class="station reveal" id="s11">
+  <div class="station-head">
+    <span class="station-no">第 11 站</span>
+    <h2>陷阱 1~2：共享可变状态 &amp; 有状态操作</h2>
+  </div>
+
+  <p>这是面试最高频的考点——知道怎么用不难，知道什么不能用才是功力。五个陷阱里，前两个最致命（直接数据错乱），后三个最阴险（性能陷阱，不报错只变慢）。</p>
+
   <div class="srcbox">
     <div class="srcbox-head">陷阱 1：共享可变状态（副作用 Lambda）</div>
     <pre class="srcbox-file"><span class="c">// ❌ 错误示范：多个线程同时写同一个 ArrayList</span>
@@ -436,7 +560,11 @@ list.<span class="n">parallelStream</span>()
     .collect(<span class="t">Collectors</span>.toList());  <span class="c">// Collectors 内部处理了并发安全</span></pre>
   </div>
 
-  <!-- 陷阱 2: 有状态操作 -->
+  <div class="takeaway">
+    <span class="takeaway-label">背后的原理</span>
+    <p>为什么 <code>collect(Collectors.toList())</code> 就安全了？因为 Collector 的契约把并发安全内置了：每个线程各自维护一个局部容器（<code>supplier</code>），处理完自己那一段，最后由框架按分段<strong>归并（combine）</strong>——和 Fork/Join 的 join 合并是同一套思想。而 <code>forEach(list::add)</code> 是"所有线程挤同一个容器"，Collector 机制完全没参与。判断标准：<strong>结果收集必须走 Collector/终端操作，不许走外部共享集合</strong>。</p>
+  </div>
+
   <div class="srcbox">
     <div class="srcbox-head">陷阱 2：有状态操作在并行下性能暴降</div>
     <pre class="srcbox-file"><span class="c">// ❌ sorted() 在并行流下需要先收集所有元素才能排序</span>
@@ -455,7 +583,21 @@ list.<span class="n">parallelStream</span>()
     .collect(<span class="t">Collectors</span>.toList());</pre>
   </div>
 
-  <!-- 陷阱 3: Boxing -->
+  <div class="think">
+    <p class="think-q">怎么快速识别"有状态"操作？</p>
+    <p>问一句：<strong>"处理第 100 个元素时，需不需要知道前面 99 个元素的完整信息？"</strong>需要 → 有状态（sorted 要知道全部才能排、distinct 要知道全部才能去重、limit 在有序流上要按序截取）→ 并行流在这里必须"收拢"处理。无状态操作（filter/map/peek）每个元素独立决策，天然并行。这个判断法比背清单更耐用。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 12 站 — 陷阱 3~5
+     ================================================================ -->
+<section class="station reveal" id="s12">
+  <div class="station-head">
+    <span class="station-no">第 12 站</span>
+    <h2>陷阱 3~5：装箱开销、小数据集、嵌套并行</h2>
+  </div>
+
   <div class="srcbox">
     <div class="srcbox-head">陷阱 3：装箱/拆箱开销</div>
     <pre class="srcbox-file"><span class="c">// ❌ Stream&lt;Integer&gt; 每个元素都是 Integer 对象，内存浪费 + GC 压力</span>
@@ -471,7 +613,6 @@ list.<span class="n">parallelStream</span>()
     .sum();</pre>
   </div>
 
-  <!-- 陷阱 4: 小数据集 -->
   <div class="srcbox">
     <div class="srcbox-head">陷阱 4：小数据集用并行流 = 杀鸡用牛刀</div>
     <pre class="srcbox-file"><span class="c">// ❌ 只有 100 个元素，拆分/调度/合并的开销远大于并行收益</span>
@@ -483,7 +624,6 @@ list.<span class="n">parallelStream</span>()
 <span class="k">int</span> sum = small.stream().mapToInt(<span class="t">Integer</span>::intValue).sum();</pre>
   </div>
 
-  <!-- 陷阱 5: 嵌套并行流 -->
   <div class="srcbox">
     <div class="srcbox-head">陷阱 5：嵌套 parallelStream 导致线程饥饿</div>
     <pre class="srcbox-file"><span class="c">// ❌ 外层和内层都用 parallelStream —— 争抢同一个 commonPool</span>
@@ -503,19 +643,98 @@ outerList.<span class="n">parallelStream</span>()
     .collect(<span class="t">Collectors</span>.toList());</pre>
   </div>
 
-  <div class="takeaway">
-    <span class="takeaway-label">parallelStream 安全清单</span>
-    <p>使用前逐项检查：(1) Lambda 无副作用、不修改外部共享变量；(2) 避免 sorted/distinct 等有状态操作；(3) 用 IntStream/LongStream 代替装箱流；(4) 数据量 &gt; 10,000；(5) 不嵌套 parallelStream；(6) 不在 Lambda 里做 IO。</p>
+  <div class="think">
+    <p class="think-q">为什么嵌套并行不是"更并行"而是"互相饿死"？</p>
+    <p>内外层都从同一个 commonPool 取工作线程。外层任务占着线程执行到 flatMap 时，内层并行流又向同一个池要线程——池的线程全被外层任务占着，内层任务排队等线程，而"等线程"这件事本身就在占线程。8 线程池跑两层嵌套，很容易出现全员互相等待、吞吐跌到比纯串行还低。规则铁板一块：<strong>一条流水线里只允许一个并行级</strong>。</p>
   </div>
 </section>
 
 <!-- ================================================================
-     第 7 站 — 总结
+     第 13 站 — 顺序与 forEachOrdered
      ================================================================ -->
-<section class="station reveal" id="s7">
+<section class="station reveal" id="s13">
   <div class="station-head">
-    <span class="station-no">第 7 站</span>
-    <h2>总结：Fork/Join vs parallelStream vs CompletableFuture</h2>
+    <span class="station-no">第 13 站</span>
+    <h2>顺序的真相：encounter order 与 forEachOrdered</h2>
+  </div>
+
+  <p>并行执行 = 各段乱序完成，那结果顺序怎么保证？这里有个高频误区要拆干净：</p>
+  <ul>
+    <li><strong>有序流（ordered stream）的终端结果保留 encounter order</strong>：即使各分段是乱序完成的，<code>collect(Collectors.toList())</code> 出来的 List 元素顺序<strong>与串行完全一致</strong>——框架在合并分段结果时按原始位置归位（类似并行快排的 merge 阶段）。所以「parallelStream 结果顺序随机」是错的。</li>
+    <li><strong>unordered() 是性能开关</strong>：声明"我不在乎顺序"后，框架可以跳过按位归位的合并步骤——对 distinct/limit 这类有状态操作，这个差别是数量级的。</li>
+    <li><strong>forEach 不保证顺序，forEachOrdered 保证</strong>：并行流的 <code>forEach</code> 中，各元素的执行时机是乱的（副作用操作可能任意先后发生）；<code>forEachOrdered</code> 强制按 encounter order 逐个执行副作用——代价是<strong>前面一段没做完，后面即使算完了也得等</strong>，并行优势被顺序依赖吃掉大半。能不用就不用，要用的场景是"顺序本身有业务含义"（比如按时间序写日志、按优先级通知）。</li>
+  </ul>
+
+  <div class="srcbox">
+    <div class="srcbox-head">三种"顺序"放一张表</div>
+    <pre class="srcbox-file"><span class="c">// ① collect 结果顺序：有序流 → 与串行一致（框架归位合并）</span>
+list.<span class="n">parallelStream</span>().map(f).collect(<span class="t">Collectors</span>.toList());  <span class="c">// 顺序稳定 ✅</span>
+
+<span class="c">// ② forEach 副作用顺序：不保证</span>
+list.<span class="n">parallelStream</span>().forEach(e -&gt; log.info(e));  <span class="c">// 日志顺序是乱的 ⚠️</span>
+
+<span class="c">// ③ forEachOrdered：强制按序执行副作用（慢）</span>
+list.<span class="n">parallelStream</span>().forEachOrdered(e -&gt; log.info(e));  <span class="c">// 按序但收益打折</span></pre>
+  </div>
+
+  <div class="think">
+    <p class="think-q">追问：并行流的中间结果能"偷看"吗？</p>
+    <p>不能。流是惰性的、一次性的，中间分段在合并完成前不存在"可观察的中间态"——你唯一能拿到的就是终端操作的结果。这也解释了为什么并行流不适合"边算边输出"：要么全部算完拿结果（collect），要么放弃顺序保证（forEach）。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 14 站 — 红线场景
+     ================================================================ -->
+<section class="station reveal" id="s14">
+  <div class="station-head">
+    <span class="station-no">第 14 站</span>
+    <h2>红线场景：这四类情况 parallelStream 绝不用</h2>
+  </div>
+
+  <p>前几站的陷阱是"性能账"，这一站的四类是"安全账"——踩了不是慢，是错：</p>
+
+  <table class="nb-table">
+    <thead>
+      <tr><th>红线场景</th><th>后果</th><th>正确替代</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>lambda 里做 IO / 阻塞调用</strong><br/>（HTTP、DB、锁、sleep）</td>
+        <td>阻塞 commonPool 工作线程，拖垮全 JVM 的并行任务</td>
+        <td>CompletableFuture + 独立 IO 线程池；或批量 IO 后串行处理</td>
+      </tr>
+      <tr>
+        <td><strong>操作有副作用 / 改共享状态</strong><br/>（累加外部变量、add 进外部集合、改对象字段）</td>
+        <td>数据错乱、丢失、偶发异常——且并发下极难复现</td>
+        <td>无状态化：结果全部通过 Collector 归并；必须写则改串行或显式同步</td>
+      </tr>
+      <tr>
+        <td><strong>操作不可重入 / 依赖全局状态</strong><br/>（调 SimpleDateFormat、读全局单例的可变字段）</td>
+        <td>偶发时间解析错、脏读——线上"每周出一次"的玄学 bug</td>
+        <td>ThreadLocal 化或不可变对象（DateTimeFormatter）；依赖参数化传入</td>
+      </tr>
+      <tr>
+        <td><strong>在请求处理路径里处理小数据</strong><br/>（几百条记录也 parallelStream）</td>
+        <td>比串行慢 5~10 倍 + 占用共享池的线程做无用调度</td>
+        <td>串行 stream；确需并行且数据大，用自建池隔离</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话红线</span>
+    <p>parallelStream 只干一件事：<strong>对大份数据做无副作用的纯计算</strong>。凡是需要"等外面"（IO）、"改外面"（副作用）、"记外面"（全局状态）的，都该走别的方案。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 15 站 — 选型
+     ================================================================ -->
+<section class="station reveal" id="s15">
+  <div class="station-head">
+    <span class="station-no">第 15 站</span>
+    <h2>选型：ForkJoinPool vs parallelStream vs CompletableFuture</h2>
   </div>
 
   <p>面试中经常被问到这三者的选型。核心区别在于<strong>任务的性质</strong>：</p>
@@ -583,7 +802,7 @@ outerList.<span class="n">parallelStream</span>()
   </div>
 
   <div class="srcbox">
-    <div class="srcbox-head">自定义 ForkJoinPool 给 parallelStream 用</div>
+    <div class="srcbox-head">生产写法：自定义 ForkJoinPool 给 parallelStream 用</div>
     <pre class="srcbox-file"><span class="c">// 生产环境：不要依赖 commonPool，用自定义池隔离</span>
 <span class="t">ForkJoinPool</span> customPool = <span class="k">new</span> <span class="t">ForkJoinPool</span>(<span class="n">8</span>);
 
@@ -602,21 +821,43 @@ outerList.<span class="n">parallelStream</span>()
 }</pre>
   </div>
 
+  <div class="think">
+    <p class="think-q">为什么 submit 进去之后 parallelStream 就换了池？</p>
+    <p>因为 parallelStream 取池的逻辑是"<strong>当前线程</strong>如果正在某个 ForkJoinPool 的工作线程上执行，就用那个池；否则 fallback 到 commonPool"。submit 进 customPool 后，Callable 跑在 customPool 的工作线程里，里面的 parallelStream 就"看见"了 customPool。这是官方认可的隔离手法，也是它最容易被误解的地方——<strong>换池靠的是"在哪执行"，不是"怎么声明"</strong>。</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     第 16 站 — 总结
+     ================================================================ -->
+<section class="station reveal" id="summary">
+  <div class="station-head">
+    <span class="station-no">总结</span>
+    <h2>这一篇你掌握了什么</h2>
+  </div>
+
   <div class="recap">
-    <h3>全文核心要点回顾</h3>
+    <h3>核心知识点回顾</h3>
     <ul>
-      <li><strong>Fork/Join 思想</strong>：分治 = fork 拆分 + 递归计算 + join 合并</li>
-      <li><strong>Work-Stealing</strong>：每个线程有自己的 Deque，空闲线程从繁忙线程顶部偷任务</li>
-      <li><strong>RecursiveTask</strong>：只 fork 一侧、compute 另一侧、最后 join</li>
-      <li><strong>parallelStream</strong>：Fork/Join 的语法糖，底层用 commonPool</li>
-      <li><strong>五大陷阱</strong>：共享可变状态、有状态操作、装箱开销、小数据集、嵌套并行</li>
-      <li><strong>选型</strong>：CPU 密集 + 集合 → parallelStream；递归算法 → ForkJoinPool；IO 编排 → CompletableFuture</li>
+      <li><strong>Fork/Join 思想</strong>：分治 = fork 拆分 + 递归计算 + join 合并；阈值定在"叶子计算时间 &gt; 调度成本"</li>
+      <li><strong>Work-Stealing</strong>：每线程私有 Deque；自己从底部 pop（LIFO，热缓存），闲者从别人顶部 steal（FIFO，偷大任务还能再拆）；竞争点从"每次取"降到"偶尔偷"</li>
+      <li><strong>RecursiveTask / RecursiveAction / CountedCompleter</strong>：要返回值、不要返回值、计数收口三种基类</li>
+      <li><strong>fork / join / invoke 语义</strong>：fork 不阻塞（压入当前线程 Deque）；join 阻塞但等待时顺手帮忙（compensating）；invoke 由调用线程直接执行根任务；fork 一侧 compute 一侧 + invokeAll 收多子任务</li>
+      <li><strong>commonPool</strong>：全 JVM 单例、核数-1、parallelStream/CF/Arrays.sort 共用；只跑纯 CPU 短任务，阻塞 IO 会炸全场；重要业务自建池（submit 换池靠"在哪执行"）</li>
+      <li><strong>顺序真相</strong>：有序流 collect 结果与串行一致（框架归位）；unordered() 是性能开关；forEach 乱序、forEachOrdered 按序但慢</li>
+      <li><strong>五大陷阱</strong>：共享可变状态（走 Collector 归并）、有状态操作（识别法："需不需要知道前面元素"）、装箱（IntStream）、小数据集（串行）、嵌套并行（单流水线单并行级）</li>
+      <li><strong>选型</strong>：CPU 密集 + 大集合 → parallelStream；递归分治算法 → ForkJoinPool；IO 编排 → CompletableFuture；其余 → 普通线程池</li>
     </ul>
   </div>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试 30 秒总结</span>
-    <p>"Fork/Join 框架基于分治思想，通过 work-stealing 算法让空闲线程从繁忙线程的 Deque 偷任务，实现负载均衡。parallelStream 是它的语法糖，默认用 commonPool。使用时要注意五个陷阱：不在 Lambda 里修改共享变量、避免 sorted/distinct 等有状态操作、用 IntStream 避免装箱、数据量要大于 1 万、不嵌套并行流。IO 密集场景应该用 CompletableFuture 而不是 parallelStream。"</p>
+  <div class="recap">
+    <h3>一句话总结</h3>
+    <p>Fork/Join 是"分治 + 偷活"的并行引擎：大任务拆小、各线程私有队列、闲者偷忙者的顶部任务；parallelStream 是它的语法糖，好用但只许喂"大份 + 纯计算 + 无副作用"的数据，IO 请绕道 CompletableFuture。</p>
+  </div>
+
+  <div class="recap">
+    <h3>🎤 面试 30 秒总结</h3>
+    <p>"Fork/Join 框架基于分治思想：任务递归拆分（fork），叶子直接算，结果向上合并（join）。线程模型是 work-stealing——每个工作线程有自己的双端队列，自己从底部 LIFO 取最新任务，空闲时从别的线程队列顶部 FIFO 偷最老的大任务，把锁竞争降到最低。写 RecursiveTask 的惯例是只 fork 一侧、当前线程 compute 另一侧、最后 join 一次；fork 不阻塞，join 阻塞但等待时会帮忙偷任务。parallelStream 是它的语法糖，底层用 commonPool（核数减一、全 JVM 共享），所以三条纪律：只跑纯 CPU、lambda 无副作用无 IO、数据量上万再并行；顺序上，有序流的 collect 结果和串行一致，forEach 乱序、forEachOrdered 按序但慢。IO 密集编排应该用 CompletableFuture 加独立线程池，不该碰 commonPool。"</p>
   </div>
 </section>
 
