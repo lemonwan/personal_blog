@@ -120,6 +120,19 @@
     <span class="takeaway-label">面试话术</span>
     <p>JVM 使用可达性分析判断对象是否存活。GC Roots 是分析的起点，包括 5 种：栈帧局部变量、静态变量、常量池引用、JNI 全局引用和 JVM 内部引用。从这些根出发能到达的对象都不会被回收。</p>
   </div>
+
+  <h3>可达 ≠ 必定不回收：引用强度的限定词</h3>
+
+  <p>面试里有个高频错误说法："从 GC Roots 可达的对象一定不回收。"——少了一个限定词：<strong>只有"强可达"才是必定不回收</strong>。挂在 GC Root 上的引用未必是强引用——弱引用、软引用、虚引用同样能让对象从某个 Root"可达"，但可达性分析要结合引用强度判定：仅被弱引用可达的对象本轮 GC 就回收，仅被软引用可达的对象在内存紧张（OOM 之前）回收。准确的说法是：可达性分析实际是<strong>"强可达判定 + 引用类型过滤"两步</strong>——先判强引用可达性（不可达必回收），再看是否仅弱/软可达（弱可达也回收，软可达可能回收）。可达 ≠ 存活，差的就是引用强度。</p>
+
+  <div class="crack">
+    <span class="crack-label">易错点</span>
+    <p>被问"WeakReference 引用的对象会被回收吗"，如果答"不会，它从 GC Root 可达"——错了。标准答案：弱引用是 GC 中"最先牺牲"的引用，任何一次 GC（哪怕只是 Young GC）都可能回收仅被弱引用可达的对象。这正是 WeakHashMap 和 ThreadLocal 的 Entry key 用弱引用的原因（细节见「对象存活判定」）。</p>
+  </div>
+
+  <h3>GC Roots 本身也在变：并发收集怎么跟上</h3>
+
+  <p>另一个容易被忽略的深度点：<strong>GC Roots 不是静态集合</strong>。并发标记期间，Roots 自身就在变化——新线程启动（新栈帧、新的局部变量引用）、静态字段被赋新值、JNI 创建新的全局引用。如果收集器只按"标记开始时"的 Roots 快照来标记，就会把"新产生的可达对象"误判成垃圾。解决办法还是写屏障：引用关系的变化（包括根上的新赋值）都会被写屏障记录下来，交给增量更新（CMS）或 SATB（G1/ZGC）机制处理——这套机制在「对象存活判定」里细讲，这里只需记住结论：<strong>Roots 集合 = 初始快照 + 写屏障跟踪的变更日志，不是一份固定清单</strong>。</p>
 </section>
 
 <!-- ================================================================
@@ -155,6 +168,20 @@
   <div class="crack">
     <span class="crack-label">面试加分项</span>
     <p>即使方法内部，如果局部变量在后续代码中不再使用，JIT 编译器也可能提前将其从 GC Roots 中移除——这叫做<strong>局部变量活性分析（Liveness Analysis）</strong>。所以手动写 <code>user = null</code> 在大多数场景下是不必要的。</p>
+  </div>
+
+  <h3>栈帧的根不止"局部变量"：操作数栈也算</h3>
+
+  <p>严格地说，栈帧里算 GC Root 的引用来自两处：<strong>局部变量表</strong>（含方法参数）和<strong>操作数栈</strong>。很多字节码操作直接发生在操作数栈上——比如 <code>new</code> 出来的实例引用先压在操作数栈里，执行 <code>invokespecial</code> 期间它只被操作数栈引用，此刻若发生 GC，栈上的这个对象必须按可达处理。所以更准确的表述是"栈帧内所有引用（局部变量表 + 操作数栈）都是 GC Roots"。看一段字节码就很清楚：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">new Object() 的字节码：引用在操作数栈与局部变量表之间流动</div>
+    <pre class="srcbox-file"><span class="c">// javap -c 简化输出</span>
+  new java/lang/Object                 <span class="c">// ① 实例创建，引用压入操作数栈（此刻只有栈引用它）</span>
+  dup                                  <span class="c">// ② 复制一份引用（一份留栈上准备调构造器）</span>
+  invokespecial java/lang/Object.&lt;init&gt; <span class="c">// ③ 执行构造器</span>
+  astore_1                             <span class="c">// ④ 存入局部变量槽 1（此后由局部变量表引用）</span>
+  <span class="c">// ①→④ 任何时刻触发 GC，该对象都是可达的</span></pre>
   </div>
 </section>
 
@@ -202,6 +229,11 @@
     <p><strong>内存泄漏公式：</strong> 静态集合 + 只增不减 = 内存泄漏</p>
     <p>解决方案：① 提供 remove 方法；② 使用 <code>WeakHashMap</code>；③ 限制集合大小（如 LRU Cache）。</p>
   </div>
+
+  <div class="think">
+    <p class="think-q">"类不卸载，静态变量就永远活着"——有没有例外？</p>
+    <p>有。"类的生命周期 = 进程生命周期"这个等式成立的前提，是类由<strong>系统类加载器</strong>加载。如果类由<strong>自定义类加载器</strong>加载，当这个类加载器自己变成垃圾（类卸载三条件：无实例 + 加载器可回收 + 无 Class 引用，见「对象存活判定」），类被卸载，它静态字段引用的对象随之不可达。这正是热部署能"一键清空旧版本"的原理——反过来，也是第 6 站 ClassLoader 泄漏模式的镜像。</p>
+  </div>
 </section>
 
 <!-- ================================================================
@@ -232,6 +264,11 @@
   <h3>Class 引用</h3>
   <p>常量池中还包含类、接口、方法、字段的<strong>符号引用</strong>。解析后变为直接引用，指向方法区中的 <code>Class</code> 对象。只要引用类没被卸载，被引用的类也不会被回收。</p>
 
+  <div class="think">
+    <p class="think-q">"常量池引用"和"静态变量引用"有什么区别？不是会重叠吗？</p>
+    <p>会重叠，但入口不同：<code>static final String NAME = "x"</code> 是编译期常量，使用处编译器直接内联字面量，引用走运行时常量池进入（常量池引用）；而 <code>static String s = someMethod()</code> 运行时才赋值，静态字段里存的就是对象本身（静态变量引用）。两者最终都是"从类可达"，但 MAT 里看到的引用链不同：一条经过常量池入口，一条经过字段。面试时能把这个区分讲清楚，说明你理解常量池而不只是背清单。</p>
+  </div>
+
   <div class="crack">
     <span class="crack-label">面试高频追问</span>
     <p><strong>Q: 常量池引用导致的内存泄漏常见吗？</strong><br>
@@ -245,7 +282,7 @@
 <section class="station reveal" id="s6">
   <div class="station-head">
     <span class="station-no">第 6 站</span>
-    <h2>GC Roots 与内存泄漏：4 种典型模式</h2>
+    <h2>GC Roots 与内存泄漏：6 种典型模式</h2>
   </div>
 
   <p>理解 GC Roots 的最大价值在于<strong>诊断内存泄漏</strong>。内存泄漏的本质：对象生命周期已结束，但仍被某个 GC Root 的引用链"拽住"，无法回收。</p>
@@ -299,6 +336,29 @@
 }</pre>
   </div>
 
+  <h3>模式五：内部类隐式持有外部类（高频隐蔽坑）</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">内部类泄漏：Task 把 100MB 的外部类拖下水</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">OrderController</span> {
+    <span class="k">private</span> <span class="t">byte</span>[] bigData = <span class="k">new</span> <span class="t">byte</span>[<span class="n">100</span> * <span class="n">1024</span> * <span class="n">1024</span>]; <span class="c">// 100MB</span>
+
+    <span class="k">public void</span> <span class="n">asyncReport</span>() {
+        executor.execute(<span class="k">new</span> <span class="t">ReportTask</span>());
+        <span class="c">// ❌ 方法返回后 Task 还在线程池队列里 → 它隐式持有外部类 → 100MB 收不掉</span>
+    }
+
+    <span class="k">class</span> <span class="t">ReportTask</span> <span class="k">implements</span> <span class="t">Runnable</span> {
+        <span class="c">// 非静态内部类字节码里藏着隐式字段：OrderController this$0; ← 泄漏链关键一环</span>
+        <span class="k">public void</span> <span class="n">run</span>() { <span class="c">/* 用 bigData 做报表 */</span> }
+    }
+}
+<span class="c">// ✅ 修复：ReportTask 改 static 内部类（或顶层类），显式只持有需要的字段；确需外部实例用 WeakReference</span></pre>
+  </div>
+  <p>泄漏链：<strong>线程池（静态变量 = GC Root）→ Task 队列 → ReportTask → this$0 → OrderController → bigData</strong>。MAT 的 Path to GC Roots 会显示这条链从线程池的静态字段出发——这是"我没写任何 static 字段却泄漏了"类问题里最常见的一种，排查时先想"有没有匿名/非静态内部类跑到了线程池里"。</p>
+
+  <h3>模式六：ClassLoader 泄漏（Metaspace 方向）</h3>
+  <p>当拽住对象的是 <strong>Class 对象或自定义类加载器</strong>，泄漏的就不是堆内存而是<strong>类元数据</strong>：自定义类加载器被静态字段持有、或它加载的类注册进了全局注册表（DriverManager、JMX、反射缓存），"模块"下线后加载器仍回收不了 → 它加载的所有类、运行时常量池都留在方法区 → Metaspace 只涨不跌，最终 OOM（Metaspace）。类卸载要同时满足三条件——无实例 + 类加载器可回收 + 无 Class 引用（三条件见「对象存活判定」；MAT 定位 Metaspace 实战见「内存泄漏排查」；加载器设计见「自定义类加载器」）。</p>
+
   <table class="nb-table">
     <thead>
       <tr><th>泄漏模式</th><th>涉及的 GC Root</th><th>根因</th><th>解决方案</th></tr>
@@ -308,6 +368,8 @@
       <tr><td>ThreadLocal 残留</td><td>栈帧（线程池线程）</td><td>线程复用未清理</td><td>finally 中 remove()</td></tr>
       <tr><td>资源未关闭</td><td>JNI 全局引用</td><td>native 层持有</td><td>try-with-resources</td></tr>
       <tr><td>监听器未注销</td><td>静态变量</td><td>注册后忘记清理</td><td>生命周期结束时注销</td></tr>
+      <tr><td>内部类隐式持有</td><td>静态变量（线程池）→ Task</td><td>非静态内部类的 this$0</td><td>static 内部类 / 显式持有引用</td></tr>
+      <tr><td>ClassLoader 泄漏</td><td>JVM 内部（Class / 注册表）</td><td>旧加载器不可回收</td><td>解注册 + 释放引用，让整批一起回收</td></tr>
     </tbody>
   </table>
 
@@ -315,6 +377,23 @@
     <span class="takeaway-label">诊断思路</span>
     <p>遇到内存泄漏时：① 用 MAT / JProfiler 找到大对象；② 查看 <strong>GC Roots 引用链</strong>（MAT 中 "Path to GC Roots"）；③ 找到是哪个 GC Root "拽住"了它；④ 在合适的时机切断引用链。</p>
   </div>
+
+  <h3>实战：MAT 里的 GC Root 引用链长什么样</h3>
+  <div class="srcbox">
+    <div class="srcbox-head">MAT — Path to GC Roots（勾选 exclude GC Roots / weak+soft+phantom references）</div>
+    <pre class="srcbox-file"><span class="c">// 对可疑大对象右键 → Path to GC Roots → 排除 GC Roots 和弱/软/虚引用</span>
+java.lang.Class@3a2b1c4d                       <span class="c">← JVM 内部引用（Class 对象）</span>
+└─ field: com.example.SessionStore.sessions    <span class="c">← 静态字段 = GC Root</span>
+   └─ java.util.HashMap@7f3e2a1b
+      └─ Node[8192]
+         └─ Session@1d2e3f4a                    <span class="c">← 目标对象（retained 2.4 GB）</span>
+   <span class="c">→ 结论：被静态变量 sessions 拽住，修复 = 给 SessionStore 加过期淘汰/remove</span>
+
+<span class="c">// 配套命令行：</span>
+$ jmap -histo:live 8842 | head -20   <span class="c"># 每类实例数 + 总大小（:live 会先触发 Full GC）</span>
+$ jcmd 8842 VM.classloader_stats     <span class="c"># 各 ClassLoader 加载类数 → 一眼看出加载器泄漏</span></pre>
+  </div>
+  <p>读引用链的技巧：<strong>从下往上读</strong>——最底是目标对象，越往上越接近根；链上出现 <code>static</code> 字段说明根是静态变量，出现 <code>Thread</code> / <code>ThreadLocalMap</code> 说明根是某个存活线程（往往指向线程池泄漏），出现 <code>java.lang.Class</code> 或自定义加载器则要往 Metaspace 方向想。</p>
 </section>
 
 <!-- ================================================================
@@ -408,6 +487,28 @@
     </svg>
     <figcaption><span class="fig-no">图 2</span> — 5 种 GC Roots 速查 + 内存泄漏诊断流程</figcaption>
   </div>
+
+  <h3>面试回答模板</h3>
+  <div class="takeaway">
+    <span class="takeaway-label">30 秒版</span>
+    <p>"从 GC Roots 出发不可达的对象才能回收。GC Roots 有五类：栈帧局部变量（含操作数栈）、静态变量、常量池引用、JNI 全局引用、JVM 内部引用（Class 对象、异常、系统线程）。注意一个限定词：只有'强可达'才必定不回收——仅被弱/软引用可达的对象照样回收。"</p>
+  </div>
+  <div class="takeaway">
+    <span class="takeaway-label">3 分钟版（展开）</span>
+    <p>每类根给一个"为什么"：① 栈帧引用——方法执行期间活着，JIT 的活性分析甚至能提前释放不再使用的局部变量引用；② 静态变量——类不卸载就不死（系统类加载器加载时等于进程不死），所以是泄漏高发区；③ 常量池——字符串池 JDK 7 起在堆里，Class 引用跟着类卸载走；④ JNI——Native 显式创建的全局引用，不显式 delete 就一直在；⑤ JVM 内部——Class、未处理异常、系统线程由 JVM 自己管理。再落到实战：内存泄漏的本质是"该不可达却仍可达"，MAT 的 Path to GC Roots 就是用来找这条链的，六种常见模式：静态集合、ThreadLocal 未 remove、资源未关闭、监听器未注销、内部类隐式持有、ClassLoader 泄漏。</p>
+  </div>
+
+  <h3>高频追问表</h3>
+  <table class="nb-table">
+    <thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+    <tbody>
+      <tr><td>static 变量引用的对象一定不回收吗？</td><td>系统类加载器加载的类——是；自定义类加载器加载的类——加载器被回收、类卸载后静态引用随之失效</td></tr>
+      <tr><td>字符串常量池里的字符串，谁是 GC Root？</td><td>JDK 8 字符串池在堆里，字符串由运行时常量池 / Class 引用，引用链最终落到 JVM 内部引用（Class）或静态字段</td></tr>
+      <tr><td>线程为什么是 GC Root？</td><td>线程存活期间，其栈帧里的引用都是根；线程泄漏（线程池未关）会拖住整条引用链——ThreadLocal 泄漏的根源在此</td></tr>
+      <tr><td>JVM 内部引用具体有哪些？</td><td>Class 对象、未处理的异常（Throwable）、系统类加载器、正在执行的线程对象、GC 自身的数据结构</td></tr>
+      <tr><td>对象可达就一定能活吗？</td><td>不一定——看引用强度：弱引用可达照样回收，软引用可达在内存紧张时回收，只有强引用可达才必定不回收</td></tr>
+    </tbody>
+  </table>
 
   <div class="takeaway">
     <span class="takeaway-label">最终面试话术</span>

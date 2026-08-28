@@ -113,6 +113,7 @@
 <span class="c">// 修复：改为分页导出 + 流式写入 CSV</span></pre>
   </div>
 
+  <p>拿到 dump 之后还有一个容易混淆的判断：<strong>到底是"泄漏"还是"堆给小了"？</strong>看 GC 日志里 Full GC 之后的堆占用基线（方法见「GC 日志分析」）：如果每次 Full GC 之后的基线都比上一次高，呈阶梯式爬升，那是泄漏——活对象在持续累积；如果基线平稳，只是业务峰值偶尔顶到 <code>-Xmx</code>，那是"业务量超过了配置"，调大堆 + 优化加载方式就够了。两个实操细节：① <code>jmap -dump:live</code> 和 <code>HeapDumpOnOutOfMemoryError</code> 在 dump 前都会先做一次 Full GC——先把"可能死"的对象收掉再拍照，所以 dump 里只有活对象，分析泄漏正合适，但别指望在 dump 里看到刚被回收的临时对象；② dump 一个 16GB 的堆可能要几十秒到几分钟，全程 STW。大堆生产环境要评估这个代价，必要时先用 <code>-XX:OnOutOfMemoryError</code> 把线程栈、GC 日志等现场存下来，再从容 dump。</p>
   <div class="formula">
     <strong>修复策略</strong>：短期 → <code>-Xmx</code> 调大（治标）；长期 → 找到泄漏点或优化数据加载方式（治本）。
   </div>
@@ -291,6 +292,7 @@ $ jstack <span class="n">12345</span> | grep <span class="n">"Thread.State"</spa
     <p class="think-q">真实踩坑：一个定时任务每 5 分钟跑一次，每次都在一个 HashMap 里累加统计数据，但从来不删除过期数据。运行两周后，这个 Map 里有 2000 万条记录，GC 每次扫描它都要花好几秒，最终触发 GC overhead limit。</p>
   </div>
 
+  <p>那 98% 和 2% 这两个数字从哪来？这是 HotSpot 写死的"健康阈值"（<code>GCOverheadLimit</code> 的判定逻辑）：统计最近一段时间，如果 <strong>GC 占用的 CPU 时间超过 98%，且单次 GC 平均回收的堆空间不足 2%</strong>，就判定 JVM 已经陷入"回收不动"的状态，主动抛出这个错误。注意它是<strong>滑动统计</strong>而不是单次判定——偶尔一次 Full GC 收不到 2% 不会立刻死，要连续多次都"白干"才触发。这也解释了为什么这个错误往往出现在彻底 OOM 的前一刻：它是 JVM 的"临终遗言"，意思是"我已经尽力了，剩下的问题不是我加把劲能解决的"。</p>
   <div class="crack">
     <span class="crack-label">修复策略</span>
     <p>① <strong>不要禁用这个检查</strong>：<code>-XX:-UseGCOverheadLimit</code> 只是让 JVM 不再报错继续跑，但此时服务已经几乎无法响应请求了（98% 时间都在 GC）——这只是把"快速死亡"变成了"慢性死亡"。<br>
@@ -328,6 +330,8 @@ $ jstack <span class="n">12345</span> | grep <span class="n">"Thread.State"</spa
     <strong>Java 数组上限</strong>：理论最大长度 = <code>Integer.MAX_VALUE - 8 = 2,147,483,639</code><br>
     对于 <code>byte[]</code>：最大约 2GB。对于 <code>Object[]</code>（64 位引用）：最大约 16GB（但堆通常没这么大）。
   </div>
+
+  <p>为什么上限是 <code>Integer.MAX_VALUE - 8</code> 而不是更"整齐"的 2GB？两个原因：① Java 数组下标是 <code>int</code>，长度天然被 32 位有符号整数框死（2 的 31 次方减 1）；② 数组对象还有头部（Mark Word + 类指针 + 长度字段，64 位下 16 字节）和对齐要求，JVM 实际校验的是整个数组对象的大小能否安全表达，所以不同元素类型的理论上限略有差异。关键认知：<strong>这是结构性上限，不是内存上限</strong>——堆给再大也创建不了长度超过 21 亿的数组，所以这个 OOM 加 <code>-Xmx</code> 毫无意义，唯一出路是拆小：分块、流式、内存映射。顺带一提，32 位 JVM 的堆本身就撑不到 3GB，这道天花板会来得更早。</p>
 
   <div class="crack">
     <span class="crack-label">修复方案</span>

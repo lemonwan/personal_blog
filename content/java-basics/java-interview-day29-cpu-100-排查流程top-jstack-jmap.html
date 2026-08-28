@@ -156,6 +156,20 @@ Threads: 342 total,   4 running, 338 sleeping
     <p>在 <code>top -Hp</code> 的输出中，<code>PID</code> 列显示的实际上是<strong>线程 ID（TID）</strong>，也叫 LWP（Light Weight Process）。这是 Linux 的一个"历史遗留"——内核把线程视为轻量级进程。</p>
   </div>
 
+  <p>在动手转换 TID 之前，先做一个 10 秒的"分诊"——<strong>看高 CPU 线程是谁</strong>。JVM 进程里的线程分两大类，排查方向完全不同：</p>
+
+  <table class="nb-table">
+    <thead><tr><th>线程名特征</th><th>身份</th><th>含义与排查方向</th></tr></thead>
+    <tbody>
+      <tr><td><code>http-nio-*-exec-*</code>、<code>pool-*-thread-*</code>、<code>DubboServerHandler-</code></td><td>业务线程</td><td>CPU 花在业务代码里，按五步法继续定位到代码行</td></tr>
+      <tr><td><code>GC task thread#N</code>、<code>G1 Conc#N</code></td><td>GC 线程</td><td>CPU 花在垃圾回收上，问题在内存侧 → 转「GC 日志分析」，查 Full GC 频率与堆趋势</td></tr>
+      <tr><td><code>C1 CompilerThread0</code>、<code>C2 CompilerThreadN</code></td><td>JIT 编译线程</td><td>热点方法正在被编译，通常是启动或发布后的短暂现象，观察几分钟即可；长期飙高说明热点方法集一直在剧烈变化</td></tr>
+      <tr><td><code>VM Thread</code></td><td>JVM 内部调度线程</td><td>负责挂起/恢复线程、协调 GC，业务问题会"投影"到它身上，要继续往下查业务线程</td></tr>
+    </tbody>
+  </table>
+
+  <p>这一步的价值在于：<strong>如果飙的是 GC 线程，五步法后面的"定位代码行"根本走不通</strong>——你该去做的是 GC 日志分析和堆 dump，而不是在 jstack 里找业务栈帧。先分诊、再开刀。</p>
+
   <p>三个线程都在飙，说明可能是同一类请求触发了相同的问题代码。先抓一个 TID = <strong>9127</strong> 来分析。</p>
 
   <div class="takeaway">
@@ -277,6 +291,8 @@ $ grep -c <span class="t">'HashMap.resize'</span> j1.log j2.log j3.log
 j1.log:<span class="k">3</span>   j2.log:<span class="k">3</span>   j3.log:<span class="k">3</span>   <span class="c"># 三次都在 resize → 100% 死循环</span></code></pre>
   </div>
 
+  <p>看栈之前先校准一个认知：<strong>RUNNABLE ≠ 运行正常</strong>。jstack 里的 RUNNABLE 只表示"没在主动等待"，它既包括正常干活，也包括死循环、自旋，甚至执行 native 代码（JNI 调用、Netty 的 epoll 系统调用都显示 RUNNABLE）。所以高 CPU 线程几乎一定是 RUNNABLE——但 RUNNABLE 不代表有问题，关键看栈顶反复出现什么。还有一个容易卡住的场景：<strong>高 CPU 的 TID 在 jstack 里搜不到</strong>。jstack 只导出 JVM 认识的线程，如果是 native 库自己创建的线程（JNI 注册、本地 C++ 线程），它不在输出里。此时换系统级工具：<code>perf top -t</code> 加上 TID 直接看这个线程在哪些 native 函数上耗时间，或者用 <code>gdb</code> 附加后 <code>thread apply all bt</code> 看 native 栈。另外，如果 JVM 已经假死到 jstack 都无响应，用 <code>jstack -F</code> 强制 dump（走 Serviceability Agent，慢一些但能出结果）。</p>
+
   <div class="takeaway">
     <span class="takeaway-label">Step 4 产出</span>
     <p>线程 <code>0x23a7</code> 持续停在 <code>HashMap.resize()</code>，状态 RUNNABLE，三次采样不变——<strong>确认死循环</strong>。</p>
@@ -324,6 +340,8 @@ j1.log:<span class="k">3</span>   j2.log:<span class="k">3</span>   j3.log:<span
     <span class="crack-label">GC 导致的 CPU 飙高</span>
     <p>jstack 里看到大量 <code>"GC task thread#N"</code> 处于 RUNNABLE，说明 CPU 都花在了垃圾回收上。此时应转向 GC 日志分析，检查 Full GC 频率和堆内存趋势。</p>
   </div>
+
+  <p>五步法的盲区也要心里有数：jstack 是<strong>"采样时线程停在哪"的快照</strong>，对"单次调用很短、但调用极其频繁"的方法（热路径上的小方法、序列化框架内部函数）不敏感——每次采样时线程都"恰好"在别处。这种情况要换时间维度的工具：<code>perf record -g -p</code> 加 PID 采 30 秒后生成火焰图，横轴是方法占 CPU 时间的比例，最宽的那条"火焰"就是真凶；经验法则一句话——<strong>jstack 回答"线程卡在哪一行"，火焰图回答"CPU 时间花在了哪些方法"</strong>，两者互补，不是替代关系。</p>
 
   <div class="takeaway">
     <span class="takeaway-label">Step 5 产出</span>
@@ -493,6 +511,29 @@ CPU_USAGE=$(top -bn1 -p $JAVA_PID | tail -1 | awk <span class="t">'{print $9}'</
     </ol>
     <p>Arthas 的 <code>thread -n 3</code> 一条命令可以替代前四步。面试时五步法要能脱口而出，实操时优先用 Arthas 提效。</p>
   </div>
+
+  <h3>面试回答模板</h3>
+  <div class="takeaway">
+    <span class="takeaway-label">30 秒版</span>
+    <p>"先定位进程，再定位线程：top 找高 CPU 进程的 PID，top -Hp 找高 CPU 线程的 TID，printf 把 TID 转成十六进制，再到 jstack 输出里搜对应的 nid 看栈帧——同一个位置多次采样不变，基本就是死循环或计算密集，从栈帧定位到文件行号。实操中我会直接用 Arthas 的 thread -n 3 一步到位。"</p>
+  </div>
+  <div class="takeaway">
+    <span class="takeaway-label">3 分钟版（展开）</span>
+    <p>在 30 秒版基础上加五点：① 先看线程名分诊——GC 线程热就去查 GC 日志和堆，JIT 编译线程热多是发布后短暂现象，业务线程热才定位代码；② RUNNABLE 不等于正常，高 CPU 线程几乎必是 RUNNABLE，关键看栈顶反复出现什么；③ jstack 里搜不到的 TID 是 native 线程，换 perf top 或 gdb；④ jstack 对高频短方法不敏感，必要时上火焰图看 CPU 时间分布；⑤ 修复后要做回归验证：压测复现 → 修复 → 再压测对比，并配置 CPU 超 80% 自动留证的监控，防止复发。</p>
+  </div>
+
+  <h3>高频追问表</h3>
+  <table class="nb-table">
+    <thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+    <tbody>
+      <tr><td>为什么要转十六进制？</td><td>jstack 的 nid 是操作系统 LWP ID 的十六进制表示，top 显示十进制，进制不同对不上</td></tr>
+      <tr><td>jstack 无响应怎么办？</td><td>加 -F 强制 dump（走 Serviceability Agent）；仍失败用 pstack / eu-stack 看 native 栈</td></tr>
+      <tr><td>高 CPU 线程一定是 RUNNABLE 吗？</td><td>几乎一定——BLOCKED/WAITING 的线程不消耗 CPU；但 RUNNABLE 包含死循环、自旋和 native 调用</td></tr>
+      <tr><td>JDK 8 的 HashMap 并发 put 还会死循环吗？</td><td>环形链表问题已修复，但并发 put 仍会丢数据、size 不准，极端情况扩容时仍可能死循环；生产一律 ConcurrentHashMap</td></tr>
+      <tr><td>怎么区分"GC 吃 CPU"和"业务吃 CPU"？</td><td>看线程名（GC task thread）+ GC 日志（Full GC 频率）+ 堆趋势（jstat -gcutil 老年代曲线）</td></tr>
+      <tr><td>有 Arthas 为什么还要背五步法？</td><td>Arthas 内部就是 top + jstack 的自动化封装；面试考的是排查思路（从大到小缩小范围），Arthas 考的是实操效率</td></tr>
+    </tbody>
+  </table>
 </section>
 
 </main>

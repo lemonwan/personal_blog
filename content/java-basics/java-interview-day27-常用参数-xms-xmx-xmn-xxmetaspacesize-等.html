@@ -6,6 +6,7 @@
 <title>JVM 调优参数手册</title>
 </head>
 <body>
+
 <main class="lesson-body">
 
 <!-- ========== 元数据（隐藏） ========== -->
@@ -13,505 +14,485 @@
   title: "JVM 调优参数手册：30 个最常用参数速查"
   difficulty: 中级
   interviewFreq: 高频
-  desc: "-Xms、-Xmx、-Xmn、-XX:MetaspaceSize、-XX:+UseG1GC 等 30 个核心参数，每个附带推荐值和使用场景。"
+  desc: "-Xms、-Xmx、-Xmn、-XX:MetaspaceSize 等 30 个核心参数：默认值、陷阱与三套生产启动模板。"
 -->
 
-<!-- ================================================================
-     第 1 站 — 开场
-     ================================================================ -->
+<!-- ═══════════════ 第1站：开场 ═══════════════ -->
 <section class="station reveal" id="s1">
-  <div class="station-head">
-    <span class="station-no">第 1 站</span>
-    <h2>面试官：你常用的 JVM 参数有哪些？</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 1 站</span><h2>开场：参数手册不是背单词，是开处方</h2></div>
 
-  <div class="think">
-    <p class="think-q">"就……-Xmx 设一下堆大小？" 大部分候选人的回答到此为止。如果你能系统地讲出堆内存、GC 收集器、GC 日志、诊断调试四大类共 30 个核心参数，并给出推荐值和使用场景——这就是一份满分的实战回答。</p>
-  </div>
+<p>面试里"JVM 参数你常用哪些"是最落地的一题。原理可以背，参数背不动——你说出 <code>-Xmx4g</code> 的那一刻，追问已经在路上：为什么是 4g 不是 8g？这个数字从哪来？参数和参数之间谁压谁？这一站先把定位讲清楚：<strong>参数手册解决两件事——第一，知道什么时候用哪个（场景到参数的映射）；第二，知道参数之间的相互关系（互斥、覆盖、ergonomics 自动调整）。</strong>就像开处方：医生不是背药名，而是知道哪个药治哪个病、哪两个药不能一起吃、开完药还要复查化验单。</p>
 
-  <p>JVM 参数调优是 Java 面试中最"落地"的考点。它不像并发原理或集合源码那样有深度理论，但能直接反映你<strong>有没有真正上线过生产系统、有没有排查过线上故障</strong>。</p>
+<div class="think"><div class="think-q">"JVM 参数你常用哪些？"</div>
+<p><strong>答。</strong>只答到 <code>-Xms/-Xmx/-Xmn</code> 就停，只能证明你写过启动脚本。完整答案三层：先按<strong>堆、容器、元空间、收集器、日志、诊断</strong>六类列出 30 个核心参数和默认值；再讲关系——Xms 为什么等于 Xmx、Xmn 和 NewRatio 都设了听谁的、MetaspaceSize 为什么不能留默认；最后补一句"我用 <code>-XX:+PrintFlagsFinal</code> 验证过最终生效值"。调优是"症状 → 处方 → 复诊"的闭环，参数只是处方上那一行字。</p></div>
 
-  <p>本文将 30 个最常用的 JVM 参数按功能分为四大类：</p>
+<h3>三层能力模型</h3>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>类别</th><th>核心参数</th><th>解决的问题</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>堆内存参数</td><td>-Xms, -Xmx, -Xmn, -Xss, -XX:MetaspaceSize 等 8 个</td><td>内存分配与布局</td></tr>
-      <tr><td>GC 收集器参数</td><td>-XX:+UseG1GC, -XX:+UseZGC, -XX:MaxGCPauseMillis 等 6 个</td><td>选择与调优收集器</td></tr>
-      <tr><td>GC 日志参数</td><td>-Xlog:gc*, -XX:+PrintGCDetails 等 6 个</td><td>GC 行为可观测</td></tr>
-      <tr><td>诊断与调试参数</td><td>-XX:+HeapDumpOnOutOfMemoryError 等 5 个</td><td>故障定位与分析</td></tr>
-    </tbody>
-  </table>
+<p>把"会用参数"拆成三层，面试分层回答，自己排障也分层定位：</p>
 
-  <div class="crack">
-    <span class="crack-label">面试加分项</span>
-    <p>不要只是"背参数"。面试官真正想听到的是：你在什么场景下用了什么参数、为什么这么设、效果如何。本文每个参数都附带了推荐值和使用场景，帮你建立"参数 → 场景"的直觉。</p>
-  </div>
+<p><strong>第一层：知道是什么。</strong>每个参数的作用、默认值、单位。比如 <code>-Xmx</code> 默认是物理内存的 1/4（JDK 8 容器环境则是 cgroup 内存限制的 25%）。这些"默认值"本身就要背——因为留默认值是最常见的生产事故来源：你以为 JVM 会用满容器内存，其实它只敢用 1/4。</p>
+
+<p><strong>第二层：知道什么时候用。</strong>场景到参数的映射：容器化服务必配 <code>-XX:MaxRAMPercentage</code> 和 <code>-XX:ActiveProcessorCount</code>；Web 服务用 G1 加停顿目标；批处理用 Parallel 加大堆；任何服务都配 OOM 自动转储。背参数不如背这张映射表，场景只会多不会少。</p>
+
+<p><strong>第三层：知道相互关系。</strong>同名参数谁覆盖谁、哪两个参数互斥、ergonomics 会在你看不见的地方改默认值。这一层是分水岭——90% 的"参数不生效"问题都出在这里，也是面试官最喜欢挖的地方。</p>
+
+<h3>30 参数总目录</h3>
+
+<p>下表是全文的目录：30 个核心参数（后文各站再补 10 个诊断与杂项参数，共 40 个）。"生产必配"列回答"哪些参数不配就会出事"——<strong>新服务上线前，把带 ✓ 的项逐格打钩</strong>。</p>
+
+<table class="nb-table">
+<thead><tr><th>参数</th><th>一句话作用</th><th>分类</th><th>生产必配？</th></tr></thead>
+<tbody>
+<tr><td><code>-Xms</code></td><td>堆初始大小</td><td>堆</td><td>✓ 与 Xmx 相等</td></tr>
+<tr><td><code>-Xmx</code></td><td>堆最大大小</td><td>堆</td><td>✓</td></tr>
+<tr><td><code>-Xmn</code></td><td>年轻代大小（初始=最大）</td><td>堆</td><td>视场景</td></tr>
+<tr><td><code>-XX:NewSize</code></td><td>年轻代初始大小</td><td>堆</td><td>✗ 用 Xmn 即可</td></tr>
+<tr><td><code>-XX:MaxNewSize</code></td><td>年轻代最大大小</td><td>堆</td><td>✗ 用 Xmn 即可</td></tr>
+<tr><td><code>-XX:NewRatio</code></td><td>老年代 : 年轻代比例</td><td>堆</td><td>✗ 默认 2</td></tr>
+<tr><td><code>-XX:SurvivorRatio</code></td><td>Eden : 单个 Survivor 比例</td><td>堆</td><td>✗ 默认 8</td></tr>
+<tr><td><code>-XX:MaxTenuringThreshold</code></td><td>对象晋升老年代的年龄阈值</td><td>堆</td><td>✗ 默认 15</td></tr>
+<tr><td><code>-XX:PretenureSizeThreshold</code></td><td>超过该值的大对象直接进老年代</td><td>堆</td><td>✗ 仅 Serial/ParNew</td></tr>
+<tr><td><code>-XX:MaxRAMPercentage</code></td><td>容器内：最大堆占内存 %</td><td>容器</td><td>✓ 容器化服务</td></tr>
+<tr><td><code>-XX:InitialRAMPercentage</code></td><td>容器内：初始堆占内存 %</td><td>容器</td><td>✗</td></tr>
+<tr><td><code>-XX:MinRAMPercentage</code></td><td>容器内：最小堆占内存 %</td><td>容器</td><td>✗</td></tr>
+<tr><td><code>-XX:MetaspaceSize</code></td><td>元空间首次 GC 触发阈值</td><td>元空间</td><td>✓ 128~256m</td></tr>
+<tr><td><code>-XX:MaxMetaspaceSize</code></td><td>元空间上限（默认不限）</td><td>元空间</td><td>✓</td></tr>
+<tr><td><code>-XX:CompressedClassSpaceSize</code></td><td>压缩类指针空间大小</td><td>元空间</td><td>✗ 默认 1G</td></tr>
+<tr><td><code>-XX:-UseCompressedClassPointers</code></td><td>关闭压缩类指针</td><td>元空间</td><td>✗ 一般不动</td></tr>
+<tr><td><code>-XX:+UseSerialGC</code></td><td>Serial 收集器（单线程）</td><td>收集器</td><td>视场景</td></tr>
+<tr><td><code>-XX:+UseParallelGC</code></td><td>Parallel 收集器（吞吐优先）</td><td>收集器</td><td>视场景</td></tr>
+<tr><td><code>-XX:+UseConcMarkSweepGC</code></td><td>CMS 收集器</td><td>收集器</td><td>✗ JDK9 废弃、JDK14 移除</td></tr>
+<tr><td><code>-XX:+UseG1GC</code></td><td>G1 收集器</td><td>收集器</td><td>✓ JDK9+ 默认</td></tr>
+<tr><td><code>-XX:+UseZGC</code></td><td>ZGC（超低停顿）</td><td>收集器</td><td>视场景</td></tr>
+<tr><td><code>-XX:+UseShenandoahGC</code></td><td>Shenandoah（并发整理）</td><td>收集器</td><td>视场景</td></tr>
+<tr><td><code>-XX:MaxGCPauseMillis</code></td><td>GC 停顿软目标（毫秒）</td><td>收集器</td><td>✓</td></tr>
+<tr><td><code>-XX:InitiatingHeapOccupancyPercent</code></td><td>G1 并发标记触发水位</td><td>收集器</td><td>✗ JDK9+ 自适应</td></tr>
+<tr><td><code>-XX:G1HeapRegionSize</code></td><td>G1 Region 大小（1~32MB）</td><td>收集器</td><td>视场景</td></tr>
+<tr><td><code>-XX:G1MixedGCCountTarget</code></td><td>Mixed GC 分摊轮数</td><td>收集器</td><td>✗ 默认 8</td></tr>
+<tr><td><code>-XX:G1HeapWastePercent</code></td><td>Region 可回收浪费阈值</td><td>收集器</td><td>✗ 默认 5%</td></tr>
+<tr><td><code>-XX:ParallelGCThreads</code></td><td>并行 GC 线程数</td><td>收集器</td><td>视场景</td></tr>
+<tr><td><code>-XX:ConcGCThreads</code></td><td>并发 GC 线程数</td><td>收集器</td><td>视场景</td></tr>
+<tr><td><code>-XX:ActiveProcessorCount</code></td><td>手动指定可用核数</td><td>容器</td><td>✓ 容器化服务</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>参数手册 = 场景到参数的映射表 + 参数之间的"谁压谁"关系。目录表先扫一遍混个眼熟，后面六站按组展开：堆、元空间、收集器、日志、诊断、生产模板。背目录，懂关系，上线前逐格打钩。</p>
+</div>
 </section>
 
-<!-- ================================================================
-     第 2 站 — 堆内存参数
-     ================================================================ -->
+
+<!-- ═══════════════ 第2站：堆内存参数 ═══════════════ -->
 <section class="station reveal" id="s2">
-  <div class="station-head">
-    <span class="station-no">第 2 站</span>
-    <h2>堆内存参数：8 个必会参数</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 2 站</span><h2>堆内存参数：从大到小，五层控制</h2></div>
 
-  <p>堆是 JVM 管理的最大内存区域，几乎所有对象实例都在这里分配。堆的大小和布局直接决定了 GC 的行为和性能表现。以下 8 个参数控制着堆的方方面面：</p>
+<p>堆参数按"控制粒度"从大到小分五层：<strong>堆整体（Xms/Xmx）→ 年轻代（Xmn/NewRatio）→ 年轻代内部（SurvivorRatio）→ 晋升规则（TenuringThreshold）→ 大对象（PretenureSizeThreshold）</strong>。一层套一层，像俄罗斯套娃：外面定总盘子，里面定切法。下面逐层拆。</p>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>参数</th><th>含义</th><th>推荐值</th><th>说明</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>-Xms</code></td><td>初始堆大小</td><td>与 -Xmx 相同</td><td>避免运行时堆扩容导致的 STW</td></tr>
-      <tr><td><code>-Xmx</code></td><td>最大堆大小</td><td>物理内存的 50%~75%</td><td>留出系统 + 堆外内存余量</td></tr>
-      <tr><td><code>-Xmn</code></td><td>新生代大小</td><td>堆的 1/3~1/2</td><td>G1 下通常不手动设，交由 -XX:G1NewSizePercent 控制</td></tr>
-      <tr><td><code>-Xss</code></td><td>每个线程栈大小</td><td>256k~512k</td><td>默认 1MB，高并发场景适当减小以节省内存</td></tr>
-      <tr><td><code>-XX:NewRatio</code></td><td>老年代/新生代比值</td><td>2（默认）</td><td>设 2 表示老年代:新生代 = 2:1，即新生代占堆的 1/3</td></tr>
-      <tr><td><code>-XX:SurvivorRatio</code></td><td>Eden:Survivor 比值</td><td>8（默认）</td><td>设 8 表示 Eden:From:To = 8:1:1</td></tr>
-      <tr><td><code>-XX:MetaspaceSize</code></td><td>Metaspace 初始阈值</td><td>256m~512m</td><td>达到此值触发 Full GC 来卸载类，避免频繁 Full GC</td></tr>
-      <tr><td><code>-XX:MaxMetaspaceSize</code></td><td>Metaspace 上限</td><td>512m~1g</td><td>防止类加载泄漏无限占用系统内存</td></tr>
-    </tbody>
-  </table>
+<h3>第一层：-Xms 与 -Xmx</h3>
 
-  <div class="think">
-    <p class="think-q">为什么推荐 -Xms 和 -Xmx 设为相同值？</p>
-    <p>如果初始堆小于最大堆，JVM 在运行过程中需要不断扩容。每次扩容都是一次 STW（Stop-The-World），会暂停所有应用线程。对于生产环境，这是完全可以避免的停顿。设成相同值，让 JVM 在启动时就申请好所有内存。</p>
-  </div>
+<p><code>-Xms</code> 堆初始大小，<code>-Xmx</code> 堆最大大小。生产铁律：<strong>Xms = Xmx，相等设置</strong>。原因有三：其一，堆扩展本身是 STW（Stop The World）操作——JVM 要向操作系统要新内存、重排已用空间，频繁扩缩容等于周期性给自己加停顿；其二，Xms 小于 Xmx 时，JVM 默认会在 GC 后尝试缩堆，缩到 MinHeapFreeRatio 以下再涨回来，内存像在"呼吸"，监控曲线全是锯齿，排障时你会怀疑人生；其三，Xms=Xmx 后堆地址空间一次分配到位，压缩类指针和对象头里的 32 位窄引用（Narrow OOP）的行为完全可预测。默认值怎么算的？ergonomics（源码在 <code>src/share/vm/ergos/ergonomics.cpp</code>）：<code>-Xms</code> 默认物理内存的 1/64，<code>-Xmx</code> 默认 1/4。一台 32G 机器什么都不配，堆上限就是 8G——这就是"容器里 JVM 为什么这么抠"的根源。</p>
 
-  <h3>参数间的关系</h3>
+<h3>第二层：年轻代的三个参数</h3>
 
-  <div class="fig">
-    <svg viewBox="0 0 820 280" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
-      <!-- 堆布局 -->
-      <text x="410" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#1f2937">堆内存布局与参数控制</text>
+<p><code>-Xmn</code> 直接指定年轻代大小（初始 = 最大）。例：<code>-Xmx8g -Xmn3g</code>，年轻代 3g、老年代 5g。<code>-XX:NewSize</code> 和 <code>-XX:MaxNewSize</code> 是细粒度版本：分别指定年轻代的初始和最大值，让年轻代在 GC 后按需缓慢长大。生产上 90% 的场景一个 <code>-Xmn</code> 就够；真要精细控制，就写成 <code>NewSize = MaxNewSize = Xmn</code> 三者等值，把年轻代也钉死，道理和 Xms=Xmx 一样。</p>
 
-      <!-- 整体堆 -->
-      <rect x="40" y="55" width="740" height="100" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
-      <text x="410" y="48" text-anchor="middle" font-size="12" fill="#1e40af" font-weight="bold">-Xmx / -Xms（总堆大小）</text>
+<p><code>-XX:NewRatio</code> 是另一个思路：不直接定年轻代，而是定<strong>老年代 : 年轻代 = N : 1</strong>，默认 N = 2，即年轻代占整个堆的 1/3。它和 Xmn 是"公式"与"结果"的关系，这里有个高频易错点：</p>
 
-      <!-- 新生代 -->
-      <rect x="44" y="59" width="240" height="92" rx="6" fill="#bbf7d0" stroke="#22c55e"/>
-      <text x="164" y="82" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">新生代 (-Xmn)</text>
+<div class="crack"><span class="crack-label">易错点</span>
+<p><strong>"Xmn 和 NewRatio 都设了，到底听谁的？"</strong>听 <code>-Xmn</code> 的。JVM 启动时若发现 Xmn 被显式设置，就由它直接推导年轻代大小，NewRatio 被忽略——日志里甚至不会提示你。记住一句话：<strong>Xmn 是结果，NewRatio 是公式，结果永远压公式</strong>。生产配置里两者二选一，都写等于埋雷。</p></div>
 
-      <!-- Eden -->
-      <rect x="50" y="92" width="144" height="52" rx="4" fill="#86efac" stroke="#22c55e"/>
-      <text x="122" y="122" text-anchor="middle" font-size="12" fill="#166534">Eden (8份)</text>
+<div class="formula">未显式设 Xmn 时：年轻代 = Xmx ÷ (NewRatio + 1)；Eden = 年轻代 × SurvivorRatio ÷ (SurvivorRatio + 1)</div>
 
-      <!-- From -->
-      <rect x="198" y="92" width="38" height="52" rx="4" fill="#4ade80" stroke="#22c55e"/>
-      <text x="217" y="122" text-anchor="middle" font-size="10" fill="#166534">From</text>
+<h3>第三、四层：SurvivorRatio 与 MaxTenuringThreshold</h3>
 
-      <!-- To -->
-      <rect x="240" y="92" width="38" height="52" rx="4" fill="#4ade80" stroke="#22c55e"/>
-      <text x="259" y="122" text-anchor="middle" font-size="10" fill="#166534">To</text>
+<p><code>-XX:SurvivorRatio</code> 定 Eden 与<strong>单个</strong> Survivor 区的比例，默认 8。年轻代被切成 10 份：Eden 8 份、S0 和 S1 各 1 份（任意时刻只用一个 Survivor，另一个永远空着，这是复制算法的代价）。为什么默认 8 而不是 1？因为弱分代假说成立：绝大多数对象朝生夕灭，Survivor 只需容纳"熬过几次 Minor GC"的那一小撮幸存者，给太大纯属浪费。</p>
 
-      <!-- 老年代 -->
-      <rect x="288" y="59" width="488" height="92" rx="6" fill="#fde68a" stroke="#f59e0b"/>
-      <text x="532" y="112" text-anchor="middle" font-size="13" font-weight="bold" fill="#92400e">老年代</text>
+<p><code>-XX:MaxTenuringThreshold</code> 定晋升年龄，默认 15。对象每熬过一次 Minor GC，年龄 +1（记在对象头的 age 字段），到达阈值就进老年代。Serial/ParNew 严格执行这个阈值；G1 会动态调整（survivor 区装不下时提前晋升）。什么时候该调小？当你的对象平均存活时间只有 2~3 次 GC 时，默认 15 会让它们在 Survivor 里反复腾挪，拷贝成本翻倍——把阈值降到 6，让它们早点进老年代，Minor GC 反而更干净。</p>
 
-      <!-- 比值标注 -->
-      <text x="164" y="175" text-anchor="middle" font-size="11" fill="#6b7280">SurvivorRatio=8 → Eden:From:To=8:1:1</text>
-      <text x="532" y="175" text-anchor="middle" font-size="11" fill="#6b7280">NewRatio=2 → 老年代:新生代 = 2:1</text>
+<h3>第五层：大对象直通</h3>
 
-      <!-- Metaspace -->
-      <rect x="40" y="200" width="360" height="50" rx="8" fill="#ede9fe" stroke="#8b5cf6"/>
-      <text x="220" y="230" text-anchor="middle" font-size="13" font-weight="bold" fill="#5b21b6">Metaspace（-XX:MetaspaceSize / MaxMetaspaceSize）</text>
-      <text x="220" y="260" text-anchor="middle" font-size="11" fill="#7c3aed">存储类元数据，不在堆内（本地内存）</text>
+<p><code>-XX:PretenureSizeThreshold</code>：对象大小超过该值，跳过 Eden 直接分配进老年代，默认 0（关闭）。注意两个坑：第一，它<strong>只在 Serial/ParNew 下有效</strong>——分配路径（<code>oopFactory</code> 分配前检查）只有这两个收集器会查这个 flag，Parallel 有自己的大对象策略，G1 干脆不用它；第二，G1 里的大对象走 <strong>Humongous Region</strong>：对象超过 Region 大小的一半就直接占一个或多个 Humongous Region，想调就调 <code>-XX:G1HeapRegionSize</code>（下一站细讲），而不是去碰 PretenureSizeThreshold。面试说"G1 里 PretenureSizeThreshold 无效"，这句话本身就是加分项。</p>
 
-      <!-- 线程栈 -->
-      <rect x="420" y="200" width="360" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b"/>
-      <text x="600" y="230" text-anchor="middle" font-size="13" font-weight="bold" fill="#92400e">线程栈（-Xss × 线程数）</text>
-      <text x="600" y="260" text-anchor="middle" font-size="11" fill="#d97706">每个线程独占，默认 1MB，1000 线程 = 1GB</text>
-    </svg>
-    <figcaption><span class="fig-no">图 1</span> 堆内存布局——各参数控制的区域一目了然</figcaption>
-  </div>
+<h3>容器化：三个 RAMPercentage</h3>
 
-  <h3>MetaspaceSize 的陷阱</h3>
-  <p>很多线上系统的频繁 Full GC 问题，罪魁祸首就是 <code>-XX:MetaspaceSize</code> 的默认值太小（JDK 8 默认约 21MB）。Metaspace 在类加载时增长，一旦达到当前阈值就会触发 Full GC 来尝试卸载无用类。如果初始阈值太低，应用启动后短时间内会触发多次 Full GC。</p>
+<p>JDK 8u191+（JDK 10+ 原生）开始，JVM 能读懂 cgroup 的内存限制，三个参数全部以<strong>容器内存的百分比</strong>表示：<code>-XX:MaxRAMPercentage</code> 默认 <strong>25.0</strong>、<code>-XX:InitialRAMPercentage</code> 默认 <strong>1.5625</strong>、<code>-XX:MinRAMPercentage</code> 默认 <strong>15.0</strong>。为什么默认只给 25%？因为 JVM 看不到堆外内存（元空间、Direct Buffer、线程栈、mmap 的代码段），宁可保守。一个容器只跑一个 Java 进程时，25% 就是白白浪费——生产上一般提到 <strong>60~75%</strong>，例如 8G 容器配 <code>-XX:MaxRAMPercentage=75.0</code>，等效 Xmx 约 6G。注意优先级：<strong>显式设置 -Xmx 后，三个 RAMPercentage 全部失效</strong>——显式值永远压过 ergonomics。</p>
 
-  <div class="srcbox">
-    <div class="srcbox-head">推荐：生产环境堆内存参数模板</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  -Xms<span class="n">4g</span> -Xmx<span class="n">4g</span>               <span class="c"># 初始=最大，避免运行时扩容</span>
-  -Xmn<span class="n">1536m</span>                     <span class="c"># 新生代 1.5g（堆的 ~38%），Parallel GC 下手动指定</span>
-  -Xss<span class="n">512k</span>                      <span class="c"># 线程栈减半，高并发场景节省内存</span>
-  -XX:MetaspaceSize=<span class="n">512m</span>        <span class="c"># 初始阈值提高，避免启动后频繁 Full GC</span>
-  -XX:MaxMetaspaceSize=<span class="n">512m</span>     <span class="c"># 设上限，防止类加载泄漏吃光系统内存</span>
-  -jar app.jar</pre>
-  </div>
+<figure class="fig">
+<svg viewBox="0 0 860 360" role="img" aria-label="堆内存分代结构与参数映射">
+  <defs>
+    <linearGradient id="l29-heapg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#DCE9F5"/><stop offset="100%" stop-color="#B9D2EA"/></linearGradient>
+    <linearGradient id="l29-youngg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B8D9B0"/><stop offset="100%" stop-color="#8BC28A"/></linearGradient>
+    <linearGradient id="l29-oldg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F5D7A8"/><stop offset="100%" stop-color="#E8B96B"/></linearGradient>
+  </defs>
+  <rect x="30" y="30" width="520" height="300" rx="10" fill="url(#l29-heapg)" stroke="#3E6B8F" stroke-width="2"/>
+  <text x="290" y="58" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#1F3A56" font-weight="700">堆（Heap）</text>
+  <text x="290" y="78" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1F3A56">-Xms / -Xmx：生产设相等；默认 Xmx = 物理内存 1/4，容器内 = cgroup 限制 × 25%</text>
+  <rect x="55" y="100" width="245" height="200" rx="8" fill="url(#l29-youngg)" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="177" y="124" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#1B5E1B" font-weight="700">年轻代</text>
+  <text x="177" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1B5E1B">-Xmn 或 NewRatio（同时设置听 Xmn）</text>
+  <rect x="70" y="158" width="112" height="120" rx="6" fill="#E4F2DF" stroke="#2D7D2D" stroke-width="1"/>
+  <text x="126" y="212" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1B5E1B" font-weight="700">Eden</text>
+  <text x="126" y="230" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1B5E1B">8 份</text>
+  <rect x="190" y="158" width="46" height="120" rx="6" fill="#D3E9CC" stroke="#2D7D2D" stroke-width="1"/>
+  <text x="213" y="205" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B">S0</text>
+  <text x="213" y="222" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1B5E1B">1 份</text>
+  <rect x="243" y="158" width="46" height="120" rx="6" fill="#D3E9CC" stroke="#2D7D2D" stroke-width="1"/>
+  <text x="266" y="205" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B">S1</text>
+  <text x="266" y="222" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1B5E1B">1 份</text>
+  <rect x="315" y="100" width="220" height="200" rx="8" fill="url(#l29-oldg)" stroke="#B57E2B" stroke-width="1.5"/>
+  <text x="425" y="128" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#7A5214" font-weight="700">老年代</text>
+  <text x="425" y="148" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A5214">老年代 = 堆 − 年轻代</text>
+  <text x="425" y="166" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A5214">NewRatio=2 时占堆的 2/3</text>
+  <text x="425" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A5214">大对象：Serial/ParNew 看</text>
+  <text x="425" y="212" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A5214">PretenureSizeThreshold；</text>
+  <text x="425" y="228" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A5214">G1 看 Humongous Region</text>
+  <text x="430" y="345" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33475B">SurvivorRatio = Eden : 单 Survivor（默认 8）　|　MaxTenuringThreshold = 晋升年龄（默认 15）</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> 堆的分代结构与参数映射：外层定总盘子（Xms/Xmx），中层定切法（Xmn/NewRatio），内层定细节（SurvivorRatio/晋升/大对象）</figcaption>
+</figure>
 
-  <div class="formula">
-    堆外内存估算 = Metaspace + 线程栈 × 线程数 + Direct Buffer + Code Cache + JVM 自身开销<br>
-    典型 4GB 堆的进程总内存 ≈ 4G(堆) + 0.5G(Meta) + 0.5G(1000线程×512k) + 0.3G(其他) ≈ 5.3GB
-  </div>
-
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>生产环境我会把 -Xms 和 -Xmx 设成一样大，避免运行时扩容带来的 STW。MetaspaceSize 设到 256m~512m，避免默认值太小导致启动后频繁 Full GC。线程栈 -Xss 在并发量大的服务里从默认 1MB 降到 512k，可以节省几百 MB 内存。G1 下一般不手动设 -Xmn，而是用 G1NewSizePercent 让 G1 自己调整新生代大小。</p>
-  </div>
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>堆参数五层控制：Xms=Xmx 先钉死总盘子；Xmn 和 NewRatio 二选一钉死年轻代（都设听 Xmn）；SurvivorRatio 和 TenuringThreshold 是细调；大对象直通只认 Serial/ParNew；容器化记住三个 RAMPercentage 默认 25% / 1.5625% / 15%，显式 Xmx 会压过它们。</p>
+</div>
 </section>
 
-<!-- ================================================================
-     第 3 站 — GC 收集器参数
-     ================================================================ -->
+
+<!-- ═══════════════ 第3站：元空间参数 ═══════════════ -->
 <section class="station reveal" id="s3">
-  <div class="station-head">
-    <span class="station-no">第 3 站</span>
-    <h2>GC 收集器参数：如何选择合适的收集器</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>元空间参数：一个名字陷阱，一根保险丝</h2></div>
 
-  <p>选择 GC 收集器是 JVM 调优中最关键的决策——它决定了你的应用在<strong>吞吐量、延迟、内存开销</strong>三者之间的取舍。以下是 6 个核心参数：</p>
+<p>JDK 8 永久代（PermGen）下线，类元数据搬进 <strong>元空间（Metaspace）</strong>——它默认不再受 -Xmx 管辖，而是直接用本地内存（native memory）。这带来四个参数，其中两个是生产的必修课。</p>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>参数</th><th>收集器</th><th>算法</th><th>适用场景</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>-XX:+UseSerialGC</code></td><td>Serial</td><td>单线程 STW</td><td>小堆 (&lt;100MB)、单核 CPU、容器内</td></tr>
-      <tr><td><code>-XX:+UseParallelGC</code></td><td>Parallel</td><td>多线程 STW</td><td>批量处理、后台任务、吞吐量优先</td></tr>
-      <tr><td><code>-XX:+UseG1GC</code></td><td>G1</td><td>Region 化 + 混合回收</td><td>通用 Web 服务、中等堆 (4~64GB)、JDK 9+ 默认</td></tr>
-      <tr><td><code>-XX:+UseZGC</code></td><td>ZGC</td><td>染色指针 + 读屏障</td><td>大堆 (&gt;8GB)、超低延迟要求、JDK 15+</td></tr>
-      <tr><td><code>-XX:MaxGCPauseMillis</code></td><td>G1 / Parallel</td><td>停顿目标</td><td>G1 默认 200ms，延迟敏感可调到 50~100ms</td></tr>
-      <tr><td><code>-XX:G1HeapRegionSize</code></td><td>G1</td><td>Region 大小</td><td>1m~32m（2 的幂），目标 ~2048 个 Region</td></tr>
-    </tbody>
-  </table>
+<h3>MetaspaceSize：名字是陷阱</h3>
 
-  <div class="think">
-    <p class="think-q">为什么不直接全部用 ZGC？它停顿最低，不是最好的吗？</p>
-    <p>ZGC 的低停顿是以吞吐量和内存开销为代价的。染色指针和读屏障会带来 10%~15% 的吞吐量损失，ZGC 还需要额外的内存来维护颜色和转发表。对于堆小于 4GB、对延迟要求不极端的普通 Web 服务，G1 的性价比远高于 ZGC。ZGC 最适合的是大堆 + 低延迟的场景。</p>
-  </div>
+<p><code>-XX:MetaspaceSize</code> 听起来像"元空间初始大小"，<strong>其实是第一次 Full GC（日志里叫 Metadata GC）的触发阈值</strong>。JVM 启动时类加载持续进行，元空间用量一旦超过这个阈值，就触发一次针对元空间的 GC——注意这不是"分配初始空间"，而是"报警线"。默认值由 ergonomics 决定，在 <strong>20MB 量级</strong>（随 JDK 版本略有差异）。问题来了：一个正常的 Spring + MyBatis 服务，启动期加载的类元数据轻松 40~80MB，<strong>不设这个参数，启动阶段就会撞线</strong>，GC 日志里出现以 Metadata GC Threshold 为原因的停顿，每次都要扫一遍类空间。处方：观察服务稳定运行 24 小时后的元空间占用（<code>jstat -gcmetacapacity &lt;pid&gt;</code> 或 <code>jcmd &lt;pid&gt; VM.metaspace</code>），把 MetaspaceSize 设到<strong>略高于稳态值</strong>，一般 128m~256m。设高一点没坏处——它只是阈值，不是预留，不会真的占那么多内存。</p>
 
-  <h3>收集器选择决策树</h3>
+<h3>MaxMetaspaceSize：默认不限量 = 没装保险丝</h3>
 
-  <div class="fig">
-    <svg viewBox="0 0 820 320" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
-      <text x="410" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#1f2937">GC 收集器选择决策</text>
+<p><code>-XX:MaxMetaspaceSize</code> 才是元空间真正的<strong>上限</strong>，默认值是"不限制"（受 OS 可用内存约束）。生产必须显式设置（常见 512m），原因看下面这个易错点：</p>
 
-      <!-- 起点 -->
-      <rect x="320" y="50" width="180" height="40" rx="20" fill="#3b82f6" stroke="#2563eb"/>
-      <text x="410" y="76" text-anchor="middle" font-size="13" font-weight="bold" fill="white">你的应用是什么类型？</text>
+<div class="crack"><span class="crack-label">易错点</span>
+<p><strong>"不设 MaxMetaspaceSize 没事，元空间够用。"</strong>错。动态代理（CGLIB/ByteBuddy 生成的类）、自定义 ClassLoader（热部署框架）、脚本引擎（Nashorn/Groovy）泄漏时，类只进不出，元空间无限增长。不设上限的后果不是 <code>OutOfMemoryError: Metaspace</code>，而是<strong>OS 内存被吃光，容器被 cgroup OOM Killer 直接杀掉</strong>——进程暴毙、没有任何 Java 堆转储、K8s 事件里只有 OOMKilled，排查难度翻倍。设了上限，泄漏会表现为进程内可捕获的 OOM：有堆转储、有 GC 日志、有 <code>OnOutOfMemoryError</code> 钩子。一句话：<strong>MetaspaceSize 是报警线，MaxMetaspaceSize 是保险丝，报警线要设对，保险丝必装。</strong></p></div>
 
-      <!-- 分支 1: 小堆 -->
-      <line x1="340" y1="90" x2="120" y2="130" stroke="#6b7280" stroke-width="1.5"/>
-      <text x="210" y="108" font-size="11" fill="#6b7280">堆&lt;100MB / 单核</text>
-      <rect x="40" y="130" width="160" height="60" rx="8" fill="#dcfce7" stroke="#22c55e"/>
-      <text x="120" y="155" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">Serial GC</text>
-      <text x="120" y="175" text-anchor="middle" font-size="11" fill="#166534">简单即最优</text>
+<h3>CompressedClassSpaceSize 与 UseCompressedClassPointers</h3>
 
-      <!-- 分支 2: 吞吐量 -->
-      <line x1="410" y1="90" x2="410" y2="130" stroke="#6b7280" stroke-width="1.5"/>
-      <text x="430" y="115" font-size="11" fill="#6b7280">吞吐量优先</text>
-      <rect x="330" y="130" width="160" height="60" rx="8" fill="#fef3c7" stroke="#f59e0b"/>
-      <text x="410" y="155" text-anchor="middle" font-size="13" font-weight="bold" fill="#92400e">Parallel GC</text>
-      <text x="410" y="175" text-anchor="middle" font-size="11" fill="#92400e">批量 / 后台任务</text>
+<p>JVM 启动时会从元空间里划出一块<strong>连续的压缩类空间</strong>存放类的元数据，<code>-XX:CompressedClassSpaceSize</code> 控制这块的大小，<strong>默认 1GB</strong>。"压缩"指实例的对象头里用 32 位压缩类指针指向类元数据（每个实例省 4 字节，64 位系统上对象多时这是实打实的节省）。两个注意点：其一，这块空间在启动时一次性分配、<strong>之后不能扩</strong>，所以它是虚拟地址预留，不是物理占用，默认 1G 一般不用动；其二，<code>-XX:-UseCompressedClassPointers</code> 可以整体关闭压缩类指针，只在极端场景（比如元空间需求超过 1G 且不想放弃压缩收益的纠结方案）才考虑，<strong>生产上这个开关别碰</strong>。</p>
 
-      <!-- 分支 3: 通用 -->
-      <line x1="480" y1="90" x2="660" y2="130" stroke="#6b7280" stroke-width="1.5"/>
-      <text x="590" y="108" font-size="11" fill="#6b7280">通用 Web 服务</text>
-      <rect x="580" y="130" width="160" height="60" rx="8" fill="#dbeafe" stroke="#3b82f6"/>
-      <text x="660" y="155" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">G1 GC</text>
-      <text x="660" y="175" text-anchor="middle" font-size="11" fill="#1e40af">JDK 9+ 默认</text>
+<h3>小案例：启动期 Metadata GC 频发</h3>
 
-      <!-- G1 → ZGC 升级 -->
-      <line x1="660" y1="190" x2="660" y2="230" stroke="#6b7280" stroke-width="1.5"/>
-      <text x="680" y="215" font-size="11" fill="#6b7280">大堆 + 超低延迟</text>
-      <rect x="580" y="230" width="160" height="60" rx="8" fill="#ede9fe" stroke="#8b5cf6"/>
-      <text x="660" y="255" text-anchor="middle" font-size="13" font-weight="bold" fill="#5b21b6">ZGC</text>
-      <text x="660" y="275" text-anchor="middle" font-size="11" fill="#5b21b6">JDK 15+ 生产可用</text>
+<p>某服务上线后，启动 10 分钟内出现 7 次几十毫秒到几百毫秒的停顿，GC 日志（JDK 11 统一日志格式）长这样：</p>
 
-      <!-- 参数标注 -->
-      <rect x="40" y="240" width="340" height="60" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
-      <text x="60" y="262" font-size="12" fill="#334155" font-weight="bold">G1 核心调优参数：</text>
-      <text x="60" y="282" font-size="11" fill="#475569">-XX:MaxGCPauseMillis=200  -XX:G1HeapRegionSize=4m</text>
-      <text x="60" y="296" font-size="11" fill="#475569">-XX:InitiatingHeapOccupancyPercent=45</text>
-    </svg>
-    <figcaption><span class="fig-no">图 2</span> GC 收集器选择决策——按堆大小、延迟需求、应用类型逐步缩小范围</figcaption>
-  </div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>gc.log 片段</b> · 启动期元空间反复撞 20MB 阈值</span></div>
+<pre><code><span class="c"># 启动第 0.9 秒：Metadata GC Threshold 触发，堆没满，元空间先报警</span>
+[0.942s][info][gc] GC(3) Pause Young (Metadata GC Threshold) 512M-&gt;402M(4096M) 87.214ms
+[0.942s][info][gc,metaspace] GC(3) Metaspace: 20411K-&gt;19855K(2560000K)
+<span class="c"># 第 40 秒、第 95 秒……同样的原因反复出现，直到类加载收敛</span>
+[40.213s][info][gc] GC(9) Pause Young (Metadata GC Threshold) 812M-&gt;655M(4096M) 112.556ms
+[40.213s][info][gc,metaspace] GC(9) Metaspace: 39822K-&gt;38107K(2560000K)</code></pre>
+</div>
 
-  <div class="srcbox">
-    <div class="srcbox-head">各收集器启动参数对比</div>
-    <pre class="srcbox-file"><span class="c"># ① Serial GC —— 容器内小服务</span>
-<span class="k">java</span> -XX:+UseSerialGC -Xms<span class="n">128m</span> -Xmx<span class="n">128m</span> -jar app.jar
+<p>读法：原因列写的是 <strong>Metadata GC Threshold</strong>，说明不是堆压力、是元空间撞阈值；Metaspace 行显示用量从 20MB 涨到近 40MB。处方一行：<code>-XX:MetaspaceSize=256m</code>，重启后启动期 Metadata GC 归零。日志每个字段的完整拆解在「GC 日志分析」，这里只演示"从日志现象反推参数处方"的路径。记住这个模式：<strong>日志给症状，参数开处方，重启后复诊</strong>。</p>
 
-<span class="c"># ② Parallel GC —— 批量数据处理</span>
-<span class="k">java</span> -XX:+UseParallelGC -Xms<span class="n">8g</span> -Xmx<span class="n">8g</span> \
-     -XX:ParallelGCThreads=<span class="n">8</span> -XX:MaxGCPauseMillis=<span class="n">500</span> -jar app.jar
-
-<span class="c"># ③ G1 GC —— 通用 Web 服务（推荐默认选择）</span>
-<span class="k">java</span> -XX:+UseG1GC -Xms<span class="n">4g</span> -Xmx<span class="n">4g</span> \
-     -XX:MaxGCPauseMillis=<span class="n">100</span> -XX:G1HeapRegionSize=<span class="n">4m</span> -jar app.jar
-
-<span class="c"># ④ ZGC —— 大堆 + 超低延迟</span>
-<span class="k">java</span> -XX:+UseZGC -Xms<span class="n">16g</span> -Xmx<span class="n">16g</span> \
-     -XX:+ZGenerational -jar app.jar   <span class="c"># JDK 21+ 分代 ZGC</span></pre>
-  </div>
-
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>选 GC 收集器就是选"停顿 vs 吞吐量 vs 内存"的取舍策略。小堆单核用 Serial，吞吐量优先用 Parallel，通用场景用 G1（JDK 9+ 默认），大堆 + 超低延迟用 ZGC。G1 的 MaxGCPauseMillis 默认 200ms，延迟敏感的服务可以调低到 50~100ms，但设太低会导致吞吐量下降。JDK 21 的分代 ZGC 是目前延迟与吞吐量综合最优的选择。</p>
-  </div>
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>元空间三件套：MetaspaceSize 是首次 GC 阈值（默认 20MB 量级，设到稳态值上方 128~256m）；MaxMetaspaceSize 是保险丝（默认不限量，必设）；CompressedClassSpaceSize 默认 1G 别碰。名字陷阱 + 保险丝缺失，是元空间仅有的两个坑。</p>
+</div>
 </section>
 
-<!-- ================================================================
-     第 4 站 — GC 日志参数
-     ================================================================ -->
+
+<!-- ═══════════════ 第4站：收集器参数 ═══════════════ -->
 <section class="station reveal" id="s4">
-  <div class="station-head">
-    <span class="station-no">第 4 站</span>
-    <h2>GC 日志参数：JDK 8 vs JDK 9+ 两套体系</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 4 站</span><h2>收集器参数：先选对收集器，再谈调参</h2></div>
 
-  <p>GC 日志是排查线上 GC 问题的第一手资料。但 JDK 8 和 JDK 9+ 的 GC 日志参数<strong>完全不同</strong>，这是面试中极易踩坑的考点。</p>
+<p>调优的第一性原理：<strong>选对收集器，比调任何参数都重要</strong>——收集器定错了，参数调得再精也是南辕北辙。六个开关逐个过一遍（机制细节在「垃圾收集器全览」，这里只讲"什么时候用它"）：</p>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>JDK 版本</th><th>参数</th><th>作用</th></tr>
-    </thead>
-    <tbody>
-      <tr><td rowspan="5">JDK 8 及以前</td>
-        <td><code>-XX:+PrintGCDetails</code></td><td>打印每次 GC 的详细信息</td></tr>
-      <tr><td><code>-XX:+PrintGCDateStamps</code></td><td>在每行日志前加时间戳</td></tr>
-      <tr><td><code>-Xloggc:/path/gc.log</code></td><td>GC 日志输出到文件</td></tr>
-      <tr><td><code>-XX:+UseGCLogFileRotation</code></td><td>启用日志文件轮转</td></tr>
-      <tr><td><code>-XX:NumberOfGCLogFiles=5 -XX:GCLogFileSize=20M</code></td><td>保留 5 个文件，每个 20MB</td></tr>
-      <tr><td rowspan="3">JDK 9+（统一日志）</td>
-        <td><code>-Xlog:gc*:file=/path/gc.log:time,level,tags</code></td><td>统一日志框架，gc* 匹配所有 GC 标签</td></tr>
-      <tr><td><code>-Xlog:gc*=info:file=gc.log:time,uptime,level,tags:filecount=5,filesize=20m</code></td><td>完整配置：info 级别 + 轮转</td></tr>
-      <tr><td><code>-Xlog:gc+heap=debug</code></td><td>细化到 heap 子标签，debug 级别</td></tr>
-    </tbody>
-  </table>
+<table class="nb-table">
+<thead><tr><th>开关</th><th>适用堆/CPU</th><th>停顿特征</th><th>一句话定位</th><th>现状</th></tr></thead>
+<tbody>
+<tr><td><code>-XX:+UseSerialGC</code></td><td>堆 &lt; 100MB / 单核</td><td>STW，短</td><td>单线程，简单到极致</td><td>嵌入式、客户端</td></tr>
+<tr><td><code>-XX:+UseParallelGC</code></td><td>中大堆 / 多核</td><td>STW，可较长</td><td>吞吐量优先（Parallel Scavenge + Old）</td><td>JDK 7/8 默认</td></tr>
+<tr><td><code>-XX:+UseConcMarkSweepGC</code></td><td>堆 &lt; 8G / 多核</td><td>并发标记，低停顿</td><td>JDK8 时代的低延迟老生代方案</td><td>JDK9 废弃，JDK14 移除</td></tr>
+<tr><td><code>-XX:+UseG1GC</code></td><td>4G~32G / 多核</td><td>可预测停顿（软目标）</td><td>Region 化，通用默认</td><td>JDK9+ 默认</td></tr>
+<tr><td><code>-XX:+UseZGC</code></td><td>&gt; 16G 或延迟极苛刻</td><td>亚毫秒~几毫秒，与堆大小基本无关</td><td>并发 + 读屏障/重定位屏障</td><td>JDK11 EA，JDK15 转正</td></tr>
+<tr><td><code>-XX:+UseShenandoahGC</code></td><td>中大堆 / 多核</td><td>并发整理，低停顿</td><td>G1 的同类思路，用转发指针（BRO 卡）做并发压缩</td><td>JDK12 EA，回炉到 JDK11</td></tr>
+</tbody>
+</table>
 
-  <div class="think">
-    <p class="think-q">JDK 9+ 的统一日志框架相比 JDK 8 的 PrintGCDetails 有什么优势？</p>
-    <p>JDK 8 的 GC 日志格式不统一——不同收集器输出的格式完全不同，解析困难。JDK 9+ 的 <code>-Xlog</code> 统一了所有子系统的日志格式（GC、类加载、JIT 编译等），用标签（tags）和级别（levels）来过滤，可以用标准工具解析。而且内置了日志轮转，不需要额外配置。</p>
-  </div>
+<figure class="fig">
+<svg viewBox="0 0 860 470" role="img" aria-label="收集器选择决策树">
+  <defs>
+    <marker id="l29-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+  <rect x="150" y="20" width="300" height="50" rx="8" fill="#DCE9F5" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="300" y="50" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1F3A56" font-weight="700">① 堆 &lt; 100MB 且单核 CPU？</text>
+  <line x1="450" y1="45" x2="555" y2="45" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="500" y="38" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33475B">是</text>
+  <rect x="560" y="25" width="230" height="40" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="675" y="50" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B" font-weight="700">Serial —— 嵌入式 / 单核小堆</text>
+  <line x1="300" y1="70" x2="300" y2="105" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="312" y="92" font-family="sans-serif" font-size="11" fill="#33475B">否</text>
+  <rect x="150" y="110" width="300" height="50" rx="8" fill="#DCE9F5" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="300" y="140" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1F3A56" font-weight="700">② 吞吐优先的批处理？</text>
+  <line x1="450" y1="135" x2="555" y2="135" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="500" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33475B">是</text>
+  <rect x="560" y="115" width="230" height="40" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="675" y="140" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B" font-weight="700">Parallel —— ETL / 离线计算</text>
+  <line x1="300" y1="160" x2="300" y2="195" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="312" y="182" font-family="sans-serif" font-size="11" fill="#33475B">否</text>
+  <rect x="150" y="200" width="300" height="50" rx="8" fill="#DCE9F5" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="300" y="230" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1F3A56" font-weight="700">③ JDK8，低延迟，堆 &lt; 8G？</text>
+  <line x1="450" y1="225" x2="555" y2="225" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="500" y="218" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33475B">是</text>
+  <rect x="560" y="205" width="230" height="40" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="675" y="223" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B" font-weight="700">CMS（JDK9 废弃，JDK14 移除）</text>
+  <text x="675" y="238" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1B5E1B">JDK9+ 新项目别选，维护已终止</text>
+  <line x1="300" y1="250" x2="300" y2="285" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="312" y="272" font-family="sans-serif" font-size="11" fill="#33475B">否</text>
+  <rect x="150" y="290" width="300" height="50" rx="8" fill="#DCE9F5" stroke="#3E6B8F" stroke-width="1.5"/>
+  <text x="300" y="320" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1F3A56" font-weight="700">④ P99 要求 &lt; 10ms 或堆 &gt; 16G？</text>
+  <line x1="450" y1="315" x2="555" y2="315" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="500" y="308" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33475B">是</text>
+  <rect x="560" y="295" width="230" height="40" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="675" y="313" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B" font-weight="700">ZGC（JDK11 EA / JDK15+ 生产）</text>
+  <text x="675" y="328" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1B5E1B">Shenandoah 是备选</text>
+  <line x1="300" y1="340" x2="300" y2="375" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l29-arr)"/>
+  <text x="312" y="362" font-family="sans-serif" font-size="11" fill="#33475B">否（默认落点）</text>
+  <rect x="150" y="380" width="300" height="56" rx="8" fill="#F5D7A8" stroke="#B57E2B" stroke-width="2"/>
+  <text x="300" y="405" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#7A5214" font-weight="700">G1 —— JDK9+ 默认</text>
+  <text x="300" y="423" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A5214">4G~32G 全能型，100ms 级停顿可接受</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> 收集器选择决策树：从硬件（堆大小、CPU 核数）和延迟预算两个维度逐步排除，90% 的服务最后落在 G1</figcaption>
+</figure>
 
-  <div class="srcbox">
-    <div class="srcbox-head">JDK 8 生产环境 GC 日志配置</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  -XX:+PrintGCDetails \
-  -XX:+PrintGCDateStamps \
-  -XX:+PrintGCTimeStamps \
-  -XX:+PrintTenuringDistribution \
-  -Xloggc:/data/logs/gc/gc.log \
-  -XX:+UseGCLogFileRotation \
-  -XX:NumberOfGCLogFiles=<span class="n">10</span> \
-  -XX:GCLogFileSize=<span class="n">20M</span> \
-  -jar app.jar</pre>
-  </div>
+<div class="think"><div class="think-q">"既然 ZGC 停顿那么低，为什么不用 ZGC 全量替换 G1？"</div>
+<p><strong>答。</strong>ZGC 的低停顿不是免费的：它靠读屏障 + 重定位屏障实现并发处理，每个对象访问都多一次屏障检查，<strong>CPU 开销比 G1 高几个百分点</strong>，内存占用也略高。停顿预算 200ms 的 Web 服务，G1 用更少的 CPU 就能达标；只有 P99 卡在 10ms 以内、或者堆大到 16G 以上让 G1 的停顿开始失控时，ZGC 才值这个开销。一句话：<strong>延迟预算决定收集器，而不是收集器决定预算</strong>。</p></div>
 
-  <div class="srcbox">
-    <div class="srcbox-head">JDK 17+ 生产环境 GC 日志配置</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  -Xlog:gc*,gc+age=trace,safepoint:file=/data/logs/gc/gc.log:\
-time,uptime,level,tags:filecount=<span class="n">10</span>,filesize=<span class="n">20m</span> \
-  -jar app.jar
+<h3>G1 调参四件套</h3>
 
-<span class="c"># 日志输出样例</span>
-<span class="c"># [2024-01-15T10:30:00.123+0800][1.234s][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 209M-&gt;42M(4096M) 8.234ms</span>
-<span class="c"># 解析：时间戳 | JVM运行时间 | 级别 | 标签 | GC编号 | 类型 | 原因 | 回收前-&gt;回收后(堆总量) | 停顿时间</span></pre>
-  </div>
+<p><code>-XX:MaxGCPauseMillis</code>：停顿<strong>软目标</strong>，默认 200ms（Parallel 收集器也认这个参数）。"软"的含义：G1 据此估算"一轮 Young GC / Mixed GC 最多回收多少 Region"，但回收量太小会导致老年代积压，G1 宁可通过一次更长的停顿换长期稳定。所以它是个<strong>期望值不是承诺</strong>——设 1ms 的下场后面追问表里细说。</p>
 
-  <h3>GC 日志关键字段速读</h3>
-  <table class="nb-table">
-    <thead>
-      <tr><th>字段</th><th>示例</th><th>含义</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>GC 类型</td><td>Pause Young / Pause Full / Concurrent Mark</td><td>Young GC / Full GC / 并发标记</td></tr>
-      <tr><td>原因</td><td>G1 Evacuation Pause / Allocation Failure</td><td>触发 GC 的原因</td></tr>
-      <tr><td>内存变化</td><td>209M→42M(4096M)</td><td>回收前→回收后(堆总量)</td></tr>
-      <tr><td>停顿时间</td><td>8.234ms</td><td>STW 停顿的墙钟时间</td></tr>
-    </tbody>
-  </table>
+<p><code>-XX:InitiatingHeapOccupancyPercent</code>（IHOP）：并发标记启动水位，默认 <strong>45%</strong>——堆占用到 45% 就启动并发标记，为 Mixed GC 准备"哪些 Region 该回收"的脏卡信息。JDK9+ 起 IHOP 是<strong>自适应的</strong>（JVM 根据历史回收速率动态调整），手动设死的价值很小，一般交给自适应。</p>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>JDK 8 用 -XX:+PrintGCDetails + -Xloggc 来输出 GC 日志，JDK 9+ 改用统一的 -Xlog:gc* 框架。生产环境一定要开 GC 日志并配置轮转——它是排查 GC 停顿、Full GC 频率、内存泄漏的第一手数据。我一般用 GCEasy 或 gcviewer 来分析日志，可以快速看到 GC 频率、停顿时间分布和内存趋势。</p>
-  </div>
+<p><code>-XX:G1HeapRegionSize</code>：Region 大小，1~32MB，默认 <strong>Xmx ÷ 2048</strong>（8G 堆 → 4MB Region）。什么时候调大？当你的业务对象普遍偏大（比如 2MB 的报文缓冲、10MB 的图片解码缓存），超过 Region 一半就成了 Humongous 对象，直接进 Humongous Region，回收时机被特殊化、还容易造成碎片——把 Region 调到 16m 或 32m，让"大对象"变小。注意 Region 大小是启动期定死的，运行期不能改。</p>
+
+<p><code>-XX:G1MixedGCCountTarget</code>（默认 8）和 <code>-XX:G1HeapWastePercent</code>（默认 5%）：Mixed GC 要把"清理老年代"这个脏活摊到若干轮里做，CountTarget 是摊几轮；WastePercent 是"回收收益"门槛——一个 Region 里可回收的比例不足 5% 就不值得为它 STW，跳过。这两个参数默认值已经够用，<strong>调参手册里属于"知道它存在"级别</strong>，真到要动它，说明你已经在看 GC 日志里的 Mixed GC 效率了。</p>
+
+<h3>并行度：GC 线程数与容器核数</h3>
+
+<p><code>-XX:ParallelGCThreads</code> 控制 STW 阶段的并行度，默认值由 CPU 核数公式决定（≤8 核时约为核数的一半，更多核时约 5 + (n-8) × 5/8）；<code>-XX:ConcGCThreads</code> 控制并发阶段线程数，约为 ParallelGCThreads 的 1/4。容器场景有个经典翻车点：</p>
+
+<div class="crack"><span class="crack-label">易错点</span>
+<p><strong>"容器限了 2 核，JVM 的 GC 线程自动适配，不用管。"</strong>只对一半。JDK 10+（JDK 8u191+ 部分能力）能读 cgroup CPU 限制，自动把 ParallelGCThreads 压到 2；但<strong>老版本 JDK 或某些 cgroup v1 配置下，JVM 看到的是宿主机 32 核</strong>，于是开 16 个 GC 线程去抢 2 个核——GC 期间 16:2 超调度，上下文切换风暴，停顿不降反升，业务线程还跟着遭殃。处方：JDK10+ 用 <code>-XX:ActiveProcessorCount=2</code> 显式钉死（JDK 10+ 参数，直接覆盖容器探测），老版本只能靠升级 JDK。<strong>容器化服务的两个必查项：内存看 MaxRAMPercentage，CPU 看 ActiveProcessorCount。</strong></p></div>
+
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>收集器选择走决策树（堆大小 + 核数 + 延迟预算 → 90% 落在 G1）；G1 调参核心就两个：MaxGCPauseMillis 是软目标默认 200ms，IHOP 默认 45% 交给自适应；容器场景永远检查 MaxRAMPercentage 和 ActiveProcessorCount 两项。</p>
+</div>
 </section>
 
-<!-- ================================================================
-     第 5 站 — 诊断与调试参数
-     ================================================================ -->
+
+<!-- ═══════════════ 第5站：GC 日志参数 ═══════════════ -->
 <section class="station reveal" id="s5">
-  <div class="station-head">
-    <span class="station-no">第 5 站</span>
-    <h2>诊断与调试参数：线上排障的救命稻草</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 5 站</span><h2>GC 日志参数：调优的眼睛，两套语法</h2></div>
 
-  <p>当线上出现 OOM、崩溃、性能退化时，以下参数能帮你<strong>自动保留现场</strong>，是生产环境必配的安全网：</p>
+<p>没有 GC 日志的调优是盲人摸象——你改了参数，不知道效果是好是坏，只能靠 RT 监控猜。GC 日志是调优闭环里的"复诊化验单"，<strong>生产必开，且必须开轮转</strong>（GC 很频繁时日志文件增长极快，不轮转会写爆磁盘）。JDK 8 和 JDK 9+ 是两套完全不同的语法，而且<strong>不能混用</strong>：JDK 9+ 的统一日志（unified logging）把 -XX:+PrintGCDetails 这类 flag 全部干掉了，在 JDK 11 上写 JDK 8 的日志参数，JVM 只会在启动日志里打印一行 "Ignoring option PrintGCDetails; support was removed in 8.0" 然后静默忽略——不报错，但你的日志文件根本不存在，排障时才发现，黄花菜都凉了。</p>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>参数</th><th>作用</th><th>推荐配置</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>-XX:+HeapDumpOnOutOfMemoryError</code></td><td>OOM 时自动 dump 堆内存</td><td>生产必开</td></tr>
-      <tr><td><code>-XX:HeapDumpPath</code></td><td>指定 dump 文件路径</td><td>/data/dumps/heap.hprof</td></tr>
-      <tr><td><code>-XX:ErrorFile</code></td><td>JVM 致命错误日志路径</td><td>/data/logs/jvm/hs_err_%p.log</td></tr>
-      <tr><td><code>-XX:+PrintFlagsFinal</code></td><td>打印所有 JVM 参数的最终值</td><td>启动时验证参数生效</td></tr>
-      <tr><td><code>-XX:+UnlockDiagnosticVMOptions</code></td><td>解锁隐藏的诊断参数</td><td>高级调优时使用</td></tr>
-    </tbody>
-  </table>
+<h3>JDK 8 配置</h3>
 
-  <div class="think">
-    <p class="think-q">HeapDump 文件动辄几个 GB，怎么分析？</p>
-    <p>用 Eclipse MAT（Memory Analyzer Tool）打开 .hprof 文件，它会生成"Leak Suspects Report"（泄漏嫌疑报告），自动找出占用内存最大的对象和 GC Root 引用链。重点关注"Dominator Tree"——它显示哪些对象"支配"了最多的内存保留。</p>
-  </div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>启动参数 · JDK 8 GC 日志</b> · 带轮转的生产配置</span></div>
+<pre><code><span class="c"># 基础输出</span>
+-XX:+PrintGCDetails              <span class="c"># 详细 GC 日志（每次 GC 的 before/after/耗时）</span>
+-XX:+PrintGCDateStamps           <span class="c"># 用日期时间戳（能对上业务日志的时间轴）</span>
+-XX:+PrintGCApplicationStoppedTime <span class="c"># 打印所有 STW 停顿（不止 GC，还有 safepoint）</span>
+-XX:+PrintTenuringDistribution   <span class="c"># 打印年龄分布（调 MaxTenuringThreshold 的原料）</span>
+<span class="c"># 输出位置与轮转：10 个文件 × 20M，约 200M 上限</span>
+-Xloggc:/data/logs/gc-%t.log
+-XX:+UseGCLogFileRotation
+-XX:NumberOfGCLogFiles=10
+-XX:GCLogFileSize=20M</code></pre>
+</div>
 
-  <div class="srcbox">
-    <div class="srcbox-head">生产环境必配的诊断参数</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath=/data/dumps/heap_%p.hprof   <span class="c"># %p = PID，避免覆盖</span>
-  -XX:ErrorFile=/data/logs/jvm/hs_err_%p.log   <span class="c"># JVM 崩溃日志</span>
-  -XX:+PrintFlagsFinal                          <span class="c"># 启动时打印所有参数最终值</span>
-  -jar app.jar
+<h3>JDK 9+ 配置（统一日志）</h3>
 
-<span class="c"># 验证参数是否生效</span>
-<span class="k">java</span> -XX:+PrintFlagsFinal -version 2>&amp;1 | <span class="k">grep</span> HeapDump
-<span class="c"># 输出：bool HeapDumpOnOutOfMemoryError = true  {product}</span></pre>
-  </div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>启动参数 · JDK 9+ GC 日志</b> · 统一日志语法</span></div>
+<pre><code><span class="c"># 统一日志：Xlog:日志标签:目标:装饰器:轮转</span>
+-Xlog:gc*,safepoint:file=/data/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=20M
+<span class="c"># 字段拆解：</span>
+<span class="c"># gc*          —— 所有 gc 开头的标签（gc、gc-task、gc-phase、gc-ref、gc-heap…）</span>
+<span class="c"># safepoint    —— 全部 STW 事件，排查"停顿不全是 GC"必备</span>
+<span class="c"># time,uptime  —— 墙上时间 + JVM 启动后秒数（对照业务日志用 time）</span>
+<span class="c"># level,tags   —— 输出日志级别与标签列（第 3 站案例里的 [gc,metaspace] 就是 tags）</span>
+<span class="c"># filecount/filesize —— 轮转 10 份 × 20M，与 JDK 8 配置等效</span></code></pre>
+</div>
 
-  <h3>ErrorFile 的价值</h3>
-  <p>当 JVM 因为段错误（SIGSEGV）、栈溢出（StackOverflowError 导致崩溃级别）等致命错误退出时，会在 ErrorFile 路径下生成 <code>hs_err_pid&lt;N&gt;.log</code>。这个文件包含了：</p>
-  <ul>
-    <li><strong>崩溃线程的堆栈信息</strong>——定位崩溃发生的代码位置</li>
-    <li><strong>JVM 参数和版本</strong>——确认运行时配置</li>
-    <li><strong>堆使用概况</strong>——崩溃前的内存状态</li>
-    <li><strong>加载的动态库列表</strong>——排查 JNI/native 问题</li>
-  </ul>
+<p>配好日志后，一行典型的 G1 输出长这样：<code>[0.942s][info][gc] GC(3) Pause Young (G1 Evacuation Pause) 1234M-&gt;876M(4096M) 15.2ms</code>。读法三要素：<strong>GC 序号 + 原因（括号里）→ 回收前后堆占用（箭头前后）→ 总堆 → 停顿毫秒数</strong>。原因列是诊断的第一入口：G1 Evacuation Pause 是正常年轻代回收，Metadata GC Threshold 说明元空间撞阈值（第 3 站的案例），Allocation Failure 是常规分配失败，<strong>Full GC 则意味着收集器扛不住了</strong>。逐字段、逐原因的完整解剖在「GC 日志分析」，本文只负责把"日志先配上"这一步做实——<strong>先有化验单，再谈看化验单</strong>。</p>
 
-  <h3>实用诊断命令（运行时）</h3>
-  <div class="srcbox">
-    <div class="srcbox-head">常用 JVM 诊断工具</div>
-    <pre class="srcbox-file"><span class="c"># 查看 JVM 启动参数</span>
-<span class="k">jcmd</span> &lt;pid&gt; VM.flags
-
-<span class="c"># 查看堆内存使用概况</span>
-<span class="k">jmap</span> -heap &lt;pid&gt;
-
-<span class="c"># 触发一次堆 dump（不用等 OOM）</span>
-<span class="k">jmap</span> -dump:format=b,file=heap.hprof &lt;pid&gt;
-
-<span class="c"># 查看 GC 统计摘要</span>
-<span class="k">jstat</span> -gcutil &lt;pid&gt; <span class="n">1000</span> <span class="n">10</span>  <span class="c"># 每 1 秒采样，共 10 次</span>
-
-<span class="c"># 查看线程堆栈</span>
-<span class="k">jstack</span> &lt;pid&gt; &gt; threads.txt</pre>
-  </div>
-
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>生产环境必开 -XX:+HeapDumpOnOutOfMemoryError，配合 HeapDumpPath 指定到磁盘空间充足的目录。这样 OOM 发生时 JVM 自动保存堆快照，事后用 MAT 分析就能定位内存泄漏的根因。ErrorFile 则是 JVM 崩溃时的"黑匣子"，包含崩溃线程堆栈和内存状态。-XX:+PrintFlagsFinal 可以在启动时验证所有参数是否按预期生效，避免配置写错导致的线上问题。</p>
-  </div>
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>GC 日志生产必开 + 必轮转（10 份 × 20M 是标配）；JDK 8 用 PrintGCDetails 一族，JDK 9+ 用 -Xlog:gc* 统一语法，两套不能混用、用错只会静默忽略；读日志先认"原因列"，完整拆解去「GC 日志分析」。</p>
+</div>
 </section>
 
-<!-- ================================================================
-     第 6 站 — 总结：生产就绪模板
-     ================================================================ -->
+
+<!-- ═══════════════ 第6站：诊断与排障参数 ═══════════════ -->
 <section class="station reveal" id="s6">
-  <div class="station-head">
-    <span class="station-no">第 6 站</span>
-    <h2>生产就绪：三种场景的 JVM 启动模板</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 6 站</span><h2>诊断与排障参数：平时配好，出事不慌</h2></div>
 
-  <p>把前 5 站的参数组合起来，针对三种最常见的生产场景，给出可以直接复制使用的启动脚本：</p>
+<p>诊断参数是 JVM 的<strong>黑匣子</strong>：平时占不了什么内存，出事时价值连城。核心原则一句话——<strong>和事配，别等出事再加</strong>，因为 OOM 和 JVM crash 发生的那一刻，你没有第二次启动的机会。</p>
 
-  <h3>场景一：通用 Web 服务（Spring Boot / 微服务）</h3>
-  <div class="srcbox">
-    <div class="srcbox-head">web-service.sh — 4GB 堆，G1 GC，延迟优先</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  <span class="c"># 堆内存</span>
-  -Xms<span class="n">4g</span> -Xmx<span class="n">4g</span> \
-  -XX:MetaspaceSize=<span class="n">256m</span> -XX:MaxMetaspaceSize=<span class="n">512m</span> \
-  -Xss<span class="n">512k</span> \
-  <span class="c"># GC 收集器</span>
-  -XX:+UseG1GC \
-  -XX:MaxGCPauseMillis=<span class="n">100</span> \
-  -XX:G1HeapRegionSize=<span class="n">4m</span> \
-  -XX:InitiatingHeapOccupancyPercent=<span class="n">45</span> \
-  <span class="c"># GC 日志（JDK 17+）</span>
-  -Xlog:gc*,gc+age=trace:file=/data/logs/gc.log:time,uptime,level,tags:filecount=<span class="n">5</span>,filesize=<span class="n">20m</span> \
-  <span class="c"># 诊断</span>
-  -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath=/data/dumps/heap_%p.hprof \
-  -XX:ErrorFile=/data/logs/hs_err_%p.log \
-  -jar app.jar</pre>
-  </div>
+<h3>OOM 自动转储三件套</h3>
 
-  <h3>场景二：批量处理 / 数据 ETL</h3>
-  <div class="srcbox">
-    <div class="srcbox-head">batch-job.sh — 8GB 堆，Parallel GC，吞吐量优先</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  <span class="c"># 堆内存</span>
-  -Xms<span class="n">8g</span> -Xmx<span class="n">8g</span> \
-  -Xmn<span class="n">4g</span> \
-  -XX:MetaspaceSize=<span class="n">256m</span> -XX:MaxMetaspaceSize=<span class="n">512m</span> \
-  <span class="c"># GC 收集器</span>
-  -XX:+UseParallelGC \
-  -XX:ParallelGCThreads=<span class="n">8</span> \
-  -XX:MaxGCPauseMillis=<span class="n">500</span> \
-  <span class="c"># GC 日志</span>
-  -Xlog:gc*:file=/data/logs/gc.log:time,level,tags:filecount=<span class="n">5</span>,filesize=<span class="n">20m</span> \
-  <span class="c"># 诊断</span>
-  -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath=/data/dumps/heap_%p.hprof \
-  -jar batch-app.jar</pre>
-  </div>
+<p><code>-XX:+HeapDumpOnOutOfMemoryError</code> 配合 <code>-XX:HeapDumpPath</code>：一旦发生 OOM，JVM 在抛异常的同时自动写一份完整堆转储（效果等同 <code>jmap -dump:live</code>）。生产必配，两个细节决定它"关键时刻顶不顶用"：其一，转储文件大小约等于堆已用大小，<strong>放在容量充足的独立磁盘</strong>，放在系统盘且系统盘只有 50G 时，一次 12G 的 OOM 转储直接写爆磁盘，雪上加霜；其二，转储要时间（大堆可能几十秒），期间进程还活着，别急着 kill。为什么必须自动？看下面这个追问：</p>
 
-  <h3>场景三：超低延迟微服务（金融 / 实时竞价）</h3>
-  <div class="srcbox">
-    <div class="srcbox-head">low-latency.sh — 16GB 堆，ZGC，亚毫秒停顿</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  <span class="c"># 堆内存</span>
-  -Xms<span class="n">16g</span> -Xmx<span class="n">16g</span> \
-  -XX:MetaspaceSize=<span class="n">512m</span> -XX:MaxMetaspaceSize=<span class="n">1g</span> \
-  -Xss<span class="n">512k</span> \
-  <span class="c"># GC 收集器</span>
-  -XX:+UseZGC \
-  -XX:+ZGenerational \
-  -XX:SoftMaxHeapSize=<span class="n">14g</span> \
-  <span class="c"># GC 日志</span>
-  -Xlog:gc*,gc+heap=debug:file=/data/logs/gc.log:time,uptime,level,tags:filecount=<span class="n">10</span>,filesize=<span class="n">20m</span> \
-  <span class="c"># 诊断</span>
-  -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath=/data/dumps/heap_%p.hprof \
-  -XX:ErrorFile=/data/logs/hs_err_%p.log \
-  <span class="c"># 性能优化</span>
-  -XX:-UseBiasedLocking \
-  -XX:AutoBoxCacheMax=<span class="n">20000</span> \
-  -jar latency-sensitive.jar</pre>
-  </div>
+<div class="think"><div class="think-q">"出 OOM 了，手动 jmap -dump 不就行了，为什么要配自动转储？"</div>
+<p><strong>答。</strong>三个现实问题。第一，K8s 里 OOM 后容器随时可能被杀掉（exit code 137），等你登上 Pod，现场已经没了；第二，大堆的 <code>jmap -dump</code> 本身要 STW 很久，期间服务不可用，业务方会催你重启——重启之后现场就没了；第三，"发现 OOM → 连上机器 → 敲命令"这个链路要几十秒，而 OOM 后 JVM 可能因为堆里还有大量存活对象根本 dump 不出完整现场。<strong>自动转储是 JVM 写的遗书，必须在它还活着的时候写好。</strong></p></div>
 
-  <div class="crack">
-    <span class="crack-label">注意事项</span>
-    <p>以上模板需要根据实际业务负载调整。特别是 -Xmx 的大小，需要基于压测数据确定——观察 Full GC 后的存活对象大小，乘以 2~3 倍作为堆大小的参考值。不要"拍脑袋"设一个很大的堆，过大的堆会导致 GC 时间变长（Parallel / G1）或内存浪费（ZGC 的额外开销）。</p>
-  </div>
+<p><code>-XX:OnOutOfMemoryError</code>：OOM 时执行一条外部命令，把"处理 OOM"自动化。典型用法：<code>-XX:OnOutOfMemoryError="curl -fsS -X POST http://alert.local/hook -d 'host=%h;pid=%p'"</code> 直接打告警；或者干脆 <code>kill -9 %p</code> 自杀，让 K8s 立刻拉新容器（%p 占位符是进程号，%h 是主机名）。注意命令是<strong>同步执行</strong>的，别在里面写一个会 hang 的操作，否则 OOM 处理本身把进程卡死。</p>
 
-  <div class="recap">
-    <h3>全文速查清单</h3>
-    <ul>
-      <li><strong>堆内存</strong>：-Xms=-Xmx 避免扩容 STW；MetaspaceSize 设 256m+ 避免启动 Full GC；-Xss 高并发时降到 512k</li>
-      <li><strong>GC 收集器</strong>：通用选 G1，吞吐选 Parallel，超低延迟选 ZGC；MaxGCPauseMillis 按 SLA 设置</li>
-      <li><strong>GC 日志</strong>：JDK 8 用 PrintGCDetails，JDK 9+ 用 -Xlog:gc*；必须配轮转</li>
-      <li><strong>诊断</strong>：HeapDumpOnOutOfMemoryError 必开；ErrorFile 指定路径；PrintFlagsFinal 验证配置</li>
-      <li><strong>核心原则</strong>：所有参数都需要基于压测数据调优，不能照搬模板</li>
-    </ul>
-  </div>
+<h3>hs_err：JVM 崩溃现场</h3>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试总结</span>
-    <p>JVM 参数调优的核心不是"背参数"，而是理解每个参数在"停顿-吞吐-内存"三角中的位置。面试时如果能按"堆内存 → GC 收集器 → GC 日志 → 诊断保护"这四个维度系统回答，并给出推荐值和选型理由，就是一份有经验、有深度的满分回答。</p>
-  </div>
+<p><code>-XX:ErrorFile</code> 指定 JVM <strong>致命错误</strong>（不是 OOM，是 SIGSEGV、assert 失败这类把 JVM 自己搞崩的故障）时生成的 <code>hs_err_pid&lt;pid&gt;.log</code> 的位置。默认写在当前工作目录——容器里当前目录经常是只读的，或者容器一重启就丢，等于没写。生产配 <code>-XX:ErrorFile=/data/hs_err/hs_err_pid%p.log</code>。这个文件里有线程栈、寄存器、加载的库、GC 状态，是排查 native crash 的唯一线索，「CPU 100% 排查」里遇到 jstack 都打不出来、进程直接消失的场景，第一反应就是找 hs_err。</p>
+
+<h3>PrintFlagsFinal：别猜，查</h3>
+
+<p><code>-XX:+PrintFlagsFinal</code> 在启动时打印<strong>所有参数的最终生效值</strong>——命令行设的、ergonomics 推出来的、参数间相互覆盖后的结果，一个不落地全列出来，每行带注释说明来源。<code>-XX:+PrintFlagsRanges</code> 是加强版，额外打印每个参数的取值范围和默认值。它是"参数到底生效没有"这个问题的标准答案，配合 grep 使用：<code>-XX:+PrintFlagsFinal | grep MaxHeapSize</code>。为什么需要它？因为"参数写了不生效"有五种典型原因，每一种都猜不出来，只能查：</p>
+
+<div class="crack"><span class="crack-label">易错点</span>
+<p><strong>"我在启动脚本里写了参数，但实际行为跟没写一样。"</strong>五种原因按出现频率排：<strong>① 拼写错误</strong>——JDK 8 对拼错的 -XX 参数<strong>静默忽略</strong>（不报错！），JDK 9+ 才会直接启动失败，老系统上这是头号杀手；<strong>② 版本不支持</strong>——比如 JDK 11~14 的 ZGC 是实验性特性，不加 <code>-XX:+UnlockExperimentalVMOptions</code> 就不认；<strong>③ ergonomics 改写了默认值</strong>——你没写 Xmx，但容器里它的"默认值"已经是 25% cgroup 限制，你以为的默认值（1/4 物理内存）在容器里根本不存在；<strong>④ 与另一参数互斥覆盖</strong>——Xmn 压 NewRatio 就是典型（第 2 站）；<strong>⑤ 容器 JDK 版本不认 cgroup</strong>——JDK 8u191 之前的版本在容器里按宿主机内存算默认值，8G 容器里的 JVM 以为自己有 128G。验证路径统一为：<code>-XX:+PrintFlagsFinal | grep 参数名</code>（启动时）、<code>jinfo -flags &lt;pid&gt;</code>（运行时全量）、<code>jcmd &lt;pid&gt; VM.flags</code>（运行时，更轻量）。<strong>排障第一原则：用生效值说话，不用记忆说话。</strong></p></div>
+
+<h3>NMT 与类加载跟踪：堆外与类的显微镜</h3>
+
+<p><code>-XX:NativeMemoryTracking=summary</code>（或 <code>detail</code>）开启<strong>本地内存跟踪</strong>：把堆外内存按线程栈、代码缓存、内部结构、符号、GC 本身等类别拆开统计。用法是<strong>临时开启</strong>排查，因为 detail 模式有 <strong>1~5% 的性能开销</strong>，不适合常驻。典型流程：启动时开 NMT，运行时 <code>jcmd &lt;pid&gt; VM.native_memory baseline</code> 打基线，过一阵 <code>jcmd &lt;pid&gt; VM.native_memory summary.diff</code> 看差值——哪个类别涨了多少，一目了然。堆外内存增长排不出方向时，NMT 是第一个该开的灯（更深入的堆外排查见「JVM 运行时数据区」）。</p>
+
+<p><code>-XX:+TraceClassLoading</code> / <code>-XX:+TraceClassUnloading</code>：打印<strong>每一次类加载/卸载</strong>（类名 + 加载它的 ClassLoader）。类加载器泄漏（"Metaspace OOM 但就是找不到谁在泄漏"）时的武器：看日志里哪个 ClassLoader 的类只进不出。注意日志量巨大（一个 Web 服务每秒几十行），同样<strong>临时开、定位完就关</strong>。</p>
+
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>诊断参数是和事配：HeapDumpOnOutOfMemoryError + HeapDumpPath + OnOutOfMemoryError 三件套管 OOM，ErrorFile 管 JVM 崩溃，PrintFlagsFinal 管"参数到底生效没有"，NMT 和类加载跟踪管堆外与类泄漏的深挖。记住验证三板斧：PrintFlagsFinal（启动）、jinfo -flags（运行时）、jcmd VM.flags（轻量运行时）。</p>
+</div>
 </section>
 
+
+<!-- ═══════════════ 第7站：杂项参数与三套生产模板 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>杂项参数 + 三套生产启动模板</h2></div>
+
+<p>最后四个"杂项"参数，个个短小，但都对应一类真实事故：</p>
+
+<h3>四个杂项参数</h3>
+
+<p><strong><code>-Xss</code>（线程栈大小）</strong>：默认 1MB（Linux x64）。它管的是每个线程的 Java 栈，<strong>属于线程私有区，不吃 -Xmx 的额度</strong>——这是很多人忽略的堆外大头。两个方向：深递归场景（调用链动辄上千层，比如没写好的互相递归、超大 JSON 树的递归解析）出现 StackOverflowError，调到 2m；反过来，<strong>线程数是堆外内存的隐形乘法器</strong>——1 万个线程 × 1MB 栈 = 10GB 堆外，高并发短任务的服务把 Xss 压到 512k，一次省一半。算线程预算时，永远把 Xss 乘进去。</p>
+
+<p><strong><code>-XX:+UseTLAB</code></strong>：TLAB（Thread Local Allocation Buffer）让每个线程在 Eden 里预先圈一小块内存，分配对象不用抢全局锁，默认开启。它属于"知道它存在就行"的参数，<strong>生产上没有任何理由去动它</strong>。机制细节（TLAB 满了怎么办、指针碰撞 vs 空闲列表）在「对象创建全过程」。</p>
+
+<p><strong><code>-XX:SoftMaxHeapSize</code></strong>（JDK 12+）：给 G1/ZGC 一个<strong>软上限</strong>——堆占用超过它时，GC 会更积极地回收，努力让堆落回软限以下，把多用的内存还给操作系统；但它是"软"的，分配压力真来了，堆依然可以涨到 Xmx。典型配方：<code>-Xms12g -Xmx16g -XX:SoftMaxHeapSize=10g</code>，稳态只占 10G 左右，高峰期允许冲到 16G。适合"容器内存给得宽裕、但想控制稳态占用"的场景（ZGC 尤其配它，因为 ZGC 能真正并发地把堆缩回去）。</p>
+
+<p><strong><code>-XX:+DisableExplicitGC</code> / <code>-XX:+ExplicitGCInvokesConcurrent</code></strong>：管的是 <code>System.gc()</code> 这个"定时炸弹"。DirectByteBuffer 池快满时，Netty 等框架会主动调 System.gc() 触发回收；在 G1/CMS 下，System.gc() 默认触发的是 <strong>Full GC（STW）</strong>。两个参数两条路：DisableExplicitGC 直接忽略所有 System.gc()（此时 Netty 会改用 Unsafe 路径清理 Direct 内存，Netty 4.1+ 支持）；ExplicitGCInvokesConcurrent 不忽略，但把 System.gc() 改造成触发<strong>并发收集</strong>而不是 Full GC。直接内存紧张（Direct buffer memory OOM）的服务，两者至少配一个，直接内存的来龙去脉见「JVM 运行时数据区」。</p>
+
+<h3>三套生产启动模板</h3>
+
+<p>参数学的目的是拼出能用的启动命令。下面三套模板覆盖 90% 的 Java 服务场景，<strong>每个参数都带注释，直接拷走改数字</strong>。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>模板 A · 通用 Web</b> · 8G 容器 / G1 / JDK11+</span></div>
+<pre><code><span class="c"># 通用 Web 服务：8G 容器，G1，P99 停顿预算 200ms</span>
+-Xms6g -Xmx6g                 <span class="c"># 相等，留约 2G 给堆外（元空间/Direct/线程栈/代码段）</span>
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200       <span class="c"># 软目标，与 Web 的 P99 预算对齐</span>
+-XX:MetaspaceSize=256m         <span class="c"># 阈值贴稳态，杜绝启动期 Metadata GC</span>
+-XX:MaxMetaspaceSize=512m      <span class="c"># 保险丝</span>
+-XX:MaxDirectMemorySize=1g     <span class="c"># Netty 直接内存上限（默认 = Xmx，显式钉死）</span>
+-Xss512k                       <span class="c"># 高并发短任务，栈减半</span>
+-XX:ActiveProcessorCount=4     <span class="c"># 容器 4C，钉死 GC 线程数计算依据</span>
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/data/dumps/
+-XX:ErrorFile=/data/hs_err/hs_err_pid%p.log
+-Xlog:gc*,safepoint:file=/data/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=20M</code></pre>
+</div>
+
+<p><strong>为什么这样配：</strong>① Xmx 只给容器的 75%，堆外四兄弟（元空间、Direct、线程栈、mmap 代码段）约 2G 的份额必须留足，这是"Xmx 不能占容器 100%"的最直接体现；② MetaspaceSize 贴稳态值，把启动期 Metadata GC 掐死在摇篮里；③ ActiveProcessorCount 显式声明，不赌 JDK 版本对 cgroup 的探测能力。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>模板 B · 批处理 / ETL</b> · 16G 容器 / Parallel / 吞吐优先</span></div>
+<pre><code><span class="c"># 离线批处理：16G 容器，Parallel，吞吐优先，单次停顿可接受 500ms</span>
+-Xms12g -Xmx12g
+-XX:+UseParallelGC              <span class="c"># Parallel Scavenge + Parallel Old，吞吐最大化</span>
+-XX:MaxGCPauseMillis=500        <span class="c"># 目标放宽，用停顿换吞吐</span>
+-XX:ParallelGCThreads=12        <span class="c"># 16C 容器，钉死并行度（默认公式约 12）</span>
+-XX:MetaspaceSize=256m
+-XX:MaxMetaspaceSize=512m
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/data/dumps/
+-XX:ErrorFile=/data/hs_err/hs_err_pid%p.log
+-Xlog:gc*,safepoint:file=/data/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=20M</code></pre>
+</div>
+
+<p><strong>为什么这样配：</strong>① 批处理没有延迟预算，吞吐量（单位时间处理多少数据）是 KPI，Parallel 的 STW 虽然长但回收效率最高；② 堆给到容器的 75%，离线作业类加载少，元空间保险丝 512m 足够；③ 显式设 ParallelGCThreads，防止容器超卖核数时 GC 线程打架（第 4 站的 crack）。</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>模板 C · 超低延迟</b> · 16G 容器 / ZGC / JDK17+</span></div>
+<pre><code><span class="c"># 超低延迟服务：16G 容器，ZGC（JDK17+，非实验性），P99 停顿 &lt; 10ms</span>
+-Xms12g -Xmx12g
+-XX:+UseZGC                     <span class="c"># 停顿与堆大小基本无关，亚毫秒~毫秒级</span>
+-XX:SoftMaxHeapSize=10g         <span class="c"># 稳态压到 10g，压力来了允许涨回 12g</span>
+-XX:ConcGCThreads=4             <span class="c"># 并发线程限 4 个，别让 GC 吃掉业务 CPU</span>
+-XX:MetaspaceSize=256m
+-XX:MaxMetaspaceSize=512m
+-XX:MaxDirectMemorySize=1g
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/data/dumps/
+-XX:ErrorFile=/data/hs_err/hs_err_pid%p.log
+-Xlog:gc*,safepoint:file=/data/logs/gc.log:time,uptime,level,tags:filecount=10,filesize=20M</code></pre>
+</div>
+
+<p><strong>为什么这样配：</strong>① ZGC 的卖点是不停顿，但它的并发阶段要占 CPU——ConcGCThreads 必须显式限流，否则 GC 线程和业务线程抢核，延迟反而变差（第 4 站 think 里算过这笔账）；② SoftMaxHeapSize 让稳态占用低于 Xmx，容器账单好看了，峰值还有 2G 缓冲；③ 注意 JDK 版本：JDK 15 之前 ZGC 是实验性特性，启动要加 <code>-XX:+UnlockExperimentalVMOptions</code>，模板按 JDK 17+ 写就免了。</p>
+
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>杂项四参数各管一类事故：Xss 管栈与线程预算（记得乘线程数），UseTLAB 别碰，SoftMaxHeapSize 管稳态占用，ExplicitGC 两兄弟管 System.gc() 的 Full GC 风险。三套模板的骨架完全一致——堆（相等）+ 元空间（阈值+保险丝）+ 收集器（场景选）+ 诊断（三件套），变的只有数字。</p>
+</div>
+</section>
+
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结：知识地图 + 面试模板 + 高频追问</h2></div>
+
+<h3>知识地图</h3>
+<div class="recap">
+<p><strong>本文全部知识点的结构（能默画出来就算内化）：</strong></p>
+<ul>
+  <li><strong>堆（五层控制）</strong>：Xms=Xmx 钉总盘子；Xmn 与 NewRatio 二选一（都设听 Xmn，Xmn 是结果、NewRatio 是公式）；SurvivorRatio 默认 8、TenuringThreshold 默认 15；PretenureSizeThreshold 仅 Serial/ParNew，G1 大对象看 Humongous Region。</li>
+  <li><strong>容器（版本线 8u191 / 10+）</strong>：MaxRAMPercentage 默认 25% 要提到 60~75%、ActiveProcessorCount 钉核数；显式 Xmx 会压过全部 RAMPercentage。</li>
+  <li><strong>元空间（两坑）</strong>：MetaspaceSize 是首次 GC 阈值（默认 20MB 量级 → 设 128~256m），MaxMetaspaceSize 是保险丝（默认不限量 → 必设 512m）；CompressedClassSpaceSize 默认 1G 别碰。</li>
+  <li><strong>收集器（决策树）</strong>：堆与核数加延迟预算逐步排除 → Serial / Parallel / CMS（JDK14 移除）/ ZGC（P99&lt;10ms 或 &gt;16G）/ 默认 G1；G1 核心参数 MaxGCPauseMillis 默认 200ms（软目标）、IHOP 默认 45%（JDK9+ 自适应）、Region 默认 Xmx÷2048；并行度受容器核数影响。</li>
+  <li><strong>日志（两套语法）</strong>：JDK 8 用 PrintGCDetails 一族，JDK 9+ 用 -Xlog:gc* 统一日志，不能混用、用错静默忽略；必开轮转 10 份 × 20M。</li>
+  <li><strong>诊断（和事配）</strong>：OOM 三件套（HeapDump+Path、OnOutOfMemoryError）、ErrorFile 管 crash、PrintFlagsFinal 验证生效值、NMT 管堆外、TraceClassLoading 管类泄漏；参数不生效的五种原因（拼写/版本/ergonomics/互斥/容器探测）。</li>
+  <li><strong>模板（三套骨架）</strong>：通用 Web（G1）、批处理（Parallel）、超低延迟（ZGC+SoftMaxHeapSize）；骨架 = 堆相等 + 元空间阈值与保险丝 + 收集器 + 诊断，变的只有数字。</li>
+</ul>
+</div>
+
+<h3>面试回答模板</h3>
+<div class="takeaway"><span class="takeaway-label">30 秒版（先说结论）</span>
+<p>"我常用 30 个左右的参数，分六类：堆、容器、元空间、收集器、日志、诊断。最常用的：-Xms 等于 -Xmx 避免扩缩堆的 STW；-XX:MetaspaceSize 加 MaxMetaspaceSize，一个是首次 GC 阈值、一个是保险丝；收集器 90% 的场景用 G1，配 MaxGCPauseMillis=200ms；任何服务都配 OOM 自动转储三件套和带轮转的 GC 日志。容器化再加两个：MaxRAMPercentage 和 ActiveProcessorCount。最后我习惯用 -XX:+PrintFlagsFinal 验证最终生效值，不靠猜。"</p></div>
+<div class="takeaway"><span class="takeaway-label">3 分钟版（展开细节）</span>
+<p>"第一层，收集器选择走决策树：堆小于 100MB 加单核用 Serial；吞吐优先的批处理用 Parallel；JDK8 低延迟且堆小于 8G 时代会用 CMS，现在 JDK14 已经移除；P99 要求小于 10ms 或堆大于 16G 用 ZGC；剩下的 90% 落在 G1。第二层，三套生产模板：通用 Web 是 G1 加 Xmx 取容器内存的 75%，MetaspaceSize 贴稳态值；批处理是 Parallel 加停顿目标放宽到 500ms；超低延迟是 ZGC 加 SoftMaxHeapSize 控稳态，还要限 ConcGCThreads 防止 GC 线程吃业务 CPU。第三层，参数间的关系：Xmn 压 NewRatio、显式 Xmx 压 RAMPercentage、JDK 8 对拼错的参数会静默忽略——这是参数不生效的头号原因。最后说验证：启动时 PrintFlagsFinal 加 grep，运行时 jinfo -flags 或 jcmd VM.flags。举个实战例子：某服务启动期反复出现 Metadata GC Threshold 停顿，日志元空间用量 20MB 起步，一行 -XX:MetaspaceSize=256m 解决——这就是从日志现象反推参数处方的完整闭环。"</p></div>
+
+<h3>高频追问表</h3>
+<table class="nb-table">
+<thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+<tbody>
+<tr><td>Xmn 和 NewRatio 都设了，听谁的？</td><td>听 Xmn。Xmn 是结果，NewRatio 是公式，结果压公式；两者二选一，都写等于埋雷。</td></tr>
+<tr><td>MetaspaceSize 和 MaxMetaspaceSize 区别？</td><td>前者是首次 Metadata GC 的触发阈值（报警线，默认 20MB 量级），后者是元空间上限（保险丝，默认不限量）。设稳态值上方 + 必设上限。</td></tr>
+<tr><td>为什么 -Xmx 不要设成容器内存的 100%？</td><td>堆外还有四兄弟：元空间、Direct 内存、线程栈（Xss × 线程数）、mmap 代码段。占满 100%，堆外没额度，容器被 OOM Killer 杀。</td></tr>
+<tr><td>G1 的 MaxGCPauseMillis 设 1ms 会怎样？</td><td>它只是软目标，设 1ms 后每轮回收量太小，老年代积压追不上分配速度，最终退化成长时间 Full GC——软目标不是承诺。</td></tr>
+<tr><td>容器里 JVM 参数要注意什么？</td><td>三条：JDK 版本线（8u191 / 10+ 才完整支持 cgroup）；MaxRAMPercentage 默认 25% 要调；ActiveProcessorCount 钉核数，防 GC 线程按宿主机核数超调度。</td></tr>
+<tr><td>怎么确认参数真的生效了？</td><td>启动时 -XX:+PrintFlagsFinal | grep 参数名；运行时 jinfo -flags pid 或 jcmd pid VM.flags。用生效值说话，不用记忆说话。</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">核心记忆</span>
+<p>调参像开处方：症状 → 处方 → 复诊。记三个数字（Xmx ≈ 容器 75%、MetaspaceSize ≈ 256m、停顿目标 200ms）、两条版本线（8u191 / 10+）、三板斧验证（PrintFlagsFinal / jinfo / jcmd），处方就不会开错。下一篇「GC 日志分析」教你怎么读复诊的化验单——把日志里每一行 GC 输出的字段和原因都拆开看。</p>
+</div>
+</section>
 </main>
 </body>
 </html>

@@ -9,492 +9,643 @@
 
 <main class="lesson-body">
 
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "JVM 堆内存：年轻代三区与老年代的生命周期"
+  difficulty: 中级
+  interviewFreq: 必问
+  desc: "Eden + Survivor0 + Survivor1 + Old Gen，对象在哪里出生、在哪里晋升、什么时候进入老年代——GC 调优的基础。"
+-->
+
 <!-- ═══════════════ 第1站：为什么要分代 ═══════════════ -->
 <section class="station reveal" id="s1">
 <div class="station-head"><span class="station-no">第 1 站</span><h2>开场：为什么 JVM 堆要分代？</h2></div>
 
-<p>面试官开口第一问：</p>
+<p>面试官很喜欢用这个问题开场，因为答案直接决定了他对你 GC 理解深度的判断：</p>
 
 <div class="think"><div class="think-q">"JVM 堆为什么要分成年轻代和老年代？一整块不好吗？"</div></div>
 
-<p>如果你只回答"为了 GC 效率"，面试官会继续追问：<strong>凭什么年轻代的 GC 就可以更快？</strong></p>
+<p>如果你只回答"为了 GC 效率"，面试官一定会继续追问：<strong>凭什么年轻代的 GC 就可以更快？依据是什么统计规律？</strong>答不上来，话题就到此为止了。所以我们先建立正确的认知框架，再回答问题。</p>
 
-<p>答案藏在一个经验假设里——<strong>弱分代假说（Weak Generational Hypothesis）</strong>：</p>
+<h3>先搭框架：GC 的三个根本问题</h3>
 
-<div class="formula">绝大多数对象都是"朝生夕灭"的——分配后很快就会死亡，只有极少数对象能长期存活。</div>
+<p>整个 JVM 垃圾回收的知识体系，都可以挂在三个根本问题上。先记住这个框架，后面所有卷三的知识点都不会乱：</p>
 
-<p>这个假说有大量统计支撑：超过 90% 的对象活不过第一次 GC。既然绝大多数对象集中在某个区域且迅速死亡，那就把它们单独划出来，用一套<strong>快速、高频</strong>的回收策略去处理——这就是年轻代。</p>
+<table class="nb-table">
+<thead><tr><th>根本问题</th><th>回答什么</th><th>对应知识点</th></tr></thead>
+<tbody>
+<tr><td><strong>回收什么</strong></td><td>哪些对象可以回收</td><td>可达性分析、GC Roots、四种引用（见「对象存活判定」「GC Roots 详解」）</td></tr>
+<tr><td><strong>何时回收</strong></td><td>什么时候触发一次 GC</td><td>Eden 满、老年代满、元空间满、IHOP 水位、System.gc()（本篇 + 「GC 日志分析」）</td></tr>
+<tr><td><strong>怎么回收</strong></td><td>用什么算法和收集器回收</td><td>复制 / 标记-清除 / 标记-整理、Serial → G1 → ZGC（见「垃圾收集器全览」）</td></tr>
+</tbody>
+</table>
 
-<p>而少数"长寿"对象放到老年代，用<strong>慢速、低频</strong>的策略回收。两套策略各司其职，整体 GC 效率远高于"一刀切"。</p>
+<p>"为什么分代"本质上是回答"何时回收 + 怎么回收"的设计动机：<strong>把堆按对象存活时间切成不同的区域，让占绝大多数的"短命对象"能被一套又快又专的机制快速处理掉。</strong></p>
 
-<div class="takeaway"><span class="takeaway-label">一句话</span>分代的本质是<strong>按存活时间分组</strong>，对不同组使用不同的 GC 策略，让大部分回收工作在年轻代快速完成。</div>
+<h3>分代依赖的两个统计假设</h3>
 
-<p>这篇文章把 JVM 堆的分代结构拆成 <strong>7 站</strong>，从全景布局到对象生命周期，从 GC 类型到调优参数，逐站讲透。</p>
-
-<p>发车之前先问自己三个问题：</p>
+<p>HotSpot 的分代设计完全建立在这两个经验假设之上——面试时能说出名字和区别，就是加分项：</p>
 
 <ul>
-  <li>Eden 和两个 Survivor 区的默认比例是多少？</li>
-  <li>对象经历多少次 GC 后才会晋升到老年代？</li>
-  <li>Minor GC 和 Full GC 分别在什么场景下触发？</li>
+  <li><strong>弱分代假说（Weak Generational Hypothesis）</strong>：绝大多数对象都是"朝生夕灭"的——刚分配出来，很快就再也没有引用指向它们了。</li>
+  <li><strong>强分代假说（Strong Generational Hypothesis）</strong>：熬过了前几轮 GC 的对象，未来继续长期存活的概率会更高。</li>
 </ul>
 
-<p>带着问题，我们开始。</p>
+<p>第一个假设是<strong>年轻代存在的理由</strong>：统计上绝大多数对象活不过第一轮 GC，那么回收这"绝大多数"就不该每次都扫描整个堆，而应该有一块专用区域、一个高频快速的收集器（Minor GC）专门处理。第二个假设是<strong>老年代存在的理由</strong>：熬过年轻代的对象被证明"活得久"，回收它们可以慢一点、频率低一点——因为它们下轮还活着的概率高，如果每次都急着回收（比如频繁整理），反而浪费 CPU。</p>
+
+<p>一个帮助内化的类比：医院分<strong>急诊科</strong>和<strong>住院部</strong>。急诊科（年轻代）处理"来得急、走得也快"的病例，流程快、频次高、吞吐量必须大；住院部（老年代）处理长期病人，动作慢、频次低。如果医院只设一个大厅让所有病人走同一条流程，那才是灾难。分代就是 JVM 的"分诊制度"。</p>
+
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>分代的本质是<strong>按存活时间分组</strong>，给不同组配不同的 GC 策略：高频、短耗时的回收工作集中在年轻代完成，长寿对象留在老年代低频处理。是用"分组的复杂度"换"整体 GC 效率"。</p>
+</div>
+
+<p>这篇文章把 JVM 堆的分代结构拆成 <strong>8 站</strong>：全景布局 → 分配规则 → 晋升规则 → Minor GC 拆解 → Full/Mixed GC → 调优参数 → 面试模板。读的时候带着三个问题：</p>
+
+<ul>
+  <li>Eden 和两个 Survivor 区默认什么比例？对象"Eden 都装不下"时去哪？</li>
+  <li>除了"年龄到 15"，对象进老年代还有哪几条路？"分配担保"的完整判定逻辑是什么？</li>
+  <li>到了 G1 时代，"年轻代 / 老年代"还是物理分区吗？</li>
+</ul>
 </section>
 
 <!-- ═══════════════ 第2站：堆内存全景 ═══════════════ -->
 <section class="station reveal" id="s2">
 <div class="station-head"><span class="station-no">第 2 站</span><h2>堆内存全景：Eden + S0 + S1 + Old Gen</h2></div>
 
-<p>JVM 堆（Heap）分为两大区域：<strong>年轻代（Young Generation）</strong>和<strong>老年代（Old Generation）</strong>。年轻代内部再细分为三个区：<strong>Eden</strong>、<strong>Survivor 0（From）</strong>和 <strong>Survivor 1（To）</strong>。</p>
+<p>先画地图。HotSpot 的堆（Heap）分为两大区域：<strong>年轻代（Young Generation）</strong>和<strong>老年代（Old Generation）</strong>；年轻代内部再细分为三个区：<strong>Eden</strong> 和两个 <strong>Survivor</strong> 区（一个当 From，一个当 To，角色互换使用）。</p>
 
 <figure class="fig">
-<svg viewBox="0 0 800 440" role="img" aria-label="JVM 堆内存分代结构全景图">
+<svg viewBox="0 0 800 460" role="img" aria-label="JVM 堆内存分代结构全景图">
   <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
-    <linearGradient id="edenGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#B8D9B0"/>
-      <stop offset="100%" stop-color="#8BC28A"/>
+    <marker id="l24-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="l24-arrr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+    <linearGradient id="l24-eden" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#B8D9B0"/><stop offset="100%" stop-color="#8BC28A"/>
     </linearGradient>
-    <linearGradient id="survGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#A8CDE0"/>
-      <stop offset="100%" stop-color="#6BAFCF"/>
+    <linearGradient id="l24-surv" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#A8CDE0"/><stop offset="100%" stop-color="#6BAFCF"/>
     </linearGradient>
-    <linearGradient id="oldGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#E0C8A8"/>
-      <stop offset="100%" stop-color="#C9A87C"/>
+    <linearGradient id="l24-old" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E0C8A8"/><stop offset="100%" stop-color="#C9A87C"/>
     </linearGradient>
   </defs>
 
-  <!-- 整体堆边框 -->
-  <rect x="20" y="30" width="760" height="340" rx="12" fill="#FAFAFA" stroke="#555" stroke-width="2"/>
-  <text x="400" y="22" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#333" font-weight="700">JVM Heap（堆）</text>
+  <text x="400" y="22" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#333" font-weight="700">JVM Heap（堆）—— 对象分配的主战场，也是 GC 的主战场</text>
+  <rect x="20" y="34" width="760" height="346" rx="12" fill="#FAFAFA" stroke="#555" stroke-width="2"/>
 
-  <!-- 年轻代边框 -->
-  <rect x="35" y="55" width="310" height="300" rx="8" fill="none" stroke="#2D7D2D" stroke-width="1.8" stroke-dasharray="6,3"/>
-  <text x="190" y="78" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#2D7D2D" font-weight="700">年轻代 Young Generation</text>
+  <rect x="35" y="58" width="310" height="302" rx="8" fill="none" stroke="#2D7D2D" stroke-width="1.8" stroke-dasharray="6,3"/>
+  <text x="190" y="80" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#2D7D2D" font-weight="700">年轻代 Young Generation（约 1/3 堆）</text>
 
-  <!-- Eden -->
-  <rect x="50" y="95" width="180" height="245" rx="6" fill="url(#edenGrad)" stroke="#2D7D2D" stroke-width="1.5"/>
-  <text x="140" y="195" text-anchor="middle" font-family="monospace" font-size="16" fill="#1B5E1B" font-weight="700">Eden</text>
-  <text x="140" y="218" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B">80% 年轻代</text>
-  <text x="140" y="240" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#3A7A3A">新对象在这里分配</text>
+  <rect x="50" y="96" width="180" height="246" rx="6" fill="url(#l24-eden)" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="140" y="200" text-anchor="middle" font-family="monospace" font-size="16" fill="#1B5E1B" font-weight="700">Eden</text>
+  <text x="140" y="222" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B">占年轻代 80%</text>
+  <text x="140" y="244" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#3A7A3A">几乎所有新对象在这里出生</text>
 
-  <!-- Survivor 0 -->
-  <rect x="245" y="95" width="85" height="245" rx="6" fill="url(#survGrad)" stroke="#2B6E91" stroke-width="1.5"/>
-  <text x="287" y="195" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S0</text>
-  <text x="287" y="218" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1A4D6E">From</text>
-  <text x="287" y="238" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2B6E91">10%</text>
+  <rect x="245" y="96" width="85" height="118" rx="6" fill="url(#l24-surv)" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="287" y="146" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S0</text>
+  <text x="287" y="166" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">From · 10%</text>
 
-  <!-- Survivor 1 -->
-  <rect x="245" y="95" width="0" height="0" rx="0" fill="none"/>
-  <!-- S1 放在年轻代区域外面右侧以便看清，用箭头连接 -->
-  <!-- 其实放年轻代里面更好 -->
-  <rect x="50" y="350" width="180" height="0" rx="0" fill="none"/>
+  <rect x="245" y="224" width="85" height="118" rx="6" fill="url(#l24-surv)" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="287" y="274" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S1</text>
+  <text x="287" y="294" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">To · 10%</text>
 
-  <!-- 调整布局：把 S0 S1 并排放在 Eden 右侧 -->
-  <!-- 覆盖上面的 S0，重新绘制 -->
-  <rect x="245" y="95" width="85" height="118" rx="6" fill="url(#survGrad)" stroke="#2B6E91" stroke-width="1.5"/>
-  <text x="287" y="145" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S0</text>
-  <text x="287" y="165" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">From · 10%</text>
+  <line x1="333" y1="160" x2="333" y2="262" stroke="#2B6E91" stroke-width="1.2" marker-end="url(#l24-arr)"/>
+  <text x="344" y="212" font-family="sans-serif" font-size="9" fill="#2B6E91">每次 Minor GC</text>
+  <text x="344" y="224" font-family="sans-serif" font-size="9" fill="#2B6E91">From/To 互换</text>
 
-  <!-- Survivor 1 -->
-  <rect x="245" y="222" width="85" height="118" rx="6" fill="url(#survGrad)" stroke="#2B6E91" stroke-width="1.5"/>
-  <text x="287" y="272" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S1</text>
-  <text x="287" y="292" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">To · 10%</text>
+  <rect x="370" y="58" width="395" height="302" rx="8" fill="url(#l24-old)" stroke="#8B6914" stroke-width="1.8"/>
+  <text x="567" y="80" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#6B4E0A" font-weight="700">老年代 Old Generation（约 2/3 堆）</text>
+  <text x="567" y="190" text-anchor="middle" font-family="monospace" font-size="15" fill="#6B4E0A">长期存活的对象</text>
+  <text x="567" y="214" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#8B6914">大对象、熬过年龄阈值的对象、Survivor 装不下的对象</text>
+  <text x="567" y="236" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#8B6914">回收慢、频率低（Major GC / Mixed GC / Full GC）</text>
 
-  <!-- S0 ↔ S1 双向箭头 -->
-  <line x1="332" y1="154" x2="332" y2="281" stroke="#2B6E91" stroke-width="1.2" marker-end="url(#arrow)"/>
-  <text x="342" y="220" font-family="sans-serif" font-size="9" fill="#2B6E91">复制交换</text>
+  <line x1="337" y1="230" x2="367" y2="230" stroke="#B85450" stroke-width="2" marker-end="url(#l24-arrr)"/>
+  <text x="352" y="220" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#B85450">晋升</text>
 
-  <!-- 老年代 -->
-  <rect x="370" y="55" width="395" height="300" rx="8" fill="url(#oldGrad)" stroke="#8B6914" stroke-width="1.8"/>
-  <text x="567" y="78" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#6B4E0A" font-weight="700">老年代 Old Generation</text>
-  <text x="567" y="200" text-anchor="middle" font-family="monospace" font-size="15" fill="#6B4E0A">长期存活的对象</text>
-  <text x="567" y="225" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#8B6914">约占堆的 2/3</text>
-  <text x="567" y="250" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#8B6914">默认 young:old = 1:2</text>
+  <text x="400" y="408" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#555">默认比例：Eden : S0 : S1 = 8 : 1 : 1（-XX:SurvivorRatio=8）　|　Young : Old = 1 : 2（-XX:NewRatio=2）</text>
 
-  <!-- 晋升箭头 -->
-  <line x1="335" y1="220" x2="368" y2="220" stroke="#B85450" stroke-width="2" marker-end="url(#arrow)"/>
-
-  <!-- 默认比例标注 -->
-  <text x="400" y="395" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#555">默认比例: Eden : S0 : S1 = 8 : 1 : 1 &nbsp;|&nbsp; Young : Old = 1 : 2</text>
-
-  <!-- 图例 -->
-  <rect x="50" y="410" width="14" height="14" rx="2" fill="#8BC28A" stroke="#2D7D2D"/>
-  <text x="70" y="422" font-family="sans-serif" font-size="11" fill="#333">新生代分配区</text>
-  <rect x="170" y="410" width="14" height="14" rx="2" fill="#6BAFCF" stroke="#2B6E91"/>
-  <text x="190" y="422" font-family="sans-serif" font-size="11" fill="#333">幸存者区</text>
-  <rect x="270" y="410" width="14" height="14" rx="2" fill="#C9A87C" stroke="#8B6914"/>
-  <text x="290" y="422" font-family="sans-serif" font-size="11" fill="#333">老年代</text>
+  <rect x="50" y="428" width="14" height="14" rx="2" fill="#8BC28A" stroke="#2D7D2D"/>
+  <text x="70" y="440" font-family="sans-serif" font-size="11" fill="#333">新生区（Eden）</text>
+  <rect x="185" y="428" width="14" height="14" rx="2" fill="#6BAFCF" stroke="#2B6E91"/>
+  <text x="205" y="440" font-family="sans-serif" font-size="11" fill="#333">幸存者区（Survivor）</text>
+  <rect x="340" y="428" width="14" height="14" rx="2" fill="#C9A87C" stroke="#8B6914"/>
+  <text x="360" y="440" font-family="sans-serif" font-size="11" fill="#333">老年代（Old Gen）</text>
 </svg>
-<figcaption><span class="fig-no">图 1</span> JVM 堆内存分代结构全景——Eden 占年轻代 80%，两个 Survivor 各占 10%，老年代约为堆的 2/3</figcaption>
+<figcaption><span class="fig-no">图 1</span> JVM 堆内存分代结构全景——Eden 占年轻代 80%，两个 Survivor 各占 10%；老年代约占堆的 2/3</figcaption>
 </figure>
 
-<p>几个关键数字要记住：</p>
+<h3>三个必须记住的默认值</h3>
 
 <table class="nb-table">
-<thead><tr><th>参数</th><th>默认值</th><th>说明</th></tr></thead>
+<thead><tr><th>参数</th><th>默认值</th><th>含义</th><th>控制参数</th></tr></thead>
 <tbody>
-<tr><td>Young : Old</td><td>1 : 2</td><td>由 <code>-XX:NewRatio</code> 控制，默认 NewRatio=2</td></tr>
-<tr><td>Eden : Survivor</td><td>8 : 1 : 1</td><td>由 <code>-XX:SurvivorRatio</code> 控制，默认 SurvivorRatio=8</td></tr>
-<tr><td>TLAB（线程本地分配缓存）</td><td>约 1% Eden</td><td>每个线程独享的小缓冲区，避免锁竞争</td></tr>
+<tr><td>Eden : S0 : S1</td><td>8 : 1 : 1</td><td>年轻代内部三区比例，每次 Minor GC 只有 1/10 空间装存活对象</td><td><code>-XX:SurvivorRatio</code>（默认 8，指 Eden:Survivor）</td></tr>
+<tr><td>Young : Old</td><td>1 : 2</td><td>年轻代约占堆的 1/3</td><td><code>-XX:NewRatio</code>（默认 2，指 Old:Young）</td></tr>
+<tr><td>晋升年龄阈值</td><td>15 次 Minor GC</td><td>对象在 Survivor 区每存活一次年龄 +1，到阈值晋升</td><td><code>-XX:MaxTenuringThreshold</code></td></tr>
 </tbody>
 </table>
 
-<div class="think"><div class="think-q">为什么有两个 Survivor 区，而不是一个？</div>
+<div class="think"><div class="think-q">为什么需要两个 Survivor 区？一个不行吗？</div>
 
-<p>因为年轻代用的是 <strong>复制算法（Copying Collector）</strong>。每次 Minor GC 时，Eden 和一个 Survivor（From）中的存活对象会被<strong>复制到另一个 Survivor（To）</strong>，然后清空 Eden 和 From。之后 S0 和 S1 角色互换。如果只有一个 Survivor，碎片化会非常严重。</p></div>
+<p>因为年轻代用的是<strong>复制算法（Copying）</strong>：每次 Minor GC 时，把 Eden + 当前 From 区中<strong>存活</strong>的对象，原样复制到 To 区，然后一次性清空 Eden 和 From。复制算法要求<strong>目标区必须是空的</strong>（否则没法区分"复制过来的对象"和"本来就在的对象"）。两个 Survivor 轮流充当 From 和 To，就保证了每次总有一个空区可用。代价是浪费 1/10 的年轻代空间——所以 SurvivorRatio 默认给到 8：反正存活对象只占少数，10% 足够装了。</p></div>
+
+<h3>分代是物理分区吗？——G1 时代的真相</h3>
+
+<p>在 Serial、Parallel、CMS 这些"经典"收集器里，年轻代和老年代确实是堆里<strong>两块连续的物理内存</strong>。但到了 G1，情况变了：</p>
+
+<div class="formula">G1 把整个堆切成约 2048 个等大的 Region（每个 1MB ~ 32MB）。<br>Eden / Survivor / Old 只是 Region 的「逻辑集合」，互不连续——同一个 Region 甚至可以在不同 GC 周期扮演不同角色。</div>
+
+<p>这是 Oracle 官方文档的原话："the eden, survivor, and old generations are <strong>logical sets</strong> of these regions and are not contiguous"。所以面试时说"堆分成年轻代老年代"没错，但加分回答是：<strong>分代是一种分配与回收策略，不一定要物理连续</strong>——G1 用 Region 化打破了物理边界，但"对象从年轻态走向老年态"的生命周期概念依然保留（Region 也有年龄）。</p>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>记住三组数字：<strong>8:1:1</strong>（年轻代内部）、<strong>1:2</strong>（年轻:老年）、<strong>15</strong>（年龄阈值）。再记住一个观念：分代是逻辑概念，G1 之后 Region 可以跨代复用。</p>
+</div>
 </section>
 
-<!-- ═══════════════ 第3站：对象生命周期 ═══════════════ -->
+<!-- ═══════════════ 第3站：分配规则 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>对象的生命周期：从出生到晋升</h2></div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>分配规则：对象在哪里出生？</h2></div>
 
-<p>一个普通对象在 JVM 堆中的旅程是这样的：</p>
+<p>对象创建的第一步是<strong>内存分配</strong>。JVM 决定"把对象放在哪"的规则，比你想象的多——不只是"新对象进 Eden"这么简单。</p>
+
+<h3>规则一：新对象优先进 Eden</h3>
+
+<p>绝大多数对象走这条路：在 Eden 区分配内存（实际发生在每个线程的 TLAB——线程本地分配缓存里，TLAB 的机制在「对象创建全过程」一篇里拆，这里只需知道：TLAB 是 Eden 里划给每个线程的私有小块，避免多线程抢同一个分配指针加锁）。Eden 满了，触发一次 Minor GC。</p>
+
+<h3>规则二：Eden 装不下，直接去老年代</h3>
+
+<p>如果一个对象比 Eden 的<strong>剩余空闲空间</strong>还大（注意：不是比 Eden 总空间大，JVM 会先看 Eden 当前剩多少），就没有资格在年轻代"历练"了——JVM 直接在老年代找一块连续空间分配。如果老年代也放不下，就先触发一次 Full GC 腾空间，再试。</p>
+
+<div class="crack"><span class="crack-label">易错点</span>
+<p>"比 Eden 大才进老年代"是常见误解。准确说法是<strong>比 Eden 的剩余空间大</strong>。所以同一个对象，有时在 Eden 出生，有时直接进老年代——取决于当时 Eden 还剩多少。这也是 GC 日志里偶发"大对象"现象的来源之一。</p>
+</div>
+
+<h3>规则三：大对象直通老年代（PretenureSizeThreshold）</h3>
+
+<p>有些对象天生就是大块头（典型如大数组 <code>byte[10 * 1024 * 1024]</code>、大视频字节流）。如果让它先在 Eden 出生、再在 Survivor 之间反复复制，复制成本可能比直接分配还高。于是 HotSpot 提供了直通机制：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><div class="srcbox-file">对象生命周期时间线</div></div>
-<div class="srcbox-code">
-<div><span class="c">阶段 1</span> <span class="k">new 对象</span> <span class="t">→</span> <span class="n">分配在 Eden 区</span></div>
-<div><span class="c">阶段 2</span> <span class="k">第一次 Minor GC</span> <span class="t">→</span> <span class="n">存活对象复制到 S0，age = 1</span></div>
-<div><span class="c">阶段 3</span> <span class="k">第二次 Minor GC</span> <span class="t">→</span> <span class="n">从 S0 复制到 S1，age = 2</span></div>
-<div><span class="c">阶段 4</span> <span class="k">第三次 Minor GC</span> <span class="t">→</span> <span class="n">从 S1 复制到 S0，age = 3</span></div>
-<div><span class="c">  ...</span></div>
-<div><span class="c">阶段 N</span> <span class="k">age >= 15</span> <span class="t">→</span> <span class="n">晋升到老年代（Promotion）</span></div>
+<div class="srcbox-head"><span class="srcbox-file"><b>HotSpot 分配逻辑（简化）</b> · 对象分配时的判断顺序</span></div>
+<pre><code><span class="c">// 分配对象 size 时：</span>
+<span class="k">if</span> (size &lt;= eden_free)          <span class="c">// ① Eden 剩得下 → 正常在 Eden 分配</span>
+    <span class="n">allocate_in_eden</span>(size);
+<span class="k">else if</span> (size &lt;= old_free)     <span class="c">// ② Eden 剩不下，老年代放得下 → 直接老年代</span>
+    <span class="n">allocate_in_old</span>(size);
+<span class="k">else</span> {                          <span class="c">// ③ 两边都放不下 → 先 Full GC 再试，仍失败则 OOM</span>
+    <span class="n">full_gc</span>();
+    <span class="n">retry_or_oom</span>(size);
+}</code></pre>
 </div>
-</div>
 
-<p>每次 Minor GC 存活后，对象的 <strong>年龄（age）+1</strong>。当 age 达到 <code>-XX:MaxTenuringThreshold</code>（默认 15）时，对象晋升到老年代。</p>
+<p>对于 Serial / ParNew 收集器，还可以显式指定：<code>-XX:PretenureSizeThreshold</code>——超过该大小的对象<strong>不走规则二的"看剩余空间"逻辑</strong>，直接进老年代。它存在的目的正是省掉大对象在年轻代的复制开销。</p>
 
-<div class="formula">晋升条件：obj.age >= MaxTenuringThreshold（默认 15）</div>
+<div class="think"><div class="think-q">G1 时代这个参数还有用吗？</div>
+<p><strong>没有。</strong>该参数只对 Serial 和 ParNew 有效（文档明确说明）。G1 有自己的一套大对象机制——<strong>Humongous 对象</strong>：对象大小超过 Region 的 <strong>一半</strong>，就叫 Humongous，JVM 会把它直接分配到一块或多块连续的 Humongous Region 里（不经过普通 Eden）。如果连续 Region 不够，G1 会先触发一次 Young GC（顺便整理 Humongous Region）再试。所以 G1 调优里你关注的是 <code>-XX:G1HeapRegionSize</code> 而不是 PretenureSizeThreshold——这也是为什么大量分配超大对象时，要先把 Region 调大。</p></div>
 
-<p>用一个流程图来展示完整的对象旅行路线：</p>
+<h3>规则四：大数组的"灰色地带"</h3>
+
+<p>一个容易忽略的细节：数组在 HotSpot 里有特殊待遇。即使没有设置 PretenureSizeThreshold，一个<strong>总长度很大的数组</strong>（比如 <code>new long[100000]</code>，约 800KB）如果在 Eden 剩余空间里放不下，也会直接落到老年代——因为数组是"潜在大对象"里最常见的一种，HotSpot 对它的分配策略更保守。写批量处理代码时，如果一次性 new 超大数组，老年代会突然鼓起来，GC 日志里能看到对应的 allocation——这不是 bug，是分配规则在起作用。</p>
 
 <figure class="fig">
-<svg viewBox="0 0 780 300" role="img" aria-label="对象从 Eden 到老年代的晋升流程">
+<svg viewBox="0 0 780 330" role="img" aria-label="对象内存分配决策流程图">
   <defs>
-    <marker id="arr2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
-    <marker id="arr-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+    <marker id="l24-a2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
   </defs>
 
-  <!-- Eden -->
-  <rect x="20" y="80" width="120" height="80" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
-  <text x="80" y="115" text-anchor="middle" font-family="monospace" font-size="14" fill="#1B5E1B" font-weight="700">Eden</text>
-  <text x="80" y="135" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2D7D2D">new 对象</text>
+  <rect x="30" y="30" width="170" height="70" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="115" y="58" text-anchor="middle" font-family="monospace" font-size="14" fill="#1B5E1B" font-weight="700">new 对象</text>
+  <text x="115" y="78" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2D7D2D">大小 = size</text>
 
-  <!-- Minor GC -->
-  <line x1="142" y1="120" x2="195" y2="120" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#arr2)"/>
-  <text x="168" y="110" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#3E6B8F">GC</text>
+  <line x1="115" y1="102" x2="115" y2="140" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l24-a2)"/>
 
-  <!-- S0 -->
-  <rect x="200" y="80" width="90" height="80" rx="8" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
-  <text x="245" y="112" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S0 / S1</text>
-  <text x="245" y="132" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">age 1→14</text>
+  <polygon points="115,145 215,190 115,235 15,190" fill="#FFF3CD" stroke="#B8860B" stroke-width="1.5"/>
+  <text x="115" y="182" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A5C00">size ≤ Eden 剩余空间？</text>
+  <text x="115" y="200" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#7A5C00">（或超过 Pretenure 阈值？）</text>
 
-  <!-- 循环箭头 -->
-  <path d="M290,100 Q320,60 290,80" fill="none" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr2)"/>
-  <text x="325" y="75" font-family="sans-serif" font-size="9" fill="#3E6B8F">每次 GC</text>
-  <text x="325" y="87" font-family="sans-serif" font-size="9" fill="#3E6B8F">age++</text>
+  <line x1="215" y1="190" x2="330" y2="190" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l24-a2)"/>
+  <text x="270" y="180" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#3E6B8F">是（常规路径）</text>
 
-  <!-- 晋升 -->
-  <line x1="292" y1="120" x2="395" y2="120" stroke="#B85450" stroke-width="2" marker-end="url(#arr-red)"/>
-  <text x="345" y="110" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">age≥15</text>
-  <text x="345" y="140" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">晋升</text>
+  <rect x="335" y="150" width="150" height="80" rx="8" fill="url(#l24-eden)" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="410" y="180" text-anchor="middle" font-family="monospace" font-size="14" fill="#1B5E1B" font-weight="700">Eden</text>
+  <text x="410" y="200" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1B5E1B">（线程的 TLAB）</text>
+  <text x="410" y="216" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#3A7A3A">Eden 满 → Minor GC</text>
 
-  <!-- Old Gen -->
-  <rect x="400" y="80" width="140" height="80" rx="8" fill="#E0C8A8" stroke="#8B6914" stroke-width="1.5"/>
-  <text x="470" y="112" text-anchor="middle" font-family="monospace" font-size="14" fill="#6B4E0A" font-weight="700">Old Gen</text>
-  <text x="470" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#8B6914">长期存活</text>
+  <line x1="115" y1="235" x2="115" y2="268" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l24-a2)"/>
+  <text x="130" y="256" font-family="sans-serif" font-size="11" fill="#3E6B8F">否</text>
 
-  <!-- 死亡对象 -->
-  <line x1="80" y1="162" x2="80" y2="210" stroke="#999" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="80" y="230" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#999">90%+ 对象死亡</text>
-  <text x="80" y="245" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#999">Eden 直接清空</text>
+  <polygon points="115,272 205,305 115,338 25,305" fill="#FFF3CD" stroke="#B8860B" stroke-width="1.5"/>
+  <text x="115" y="300" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#7A5C00">size ≤ 老年代</text>
+  <text x="115" y="314" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#7A5C00">剩余空间？</text>
 
-  <!-- 特殊路径 -->
-  <rect x="400" y="200" width="140" height="60" rx="8" fill="#F5E0E0" stroke="#B85450" stroke-width="1.2" stroke-dasharray="4,3"/>
-  <text x="470" y="225" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450">大对象直接进 Old</text>
-  <text x="470" y="242" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">PretenureSizeThreshold</text>
+  <line x1="205" y1="305" x2="330" y2="305" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l24-a2)"/>
+  <text x="265" y="296" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#3E6B8F">是</text>
+
+  <rect x="335" y="265" width="150" height="80" rx="8" fill="url(#l24-old)" stroke="#8B6914" stroke-width="1.5"/>
+  <text x="410" y="295" text-anchor="middle" font-family="monospace" font-size="13" fill="#6B4E0A" font-weight="700">Old Gen</text>
+  <text x="410" y="313" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#6B4E0A">大对象直通 / 规则二</text>
+  <text x="410" y="329" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#8B6914">（大数组同此路径）</text>
+
+  <line x1="115" y1="338" x2="115" y2="352" stroke="#B85450" stroke-width="1.5"/>
+  <text x="160" y="360" font-family="sans-serif" font-size="11" fill="#B85450">否 → 先 Full GC，仍失败 → OOM: Java heap space</text>
+
+  <rect x="520" y="150" width="235" height="195" rx="8" fill="#F5E0E0" stroke="#B85450" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="637" y="175" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#B85450" font-weight="700">G1 的分支：Humongous 对象</text>
+  <text x="637" y="200" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450">size &gt; Region / 2</text>
+  <text x="637" y="222" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450">→ 直接占连续 Humongous Region</text>
+  <text x="637" y="244" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450">（不经过普通 Eden）</text>
+  <text x="637" y="266" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450">空间不足 → 先 Young GC 整理</text>
+  <text x="637" y="288" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450">相关参数：-XX:G1HeapRegionSize</text>
+  <text x="637" y="310" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">（范围 1MB ~ 32MB，约 2048 个 Region）</text>
 </svg>
-<figcaption><span class="fig-no">图 2</span> 对象从 Eden 出生，经历多次 Minor GC 后 age 递增，达到阈值后晋升到老年代</figcaption>
+<figcaption><span class="fig-no">图 2</span> 对象分配决策流程：常规路径走 Eden，装不下或天生过大走老年代，G1 则多一条 Humongous 分支</figcaption>
 </figure>
 
-<div class="crack"><span class="crack-label">面试加分</span>
-<p>对象头（Object Header）中有一个 <strong>4 bit 的分代年龄字段</strong>，最大值 15。这就是为什么 <code>MaxTenuringThreshold</code> 不能超过 15——不是 JVM 限制，而是对象头的物理限制。</p>
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>四条分配规则按优先级：① Eden 剩余空间够 → Eden；② 不够但老年代够 → 直接老年代；③ 超过 <code>PretenureSizeThreshold</code>（仅 Serial/ParNew）→ 直接老年代；④ G1 下超过 Region 一半 → Humongous Region。写代码时"少 new 超大对象、少在循环里 new 大数组"，就是在这个决策树的边缘打转。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：特殊晋升路径 ═══════════════ -->
+<!-- ═══════════════ 第4站：晋升规则 ═══════════════ -->
 <section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>特殊晋升：大对象直通 &amp; 动态年龄判定</h2></div>
+<div class="station-head"><span class="station-no">第 4 站</span><h2>晋升规则：对象什么时候进老年代？</h2></div>
 
-<p>除了按年龄正常晋升，还有两条"快速通道"让对象提前进入老年代。</p>
+<p>对象在年轻代的"履历"由一个数字记录：<strong>年龄（age）</strong>。每熬过一次 Minor GC，年龄 +1；年龄存的是<strong>字节（byte）</strong>，所以理论上限是 255。HotSpot 默认认为：<strong>年龄达到 15 的对象，晋升老年代</strong>。</p>
 
-<h3>通道一：大对象直接进入老年代</h3>
+<div class="formula">正常晋升：obj.age &gt;= -XX:MaxTenuringThreshold（默认 15）→ 晋升老年代</div>
 
-<p>如果一个对象特别大（比如一个很大的数组），在 Eden 和 Survivor 之间来回复制的代价太高。JVM 提供了参数让它<strong>直接在老年代分配</strong>：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><div class="srcbox-file">大对象直通参数</div></div>
-<div class="srcbox-code">
-<div><span class="k">-XX:PretenureSizeThreshold</span> <span class="t">=</span> <span class="n">1048576</span>  <span class="c">// 超过 1MB 的对象直接进老年代</span></div>
-<div><span class="c">// 注意：该参数仅对 Serial 和 ParNew 收集器有效</span></div>
-<div><span class="c">// G1 收集器不使用此参数，G1 有自己的 Humongous Region 机制</span></div>
-</div>
-</div>
+<div class="think"><div class="think-q">为什么是 15？不是 10 或 20？</div>
+<p>15 = 2⁴ - 1，是个经验值，背后的逻辑是：强分代假说下，对象存活曲线是"指数衰减"的——绝大多数对象在第 1 轮就死，能活过 3~5 轮的已经是少数，活过 15 轮的更是极少数。阈值设太低，年轻对象会过早进入老年代，让老年代"消化不良"（回收变慢）；设太高，Survivor 会堆积太多对象，复制开销变大。15 是让"Survivor 装得下"和"老年代别太快满"两个约束的折中。另外年龄是 byte，15 也是默认取的一个"安全小值"。</p></div>
 
 <h3>通道二：动态年龄判定（Dynamic Aging）</h3>
 
-<p>即使对象年龄没到 15，也可能被提前晋升。规则是：</p>
+<p>年龄只是"名义"条件。HotSpot（Parallel Scavenge 实现）还有一个更聪明的<strong>自适应规则</strong>：</p>
 
-<div class="formula">如果 Survivor 区中<strong>相同年龄</strong>的对象总大小 > Survivor 剩余空间的一半，则<strong>该年龄及以上</strong>的对象直接晋升到老年代。</div>
+<div class="formula">如果 Survivor 区中「相同年龄」的对象总大小 &gt; Survivor 剩余空间的一半，<br>则该年龄及以上的对象<strong>全部直接晋升老年代</strong>（不再等年龄到 15）。</div>
 
-<p>这是一个<strong>自适应策略</strong>。当某一年龄段的存活对象特别多、Survivor 快装不下时，JVM 会把这批对象"批量晋升"，避免 Survivor 溢出。</p>
+<p>举个例子：Survivor 只剩 10MB，而年龄为 3 的对象加起来有 8MB——如果还按年龄规则让它们继续在 S0/S1 之间复制，这次 Minor GC 大概率装不下。JVM 就"批量升级"：把年龄 ≥ 3 的对象全部送进老年代。这就是 GC 日志里常说的 <strong>average promotion size（平均晋升大小）</strong>统计的由来——JVM 会持续跟踪每轮 Minor GC 实际晋升了多大一块，供后续决策参考。</p>
 
-<div class="think"><div class="think-q">如果 Survivor 区不够大，会发生什么？</div>
+<div class="think"><div class="think-q">如果 Survivor 就是装不下存活对象，怎么办？</div>
+<p>存活对象放不下时，JVM 把<strong>放不下的那部分直接放进老年代</strong>（分配担保机制，下一节细讲）。如果老年代也放不下——先触发一次 Full GC；Full GC 之后还是放不下，就只能 <code>OutOfMemoryError: Java heap space</code> 了。这就是"Minor GC 之后紧接着 Full GC"的典型链路。</p></div>
 
-<p>存活对象无法全部放入 Survivor，JVM 会通过<strong>分配担保（Handle Promotion）</strong>机制，把放不下的对象直接放到老年代。如果老年代也放不下，就会触发 <strong>Full GC</strong>。</p></div>
+<h3>通道三：分配担保（Allocation Failure / Promotion Guarantee）</h3>
+
+<p>这是最容易被忽略、也最能体现深度的一条规则。场景是：<strong>Eden 满了，Minor GC 即将触发</strong>。此时 JVM 要回答一个问题：<em>这次 GC 之后，存活对象（Eden + From 里活着的）总共多大？To 区装得下吗？</em>装不下的部分得有去处——这个"去处保证"就叫<strong>分配担保</strong>。</p>
+
+<p>ParNew 收集器的完整判定逻辑是两步：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ParNew 的分配担保判定</b> · Minor GC 触发前的安全检查</span></div>
+<pre><code><span class="c">// 设：young_live = Eden + From 中存活对象总大小</span>
+<span class="c">//     to_space  = 另一个 Survivor 区的大小</span>
+<span class="c">//     old_free  = 老年代当前最大连续空闲空间</span>
+
+<span class="k">if</span> (old_free &gt; young_live) {
+    <span class="c">// ① 老年代的连续空闲空间 比 全部存活对象还大</span>
+    <span class="c">//    → 担保成立：放心做 Minor GC，To 装不下的部分直接放老年代</span>
+    <span class="n">proceed_minor_gc</span>();
+} <span class="k">else</span> {
+    <span class="c">// ② 担保不成立，还要看历史：比较 old_free 与「平均晋升大小」</span>
+    <span class="k">if</span> (old_free &gt; avg_promotion_size) {
+        <span class="c">//    历史每轮晋升量不大，这次大概率也放得下 → 冒险做 Minor GC</span>
+        <span class="c">//    （风险：这次偏偏晋升多了 → Promotion Failed → 还是 Full GC）</span>
+        <span class="n">proceed_minor_gc</span>();
+    } <span class="k">else</span> {
+        <span class="c">// ③ 连历史平均都放不下 → 保险起见，先做一次 Full GC 腾老年代</span>
+        <span class="c">//    然后再重试 Minor GC</span>
+        <span class="n">full_gc</span>();
+        <span class="n">retry_minor_gc</span>();
+    }
+}</code></pre>
+</div>
+
+<p>理解这段逻辑，三个常见现象就有解释了：</p>
+
+<ul>
+  <li><strong>"为什么 Minor GC 之前会先来一次 Full GC？"</strong>——分配担保失败，JVM 主动先清老年代（GC 日志里能看到 <code>Full GC (Ergonomics)</code> 或 <code>Promotion Failed</code> 的 cause）。</li>
+  <li><strong>"为什么老年代占用率还没满，Full GC 就发生了？"</strong>——上面第 ③ 种情况：不是老年代"满了"，而是"预判装不下即将晋升的对象"。</li>
+  <li><strong>"为什么调大年轻代后 Full GC 反而多了？"</strong>——年轻代越大，单次 Minor GC 的存活总量越大，担保判定越容易失败（第 ① 步 <code>old_free &gt; young_live</code> 更难成立）。</li>
+</ul>
+
+<h3>四条晋升路径汇总</h3>
 
 <table class="nb-table">
-<thead><tr><th>晋升路径</th><th>触发条件</th><th>目的</th></tr></thead>
+<thead><tr><th>晋升路径</th><th>触发条件</th><th>设计目的</th><th>相关参数</th></tr></thead>
 <tbody>
-<tr><td>正常晋升</td><td>age >= MaxTenuringThreshold</td><td>常规生命周期</td></tr>
-<tr><td>大对象直通</td><td>对象大小 > PretenureSizeThreshold</td><td>减少复制开销</td></tr>
-<tr><td>动态年龄判定</td><td>同年龄对象总大小 > Survivor 空间 / 2</td><td>防止 Survivor 溢出</td></tr>
-<tr><td>分配担保</td><td>Survivor 空间不足</td><td>兜底机制，转入老年代</td></tr>
+<tr><td>① 正常晋升（年龄）</td><td>age ≥ 阈值</td><td>常规生命周期管理</td><td><code>-XX:MaxTenuringThreshold=15</code></td></tr>
+<tr><td>② 动态年龄判定</td><td>同年龄对象总量 &gt; Survivor/2</td><td>自适应：防止 Survivor 溢出</td><td>无（JVM 自动）</td></tr>
+<tr><td>③ 大对象直通</td><td>size &gt; 阈值 / &gt; Eden 剩余 / &gt; Region/2(G1)</td><td>省掉大对象在年轻代的复制开销</td><td><code>-XX:PretenureSizeThreshold</code> / <code>-XX:G1HeapRegionSize</code></td></tr>
+<tr><td>④ 分配担保溢出</td><td>Minor GC 后 To 装不下</td><td>兜底：溢出部分进老年代，装不下再 Full GC</td><td>无（JVM 自动）</td></tr>
 </tbody>
 </table>
-</section>
 
-<!-- ═══════════════ 第5站：GC 类型 ═══════════════ -->
-<section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>Minor GC vs Major GC vs Full GC</h2></div>
-
-<p>面试官最常问的区分题：</p>
-
-<div class="think"><div class="think-q">"Minor GC 和 Full GC 分别什么时候触发？各回收哪些区域？"</div></div>
-
-<h3>Minor GC（Young GC）</h3>
-
-<p>只回收<strong>年轻代</strong>（Eden + Survivor）。触发条件很简单：<strong>Eden 空间满了</strong>。</p>
-
-<ul>
-  <li>速度很快（通常几十毫秒）</li>
-  <li>频率很高（应用运行期间频繁发生）</li>
-  <li>使用复制算法，将存活对象从 Eden/From 复制到 To</li>
-</ul>
-
-<h3>Major GC（老年代 GC）</h3>
-
-<p>回收<strong>老年代</strong>。通常伴随一次 Minor GC，因为老年代 GC 前往往需要先清理年轻代腾出空间。</p>
-
-<h3>Full GC</h3>
-
-<p>回收<strong>整个堆</strong>（年轻代 + 老年代）+ <strong>方法区/元空间</strong>。触发条件：</p>
-
-<ul>
-  <li>老年代空间不足</li>
-  <li>元空间（Metaspace）不足</li>
-  <li>调用 <code>System.gc()</code>（建议，非强制）</li>
-  <li>Minor GC 后存活对象无法放入老年代（分配担保失败）</li>
-  <li>CMS 的 concurrent mode failure</li>
-</ul>
+<div class="crack"><span class="crack-label">面试加分</span>
+<p>大多数候选人只会说"年龄到 15 就晋升"。把<strong>动态年龄判定</strong>和<strong>分配担保的两步判定</strong>讲出来，基本就锁定了 GC 部分的高分——这两条恰好是"为什么我的服务 Full GC 频繁"这类线上问题的理论根源。</p>
+</div>
 
 <figure class="fig">
-<svg viewBox="0 0 780 320" role="img" aria-label="Minor GC / Major GC / Full GC 对比关系图">
+<svg viewBox="0 0 780 300" role="img" aria-label="对象从 Eden 到老年代的晋升流程图">
   <defs>
-    <marker id="arr3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#555"/></marker>
+    <marker id="l24-a3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="l24-a3r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
   </defs>
 
-  <!-- Minor GC -->
-  <rect x="30" y="30" width="220" height="120" rx="8" fill="#D4EDDA" stroke="#28A745" stroke-width="1.5"/>
-  <text x="140" y="55" text-anchor="middle" font-family="monospace" font-size="14" fill="#155724" font-weight="700">Minor GC</text>
-  <text x="140" y="78" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#155724">回收：年轻代</text>
-  <text x="140" y="98" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#155724">触发：Eden 满</text>
-  <text x="140" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#155724">耗时：10~50ms</text>
-  <text x="140" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#155724">频率：高</text>
+  <rect x="20" y="80" width="120" height="80" rx="8" fill="url(#l24-eden)" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="80" y="115" text-anchor="middle" font-family="monospace" font-size="14" fill="#1B5E1B" font-weight="700">Eden</text>
+  <text x="80" y="135" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2D7D2D">new 对象出生</text>
 
-  <!-- Major GC -->
-  <rect x="280" y="30" width="220" height="120" rx="8" fill="#FFF3CD" stroke="#FFC107" stroke-width="1.5"/>
-  <text x="390" y="55" text-anchor="middle" font-family="monospace" font-size="14" fill="#856404" font-weight="700">Major GC</text>
-  <text x="390" y="78" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#856404">回收：老年代</text>
-  <text x="390" y="98" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#856404">通常伴随 Minor GC</text>
-  <text x="390" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#856404">耗时：100ms~数秒</text>
-  <text x="390" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#856404">频率：低</text>
+  <line x1="142" y1="120" x2="195" y2="120" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l24-a3)"/>
+  <text x="168" y="108" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#3E6B8F">Minor GC</text>
 
-  <!-- Full GC -->
-  <rect x="530" y="30" width="220" height="120" rx="8" fill="#F8D7DA" stroke="#DC3545" stroke-width="1.5"/>
-  <text x="640" y="55" text-anchor="middle" font-family="monospace" font-size="14" fill="#721C24" font-weight="700">Full GC</text>
-  <text x="640" y="78" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#721C24">回收：整个堆 + 元空间</text>
-  <text x="640" y="98" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#721C24">触发：老年代/元空间满</text>
-  <text x="640" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#721C24">耗时：数百ms~数十秒</text>
-  <text x="640" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#721C24">频率：应尽量避免</text>
+  <rect x="200" y="80" width="110" height="80" rx="8" fill="url(#l24-surv)" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="255" y="112" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S0 / S1</text>
+  <text x="255" y="132" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">每次存活 age+1</text>
+  <text x="255" y="148" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">From/To 互换</text>
 
-  <!-- 箭头关系 -->
-  <line x1="252" y1="90" x2="278" y2="90" stroke="#555" stroke-width="1.2" marker-end="url(#arr3)"/>
-  <line x1="502" y1="90" x2="528" y2="90" stroke="#555" stroke-width="1.2" marker-end="url(#arr3)"/>
+  <path d="M275,78 Q300,48 315,78" fill="none" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#l24-a3)"/>
+  <text x="310" y="42" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#3E6B8F">存活 → age+1</text>
 
-  <!-- 触发链条 -->
-  <rect x="30" y="185" width="720" height="110" rx="8" fill="#F5F5F5" stroke="#999" stroke-width="1"/>
-  <text x="390" y="208" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333" font-weight="700">典型 GC 触发链条</text>
+  <line x1="312" y1="120" x2="420" y2="120" stroke="#B85450" stroke-width="2" marker-end="url(#l24-a3r)"/>
+  <text x="365" y="108" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">① age≥15</text>
+  <text x="365" y="142" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">② 同年龄 &gt; Survivor/2</text>
 
-  <text x="60" y="235" font-family="sans-serif" font-size="12" fill="#333">对象分配 → Eden 满 → Minor GC → 存活对象进 Survivor</text>
-  <text x="60" y="258" font-family="sans-serif" font-size="12" fill="#333">Survivor 装不下 → 分配担保 → 进入老年代 → 老年代满 → Full GC</text>
-  <text x="60" y="281" font-family="sans-serif" font-size="12" fill="#333">Full GC 仍无法回收足够空间 → OutOfMemoryError: Java heap space</text>
+  <rect x="425" y="80" width="150" height="80" rx="8" fill="url(#l24-old)" stroke="#8B6914" stroke-width="1.5"/>
+  <text x="500" y="112" text-anchor="middle" font-family="monospace" font-size="14" fill="#6B4E0A" font-weight="700">Old Gen</text>
+  <text x="500" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#8B6914">长期存活对象</text>
+
+  <line x1="80" y1="162" x2="80" y2="215" stroke="#999" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="80" y="235" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#999">绝大多数对象</text>
+  <text x="80" y="251" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#999">在 Eden/第一轮就死亡</text>
+
+  <rect x="425" y="205" width="230" height="70" rx="8" fill="#F5E0E0" stroke="#B85450" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="540" y="230" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450">③ 大对象 / ④ 分配担保溢出</text>
+  <text x="540" y="250" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">直接进入老年代；老年代也放不下 → Full GC</text>
+
+  <text x="500" y="295" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#555">Full GC 后仍无法腾出空间 → OutOfMemoryError: Java heap space</text>
 </svg>
-<figcaption><span class="fig-no">图 3</span> 三种 GC 类型的回收范围、触发条件和典型触发链条</figcaption>
+<figcaption><span class="fig-no">图 3</span> 对象的四条晋升路径：年龄晋升、动态年龄判定、大对象直通、分配担保溢出</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第5站：Minor GC 完整拆解 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><span class="station-no">第 5 站</span><h2>Minor GC 完整拆解：一次 Young GC 到底做了什么？</h2></div>
+
+<p>前面讲了"对象去哪"，这一站拆开引擎盖：Eden 满了之后，JVM 内部一步步发生了什么。以 ParNew（经典的并行复制收集器）为例，一次 Minor GC 分五步：</p>
+
+<ol>
+  <li><strong>STW（Stop-The-World）</strong>：暂停所有 Java 线程。原因：标记和复制期间，引用关系不能变，否则会出现"正在遍历的对象被新建/删除"的混乱。这是所有 Minor GC 无法避免的代价。</li>
+  <li><strong>根扫描</strong>：从 GC Roots 出发，找出年轻代里的存活对象。注意这里有一个关键优化——<strong>不需要完整扫描老年代</strong>。老年代对象可能引用了年轻代对象（比如一个长生命周期容器里存了短命对象），但 HotSpot 用<strong>卡表（Card Table）+ 写屏障（Write Barrier）</strong>机制，只在"老年代指向年轻代的引用发生过写操作"的内存卡（每 512 字节一张卡）上打脏标记，根扫描时只处理脏卡。G1 里对应的结构是 <strong>RSet（Remembered Set）</strong>。这正是"为什么 Minor GC 只扫年轻代却不会漏掉老年代的引用"的答案——写屏障是并发 GC 的基石，「对象存活判定」一篇会展开讲。</li>
+  <li><strong>标记存活对象</strong>：用三色标记法（白色=不可达、灰色=自身可达但子引用未处理完、黑色=处理完）从根出发遍历。年轻代用 STW 标记，不存在并发修改问题，所以不需要 SATB 之类的补偿机制。</li>
+  <li><strong>复制存活对象</strong>：把存活对象按内存序重新排布到 To 区（复制过程中顺便完成<strong>内存整理</strong>——对象紧凑排列，无碎片）；同时 age+1，满足晋升条件的对象改放到老年代（走上一节的分配担保逻辑）。</li>
+  <li><strong>清空与角色互换</strong>：Eden 和 From 区的"指针"一移即空（零成本，不需要逐个释放），S0 和 S1 互换 From/To 身份。下一轮 Minor GC 的存活对象会复制到另一个区。</li>
+</ol>
+
+<figure class="fig">
+<svg viewBox="0 0 780 360" role="img" aria-label="一次 Minor GC 前后内存布局变化">
+  <defs>
+    <marker id="l24-a4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+  </defs>
+
+  <text x="200" y="25" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333" font-weight="700">GC 前（Eden 已满）</text>
+  <rect x="30" y="40" width="340" height="150" rx="6" fill="none" stroke="#2D7D2D" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="200" y="58" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2D7D2D">年轻代</text>
+  <rect x="40" y="66" width="190" height="116" rx="4" fill="url(#l24-eden)" stroke="#2D7D2D"/>
+  <text x="135" y="82" text-anchor="middle" font-family="monospace" font-size="11" fill="#1B5E1B" font-weight="700">Eden（满）</text>
+  <rect x="48" y="90" width="30" height="80" rx="2" fill="#fff" opacity="0.85"/>
+  <rect x="84" y="90" width="26" height="80" rx="2" fill="#B85450" opacity="0.75"/>
+  <rect x="116" y="90" width="34" height="80" rx="2" fill="#fff" opacity="0.85"/>
+  <rect x="156" y="90" width="24" height="80" rx="2" fill="#B85450" opacity="0.75"/>
+  <rect x="186" y="90" width="36" height="80" rx="2" fill="#fff" opacity="0.85"/>
+  <text x="48" y="190" font-family="sans-serif" font-size="9" fill="#666">■存活 ■死亡（多数）</text>
+  <rect x="238" y="66" width="60" height="116" rx="4" fill="url(#l24-surv)" stroke="#2B6E91"/>
+  <text x="268" y="82" text-anchor="middle" font-family="monospace" font-size="10" fill="#1A4D6E" font-weight="700">S0(From)</text>
+  <rect x="244" y="92" width="14" height="82" rx="2" fill="#B85450" opacity="0.75"/>
+  <rect x="262" y="92" width="10" height="82" rx="2" fill="#fff" opacity="0.85"/>
+  <rect x="276" y="92" width="14" height="82" rx="2" fill="#B85450" opacity="0.75"/>
+  <rect x="296" y="66" width="60" height="116" rx="4" fill="#F3F8FB" stroke="#2B6E91" stroke-dasharray="4,3"/>
+  <text x="326" y="82" text-anchor="middle" font-family="monospace" font-size="10" fill="#1A4D6E" font-weight="700">S1(To)</text>
+  <text x="326" y="150" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#666">空</text>
+
+  <line x1="380" y1="115" x2="440" y2="115" stroke="#3E6B8F" stroke-width="2" marker-end="url(#l24-a4)"/>
+  <text x="410" y="100" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#3E6B8F">Minor GC</text>
+  <text x="410" y="132" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#3E6B8F">STW 标记+复制</text>
+
+  <text x="610" y="25" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333" font-weight="700">GC 后</text>
+  <rect x="470" y="40" width="280" height="150" rx="6" fill="none" stroke="#2D7D2D" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="610" y="58" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2D7D2D">年轻代</text>
+  <rect x="480" y="66" width="120" height="116" rx="4" fill="#F3F8FB" stroke="#2D7D2D" stroke-dasharray="4,3"/>
+  <text x="540" y="130" text-anchor="middle" font-family="monospace" font-size="11" fill="#1B5E1B" font-weight="700">Eden（清空）</text>
+  <text x="540" y="146" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#666">指针一移即空</text>
+  <rect x="608" y="66" width="60" height="116" rx="4" fill="#F3F8FB" stroke="#2B6E91" stroke-dasharray="4,3"/>
+  <text x="638" y="130" text-anchor="middle" font-family="monospace" font-size="10" fill="#1A4D6E" font-weight="700">S0(空)</text>
+  <rect x="676" y="66" width="60" height="116" rx="4" fill="url(#l24-surv)" stroke="#2B6E91"/>
+  <text x="706" y="82" text-anchor="middle" font-family="monospace" font-size="10" fill="#1A4D6E" font-weight="700">S1(To)</text>
+  <rect x="682" y="92" width="44" height="82" rx="2" fill="#B85450" opacity="0.75"/>
+  <text x="704" y="190" font-family="sans-serif" font-size="9" fill="#666">存活对象紧凑排列，age+1</text>
+
+  <rect x="30" y="225" width="720" height="115" rx="8" fill="#F8F9FA" stroke="#DEE2E6" stroke-width="1"/>
+  <text x="390" y="250" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333" font-weight="700">为什么年轻代用复制算法？</text>
+  <text x="50" y="275" font-family="sans-serif" font-size="11.5" fill="#333">① 存活对象极少（弱分代假说）→ 要复制的东西本来就少，成本远低于"标记+整理"</text>
+  <text x="50" y="298" font-family="sans-serif" font-size="11.5" fill="#333">② 复制过程天然完成内存整理 → 年轻代永远无碎片，分配就是"指针碰撞"</text>
+  <text x="50" y="321" font-family="sans-serif" font-size="11.5" fill="#333">③ 代价：浪费 1/10 空间 + 复制本身耗时 → 所以只适合"存活率低"的年轻代，老年代用标记-整理</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span> 一次 Minor GC 前后：Eden 满 → STW 标记 → 存活对象紧凑复制到 To 区 → Eden/From 清空、S0/S1 互换</figcaption>
 </figure>
 
-<div class="crack"><span class="crack-label">易混淆</span>
-<p><strong>Major GC 和 Full GC 不是同一个概念</strong>。Major GC 只回收老年代，Full GC 回收整个堆。但在很多工具和日志中，"Full GC" 和 "Major GC" 经常混用——面试时说清楚区别即可。</p>
+<div class="think"><div class="think-q">"清空 Eden"为什么是零成本？内存不是要逐个释放吗？</div>
+<p>年轻代用的是<strong>指针碰撞（Bump the Pointer）</strong>分配方式：Eden 里维护一个"当前分配位置"指针，分配对象就是指针前移。所有对象从底部连续堆上去，那么"清空"只需要把指针拨回底部——不需要遍历、不需要释放任何字节。这也是为什么年轻代没有碎片：对象总是连续分配的。（空闲列表 Free List 分配方式则相反，留给「对象创建全过程」展开。）</p></div>
+
+<p>Minor GC 的典型耗时在 <strong>10~100ms</strong> 量级（取决于存活对象大小和根扫描范围），频率取决于 Eden 大小和对象分配速度——这两者就是后面调优要拧的两个旋钮。</p>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>Minor GC = STW + 根扫描（靠卡表/写屏障避免全扫老年代）+ 三色标记 + 复制到 To（顺带整理）+ 指针清零 + From/To 互换。记住"卡表/写屏障"这个词——它是面试里区分"背过"和"真懂"的分水岭。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第6站：调优参数 ═══════════════ -->
+<!-- ═══════════════ 第6站：Full GC 与 Mixed GC ═══════════════ -->
 <section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>调优参数：控制堆的分代结构</h2></div>
+<div class="station-head"><span class="station-no">第 6 站</span><h2>Full GC 与 Mixed GC：老年代什么时候被回收？</h2></div>
 
-<p>理解了分代原理，调优就是调参数。核心参数如下：</p>
+<p>年轻代的回收快而频繁，老年代的回收则慢而危险。先把术语理清楚——"Major GC" 和 "Full GC" 在很多材料里混用，但严谨的说法是：</p>
+
+<table class="nb-table">
+<thead><tr><th>术语</th><th>回收范围</th><th>典型含义</th></tr></thead>
+<tbody>
+<tr><td><strong>Young GC（Minor GC）</strong></td><td>年轻代</td><td>Eden 满触发，复制算法，10~100ms</td></tr>
+<tr><td><strong>Mixed GC</strong></td><td>年轻代 + 部分老年代 Region</td><td>G1 特有：并发标记周期后，挑"垃圾多"的老年代 Region 一起回收</td></tr>
+<tr><td><strong>Full GC</strong></td><td>整个堆 + 元空间</td><td>STW 全量回收，几百 ms 到几十秒，应尽量避免</td></tr>
+<tr><td><strong>Major GC（旧术语）</strong></td><td>老年代</td><td>老文献中指"针对老年代的 GC"，现代日志里一般直接用 Full GC 表述</td></tr>
+</tbody>
+</table>
+
+<h3>Full GC 的六大触发场景</h3>
+
+<table class="nb-table">
+<thead><tr><th>触发场景</th><th>机制说明</th><th>日志中的 Cause</th></tr></thead>
+<tbody>
+<tr><td>老年代空间不足</td><td>晋升/大对象把老年代填满，分配失败</td><td><code>Allocation Failure</code></td></tr>
+<tr><td>元空间不足</td><td>类元数据装不下 Metaspace（加载类过多/动态代理泄漏）</td><td><code>Metadata GC Threshold</code></td></tr>
+<tr><td>分配担保失败</td><td>Minor GC 前预判老年代装不下晋升对象（上一节的两步判定）</td><td><code>Ergonomics</code> / <code>Promotion Failed</code></td></tr>
+<tr><td>显式调用 System.gc()</td><td>代码或库（常见于 Netty 释放直接内存）主动触发</td><td><code>System.gc()</code></td></tr>
+<tr><td>CMS concurrent mode failure</td><td>CMS 并发回收期间老年代被塞满，退化为 Serial Old 串行 Full GC</td><td><code>Concurrent Mode Failure</code></td></tr>
+<tr><td>JVM 自适应调整（Ergonomics）</td><td>Parallel/G1 根据历史数据主动提前 GC</td><td><code>Ergonomics</code></td></tr>
+</tbody>
+</table>
+
+<div class="crack"><span class="crack-label">关于 System.gc() 的冷知识</span>
+<p><code>System.gc()</code> 只是"建议"，JVM 可以忽略。生产上常见两种配置：① 直接 <code>-XX:+DisableExplicitGC</code> 禁用显式 GC——但 Netty 释放 Direct Memory 依赖显式 GC 触发 Cleaner（虚引用回调），禁用后直接内存可能持续累积直到 <code>Direct buffer memory</code> OOM，所以"禁用"要慎重；② 不禁用时，G1/ZGC 下建议配 <code>-XX:+ExplicitGCInvokesConcurrent</code>，让显式 GC 走<strong>并发</strong>路径（G1 的并发标记周期）而不是 STW Full GC。这个细节在 Netty 服务的线上排障里经常出现，说出来很加分。</p></div>
+
+<h3>为什么 Full GC 这么可怕？</h3>
+
+<p>三个原因叠加：① 全程 STW，且要扫描<strong>所有</strong> GC Roots（包括完整老年代根）；② 回收整个堆，耗时与堆大小成正比（几十 GB 的堆，一次 STW 可达秒级）；③ Full GC 之后如果回收不了多少空间（说明是泄漏或堆太小），很快又会触发下一次——形成"GC 风暴"，CPU 几乎全耗在 GC 上，业务线程饿死。</p>
+
+<h3>G1 的 Mixed GC：不做 Full GC 的理想</h3>
+
+<p>G1 的设计目标就是"让 Full GC 尽量不发生"。它的做法是把老年代回收<strong>化整为零</strong>：</p>
+
+<ol>
+  <li><strong>并发标记周期（Concurrent Marking Cycle）</strong>：老年代占用率到达 <code>-XX:InitiatingHeapOccupancyPercent</code>（默认 45%，JDK 9+ 可自适应）时启动。分四阶段：初始标记（STW，挂在 Young GC 尾部，只标根对象）→ 并发标记（与应用并发，从根出发标记全部老年代对象，用 SATB 快照保证一致性）→ 最终标记（STW，处理并发期间的引用变更）→ 筛选清理（按 Region 垃圾比例排序）。</li>
+  <li><strong>Mixed GC</strong>：并发标记结束后，接下来的若干次 Young GC 变成 Mixed GC——每次除了回收全部年轻代，再回收一批"垃圾占比最高"的老年代 Region。</li>
+  <li><strong>回收多少由暂停时间目标决定</strong>：<code>-XX:MaxGCPauseMillis</code>（默认 200ms）是 G1 的"软实时"目标。G1 内部维护每个 Region 的回收效率预测（可回收字节数 ÷ 预测耗时），每次 Mixed GC 在暂停预算内按性价比挑 Region。相关旋钮：<code>-XX:G1MixedGCCountTarget</code>（默认 8，分 8 次 Mixed GC 消化完标记的老年代垃圾）、<code>-XX:G1HeapWastePercent</code>（默认 5%，可回收垃圾低于堆的 5% 就停止 Mixed GC）。</li>
+</ol>
+
+<div class="think"><div class="think-q">如果 Mixed GC 追不上老年代垃圾产生速度会怎样？</div>
+<p>两种结局：① 老年代被填满 → 触发 Full GC（STW，G1 的 Full GC 用的是单线程标记-整理，非常慢——所以 G1 时代出现 Full GC 基本等于事故）；② 要回收的对象太多、目标 Region 放不下存活对象 → <strong>Evacuation Failure（疏散失败）</strong>，日志里出现 <code>To-space exhausted</code>，直接升级 Full GC。这两条是「GC 日志分析」一篇的重点识别项，也是"为什么 G1 服务偶尔卡几秒"的最常见答案。</p></div>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>Full GC = 全堆 STW + 完整根扫描 + 低回收效率风险，是调优的"头号敌人"。G1 用"并发标记 + Mixed GC 化整为零"的策略把 Full GC 变成极端情况。记住三个 G1 参数：<code>InitiatingHeapOccupancyPercent</code>（什么时候开始标记）、<code>MaxGCPauseMillis</code>（每次停多久）、<code>G1MixedGCCountTarget</code>（分几次消化）。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第7站：调优参数 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>调优参数：控制分代结构的旋钮与方法论</h2></div>
+
+<p>理解了分代原理，调优就是拧参数。先列出控制堆分代结构的核心参数：</p>
 
 <table class="nb-table">
 <thead><tr><th>参数</th><th>作用</th><th>默认值</th><th>示例</th></tr></thead>
 <tbody>
-<tr><td><code>-Xmn</code></td><td>设置年轻代大小</td><td>堆的 1/3</td><td><code>-Xmn512m</code></td></tr>
-<tr><td><code>-XX:NewRatio</code></td><td>老年代 / 年轻代 比例</td><td>2</td><td><code>-XX:NewRatio=3</code></td></tr>
-<tr><td><code>-XX:SurvivorRatio</code></td><td>Eden / Survivor 比例</td><td>8</td><td><code>-XX:SurvivorRatio=6</code></td></tr>
-<tr><td><code>-XX:MaxTenuringThreshold</code></td><td>晋升老年代的年龄阈值</td><td>15</td><td><code>-XX:MaxTenuringThreshold=10</code></td></tr>
-<tr><td><code>-XX:PretenureSizeThreshold</code></td><td>大对象直通老年代的阈值</td><td>0（不限制）</td><td><code>-XX:PretenureSizeThreshold=1m</code></td></tr>
-<tr><td><code>-Xms</code> / <code>-Xmx</code></td><td>堆初始大小 / 堆最大大小</td><td>物理内存的 1/64 / 1/4</td><td><code>-Xms2g -Xmx2g</code></td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-Xms</code> / <code style="white-space:normal;overflow-wrap:anywhere">-Xmx</code></td><td>堆初始 / 最大大小</td><td>物理内存的 1/64 / 1/4</td><td><code style="white-space:normal;overflow-wrap:anywhere">-Xms4g -Xmx4g</code>（生产环境两者必须相等）</td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-Xmn</code></td><td>直接指定年轻代大小（初始=最大）</td><td>由 NewRatio 推算</td><td><code style="white-space:normal;overflow-wrap:anywhere">-Xmn2g</code></td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:NewRatio</code></td><td>老年代 : 年轻代 比例</td><td>2（年轻代占 1/3）</td><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:NewRatio=1</code>（各占一半）</td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:SurvivorRatio</code></td><td>Eden : 单个 Survivor 比例</td><td>8</td><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:SurvivorRatio=6</code>（Survivor 变大）</td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:MaxTenuringThreshold</code></td><td>晋升年龄阈值</td><td>15</td><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:MaxTenuringThreshold=6</code></td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:PretenureSizeThreshold</code></td><td>大对象直通阈值（仅 Serial/ParNew）</td><td>0（关闭）</td><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:PretenureSizeThreshold=512k</code></td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:MaxGCPauseMillis</code></td><td>G1 暂停时间目标（软约束）</td><td>200ms</td><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:MaxGCPauseMillis=50</code></td></tr>
+<tr><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:InitiatingHeapOccupancyPercent</code></td><td>G1 启动并发标记的堆占用水位</td><td>45%（JDK9+ 自适应）</td><td><code style="white-space:normal;overflow-wrap:anywhere">-XX:InitiatingHeapOccupancyPercent=35</code></td></tr>
 </tbody>
 </table>
 
-<h3>调优建议</h3>
+<h3>参数之间的关系与冲突（面试爱问）</h3>
+
+<ul>
+  <li><strong><code>-Xmn</code> 与 <code>-XX:NewRatio</code> 二选一</strong>：同时指定时 <code>-Xmn</code> 优先生效，NewRatio 被忽略。写启动脚本时别两个都写，否则参数"看起来生效了其实没生效"。</li>
+  <li><strong><code>-Xms = -Xmx</code> 是铁律</strong>：堆动态扩容/缩容本身需要 GC 且缩容要整理内存，生产环境固定堆大小，把"扩堆 STW"这个变量从线上环境里彻底移除。</li>
+  <li><strong>SurvivorRatio 调小的连锁反应</strong>：Survivor 变大 → 存活对象能多待几轮 → 晋升变慢，老年代压力减小；但 Eden 变小 → Minor GC 频率上升。两个方向互相制约，没有免费午餐。</li>
+</ul>
+
+<h3>三种典型场景的启动模板</h3>
 
 <div class="srcbox">
-<div class="srcbox-head"><div class="srcbox-file">实战调优建议</div></div>
-<div class="srcbox-code">
-<div><span class="c">// 1. 固定堆大小，避免动态扩缩带来的 STW</span></div>
-<div><span class="k">-Xms</span><span class="t">=</span><span class="n">4g -Xmx</span><span class="t">=</span><span class="n">4g</span></div>
-<div></div>
-<div><span class="c">// 2. 年轻代占堆的 1/3 ~ 1/2（NewRatio=2 表示 old:young=2:1，即年轻代占 1/3）</span></div>
-<div><span class="k">-XX:NewRatio</span><span class="t">=</span><span class="n">2</span></div>
-<div></div>
-<div><span class="c">// 3. 如果 Minor GC 后 Survivor 区经常放不下，尝试：</span></div>
-<div><span class="c">//    ① 增大 SurvivorRatio（让 Eden 更大、Survivor 更小）→ 适合短命对象多</span></div>
-<div><span class="c">//    ② 减小 SurvivorRatio（让 Survivor 更大）→ 适合中等寿命对象多</span></div>
-<div><span class="k">-XX:SurvivorRatio</span><span class="t">=</span><span class="n">8</span></div>
-<div></div>
-<div><span class="c">// 4. 如果对象晋升太快（老年代增长快），降低 MaxTenuringThreshold</span></div>
-<div><span class="c">//    如果 Full GC 太频繁，提高阈值让对象在年轻代多待一会</span></div>
-<div><span class="k">-XX:MaxTenuringThreshold</span><span class="t">=</span><span class="n">15</span></div>
-<div></div>
-<div><span class="c">// 5. G1 收集器下不需要手动设 PretenureSizeThreshold</span></div>
-<div><span class="c">//    G1 用 Humongous Region 自动处理大对象</span></div>
-</div>
+<div class="srcbox-head"><span class="srcbox-file"><b>场景一：通用 Web 服务</b> · 8G 容器，Spring Boot 微服务，G1</span></div>
+<pre><code><span class="c"># 固定堆 = 容器内存的一半，给堆外（Metaspace/Direct/线程栈）留余量</span>
+<span class="t">-Xms</span>4g <span class="t">-Xmx</span>4g
+<span class="c"># G1 是 JDK 9+ 默认收集器，显式写出便于日志识别</span>
+<span class="t">-XX</span>:<span class="n">+UseG1GC</span> <span class="t">-XX</span>:MaxGCPauseMillis<span class="n">=100</span>
+<span class="c"># 显式 GC（Netty 释放 DirectMemory 依赖）走并发路径</span>
+<span class="t">-XX</span>:<span class="n">+ExplicitGCInvokesConcurrent</span>
+<span class="c"># GC 日志 + OOM 自动转储（排障三件套，见「OOM 排查实战」）</span>
+<span class="t">-Xlog</span>:gc<span class="n">*</span>:file<span class="n">=</span>/var/log/app/gc.log:time,uptime,level,tags:filecount<span class="n">=5</span>,filesize<span class="n">=50m</span>
+<span class="t">-XX</span>:<span class="n">+HeapDumpOnOutOfMemoryError</span> <span class="t">-XX</span>:HeapDumpPath<span class="n">=</span>/var/log/app/</code></pre>
 </div>
 
-<div class="think"><div class="think-q">年轻代设大一点好还是小一点好？</div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景二：批量处理 / ETL</b> · 吞吐优先，Parallel GC</span></div>
+<pre><code><span class="c"># 吞吐优先：Parallel GC（JDK 8 的默认服务端收集器）</span>
+<span class="t">-Xms</span>8g <span class="t">-Xmx</span>8g
+<span class="t">-XX</span>:<span class="n">+UseParallelGC</span>
+<span class="c"># 大批量短命对象：年轻代给足（约占堆一半）</span>
+<span class="t">-XX</span>:NewRatio<span class="n">=1</span>
+<span class="c"># 关注吞吐而非停顿：GC 时间占比上限</span>
+<span class="t">-XX</span>:GCTimeRatio<span class="n">=19</span>   <span class="c"># GC 时间 ≤ 总时间的 1/20</span></code></pre>
+</div>
 
-<p>看场景。</p>
-<ul>
-  <li><strong>年轻代太大</strong>：Minor GC 单次耗时增加（要扫描的区域更大），但频率降低。</li>
-  <li><strong>年轻代太小</strong>：Minor GC 频率很高，存活对象频繁复制到 Survivor 甚至提前晋升到老年代，导致老年代快速填满。</li>
-</ul>
-<p>经验法则：年轻代占堆的 <strong>1/3 ~ 1/2</strong>，然后根据 GC 日志微调。</p></div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>场景三：超低延迟服务</b> · 金融行情 / 实时竞价，ZGC</span></div>
+<pre><code><span class="c"># ZGC：停顿与堆大小无关（亚毫秒级），适合大堆 + 严格延迟 SLA</span>
+<span class="t">-Xms</span>16g <span class="t">-Xmx</span>16g
+<span class="t">-XX</span>:<span class="n">+UseZGC</span>
+<span class="t">-XX</span>:SoftMaxHeapSize<span class="n">=</span>12g  <span class="c"># 软上限：尽量把堆压在这个值以下，减少 GC 频率</span></code></pre>
+</div>
 
-<div class="formula">调优核心公式：观察 GC 日志 → 找到瓶颈（频率高？单次慢？晋升多？）→ 针对性调参数</div>
-</section>
-
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：速查图 + GC 调优清单</h2></div>
-
-<p>用一张速查图回顾全部知识点：</p>
-
-<figure class="fig">
-<svg viewBox="0 0 780 480" role="img" aria-label="JVM 堆分代结构速查图">
-  <defs>
-    <marker id="arr4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
-    <marker id="arr4r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
-  </defs>
-
-  <!-- 标题 -->
-  <text x="390" y="25" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#333" font-weight="700">JVM 堆分代结构速查</text>
-
-  <!-- Eden -->
-  <rect x="40" y="50" width="160" height="90" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
-  <text x="120" y="80" text-anchor="middle" font-family="monospace" font-size="14" fill="#1B5E1B" font-weight="700">Eden</text>
-  <text x="120" y="100" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2D7D2D">新对象分配</text>
-  <text x="120" y="118" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2D7D2D">80% 年轻代</text>
-
-  <!-- S0 -->
-  <rect x="220" y="50" width="80" height="90" rx="8" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
-  <text x="260" y="80" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S0</text>
-  <text x="260" y="100" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">From 10%</text>
-
-  <!-- S1 -->
-  <rect x="310" y="50" width="80" height="90" rx="8" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
-  <text x="350" y="80" text-anchor="middle" font-family="monospace" font-size="13" fill="#1A4D6E" font-weight="700">S1</text>
-  <text x="350" y="100" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">To 10%</text>
-
-  <!-- Old Gen -->
-  <rect x="430" y="50" width="320" height="90" rx="8" fill="#E0C8A8" stroke="#8B6914" stroke-width="1.5"/>
-  <text x="590" y="80" text-anchor="middle" font-family="monospace" font-size="14" fill="#6B4E0A" font-weight="700">Old Generation</text>
-  <text x="590" y="100" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#8B6914">长期存活对象 · 约占堆 2/3</text>
-
-  <!-- 箭头 -->
-  <line x1="202" y1="95" x2="218" y2="95" stroke="#3E6B8F" stroke-width="1.2" marker-end="url(#arr4)"/>
-  <line x1="302" y1="95" x2="308" y2="95" stroke="#3E6B8F" stroke-width="1.2"/>
-  <line x1="392" y1="95" x2="428" y2="95" stroke="#B85450" stroke-width="1.5" marker-end="url(#arr4r)"/>
-  <text x="410" y="85" font-family="sans-serif" font-size="9" fill="#B85450">晋升</text>
-
-  <!-- 晋升路径汇总 -->
-  <rect x="40" y="170" width="710" height="130" rx="8" fill="#F8F9FA" stroke="#DEE2E6" stroke-width="1"/>
-  <text x="395" y="195" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#333" font-weight="700">四条晋升路径</text>
-
-  <text x="60" y="220" font-family="sans-serif" font-size="12" fill="#333">① 正常晋升：age >= MaxTenuringThreshold（默认 15）→ 晋升老年代</text>
-  <text x="60" y="243" font-family="sans-serif" font-size="12" fill="#333">② 大对象直通：对象大小 > PretenureSizeThreshold → 直接进老年代</text>
-  <text x="60" y="266" font-family="sans-serif" font-size="12" fill="#333">③ 动态年龄判定：同年龄对象总大小 > Survivor/2 → 批量晋升</text>
-  <text x="60" y="289" font-family="sans-serif" font-size="12" fill="#333">④ 分配担保：Survivor 空间不足 → 溢出对象直入老年代</text>
-
-  <!-- GC 类型对比 -->
-  <rect x="40" y="320" width="710" height="140" rx="8" fill="#F8F9FA" stroke="#DEE2E6" stroke-width="1"/>
-  <text x="395" y="345" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#333" font-weight="700">三种 GC 对比</text>
-
-  <rect x="60" y="360" width="200" height="80" rx="6" fill="#D4EDDA" stroke="#28A745" stroke-width="1"/>
-  <text x="160" y="382" text-anchor="middle" font-family="monospace" font-size="12" fill="#155724" font-weight="700">Minor GC</text>
-  <text x="160" y="400" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#155724">年轻代 · Eden 满触发</text>
-  <text x="160" y="416" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#155724">快速 · 高频</text>
-
-  <rect x="280" y="360" width="200" height="80" rx="6" fill="#FFF3CD" stroke="#FFC107" stroke-width="1"/>
-  <text x="380" y="382" text-anchor="middle" font-family="monospace" font-size="12" fill="#856404" font-weight="700">Major GC</text>
-  <text x="380" y="400" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#856404">老年代 · 伴随 Minor GC</text>
-  <text x="380" y="416" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#856404">较慢 · 低频</text>
-
-  <rect x="500" y="360" width="200" height="80" rx="6" fill="#F8D7DA" stroke="#DC3545" stroke-width="1"/>
-  <text x="600" y="382" text-anchor="middle" font-family="monospace" font-size="12" fill="#721C24" font-weight="700">Full GC</text>
-  <text x="600" y="400" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#721C24">整堆 + 元空间</text>
-  <text x="600" y="416" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#721C24">最慢 · 应尽量避免</text>
-</svg>
-<figcaption><span class="fig-no">图 4</span> JVM 堆分代结构速查：四条晋升路径 + 三种 GC 类型</figcaption>
-</figure>
-
-<h3>GC 调优清单</h3>
+<h3>调优方法论：五步走，拒绝拍脑袋</h3>
 
 <div class="recap">
-<p><strong>GC 调优 5 步走：</strong></p>
+<p><strong>GC 调优五步法（所有场景通用）：</strong></p>
 <ol>
-  <li><strong>固定堆大小</strong>：<code>-Xms = -Xmx</code>，避免动态扩缩</li>
-  <li><strong>观察 GC 日志</strong>：<code>-XX:+PrintGCDetails -Xloggc:gc.log</code>（JDK 8），<code>-Xlog:gc*</code>（JDK 9+）</li>
-  <li><strong>定位瓶颈</strong>：Minor GC 太频繁？单次太慢？Full GC 太多？</li>
-  <li><strong>针对性调参</strong>：频率高 → 加大年轻代；晋升快 → 调阈值或 Survivor 大小；Full GC 多 → 增大堆或优化代码</li>
-  <li><strong>选择收集器</strong>：低延迟选 G1/ZGC，高吞吐选 Parallel GC，小内存选 Serial GC</li>
+  <li><strong>固定基线</strong>：<code>-Xms=-Xmx</code>，选定收集器，GC 日志 + OOM 转储全部打开。</li>
+  <li><strong>观察日志</strong>：先跑一段时间，用「GC 日志分析」一篇的方法读日志——Young GC 频率/耗时、Full GC 频率、晋升速度、老年代占用曲线。</li>
+  <li><strong>定位瓶颈</strong>：三类症状对应不同旋钮——<em>Young GC 太频繁</em> → 加大年轻代；<em>单次停顿太长</em> → 收集器目标（MaxGCPauseMillis）或减少存活对象；<em>Full GC 多 / 老年代涨得快</em> → 晋升问题（Survivor 太小、大对象、泄漏）。</li>
+  <li><strong>单变量调整</strong>：一次只动一个参数，跑同样的负载，对比日志。多变量一起调 = 无法归因。</li>
+  <li><strong>回归验证</strong>：压测验证 P99 延迟和吞吐，监控大盘确认无回归后发布。</li>
 </ol>
 </div>
 
+<div class="crack"><span class="crack-label">调优常见误用</span>
+<p>① 一看 Young GC 频繁就把 <code>-Xmn</code> 拉满——年轻代过大后单次 Minor GC 更慢，且分配担保更容易失败，Full GC 反而更多。② G1 环境还去设 <code>PretenureSizeThreshold</code>——无效参数，G1 看的是 Region 大小。③ <code>MaxGCPauseMillis</code> 设 5ms 追求极致——目标定得越狠，G1 每次回收的 Region 越少，老年代越容易积压，最后以 Full GC 收场。暂停目标是"软约束"，不是"硬保证"。</p>
+</div>
+
+<h3>容器化部署的特别注意</h3>
+
+<p>JDK 8u191+ / JDK 10+ 能正确识别 cgroup 内存限制（<strong>Container Support</strong>），此时不写 <code>-Xmx</code>，JVM 默认用容器限制的 25%（<code>-XX:MaxRAMPercentage=25.0</code>）。生产建议显式写出：容器 8G 给 JVM 4G 堆（<code>-XX:MaxRAMPercentage=50.0</code>），剩下的留给 Metaspace、Direct Memory、线程栈（每个线程 <code>-Xss</code> 默认 1MB 堆外内存）和 OS 缓存。JDK 8 老版本在容器里会看到宿主机物理内存——这是"容器里 JVM 把宿主机内存吃满"的经典事故根源。</p>
+</section>
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结：知识地图 + 面试模板 + 高频追问</h2></div>
+
+<h3>知识地图</h3>
+
+<div class="recap">
+<p><strong>本文全部知识点的结构（能默画出来就算内化）：</strong></p>
+<ul>
+  <li><strong>为什么分代</strong>：弱分代假说（短命对象占绝大多数）+ 强分代假说（熬过 GC 的更长寿）→ 按存活时间分组，不同组不同策略。</li>
+  <li><strong>结构</strong>：Eden:S0:S1 = 8:1:1（SurvivorRatio=8），Young:Old = 1:2（NewRatio=2）；G1 下代是 Region 的逻辑集合，非物理连续。</li>
+  <li><strong>四条分配规则</strong>：Eden 剩余够 → Eden；不够但老年代够 → 老年代；PretenureSizeThreshold（Serial/ParNew）→ 老年代；G1 超 Region 一半 → Humongous Region。</li>
+  <li><strong>四条晋升路径</strong>：年龄 ≥15；动态年龄判定（同年龄 &gt; Survivor/2）；大对象直通；分配担保溢出（ParNew 两步判定：老年代连续空间 &gt; 存活总量 → 放心 GC；否则比平均晋升量 → 仍不够先 Full GC）。</li>
+  <li><strong>Minor GC 五步</strong>：STW → 根扫描（卡表/写屏障/RSet 避免全扫老年代）→ 三色标记 → 复制到 To（顺带整理，age+1）→ 清空 + From/To 互换。</li>
+  <li><strong>Full GC 六场景</strong>：老年代满 / 元空间满 / 担保失败 / System.gc() / CMS 并发失败 / Ergonomics。G1 用并发标记 + Mixed GC（MaxGCPauseMillis 预测模型）把 Full GC 变成极端情况。</li>
+  <li><strong>调优</strong>：五步法（基线 → 日志 → 定位 → 单变量 → 回归）；Xms=Xmx 铁律；Xmn 与 NewRatio 互斥。</li>
+</ul>
+</div>
+
+<h3>面试回答模板</h3>
+
+<div class="takeaway"><span class="takeaway-label">30 秒版（先说结论）</span>
+<p>"堆分代基于弱分代假说——绝大多数对象朝生夕灭。年轻代用 Eden + 双 Survivor（8:1:1），Minor GC 用复制算法，快但 STW；长寿对象按年龄或动态判定晋升老年代（约 2/3 堆），用更慢的策略回收。G1 之后年轻代/老年代变成 Region 的逻辑集合，用 Mixed GC 化整为零，目标是避免 Full GC。"</p>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">3 分钟版（追加分层）</span>
+<p>30 秒版 + 三个"为什么"：① 为什么双 Survivor——复制算法需要空的目标区，From/To 互换，代价是浪费 1/10 空间；② 为什么晋升不只看年龄——动态年龄判定防止 Survivor 溢出，分配担保（ParNew 两步判定）防止"Minor GC 后老年代装不下"，这就是"Minor GC 前先来 Full GC"的日志现象来源；③ 为什么 Minor GC 不扫老年代——卡表 + 写屏障只记录"老年代→年轻代"引用变化过的卡，根扫描只处理脏卡。G1 对应结构是 RSet。最后落一句：所以调优核心是控制晋升速度和年轻代大小，目标是 Young GC 快而稳、Full GC 不发生。</p>
+</div>
+
+<h3>高频追问速答</h3>
+
+<table class="nb-table">
+<thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+<tbody>
+<tr><td>为什么是 8:1:1？</td><td>弱分代假说下存活对象只占少数，10% Survivor 足够装；Survivor 越大 Eden 越小，Minor GC 越频繁，8 是经验平衡点</td></tr>
+<tr><td>为什么年龄阈值是 15？</td><td>2⁴-1 的经验值：存活曲线指数衰减，熬过 15 轮的是极少数；太小→老年代消化不良，太大→Survivor 复制压力大；age 是 byte，上限 255</td></tr>
+<tr><td>G1 还分代吗？</td><td>分。Region 化后 Eden/Survivor/Old 是逻辑集合，不物理连续；Region 也有年龄，生命周期概念保留（Oracle 官方原话 logical sets of these regions）</td></tr>
+<tr><td>为什么 Minor GC 后紧跟 Full GC？</td><td>分配担保失败：老年代连续空间装不下本次存活总量，且也不大于平均晋升量 → JVM 先 Full GC 腾老年代再重试</td></tr>
+<tr><td>年轻代越大越好吗？</td><td>不是。越大 → Minor GC 频率降但单次更慢，存活总量越大，分配担保越容易失败；经验上占堆 1/3~1/2，以 GC 日志为准</td></tr>
+<tr><td>Survivor 区为什么经常是空的？</td><td>每轮 Minor GC 只有"上轮 From + Eden 的存活者"被复制过来，存活率低时占用很小；日志里 To 空间利用率长期 &lt;50% 通常意味着 Survivor 偏大或对象死得快</td></tr>
+</tbody>
+</table>
+
 <div class="takeaway"><span class="takeaway-label">核心记忆</span>
-<p>堆分代的本质是利用<strong>"大部分对象朝生夕灭"</strong>的统计规律，把高频回收集中在年轻代（Minor GC），降低整体 GC 开销。对象从 Eden 出生，在 Survivor 区"历练"，age 达标后晋升到老年代——理解这条生命线，GC 调优就有了方向。</p>
+<p>堆分代是利用"大部分对象朝生夕灭"的统计规律，把高频回收集中在年轻代、让长寿对象在老年代慢速消化的<strong>分组策略</strong>。对象从 Eden 出生，在 Survivor 历练，经四条路径之一进入老年代；Minor GC 靠复制 + 卡表/写屏障快进快出，Full GC 是必须避免的兜底。掌握这条"对象生命线"，GC 调优就有了坐标系——下一篇我们沿着 <code>new</code> 指令，把对象出生那一瞬间 JVM 的每一步拆开看（「对象创建全过程」）。</p>
 </div>
 </section>
 

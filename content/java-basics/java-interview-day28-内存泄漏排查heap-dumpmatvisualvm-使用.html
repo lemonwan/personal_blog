@@ -6,6 +6,7 @@
 <title>内存泄漏排查</title>
 </head>
 <body>
+
 <main class="lesson-body">
 
 <!-- ========== 元数据（隐藏） ========== -->
@@ -13,567 +14,785 @@
   title: "内存泄漏排查：Heap Dump + MAT + VisualVM 实战"
   difficulty: 高级
   interviewFreq: 高频
-  desc: "从 jmap 导出堆转储到 MAT 分析大对象，完整排查一次内存泄漏。ThreadLocal 泄漏、连接池泄漏、缓存泄漏——三大典型场景。"
+  desc: "从 jstat 看趋势到 jcmd 导出堆转储，再到 MAT 四步定位根因：ThreadLocal、连接、缓存三大泄漏场景全拆解，附五步 SOP、预防体系与面试模板。"
 -->
 
-<!-- ================================================================
-     第 1 站 — 开场：真实事故
-     ================================================================ -->
+<!-- ═══════════════ 第1站：泄漏的定义与五步 SOP ═══════════════ -->
 <section class="station reveal" id="s1">
-  <div class="station-head">
-    <span class="station-no">第 1 站</span>
-    <h2>面试官：你怎么排查内存泄漏？</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 1 站</span><h2>开场：内存泄漏到底是什么？</h2></div>
 
-  <div class="think">
-    <p class="think-q">"线上服务跑了两周，突然 OOM 了，你怎么定位？" 大部分候选人会说"看日志"或"加内存"。但面试官真正想听到的是——你能不能从发现泄漏、导出堆转储、到 MAT 定位根因，完整走一遍排查流程。</p>
-  </div>
+<p>面试官很喜欢用真实事故开场：<strong>"线上服务跑了两周，突然 OOM 了，你怎么排查？"</strong>大部分候选人会答"看日志"或者"把内存加一点"。前者是背过的，后者是运维思维。面试官真正想听的是——你能不能<strong>从确认泄漏存在、导出堆转储、MAT 定位到类、一路追到具体那行代码，再到修复验证</strong>，完整走一遍排查链路。这一篇就帮你把这条链路全部走通。</p>
 
-  <p>先看一个真实事故：某电商订单服务上线后一切正常，但运维监控发现<strong>老年代内存占用每天悄悄上涨约 2%</strong>。起初没人注意——Full GC 偶尔触发，也能回收掉一部分。两周后的一个凌晨，老年代使用率突破 95%，Full GC 再也收不回来，服务抛出 <code>java.lang.OutOfMemoryError: Java heap space</code>，全面不可用。</p>
+<h3>先把"泄漏"这个词说准确</h3>
 
-  <p>事后复盘发现，罪魁祸首是一个全局的 <code>ThreadLocal</code> 变量——每个请求线程都在往里塞数据，但从未调用 <code>remove()</code>。线程池中的线程不会销毁，数据就一直挂着，两周累积了 3.2GB。</p>
+<p>在带 GC 的语言里，一个对象能被回收的前提是<strong>"从 GC Roots 不可达"</strong>。所以 Java 里的内存泄漏，准确定义是：</p>
 
-  <p>这就是内存泄漏最阴险的地方：<strong>它不像 bug 那样立即报错，而是像慢性病一样慢慢侵蚀，等到爆发时已经积重难返。</strong></p>
+<div class="formula">内存泄漏 = 对象已无业务用途 + 仍被某条引用链从 GC Roots 拽着（可达）<br>→ GC 不是不想收，是被引用"绑架"了，收不掉<br>→ 本质：<strong>引用没释放</strong>，不是内存没回收</div>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>内存泄漏的典型症状</th><th>表现</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>内存缓慢上涨</td><td>老年代使用量每天增长 1%~5%，Full GC 后无法回落到基线</td></tr>
-      <tr><td>Full GC 越来越频繁</td><td>从一周一次到一天一次，间隔越来越短</td></tr>
-      <tr><td>Full GC 回收量递减</td><td>每次 Full GC 能回收的内存越来越少</td></tr>
-      <tr><td>最终 OOM</td><td>java.lang.OutOfMemoryError: Java heap space / GC overhead limit exceeded</td></tr>
-    </tbody>
-  </table>
+<p>注意这个定义里最值钱的后半句：<strong>Java 内存泄漏的排查，关键问题从来不是"内存去哪了"，而是"谁还拽着这些对象不放"。</strong>问对问题，方向才不会跑偏。在《GC Roots 详解》里我们梳理过泄漏的六种常见模式：① 静态集合只增不减；② 资源（连接 / 流 / 监听器）未关闭或未注销；③ ThreadLocal 未 remove；④ 缓存没有淘汰策略；⑤ 内部类 / 匿名类隐式持有外部对象；⑥ 动态生成类导致类加载器泄漏（这个漏的是 Metaspace，不是堆）。本文第 5 站的三大场景正好覆盖其中 ①③④，附加场景再补 ⑤⑥。</p>
 
-  <div class="crack">
-    <span class="crack-label">面试官视角</span>
-    <p>内存泄漏排查是面试中区分"背八股"和"有实战经验"的最佳考点。能说出 jstat、jmap、MAT 完整排查链路的候选人，通常都有真实的线上排障经历。本文就是帮你建立这条完整的排查链路。</p>
-  </div>
+<h3>泄漏 vs 内存不足：OOM 的两种根因</h3>
+
+<p>一个容易混淆的点：OOM（OutOfMemoryError）≠ 内存泄漏。<code>OutOfMemoryError: Java heap space</code> 至少有两种根因，处理方式完全不同——一种是<strong>泄漏</strong>（对象该死不死，缓慢累积），另一种是<strong>容量 / 大对象问题</strong>（堆真的不够大，或单个对象大到装不下）。区分方法看曲线：</p>
+
+<table class="nb-table">
+<thead><tr><th>维度</th><th>内存泄漏（缓慢增长）</th><th>容量 / 大对象问题（突然撑爆）</th></tr></thead>
+<tbody>
+<tr><td>老年代曲线</td><td>Full GC 后<strong>基线逐级抬高</strong>，楼梯状爬升</td><td>在某个水位锯齿震荡、每次都能回收；或被单个大对象一次顶满</td></tr>
+<tr><td>与业务量的关系</td><td>与流量无关，低峰期也在涨</td><td>通常与负载或单次请求大小相关</td></tr>
+<tr><td>到 OOM 的时间</td><td>慢，数天到数周，"慢性病"</td><td>快，数小时甚至启动即 OOM（大对象场景见《JVM 堆内存》的大对象直通老年代路径）</td></tr>
+<tr><td>修复方向</td><td>找到并释放那条引用链</td><td>扩堆 / 拆大对象 / 换收集器</td></tr>
+</tbody>
+</table>
+
+<p>两种情况抛的异常可能一模一样，所以<strong>光看异常堆栈区分不了，必须看内存趋势</strong>——这就是为什么排查 SOP 的第一步永远是"看趋势"而不是"dump 堆"。OOM 的其余几类（GC overhead limit exceeded、Metaspace、Direct buffer memory 等）在《OOM 排查实战》里有完整分类，这里不展开。</p>
+
+<h3>全文主线：五步 SOP</h3>
+
+<p>把一次泄漏排查拆成五个阶段，后文每站对应其中一步，读完你会发现整篇文章就是一条流水线：</p>
+
+<ol>
+  <li><strong>趋势</strong>：确认泄漏确实存在（第 2 站，工具 jstat / 监控）。</li>
+  <li><strong>取证</strong>：导出堆转储快照（第 3 站，工具 jmap / jcmd / OOM 自动转储）。</li>
+  <li><strong>定位</strong>：MAT 四步走，找到嫌疑类与引用链（第 4 站，核心）。</li>
+  <li><strong>根因</strong>：把引用链对应回代码，确认业务语义（第 5 站，三大典型场景）。</li>
+  <li><strong>修复</strong>：改代码 + 验证基线恢复锯齿形（第 7 站，预防体系让这类问题不再发生）。</li>
+</ol>
+
+<p>类比医院：<strong>看症状（趋势）→ 抽血化验（取证）→ CT 成像（定位）→ 病理确诊（根因）→ 治疗（修复）</strong>。跳步的后果是真实的——没看趋势就 dump，可能白停一次服务；拿到 dump 不会 MAT，证据就在眼前也读不出来。</p>
+
+<div class="think"><div class="think-q">"内存泄漏是 Java 特有的问题吗？"——面试官追问时这样接</div>
+<p>不是，但机制不同。没有 GC 的语言（C / C++）里泄漏是<strong>忘了 free()</strong>，内存永远回不来；Java 有 GC，"忘"的不是释放内存，而是<strong>释放引用</strong>。所以 Java 排查的问法从"哪块内存没还"变成"谁还指着这个对象"。这个区别决定了你后面选工具：C 语言查泄漏用 AddressSanitizer 一类工具盯"分配未释放"，Java 查泄漏用 MAT 这类工具盯"引用链"。</p></div>
+
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>Java 内存泄漏 = 没用的对象被引用链拽着不让 GC 收；排查五步 <strong>趋势 → 取证 → 定位 → 根因 → 修复</strong>，第一步看曲线区分"泄漏"和"堆太小"，后面每步都有固定工具。OOM 不等于泄漏，先看病灶，再开药方。</p></div>
 </section>
 
-<!-- ================================================================
-     第 2 站 — 发现泄漏
-     ================================================================ -->
+<!-- ═══════════════ 第2站：发现泄漏 ═══════════════ -->
 <section class="station reveal" id="s2">
-  <div class="station-head">
-    <span class="station-no">第 2 站</span>
-    <h2>发现泄漏：jstat -gcutil 监控堆内存趋势</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 2 站</span><h2>发现泄漏：先看趋势，再下判断</h2></div>
 
-  <p>排查内存泄漏的第一步不是 dump 堆，而是<strong>确认泄漏确实存在</strong>。盲目 dump 一个 4GB 的堆既耗时又占磁盘，你需要先通过监控数据判断是不是真的在泄漏。</p>
+<p>面试官第一问：<strong>"你凭什么判断它在泄漏？直接 dump 不行吗？"</strong>4GB 的堆 dump 一次要 STW 数秒、产出几 GB 文件、再花几十分钟传出来——在没确认泄漏之前动这个工具，等于没化验就开刀。发现泄漏这一步的关键词是<strong>低成本、看趋势</strong>。</p>
 
-  <p><code>jstat -gcutil</code> 是最轻量的实时监控工具，它以百分比形式展示堆内存各区域的使用率：</p>
+<h3>jstat -gcutil：最轻量的"趋势显微镜"</h3>
 
-  <div class="srcbox">
-    <div class="srcbox-head">jstat 实时监控命令</div>
-    <pre class="srcbox-file"><span class="c"># 每 5 秒采样一次，持续观察</span>
-<span class="k">jstat</span> -gcutil &lt;pid&gt; <span class="n">5000</span>
+<p><code>jstat -gcutil</code> 按百分比展示各区使用率，几乎零开销，适合连着采样：S0 / S1 / E / O / M / CCS 是各区使用率，YGC / YGCT / FGC / FGCT 是 Young / Full GC 的次数与累计耗时，GCT 是 GC 总耗时。读它的关键动作只有一个——<strong>盯 FGC 每次 +1 之后 O 列停在哪里</strong>：</p>
 
-<span class="c"># 输出示例（关键列）：</span>
-<span class="c">#  S0    S1    E     O     M    CCS   YGC   YGCT   FGC  FGCT    GCT</span>
-<span class="n">  0.0</span> <span class="n">45.2</span> <span class="n">78.3</span> <span class="n">62.1</span> <span class="n">89.4</span> <span class="n">88.7</span>  <span class="n">342</span>  <span class="n">5.67</span>    <span class="n">2</span>  <span class="n">1.23</span>   <span class="n">6.90</span>
-<span class="n">  0.0</span> <span class="n">12.5</span> <span class="n">15.6</span> <span class="n">63.5</span> <span class="n">89.4</span> <span class="n">88.7</span>  <span class="n">344</span>  <span class="n">5.71</span>    <span class="n">2</span>  <span class="n">1.23</span>   <span class="n">6.94</span>
-<span class="n">  0.0</span> <span class="n">12.5</span> <span class="n">67.2</span> <span class="n">64.9</span> <span class="n">89.4</span> <span class="n">88.7</span>  <span class="n">344</span>  <span class="n">5.71</span>    <span class="n">2</span>  <span class="n">1.23</span>   <span class="n">6.94</span>
-<span class="c"># O=Old 老年代使用率  M=Metaspace  YGC/FGC=Young/Full GC 次数  GCT=GC 总耗时</span></pre>
-  </div>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>jstat 采样</b> · 示例日志（老年代基线逐级抬高的泄漏信号）</span></div>
+<pre><code><span class="c"># 每 10 秒采样一次，重点盯 O（老年代使用率）与 FGC（Full GC 次数）</span>
+<span class="k">$</span> jstat -gcutil <span class="n">23456</span> <span class="n">1000</span>
+  S0     S1     E      O    M    CCS    YGC    YGCT   FGC  FGCT    GCT
+  0.0   45.2   78.3   89.4  88.2  87.6   1204   12.31   2   3.10   15.41
+  0.0   12.5   22.6   <span class="t">91.2</span>  88.2  87.6   1207   12.44   <span class="t">5</span>   4.92   17.36
+  0.0    0.0   45.8   <span class="t">93.5</span>  88.2  87.6   1211   12.59   <span class="t">8</span>   6.85   19.44
+  0.0   38.2   67.4   <span class="t">96.1</span>  88.2  87.6   1216   12.78  <span class="t">11</span>   8.90   21.68
+<span class="c"># FGC 从 2→5→8→11，每次 Full GC 刚结束时 O 列的残留：91.2 → 93.5 → 96.1</span>
+<span class="c"># 每次 Full GC 的"回收后基线"都比上一次更高——典型的泄漏曲线</span></code></pre>
+</div>
 
-  <p>看这组输出，关键发现：<strong>老年代（O 列）从 62.1% 稳步上涨到 64.9%，中间经历了一次 Young GC（Eden 清零、Survivor 变化），但老年代纹丝不动地往上走。</strong>这就是泄漏的信号。</p>
+<p>上面这份示例日志里，Eden（E 列）该清零清零、Survivor 该变化变化，年轻代一切正常；唯一的异常是：<strong>FGC 从 2 涨到 11 的三次 Full GC 之后，老年代残留从 91.2% 一路抬到 96.1%，一次都没落回去。</strong>Full GC 是堆里最彻底的清理，它都清不掉的残留，就是"被引用拽着"的对象。这就是泄漏的强信号。</p>
 
-  <h3>如何判断是泄漏还是正常增长？</h3>
+<figure class="fig">
+<svg viewBox="0 0 780 330" role="img" aria-label="老年代占用趋势对比：正常服务与泄漏服务的 Full GC 后基线">
+  <defs>
+    <marker id="l30-m1" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2D7D2D"/></marker>
+    <marker id="l30-m2" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+  </defs>
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">老年代使用率随时间的两条曲线（纵轴 0~100%，纵轴向下为 0）</text>
+  <line x1="70" y1="45" x2="70" y2="275" stroke="#555" stroke-width="1.5"/>
+  <line x1="70" y1="275" x2="745" y2="275" stroke="#555" stroke-width="1.5"/>
+  <text x="60" y="50" text-anchor="end" font-family="sans-serif" font-size="10" fill="#666">100%</text>
+  <text x="60" y="110" text-anchor="end" font-family="sans-serif" font-size="10" fill="#666">75%</text>
+  <text x="60" y="170" text-anchor="end" font-family="sans-serif" font-size="10" fill="#666">50%</text>
+  <text x="60" y="230" text-anchor="end" font-family="sans-serif" font-size="10" fill="#666">25%</text>
+  <text x="60" y="279" text-anchor="end" font-family="sans-serif" font-size="10" fill="#666">0</text>
+  <line x1="70" y1="105" x2="745" y2="105" stroke="#EEE" stroke-width="1"/>
+  <line x1="70" y1="165" x2="745" y2="165" stroke="#EEE" stroke-width="1"/>
+  <line x1="70" y1="225" x2="745" y2="225" stroke="#EEE" stroke-width="1"/>
+  <text x="745" y="292" text-anchor="end" font-family="sans-serif" font-size="11" fill="#666">时间 →</text>
+  <text x="80" y="292" font-family="sans-serif" font-size="10" fill="#999">每一条陡峭的竖直跌落 = 一次 Full GC</text>
 
-  <p>正常的堆使用是"锯齿形"——Eden 区填满后触发 Young GC 清零，然后重新填充，周而复始。老年代也会缓慢增长，但 Full GC 后能明显回落。<strong>内存泄漏的特征是：Full GC 后老年代使用量无法回落到之前的基线，底部不断抬高。</strong></p>
+  <polyline points="90,198 130,138 133,198 173,138 176,198 216,138 219,198 259,138 262,198 302,138 305,198 345,138 348,198 388,138 391,198 431,138 434,198 474,138 477,198 517,138 520,198 560,138 563,198 603,138 606,198 646,138 649,198"
+    fill="none" stroke="#2D7D2D" stroke-width="2"/>
+  <text x="120" y="120" font-family="sans-serif" font-size="11" fill="#2D7D2D" font-weight="700">正常服务：锯齿形，基线稳定在 30% 附近</text>
 
-  <div class="formula">
-    泄漏判定公式：观察 N 次 Full GC 后的老年代残留量<br>
-    如果残留量呈单调递增趋势 → 大概率内存泄漏<br>
-    如果残留量在某个水位稳定下来 → 正常，只是堆设小了
-  </div>
+  <polyline points="90,186 200,138 203,150 330,102 333,121 470,78 473,97 610,54 613,73 730,40"
+    fill="none" stroke="#B85450" stroke-width="2.2"/>
+  <text x="360" y="88" font-family="sans-serif" font-size="11" fill="#B85450" font-weight="700">泄漏服务：Full GC 后基线 35%→50%→62%→72%→82%→90% 逐级抬高</text>
+  <line x1="203" y1="150" x2="333" y2="121" stroke="#B85450" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="333" y1="121" x2="473" y2="97" stroke="#B85450" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="473" y1="97" x2="613" y2="73" stroke="#B85450" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="430" y="140" font-family="sans-serif" font-size="10" fill="#B85450">虚线连成的"上升基线" = 泄漏的签名</text>
 
-  <div class="think">
-    <p class="think-q">Metaspace（M 列）使用率 89.4% 且纹丝不动，这说明什么？</p>
-    <p>Metaspace 存的是类元数据，正常情况下类加载完成后就稳定了。如果 M 列持续增长，说明有类加载泄漏（比如 CGLIB 动态代理不断生成新类）。本例中 M 列稳定，问题不在 Metaspace，而在老年代。</p>
-  </div>
+  <rect x="90" y="306" width="14" height="14" fill="#2D7D2D"/>
+  <text x="110" y="318" font-family="sans-serif" font-size="11" fill="#333">正常：每次 Full GC 都能回到原基线</text>
+  <rect x="360" y="306" width="14" height="14" fill="#B85450"/>
+  <text x="380" y="318" font-family="sans-serif" font-size="11" fill="#333">泄漏：每次 Full GC 的落脚点都比上次高（楼梯状）</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> 泄漏判定看"Full GC 后的落脚点"：正常服务回基线，泄漏服务基线逐级抬高——这是 jstat / 监控图里最该盯的一条线</figcaption>
+</figure>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>发现内存泄漏的第一步是用 jstat -gcutil 实时监控堆使用率。重点观察老年代（O 列）——如果每次 Full GC 后的残留量持续上涨、无法回落基线，就基本确认存在内存泄漏。接下来要做的就是导出堆转储文件，用 MAT 分析具体是哪些对象在泄漏。</p>
-  </div>
+<h3>判断"泄漏 vs 正常增长"的三问</h3>
+
+<p>曲线涨了不等于泄漏——缓存预热、大查询结果集、批量任务都会让老年代短期上涨。对着曲线问三个问题，基本能定性：</p>
+
+<ol>
+  <li><strong>Full GC 之后能否回落？</strong>能回落到之前的水位 → 大概率正常；回不去 → 继续问第二问。</li>
+  <li><strong>回落后的基线是否逐次抬高？</strong>在某个水位稳定下来（比如稳定在 55% 不再动）→ 正常，只是堆设小了，见《JVM 调优参数手册》；像楼梯一样每级 +2% → 泄漏。</li>
+  <li><strong>增长速率与业务量是否线性相关？</strong>正常缓存的增长随业务量增长而<strong>收敛</strong>（热点被填满后就不涨了）；泄漏的增长<strong>与流量无关</strong>，凌晨低峰照样涨——这是泄漏最"诚实"的特征。</li>
+</ol>
+
+<p>一个帮助记忆的画面：正常内存使用像<strong>潮汐</strong>——涨潮落潮，海岸线（基线）不动；泄漏像<strong>海平面上升</strong>——每次落潮都多露出一片新的陆地，潮水永远回不到原来的位置。</p>
+
+<h3>生产环境：从"人工看"到"机器盯"</h3>
+
+<p>jstat 是人肉排查工具，生产长期监控要靠指标体系：Micrometer 把 JVM 指标（堆各代使用量、GC 次数与耗时）暴露给 Prometheus，配两条告警就能覆盖大部分泄漏的早期信号：</p>
+
+<ul>
+  <li><strong>Full GC 后老年代残留 &gt; 85%</strong>（或连续 3 次 Full GC 残留递增）——泄漏强信号；</li>
+  <li><strong>10 分钟内 Full GC &gt; 3 次</strong>，或 GC 时间占比 &gt; 30%——服务已经在"用 GC 续命"。</li>
+</ul>
+
+<p>指标的采集、告警阈值的完整设计见《GC 日志分析实战》的监控一节，这里只强调一点：<strong>泄漏排查拼的是"发现得早"，等 OOM 了再查，你手里只剩一个已经发生过的现场。</strong></p>
+
+<h3>加分项：JFR 长周期录制</h3>
+
+<p>如果你用的 JDK 是 9+（JDK 11 起 JFR 免费开放），还有一个低成本手段：<strong>JFR（Java Flight Recorder）持续录制</strong>。它开销极低（通常不到 1%），可以录数小时甚至数天，OOM 或怀疑泄漏时随时导出回放：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>JFR 命令</b> · 启动参数 + 运行时按需录制</span></div>
+<pre><code><span class="c"># 启动时开启（JDK 9+，JDK 11 起免费）：低开销，可长时间录制</span>
+-XX:StartFlightRecording
+<span class="c"># 运行时按需开始 / 导出（settings=profile 才会采集高频分配事件）</span>
+<span class="k">$</span> jcmd <span class="n">23456</span> JFR.start name=leakhunt duration=1h filename=/data/jfr/leak.jfr settings=profile
+<span class="k">$</span> jcmd <span class="n">23456</span> JFR.dump name=leakhunt filename=/data/jfr/leak2.jfr
+<span class="c"># 回放时看分配事件（jdk.ObjectAllocationInNewTLAB 等）：谁在分配大对象</span>
+<span class="c"># 配合 MAT 的 dump，一个回答"谁在分配"，一个回答"谁还拽着"</span></code></pre>
+</div>
+
+<p>JFR 的分配事件回答的是"谁在<strong>分配</strong>"，MAT 的引用链回答的是"谁在<strong>持有</strong>"——两个工具拼起来，泄漏排查就没有盲区了。</p>
+
+<div class="crack"><span class="crack-label">易错点</span>
+<p>jstat 里 M 列（Metaspace）持续增长，别当成堆泄漏——那是<strong>类加载泄漏</strong>（CGLIB 动态代理、Groovy / JS 脚本引擎反复编译新类），漏的是堆外的 Metaspace，heap dump 根本看不见它。正确姿势是 <code>jstat -class</code> 看类数量趋势，详见《OOM 排查实战》。看趋势时 O 和 M 要分开判。</p></div>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>jstat -gcutil 是泄漏的"听诊器"：盯 <strong>FGC 每次 +1 后 O 列的残留</strong>，基线逐级抬高 = 泄漏强信号；再用三问定性（能否回落 / 基线是否抬高 / 与业务量是否解耦）。生产用 Prometheus 告警提前发现，JFR 长周期录制留一手回放数据。</p></div>
 </section>
 
-<!-- ================================================================
-     第 3 站 — 导出 Heap Dump
-     ================================================================ -->
+<!-- ═══════════════ 第3站：导出 Heap Dump ═══════════════ -->
 <section class="station reveal" id="s3">
-  <div class="station-head">
-    <span class="station-no">第 3 站</span>
-    <h2>导出 Heap Dump：jmap 与自动转储配置</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>导出 Heap Dump：三种方式与风险取舍</h2></div>
 
-  <p>确认泄漏后，下一步是<strong>获取堆内存快照（Heap Dump）</strong>——它记录了 dump 时刻堆中所有对象的实例、引用关系和占用大小。这是 MAT 分析的输入文件。</p>
+<p>趋势确认后进入取证：<strong>把堆在某个时刻的完整快照存成文件（.hprof）</strong>。Heap Dump 记录 dump 时刻堆里每个对象的实例数据、引用关系和占用大小——它是 MAT 的"检材"。取证的原则是<strong>在风险最小的时机拿最完整的证据</strong>。</p>
 
-  <h3>方式一：手动导出（jmap）</h3>
+<h3>方式一：手动导出（jmap）</h3>
 
-  <div class="srcbox">
-    <div class="srcbox-head">手动导出堆转储</div>
-    <pre class="srcbox-file"><span class="c"># 基本命令：导出二进制格式的堆转储</span>
-<span class="k">jmap</span> -dump:format=b,file=/data/dumps/heap_<span class="t">$(date +%Y%m%d_%H%M%S)</span>.hprof &lt;pid&gt;
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>jmap 手动导出</b> · 三种 dump 命令对比</span></div>
+<pre><code><span class="c"># ① 完整导出：不触发 GC，dump 时刻堆里的全部对象（含将死的）</span>
+<span class="k">$</span> jmap -dump:format=b,file=/data/dumps/heap_<span class="s">$(date +%Y%m%d_%H%M%S)</span>.hprof <span class="n">23456</span>
 
-<span class="c"># 如果 jmap 无响应（JVM 处于 GC 中），使用 F 参数强制 dump</span>
-<span class="k">jmap</span> -F -dump:format=b,file=heap.hprof &lt;pid&gt;
+<span class="c"># ② 只导存活对象：:live 先触发一次 Full GC，再只导出存活的</span>
+<span class="k">$</span> jmap -dump:live,format=b,file=/data/dumps/heap_live.hprof <span class="n">23456</span>
 
-<span class="c"># JDK 9+ 推荐用 jcmd 替代 jmap</span>
-<span class="k">jcmd</span> &lt;pid&gt; GC.heap_dump /data/dumps/heap.hprof</pre>
-  </div>
+<span class="c"># ③ JDK 9+ 官方更推荐 jcmd（输出更规范，参数模型一致）：</span>
+<span class="k">$</span> jcmd <span class="n">23456</span> GC.heap_dump /data/dumps/heap.hprof
+<span class="c"># jcmd 对应 JMX 的 DiagnosticMXBean#dump_heap 命令，</span>
+<span class="c"># 远程 JMX 场景下也能通过同一通道触发，不一定要登录服务器</span>
 
-  <div class="crack">
-    <span class="crack-label">注意</span>
-    <p>jmap dump 会触发一次 Full GC（STW），堆越大耗时越长。4GB 堆大约暂停 1~3 秒，16GB 堆可能暂停 10 秒以上。生产环境慎用，最好在流量低谷或摘流后操作。</p>
-  </div>
+<span class="c"># ④ 快速看 Top 对象（不 dump 整个堆，先缩小范围；:live 同样触发 Full GC）</span>
+<span class="k">$</span> jmap -histo:live <span class="n">23456</span> | head -<span class="n">25</span></code></pre>
+</div>
 
-  <h3>方式二：OOM 自动转储（推荐）</h3>
+<p>两个参数细节值得说透：</p>
 
-  <p>比手动 dump 更靠谱的方式是<strong>让 JVM 在 OOM 时自动保存堆快照</strong>，这样即使凌晨三点 OOM 你也能拿到现场：</p>
+<ul>
+  <li><strong><code>:live</code> 是双刃剑</strong>：它先触发 Full GC 只导存活对象，文件小、分析快；但"刚死掉的对象"和 GC 前的引用关系全部消失——如果你要分析的对象正好是短命的（比如想确认某个临时大对象为什么没被收），<code>:live</code> 会把它洗掉。<strong>泄漏排查通常加 <code>:live</code></strong>（泄漏对象本来就"死不了"，GC 一次反而能把噪音清掉、文件更小）。</li>
+  <li><strong><code>-F</code>（强制）是最后手段</strong>：jmap 无响应（进程卡在长 GC 里）时，<code>jmap -F</code> 改用 SA 直接读进程内存，更慢更危险，能用 <code>jcmd</code> 就不要用它。</li>
+</ul>
 
-  <div class="srcbox">
-    <div class="srcbox-head">生产环境必配的自动转储参数</div>
-    <pre class="srcbox-file"><span class="k">java</span> \
-  -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath=/data/dumps/heap_%p.hprof \
-  -jar app.jar
+<p><strong>风险</strong>：dump 全程 STW，暂停时长与堆大小和存活对象数成正比——4GB 堆通常停数秒，16GB 堆、存活对象多时可能停 10 秒以上。线上高峰期这一秒停顿可能是 P0 事故，所以手动 dump 的最佳时机是<strong>流量低谷</strong>，或者更稳妥的做法：<strong>摘一台同版本的副本实例（同步一份数据），在副本上 dump</strong>，线上进程完全不受影响。</p>
 
-<span class="c"># %p 会替换为进程 PID，避免多次 OOM 覆盖同一文件
-# OOM 发生时 JVM 自动执行：dump 堆 → 写入指定路径 → 然后退出</span></pre>
-  </div>
+<h3>方式二：OOM 自动转储（生产必配）</h3>
 
-  <h3>Dump 文件大小预估</h3>
+<p>比手动 dump 更可靠的思路是<strong>提前埋伏</strong>：让 JVM 在 OOM 的那一刻自己保存快照——反正那一刻服务已经要挂了，dump 的 STW 成本是零：</p>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>堆大小（-Xmx）</th><th>Dump 文件大小（约）</th><th>写入耗时</th><th>磁盘建议</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>2GB</td><td>1.5~2GB</td><td>2~5 秒</td><td>预留 10GB</td></tr>
-      <tr><td>4GB</td><td>3~4GB</td><td>5~10 秒</td><td>预留 20GB</td></tr>
-      <tr><td>8GB</td><td>6~8GB</td><td>10~20 秒</td><td>预留 40GB</td></tr>
-      <tr><td>16GB</td><td>12~16GB</td><td>20~40 秒</td><td>预留 80GB</td></tr>
-    </tbody>
-  </table>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>启动参数</b> · 生产环境必配的两行</span></div>
+<pre><code>java -jar app.jar \
+  <span class="t">-XX:+HeapDumpOnOutOfMemoryError</span> \
+  <span class="t">-XX:HeapDumpPath=/data/dumps/heap_%p.hprof</span>
+<span class="c"># %p 展开为进程 PID（较新的 JDK 8 版本及 JDK 9+ 支持）</span>
+<span class="c"># 效果：OOM 发生 → JVM 自动写完整堆快照 → 进程退出</span>
+<span class="c"># 凌晨三点 OOM，早上你也能拿到第一现场，而不是一个空壳容器</span>
+<span class="c"># 参数全貌与配套参数见《JVM 调优参数手册》</span></code></pre>
+</div>
 
-  <div class="think">
-    <p class="think-q">Dump 文件太大，传不出服务器怎么办？</p>
-    <p>两种方案：第一，直接在服务器上用 MAT 的命令行模式（<code>mat/ParseHeapDump.sh</code>）生成分析报告，只把报告文件（几十 MB）传出来。第二，用 <code>jmap -histo:live &lt;pid&gt;</code> 先看对象直方图，不需要 dump 整个堆也能看到 Top 20 大对象。</p>
-  </div>
+<p>注意：OOM 自动 dump 的是<strong>OOM 时刻的完整堆</strong>（没加 live 语义），如果堆 8G 且几乎全满，dump 文件就是 7~8G 的大家伙——所以 HeapDumpPath 所在磁盘必须提前留足空间（下一节说预估）。</p>
 
-  <div class="srcbox">
-    <div class="srcbox-head">快速查看对象直方图（不需要 dump 整个堆）</div>
-    <pre class="srcbox-file"><span class="c"># 只看存活对象的 Top 20，按字节数排序</span>
-<span class="k">jmap</span> -histo:live &lt;pid&gt; | <span class="k">head</span> -<span class="n">25</span>
+<h3>三种方式怎么选：风险对比表</h3>
 
-<span class="c"># 输出示例：</span>
-<span class="c">#  num     #instances    #bytes  class name</span>
-<span class="c">#    1:       1280000  327680000  [B                      ← byte[] 327MB</span>
-<span class="c">#    2:        640000  204800000  com.app.CacheEntry       ← 自定义缓存 204MB</span>
-<span class="c">#    3:        512000  122880000  java.lang.String</span>
-<span class="c">#    4:         80000   51200000  java.util.HashMap$Node</span></pre>
-  </div>
+<table class="nb-table">
+<thead><tr><th>方式</th><th>STW 成本</th><th>触发时机</th><th>文件内容</th><th>适用场景</th></tr></thead>
+<tbody>
+<tr><td><code>jmap -dump</code>（不带 live）</td><td>有，与堆成正比</td><td>手动，须挑低峰</td><td>dump 时刻全量堆（含将死对象）</td><td>需要分析 GC 前状态 / 短命对象</td></tr>
+<tr><td><code>jmap -dump:live</code> / <code>jcmd GC.heap_dump</code></td><td>有，还多一次 Full GC</td><td>手动，须挑低峰</td><td>存活对象（文件小，推荐）</td><td>常规泄漏排查首选</td></tr>
+<tr><td>OOM 自动转储</td><td>无（服务已 OOM）</td><td>自动</td><td>OOM 时刻全量堆</td><td><strong>生产必配</strong>，事故第一现场</td></tr>
+</tbody>
+</table>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>生产环境我会配 -XX:+HeapDumpOnOutOfMemoryError 加 -XX:HeapDumpPath，OOM 时自动保留堆快照。如果需要主动 dump，用 jmap -dump:format=b 或 jcmd GC.heap_dump。Dump 前要注意——它会触发 Full GC 导致 STW，高峰期慎用。大堆环境可以先用 jmap -histo:live 快速看 Top 对象，缩小排查范围。</p>
-  </div>
+<h3>Dump 文件多大？先算账再动手</h3>
+
+<p>.hprof 的大小约等于<strong>存活对象的总大小</strong>（加上引用信息的少量开销），一定小于 -Xmx。粗略估算：5G 堆、老年代占用 80% 左右 → dump 文件约 <strong>1~4G</strong>（取决于对象头开销和引用结构密度）。动手前两个动作：<code>df -h</code> 确认磁盘余量（dump 文件 + MAT 索引通常还要 1~2 倍空间）；确认目标目录在独立磁盘上，而不是和日志抢同一块盘。</p>
+
+<div class="crack"><span class="crack-label">血泪教训</span>
+<p><strong>别在磁盘紧张的生产机上 dump。</strong>dump 写到一半磁盘打满，日志写不了、容器写不了元数据，一个内存问题变成整机故障——二次事故比原事故还难查。磁盘余量不足 dump 文件预估的 3 倍时，改用"服务器本地 MAT 解析"或"副本实例 dump"（下一站开头会讲）。</p></div>
+
+<div class="think"><div class="think-q">"dump 文件几个 G，传不出内网服务器怎么办？"</div>
+<p>两个办法。其一：<strong>在服务器上跑 MAT 的命令行模式</strong>（<code>mat/ParseHeapDump.sh heap.hprof</code>）建索引、生成 Leak Suspects 报告，只把几十 MB 的报告文件（.html/.zip）传出来，MAT 图形界面离线看报告。其二：先 <code>jmap -histo:live</code> 看 Top 20 类，如果某个业务类实例数已经明显反常（比如 CacheEntry 一千万个），直接去代码里找它，连 dump 都省了。<strong>不是每个泄漏都需要完整 dump，histogram 经常就够定性。</strong></p></div>
+
+<div class="takeaway"><span class="takeaway-label">面试话术</span>
+<p>"取证有两条路：平时手动，用 jcmd GC.heap_dump（比 jmap 更现代），加 live 语义先 Full GC 只导存活对象，挑流量低谷操作；更重要的是一条<strong>生产必配的埋伏</strong>——HeapDumpOnOutOfMemoryError + HeapDumpPath，OOM 时自动留现场，零成本。dump 前先看磁盘余量，大堆服务优先在副本实例上 dump，或者服务器本地用 MAT 命令行解析、只把报告传出来。"</p></div>
 </section>
 
-<!-- ================================================================
-     第 4 站 — MAT 分析
-     ================================================================ -->
+
+<!-- ═══════════════ 第4站：MAT 分析（上） ═══════════════ -->
 <section class="station reveal" id="s4">
-  <div class="station-head">
-    <span class="station-no">第 4 站</span>
-    <h2>MAT 分析：Histogram、Dominator Tree 与 Leak Suspects</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 4 站</span><h2>MAT 分析（上）：从 dump 到嫌疑对象</h2></div>
 
-  <p>拿到 .hprof 文件后，用 <strong>Eclipse Memory Analyzer Tool（MAT）</strong>打开它。MAT 是内存泄漏分析的瑞士军刀——它能从几 GB 的堆快照中，自动找出"谁持有了最多内存"以及"为什么 GC 回收不掉"。</p>
+<p>面试官第二问：<strong>"拿到一个 3G 的 hprof，你具体怎么操作 MAT？"</strong>这一站是全文核心，我按真实工作流走：<strong>打开 → Leak Suspects 报告 → Histogram → Dominator Tree → Path to GC Roots → OQL → 两次 dump 对比</strong>，每一步都告诉你看什么、点什么、输出长什么样。</p>
 
-  <h3>分析工作流</h3>
+<p>先交代成本：MAT 打开 hprof 后要先<strong>建索引</strong>（解析全部对象和引用），2G 的 dump 通常要几分钟到十几分钟，索引文件还要额外占 1~2 倍空间——所以服务器本地解析时同样要看磁盘。</p>
 
-  <div class="fig">
-    <svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%">
-      <defs>
-        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
-        </marker>
-      </defs>
-      <text x="410" y="28" text-anchor="middle" font-size="16" font-weight="bold" fill="#1f2937">MAT 内存泄漏分析工作流</text>
+<h3>第一步：Leak Suspects 报告——让 MAT 先自首</h3>
 
-      <!-- Step 1 -->
-      <rect x="30" y="60" width="170" height="80" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
-      <text x="115" y="90" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">1. Leak Suspects</text>
-      <text x="115" y="112" text-anchor="middle" font-size="11" fill="#3b82f6">自动生成泄漏嫌疑报告</text>
-      <text x="115" y="128" text-anchor="middle" font-size="11" fill="#3b82f6">快速定位可疑对象</text>
+<p>索引建完，MAT 会自动生成 <strong>Leak Suspects Report</strong>，包含四个部分：<strong>Overview</strong>（全局概览 + 潜在泄漏占比）、<strong>Dominators</strong>（最大的支配者）、<strong>Top Components</strong>（按组件归类的大头）、<strong>System Overview</strong>（JVM / 线程 / 类加载器概况）。第一眼看 Overview 里的 <strong>"Potential Memory Leak"</strong>：MAT 会算出"如果某个对象死了，能释放掉堆的百分之多少"，<strong>占比超过 90% 时，基本可以直接点名</strong>。示例输出：</p>
 
-      <!-- Step 2 -->
-      <rect x="230" y="60" width="170" height="80" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="2"/>
-      <text x="315" y="90" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">2. Histogram</text>
-      <text x="315" y="112" text-anchor="middle" font-size="11" fill="#22c55e">按类统计对象数量与大小</text>
-      <text x="315" y="128" text-anchor="middle" font-size="11" fill="#22c55e">找出最大的几个类</text>
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Leak Suspects 报告</b> · 示例文本（缓存泄漏场景）</span></div>
+<pre><code><span class="t">System Overview</span>
+  heap: 4,830,956,416 bytes (4.5 GB)
+  class loaders: 37, threads: 82, JVM: HotSpot 64-Bit Server VM (11.0.20)
 
-      <!-- Step 3 -->
-      <rect x="430" y="60" width="170" height="80" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
-      <text x="515" y="90" text-anchor="middle" font-size="13" font-weight="bold" fill="#92400e">3. Dominator Tree</text>
-      <text x="515" y="112" text-anchor="middle" font-size="11" fill="#f59e0b">按"支配关系"排列对象</text>
-      <text x="515" y="128" text-anchor="middle" font-size="11" fill="#f59e0b">找到内存占用最大的根</text>
+<span class="t">Potential Memory Leak</span>
+  <span class="n">97.8%</span> of heap is occupied by one component:
+    - <span class="k">com.app.cache.ProductCache</span> (1 instance, 3.1 GB retained)
+       via static field ProductCache.INSTANCE
 
-      <!-- Step 4 -->
-      <rect x="630" y="60" width="170" height="80" rx="8" fill="#ede9fe" stroke="#8b5cf6" stroke-width="2"/>
-      <text x="715" y="90" text-anchor="middle" font-size="13" font-weight="bold" fill="#5b21b6">4. GC Roots 链</text>
-      <text x="715" y="112" text-anchor="middle" font-size="11" fill="#8b5cf6">追踪引用链到 GC Root</text>
-      <text x="715" y="128" text-anchor="middle" font-size="11" fill="#8b5cf6">定位泄漏代码位置</text>
+<span class="t">Dominators</span> (top 3 by retained heap)
+  <span class="n">1.</span> com.app.cache.ProductCache        <span class="n">3,328,641,536</span>  <span class="n">97.8%</span>
+  <span class="n">2.</span> java.lang.ClassLoader (app)        <span class="n">120,418,000</span>  <span class="n">3.5%</span>
+  <span class="n">3.</span> Thread "http-nio-8080-exec-3"        <span class="n">8,202,144</span>  <span class="n">0.2%</span>
 
-      <!-- 箭头 -->
-      <line x1="200" y1="100" x2="228" y2="100" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow)"/>
-      <line x1="400" y1="100" x2="428" y2="100" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow)"/>
-      <line x1="600" y1="100" x2="628" y2="100" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow)"/>
+<span class="t">Reference chain（报告里自带的引用链）</span>
+  GC Root: static field com.app.cache.ProductCache.INSTANCE
+    → field map → java.util.concurrent.ConcurrentHashMap
+      → field table → Node[] (1,048,576 entries)
+        → Node → value → com.app.model.Product → byte[] …</code></pre>
+</div>
 
-      <!-- 底部详解 -->
-      <rect x="30" y="170" width="380" height="150" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
-      <text x="50" y="196" font-size="13" font-weight="bold" fill="#1f2937">Histogram 关键列：</text>
-      <text x="50" y="218" font-size="11" fill="#475569" font-family="monospace">Shallow Heap = 对象自身占用的内存</text>
-      <text x="50" y="238" font-size="11" fill="#475569" font-family="monospace">Retained Heap = 对象 + 它引用的所有对象</text>
-      <text x="50" y="262" font-size="11" fill="#dc2626" font-weight="bold">重点看 Retained Heap！</text>
-      <text x="50" y="282" font-size="11" fill="#475569">一个 HashMap 自身只有 48B（Shallow），</text>
-      <text x="50" y="302" font-size="11" fill="#475569">但 Retained 可能是 500MB（它引用的所有 Entry）</text>
+<p>这份报告一次性回答了三件事：<strong>谁占了最多</strong>（ProductCache，97.8% 的堆）、<strong>里面装了什么</strong>（一个装了 100 多万条目的 ConcurrentHashMap）、<strong>为什么 GC 不收</strong>（static 字段直接挂着，是 GC Root）。90% 以上的占比就是"铁证"，直接进第五站对代码；占比分散（比如前三名各 30%）时，报告只能指方向，需要下面的工具接力。</p>
 
-      <rect x="430" y="170" width="370" height="150" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
-      <text x="450" y="196" font-size="13" font-weight="bold" fill="#1f2937">Dominator Tree 关键概念：</text>
-      <text x="450" y="218" font-size="11" fill="#475569">如果删除对象 A 后对象 B 也无法存活，</text>
-      <text x="450" y="238" font-size="11" fill="#475569">则 A "支配" B。排在树顶的对象</text>
-      <text x="450" y="258" font-size="11" fill="#475569">支配了最多的内存。</text>
-      <text x="450" y="282" font-size="11" fill="#dc2626" font-weight="bold">Top 1 对象通常就是泄漏元凶！</text>
-      <text x="450" y="302" font-size="11" fill="#475569">右键 → List Objects → with outgoing references</text>
-    </svg>
-    <figcaption><span class="fig-no">图 1</span> MAT 分析四步走：从泄漏嫌疑报告到 GC Root 引用链，逐步锁定代码位置</figcaption>
-  </div>
+<h3>第二步：Histogram——类聚合视图，先分清两个 heap</h3>
 
-  <h3>实战：Leak Suspects 报告怎么看</h3>
+<p><strong>Histogram</strong> 把全堆对象按类聚合：每行一个类，显示实例数、shallow heap 合计、retained heap 合计。用它之前必须分清两个概念——这是整个 MAT 里最值钱的知识点：</p>
 
-  <p>打开 .hprof 文件后，MAT 会自动弹出 <strong>Leak Suspects Report</strong>。这份报告用饼图展示了堆内存的分布，并高亮标注"可疑"的大对象。典型输出如下：</p>
+<ul>
+  <li><strong>Shallow Heap（浅堆）</strong>：对象<strong>自己</strong>占多大——对象头 + 实例字段，不含它引用的对象。</li>
+  <li><strong>Retained Heap（保留堆 / 独占堆）</strong>：如果把这个对象删掉，<strong>总共能释放多少内存</strong>——它自己 + 所有"只能经过它才能到达"的对象（独占保留）。</li>
+</ul>
 
-  <div class="srcbox">
-    <div class="srcbox-head">Leak Suspects 报告摘要</div>
-    <pre class="srcbox-file"><span class="t">Leak Suspect 1:</span>
-  One instance of <span class="k">"com.app.service.OrderService"</span>
-  loaded by <span class="k">"org.springframework.boot.loader.LaunchedURLClassLoader"</span>
-  occupies <span class="n">1,234,567,890</span> (<span class="n">38.2%</span>) bytes.
+<div class="formula">Shallow Heap = 对象自己的尺寸（"我多大"）<br>Retained Heap = 它 + 只有它拽着才活着的对象（"我死了能腾出多少"）<br>查泄漏永远<strong>按 Retained Heap 排序</strong>找"老板"，Shallow 排序找到的多是"叶子"</div>
 
-  <span class="t">Biggest instances:</span>
-  - java.util.concurrent.ConcurrentHashMap$Node[] <span class="n">→ 800MB</span>
-  - com.app.cache.LocalCacheEntry[]             <span class="n">→ 350MB</span>
-  - java.lang.String[]                          <span class="n">→  84MB</span>
+<figure class="fig">
+<svg viewBox="0 0 780 330" role="img" aria-label="Shallow Heap 与 Retained Heap 的直观对比：HashMap 实例自身 48 字节，保留堆 3.2GB">
+  <defs>
+    <marker id="l30-m3" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8B6914"/></marker>
+  </defs>
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">同一个 HashMap 实例：Shallow Heap vs Retained Heap</text>
 
-  <span class="t">Reference chain:</span>
-  <span class="k">java.lang.Thread</span> "http-nio-8080-exec-1"
-    → <span class="k">java.lang.ThreadLocal$ThreadLocalMap</span>
-      → <span class="k">java.lang.ThreadLocal$ThreadLocalMap$Entry</span>[]
-        → <span class="k">com.app.context.UserContext</span>
-          → <span class="k">java.util.HashMap</span>
-            → <span class="k">com.app.cache.LocalCacheEntry</span>[]
-              → <span class="k">byte</span>[] (800MB retained)</pre>
-  </div>
+  <rect x="40" y="90" width="180" height="110" rx="8" fill="#E0C8A8" stroke="#8B6914" stroke-width="2"/>
+  <text x="130" y="122" text-anchor="middle" font-family="monospace" font-size="14" fill="#6B4E0A" font-weight="700">HashMap</text>
+  <text x="130" y="146" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#6B4E0A">（ProductCache.map）</text>
+  <text x="130" y="170" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#B85450" font-weight="700">Shallow ≈ 48 B</text>
+  <text x="130" y="188" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#8B6914">对象头 + 几个字段引用</text>
 
-  <p>这份报告告诉你三件事：</p>
-  <ol>
-    <li><strong>谁占了最多内存</strong>——OrderService 的一个实例持有了 38.2% 的堆</li>
-    <li><strong>里面是什么</strong>——ConcurrentHashMap 存了 800MB 的缓存条目</li>
-    <li><strong>为什么 GC 不回收</strong>——引用链从 ThreadLocal 出发，经过 UserContext 一直到 byte[]，说明是 ThreadLocal 泄漏</li>
-  </ol>
+  <line x1="222" y1="145" x2="290" y2="145" stroke="#8B6914" stroke-width="2" marker-end="url(#l30-m3)"/>
+  <text x="256" y="132" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#8B6914">field map 引用</text>
 
-  <div class="formula">
-    Retained Heap 的意义：如果删除这个对象，能释放多少内存<br>
-    一个 HashMap 的 Shallow Heap 只有 48B，但 Retained Heap 可能高达 500MB<br>
-    <strong>MAT 分析的核心就是找到 Retained Heap 最大的对象，然后追溯它的 GC Root 引用链</strong>
-  </div>
+  <rect x="295" y="55" width="445" height="220" rx="8" fill="#FBF6EF" stroke="#8B6914" stroke-width="1.6" stroke-dasharray="6,3"/>
+  <text x="517" y="80" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#8B6914" font-weight="700">Retained ≈ 3.2 GB（只有这个 Map 拽着才活着的对象）</text>
+  <rect x="315" y="100" width="120" height="52" rx="5" fill="#A8CDE0" stroke="#2B6E91"/>
+  <text x="375" y="122" text-anchor="middle" font-family="monospace" font-size="11" fill="#1A4D6E">Node[]</text>
+  <text x="375" y="139" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2B6E91">1,048,576 个槽位</text>
+  <rect x="470" y="92" width="120" height="60" rx="5" fill="#fff" stroke="#2B6E91" stroke-width="1.2"/>
+  <text x="530" y="114" text-anchor="middle" font-family="monospace" font-size="11" fill="#1A4D6E">Node × N</text>
+  <text x="530" y="131" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2B6E91">key + value 引用</text>
+  <rect x="625" y="86" width="95" height="72" rx="5" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.2"/>
+  <text x="672" y="110" text-anchor="middle" font-family="monospace" font-size="10" fill="#1B5E1B">key</text>
+  <text x="672" y="127" text-anchor="middle" font-family="monospace" font-size="10" fill="#1B5E1B">String</text>
+  <text x="672" y="144" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2D7D2D">+ char[]/byte[]</text>
+  <rect x="625" y="168" width="95" height="72" rx="5" fill="#F5D9D8" stroke="#B85450" stroke-width="1.2"/>
+  <text x="672" y="192" text-anchor="middle" font-family="monospace" font-size="10" fill="#8E3B38">value</text>
+  <text x="672" y="209" text-anchor="middle" font-family="monospace" font-size="10" fill="#8E3B38">Product</text>
+  <text x="672" y="226" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#B85450">含 byte[] 大字段</text>
+  <line x1="437" y1="120" x2="468" y2="120" stroke="#2B6E91" stroke-width="1.4" marker-end="url(#l30-m3)"/>
+  <line x1="592" y1="122" x2="623" y2="122" stroke="#2B6E91" stroke-width="1.2"/>
+  <line x1="592" y1="200" x2="623" y2="200" stroke="#2B6E91" stroke-width="1.2"/>
+  <text x="517" y="262" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#6B4E0A">HashMap 死了 → 上面全部可回收 = 3.2 GB</text>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>MAT 分析的流程是：先打开 Leak Suspects 报告看全局概览，找到 Retained Heap 占比最大的对象；然后用 Dominator Tree 确认支配关系；最后通过"Path To GC Roots"功能追踪引用链——从泄漏对象一路追溯到 GC Root（线程、静态变量、JNI 引用等），就能定位到是哪行代码持有引用没有释放。</p>
-  </div>
+  <rect x="40" y="292" width="700" height="26" rx="5" fill="#F5E0E0" stroke="#B85450" stroke-width="1"/>
+  <text x="390" y="310" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#B85450" font-weight="700">按 Shallow 排序：这个 Map 排不进前 20（它才 48B）；按 Retained 排序：它排第 1 —— 这就是"找老板"的方法</text>
+</svg>
+<figcaption><span class="fig-no">图 2</span> Shallow vs Retained：容器实例自身很小（shallow 48B），但它独占保住的对象链巨大（retained 3.2GB）——MAT 查泄漏按 retained 排序</figcaption>
+</figure>
+
+<p>为什么按 shallow 排序会"被骗"？因为 <code>byte[]</code>、<code>char[]</code>、<code>HashMap$Node</code> 这些"叶子"类在 shallow 榜上永远排前几名——它们自己确实大，但<strong>它们只是被引用的数据，真正决定"该不该死"的是持有它们的容器</strong>。按 retained 排序，容器（那个 Map、那个 Service 实例）才会浮出水面：它自己很小，但它一死能腾出几个 G，这就是"老板"。</p>
+
+<h3>第三步：Dominator Tree——内存的"管辖权"视图</h3>
+
+<p><strong>支配（Dominator）</strong>关系：对象 A 支配对象 B，当且仅当<strong>从所有 GC Root 到 B 的路径都必须经过 A</strong>——A 一死，B 必然跟着死。Dominator Tree 按这个关系把全堆组织成一棵树：根是 GC Roots，每个节点的 retained heap 就是"这块内存归谁管"。</p>
+
+<p>文字版示例（对应上面的报告）：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Dominator Tree</b> · 示例（顶层节点）</span></div>
+<pre><code><span class="c"># 打开 Dominator Tree（Window → Dominator Tree），按 Retained Heap 排序：</span>
+<span class="t">com.app.cache.ProductCache</span>   <span class="n">3,328,641,536</span>  <span class="n">97.8%</span>   <span class="c">← 顶层第 1 名：3.2G 归它管</span>
+  <span class="c">└─ java.util.concurrent.ConcurrentHashMap</span>   <span class="n">3,328,590,000</span>
+     <span class="c">└─ Node[]</span>   <span class="n">3,300,000,000</span>   <span class="c">← 1,048,576 个槽位</span>
+        <span class="c">└─ (每个 Node → key String + value Product → byte[] …)</span>
+<span class="t">java.lang.Thread</span> "http-nio-8080-exec-3"   <span class="n">8,202,144</span>  <span class="n">0.2%</span>   <span class="c">← 顶层第 3 名</span>
+  <span class="c">└─ ThreadLocal$ThreadLocalMap → Entry[] → value …（第 5 站的主角）</span></code></pre>
+</div>
+
+<p>用法：<strong>顶层节点就是"最大一块内存归谁管"</strong>。对顶层第 1 名右键 → <strong>List Objects → with outgoing references</strong>，可以一层层展开它管着哪些对象，找到真正的"重灾区"字段。如果顶层是 <code>java.lang.Thread</code>（线程对象支配了几个 G），基本可以直接跳到第 5 站的 ThreadLocal 场景——线程本身不占多少内存，它管着的 ThreadLocalMap 才是大头。</p>
+
+
+<h3>第四步：Path to GC Roots——反查"谁还拽着它"</h3>
+
+<p>前两步找到嫌疑对象后，最后一步是<strong>回答"它为什么死不了"</strong>：选中嫌疑对象（或它的类），右键 → <strong>Path to GC Roots</strong> → <strong>exclude weak/soft/phantom references</strong>。这个勾选项必须勾——不勾的话，经过弱引用的链也会显示出来，而弱引用在 GC 时是允许被清掉的，那种链是<strong>假线索</strong>（对象其实下轮 GC 就没了，不是泄漏）。</p>
+
+<p>输出是一串从 GC Root 到嫌疑对象的引用链，文字版示例（ThreadLocal 泄漏场景）：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>Path to GC Roots 输出</b> · 示例（ThreadLocal 泄漏）</span></div>
+<pre><code><span class="c"># 选中某个 UserContext 实例 → Path to GC Roots (exclude weak/soft/phantom)：</span>
+GC Root: <span class="t">Thread</span> "http-nio-8080-exec-1"   <span class="c">← 线程池里的长命线程</span>
+  → field threadLocals   <span class="t">java.lang.ThreadLocal$ThreadLocalMap</span>
+    → field table        <span class="t">Entry[]</span> (length = 64)
+      → element [17]     <span class="t">ThreadLocal$ThreadLocalMap$Entry</span>
+        <span class="c"># ref == null —— key（弱引用）已被回收，但 value 还活着</span>
+        → field value    <span class="t">com.app.context.UserContext</span>
+          → field data   <span class="t">java.util.HashMap</span> (1024 entries)
+            → …          <span class="t">byte[]</span> / <span class="t">String</span> …（合计 10MB）</code></pre>
+</div>
+
+<p>读链的方法<strong>从下往上读</strong>：最下面是被拽的对象（UserContext），沿着链往上看谁在持有它——Entry 的 value 字段、Entry 的持有者 ThreadLocalMap、Map 的持有者 Thread——最后一个"活人"就是元凶：一个长命线程池线程，通过 ThreadLocalMap 里一个 <strong>ref == null 的 Entry</strong>，把本该在请求结束就死掉的 UserContext 挂了两周。链读到这里，代码定位就只剩一步：全局搜索 <code>UserContext.set</code>，找到那个没写 <code>remove()</code> 的 Filter。</p>
+
+<h3>第五步：OQL——对堆写 SQL</h3>
+
+<p>GUI 看不到的精确问题，用 <strong>OQL（Object Query Language）</strong>查。三条最常用的：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>OQL 查询</b> · 三条实用语句（MAT → OQL 窗口）</span></div>
+<pre><code><span class="c">// ① 找大字符串：自身超过 1MB 的 String（@usedBytes 是 shallow 大小）</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> <span class="t">java.lang.String</span> s <span class="k">WHERE</span> s.@usedBytes &gt; <span class="n">1000000</span>
+
+<span class="c">// ② 数"僵尸 Entry"：ThreadLocalMap 里 key 已被回收但 value 还活着的条目</span>
+<span class="c">//    （stale entry —— ThreadLocal 泄漏的指纹，count 很大就是实锤）</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> <span class="t">java.lang.ThreadLocal$ThreadLocalMap$Entry</span> e <span class="k">WHERE</span> e.ref == <span class="n">null</span>
+
+<span class="c">// ③ 查某个类的所有实例：确认是不是"同一个 Map 实例在涨"（缓存泄漏特征）</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> <span class="k">INSTANCEOF</span> <span class="s">"com.app.cache.ProductCache"</span></code></pre>
+</div>
+
+<h3>第六步：两次 dump 对比——锁定"增长源"</h3>
+
+<p>什么时候用？两种情况：<strong>Leak Suspects 指向不明</strong>（占比分散，看不出谁是大头），或者<strong>泄漏刚起步</strong>（单看任何一个 dump，嫌疑对象还没长到显眼）。做法：<strong>间隔 30 分钟（或一个业务周期）导两个 dump</strong>，用 MAT 的 <strong>Compare Two Snapshots</strong>（老版本用 Merge Baselines 先合并基线再对比），直接看<strong>delta（增量）最大的类和实例</strong>——增长最快的就是增长源，不用猜"谁占得多"，只看"谁在涨"。</p>
+
+<div class="think"><div class="think-q">面试追问："为什么查泄漏要盯 retained heap，而不是 shallow heap？"</div>
+<p>回答模板：shallow heap 是对象自己的大小，retained heap 是"删掉它能释放的总量"。泄漏的大头通常是<strong>容器</strong>——一个 HashMap 自己只有几十字节（shallow 榜上排不进前 20），但它独占保住了几 GB 的 Entry 和 value（retained 榜上排第 1）。按 shallow 排序，你只会看到一堆 byte[]、char[] 这些"叶子"，它们大，但决定生死的是持有它们的"老板"。所以 MAT 查泄漏的第一动作永远是：<strong>Histogram 按 retained heap 排序，找 retained 最大的实例，再看它归谁支配、被谁引用</strong>。</p></div>
+
+<h3>完整案例：一次泄漏排查的闭环</h3>
+
+<p>把前四站串起来走一遍（场景：电商商品服务，老年代 96% 不回落）：</p>
+
+<ol>
+  <li><strong>趋势</strong>（第 2 站）：监控告警"Full GC 后老年代残留连续 3 次递增"，jstat 确认 O 列 91%→93%→96%，FGC 间隔从 2 小时缩到 20 分钟。三问定性：回不去、基线抬高、凌晨低峰也在涨 → 泄漏。</li>
+  <li><strong>取证</strong>（第 3 站）：凌晨流量低谷，<code>jcmd &lt;pid&gt; GC.heap_dump /data/dumps/heap.hprof</code>，4.5G 文件；同时确认 HeapDumpOnOutOfMemoryError 已配（兜底）。</li>
+  <li><strong>定位</strong>（本站）：MAT 打开 → Leak Suspects：Overview 显示 "97.8% 被一个 com.app.cache.ProductCache 实例占用（static 字段）" → Histogram 按 retained 排序，ProductCache 第 1，其内部 ConcurrentHashMap$Node 实例 104 万 → Dominator Tree 确认"3.2G 归 ProductCache 管" → Path to GC Roots：static 字段 ProductCache.INSTANCE 直连 GC Root。</li>
+  <li><strong>根因</strong>（第 5 站）：全局搜索 INSTANCE，定位到 <code>ProductCache</code> 第 23 行：<code>private static final Map&lt;String, Product&gt; CACHE = new ConcurrentHashMap&lt;&gt;();</code>——只 put 不淘汰、无容量上限、无过期。缓存泄漏实锤。</li>
+  <li><strong>修复</strong>（第 7 站）：换成 Caffeine（maximumSize + expireAfterWrite），压测一周，老年代基线恢复锯齿形、Full GC 消失。</li>
+</ol>
+
+<h3>MAT 四步速查表</h3>
+
+<table class="nb-table">
+<thead><tr><th>步骤</th><th>看什么</th><th>点什么</th><th>输出长什么样</th></tr></thead>
+<tbody>
+<tr><td>Leak Suspects</td><td>Overview 的 Potential Memory Leak 占比（&gt;90% 直接点名）</td><td>打开 hprof 后自动生成</td><td>四段式报告：概览 / 支配者 / Top 组件 / 系统概况</td></tr>
+<tr><td>Histogram</td><td><strong>按 retained heap 排序</strong>找"老板"类与实例</td><td>Histogram 窗口，点 "Retained Heap" 列头</td><td>类聚合表：实例数 / shallow / retained</td></tr>
+<tr><td>Dominator Tree</td><td>顶层节点："最大一块内存归谁管"</td><td>右键 → List Objects → with outgoing references 逐层展开</td><td>按支配关系的树，节点标 retained 大小与占比</td></tr>
+<tr><td>Path to GC Roots</td><td>引用链（勾 exclude weak/soft/phantom）</td><td>选中嫌疑对象 → 右键 → Path to GC Roots</td><td>从 GC Root 到对象的字段级引用链</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">面试话术</span>
+<p>"MAT 分析我按四步走：先读自动生成的 <strong>Leak Suspects</strong> 报告，Overview 里 Potential Memory Leak 占比超 90% 就直接点名；不直观就上 <strong>Histogram 按 retained heap 排序</strong>找占大头的实例（shallow 排序会被 byte[] 这些叶子骗了）；再用 <strong>Dominator Tree</strong> 确认'这块内存归谁管'；最后 <strong>Path to GC Roots</strong>（勾上 exclude weak/soft/phantom）反查'谁还拽着它'，引用链落到具体字段，对应回代码。拿不准时补两招：OQL 精确查询、两次 dump 对比看增量。"</p></div>
 </section>
 
-<!-- ================================================================
-     第 5 站 — 三大典型泄漏场景
-     ================================================================ -->
+
+<!-- ═══════════════ 第5站：三大典型泄漏场景 ═══════════════ -->
 <section class="station reveal" id="s5">
-  <div class="station-head">
-    <span class="station-no">第 5 站</span>
-    <h2>三大典型泄漏场景：ThreadLocal、连接池、缓存</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 5 站</span><h2>三大典型泄漏场景逐一拆解</h2></div>
 
-  <p>线上内存泄漏 90% 以上都逃不出这三种场景。每种都有固定的模式和固定的修复方法。</p>
+<p>定位到"谁在持有"之后，最后一问是"<strong>业务上为什么持有</strong>"。线上内存泄漏绝大多数逃不出三个场景，每个都有固定的现象、固定的 dump 特征、固定的修法。把这三个场景的"dump 长相"记熟，看到 dump 就能反推代码问题。</p>
 
-  <h3>场景 A：ThreadLocal 泄漏</h3>
+<h3>场景一：ThreadLocal 未 remove（线程池重灾区）</h3>
 
-  <p>ThreadLocal 是内存泄漏的"重灾区"。原因是：<strong>ThreadLocal 的值存储在 ThreadLocalMap 中，key 是 ThreadLocal 实例的弱引用，value 是强引用。</strong>当 ThreadLocal 实例被 GC 后，key 变成 null，但 value 仍然被线程持有。在线程池场景下，线程不销毁，value 就永远不会被回收。</p>
+<p>先看机制。每个 Thread 对象内部有一个 <code>ThreadLocalMap</code>，Map 的 Entry 结构是：<strong>key 是 ThreadLocal 实例的弱引用（WeakReference），value 是业务对象的强引用</strong>。当 ThreadLocal 变量超出作用域、实例被回收后，key 变成 null（这种条目叫 <strong>stale entry，僵尸条目</strong>），但 <strong>value 是强引用，照样活着</strong>——于是 value 被线程"永久"持有。</p>
 
-  <div class="srcbox">
-    <div class="srcbox-head">ThreadLocal 泄漏：问题代码 vs 修复代码</div>
-    <pre class="srcbox-file"><span class="c">// ===== 泄漏代码 =====</span>
-<span class="k">public class</span> <span class="t">UserContext</span> {
-    <span class="k">private static final</span> ThreadLocal&lt;<span class="t">Map</span>&lt;String, Object&gt;&gt; ctx =
-        ThreadLocal.withInitial(HashMap::new);
+<figure class="fig">
+<svg viewBox="0 0 780 360" role="img" aria-label="ThreadLocal 泄漏链：长命线程通过 ThreadLocalMap 的僵尸 Entry 持有 value">
+  <defs>
+    <marker id="l30-m4" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2B6E91"/></marker>
+    <marker id="l30-m5" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+  </defs>
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">ThreadLocal 泄漏链（线程池场景）</text>
 
-    <span class="k">public static void</span> set(String key, Object value) {
-        ctx.get().put(key, value);  <span class="c">// 只 put 不 remove</span>
+  <rect x="30" y="70" width="170" height="90" rx="8" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.8"/>
+  <text x="115" y="98" text-anchor="middle" font-family="monospace" font-size="12" fill="#1A4D6E" font-weight="700">Thread</text>
+  <text x="115" y="118" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">http-nio-8080-exec-1</text>
+  <text x="115" y="136" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2B6E91">线程池长命线程，不销毁</text>
+
+  <line x1="202" y1="115" x2="258" y2="115" stroke="#2B6E91" stroke-width="1.6" marker-end="url(#l30-m4)"/>
+  <text x="230" y="103" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2B6E91">field threadLocals</text>
+
+  <rect x="262" y="70" width="150" height="90" rx="8" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.8"/>
+  <text x="337" y="100" text-anchor="middle" font-family="monospace" font-size="11" fill="#1A4D6E" font-weight="700">ThreadLocalMap</text>
+  <text x="337" y="122" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#2B6E91">field table → Entry[]</text>
+  <text x="337" y="140" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#1A4D6E">key 弱引用 / value 强引用</text>
+
+  <line x1="414" y1="115" x2="470" y2="115" stroke="#2B6E91" stroke-width="1.6" marker-end="url(#l30-m4)"/>
+  <text x="442" y="103" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2B6E91">Entry[17]</text>
+
+  <rect x="474" y="70" width="130" height="90" rx="8" fill="#E0C8A8" stroke="#8B6914" stroke-width="1.8"/>
+  <text x="539" y="100" text-anchor="middle" font-family="monospace" font-size="11" fill="#6B4E0A" font-weight="700">Entry</text>
+  <text x="539" y="122" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450" font-weight="700">ref == null（stale）</text>
+  <text x="539" y="140" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#8B6914">key 已被 GC 回收</text>
+
+  <line x1="539" y1="162" x2="539" y2="205" stroke="#999" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#l30-m4)"/>
+  <text x="552" y="185" font-family="sans-serif" font-size="9" fill="#999">key（弱引用）已断</text>
+
+  <rect x="452" y="210" width="174" height="70" rx="8" fill="#F3F3F3" stroke="#999" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="539" y="238" text-anchor="middle" font-family="monospace" font-size="11" fill="#777">ThreadLocal 实例</text>
+  <text x="539" y="258" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#999">已回收（灰色 = 死）</text>
+
+  <line x1="606" y1="115" x2="656" y2="115" stroke="#B85450" stroke-width="2.2" marker-end="url(#l30-m5)"/>
+  <text x="631" y="103" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#B85450">value 强引用</text>
+
+  <rect x="660" y="70" width="100" height="90" rx="8" fill="#F5D9D8" stroke="#B85450" stroke-width="2"/>
+  <text x="710" y="100" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#8E3B38" font-weight="700">UserContext</text>
+  <text x="710" y="122" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#B85450" font-weight="700">强引用，活着</text>
+  <text x="710" y="140" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#8E3B38">内含 HashMap / byte[]</text>
+
+  <rect x="262" y="300" width="498" height="42" rx="6" fill="#F5E0E0" stroke="#B85450" stroke-width="1.2"/>
+  <text x="511" y="318" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#B85450" font-weight="700">线程不销毁 + 没有"下一次 set/get" → 僵尸 Entry 永不清理 → value 逐请求累积</text>
+  <text x="511" y="336" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">两个请求上下文叠在同一个线程上，数据还会互相"串号"</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span> ThreadLocal 泄漏链：key 是弱引用（可回收），value 是强引用（收不掉）；线程池长命线程让僵尸 Entry 永无"清理时机"</figcaption>
+</figure>
+
+<p>三个关键点，每个都是面试追问点：</p>
+
+<ul>
+  <li><strong>为什么 key 设计成弱引用？</strong>——这是 JDK 的"止损设计"：key 用弱引用，至少保证 ThreadLocal 实例自己不会被 Map 拽着泄漏；但它救不了 value。所以弱引用 key 只解决了一半问题，另一半（remove）必须业务代码自己负责。</li>
+  <li><strong>为什么 ThreadLocalMap 不自己清掉 stale entry？</strong>——它其实会：每次 <code>set / get / remove</code> 时顺带清理<strong>相邻</strong>的 stale entry（探测式清理）。但线程池场景下，如果业务之后再也不碰这个 ThreadLocal，清理就永远不会发生；而且探测式清理只清邻近槽位，不遍历全表——线程不销毁时，value 就是永久滞留。</li>
+  <li><strong>为什么线程池放大问题？</strong>——非线程池场景线程跑完就销毁，ThreadLocalMap 整体随线程回收，问题被"掩埋"；线程池线程长期存活，泄漏变成显性的、累积的。</li>
+</ul>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>ThreadLocal 泄漏代码</b> · 问题代码 vs 修复代码</span></div>
+<pre><code><span class="c">// ===== 泄漏代码：set 了，但从没 remove =====</span>
+<span class="k">public class</span> <span class="t">UserContextFilter</span> <span class="k">implements</span> <span class="t">Filter</span> {
+    <span class="k">public void</span> doFilter(<span class="t">ServletRequest</span> req, <span class="t">ServletResponse</span> resp, <span class="t">FilterChain</span> chain)
+            <span class="k">throws</span> <span class="t">Exception</span> {
+        <span class="t">UserContext</span>.set(req.getHeader(<span class="s">"X-User-Id"</span>));  <span class="c">// 只 set 不 remove</span>
+        chain.doFilter(req, resp);  <span class="c">// 请求结束，线程池线程里的值还挂着</span>
     }
 }
-
-<span class="c">// Filter 中设值，但忘了清理</span>
-<span class="k">public void</span> doFilter(req, resp, chain) {
-    UserContext.set(<span class="n">"userId"</span>, req.getHeader(<span class="n">"X-User-Id"</span>));
-    chain.doFilter(req, resp);  <span class="c">// 请求结束，ThreadLocal 中的数据没清除！</span>
-}
-
-<span class="c">// ===== 修复代码 =====</span>
-<span class="k">public void</span> doFilter(req, resp, chain) {
+<span class="c">// ===== 修复代码：try-finally 铁律 =====</span>
+<span class="k">public void</span> doFilter(<span class="t">ServletRequest</span> req, <span class="t">ServletResponse</span> resp, <span class="t">FilterChain</span> chain)
+        <span class="k">throws</span> <span class="t">Exception</span> {
     <span class="k">try</span> {
-        UserContext.set(<span class="n">"userId"</span>, req.getHeader(<span class="n">"X-User-Id"</span>));
+        <span class="t">UserContext</span>.set(req.getHeader(<span class="s">"X-User-Id"</span>));
         chain.doFilter(req, resp);
     } <span class="k">finally</span> {
-        UserContext.clear();  <span class="c">// ← 关键：finally 中必须 remove</span>
+        <span class="t">UserContext</span>.remove();  <span class="c">// ← 关键：无论成功异常都要清</span>
     }
-}</pre>
-  </div>
+}</code></pre>
+</div>
 
-  <div class="crack">
-    <span class="crack-label">黄金法则</span>
-    <p>ThreadLocal 的使用必须遵循 try-finally 模式：在 try 中 set，在 finally 中 remove。这不是可选的最佳实践，而是必须遵守的铁律。</p>
-  </div>
+<p>跨线程传递场景（线程池提交任务时带上下文）用 <strong>TransmittableThreadLocal</strong>（阿里 TTL），它在任务提交 / 执行 / 结束的生命周期里自动完成传递与清理，原理见并发卷《ThreadLocal 原理与内存泄漏》。<strong>dump 特征</strong>：大量 <code>ThreadLocal$ThreadLocalMap$Entry</code> 且 <code>ref == null</code>（OQL 第二条查询直接数数量）；顶层 Dominator 是若干 <code>java.lang.Thread</code>。</p>
 
-  <h3>场景 B：数据库连接 / 资源未关闭</h3>
+<h3>场景二：数据库连接 / 资源未关闭</h3>
 
-  <p>Connection、Statement、ResultSet 等 JDBC 资源如果忘记 close，不仅泄漏数据库连接（导致连接池耗尽），还会泄漏堆内存中关联的对象：</p>
+<p>泄漏链：<code>Connection</code> 被某处持有（异常跳过了 close、或连接被塞进某个集合"借出去还回来"）→ 连接池可用数持续下降 → <strong>连接池耗尽</strong>（业务表现为 getConnection 超时 / 等待）→ 堆里伴随 <code>Connection</code> / <code>PreparedStatement</code> / 结果集 <code>byte[]</code> 堆积。</p>
 
-  <div class="srcbox">
-    <div class="srcbox-head">连接泄漏 vs 修复</div>
-    <pre class="srcbox-file"><span class="c">// ===== 泄漏代码：异常时 Connection 没关闭 =====</span>
-<span class="k">public</span> List&lt;Order&gt; findOrders(Long userId) {
-    Connection conn = dataSource.getConnection();
-    PreparedStatement ps = conn.prepareStatement(<span class="n">"SELECT * FROM orders WHERE uid=?"</span>);
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>连接泄漏代码</b> · 问题代码 vs try-with-resources</span></div>
+<pre><code><span class="c">// ===== 泄漏代码：executeQuery 抛异常，conn 永远不会 close =====</span>
+<span class="k">public</span> <span class="t">List</span>&lt;<span class="t">Order</span>&gt; findOrders(<span class="t">Long</span> userId) <span class="k">throws</span> <span class="t">SQLException</span> {
+    <span class="t">Connection</span> conn = dataSource.getConnection();
+    <span class="t">PreparedStatement</span> ps = conn.prepareStatement(<span class="s">"SELECT * FROM orders WHERE uid = ?"</span>);
     ps.setLong(<span class="n">1</span>, userId);
-    ResultSet rs = ps.executeQuery();  <span class="c">// 如果这里抛异常，conn 永远不会 close</span>
-    <span class="c">// ... 处理结果 ...</span>
-    conn.close();  <span class="c">// 这行在异常时不会执行！</span>
-    <span class="k">return</span> orders;
+    <span class="t">ResultSet</span> rs = ps.executeQuery();  <span class="c">// 这里抛异常 → 下面一行不执行</span>
+    conn.close();  <span class="c">// ← 异常路径永远到不了这里</span>
+    <span class="k">return</span> map(rs);
 }
-
-<span class="c">// ===== 修复代码：try-with-resources =====</span>
-<span class="k">public</span> List&lt;Order&gt; findOrders(Long userId) {
-    <span class="k">try</span> (Connection conn = dataSource.getConnection();
-         PreparedStatement ps = conn.prepareStatement(<span class="n">"SELECT * FROM orders WHERE uid=?"</span>)) {
+<span class="c">// ===== 修复代码：try-with-resources（所有 Closeable 的铁律）=====</span>
+<span class="k">public</span> <span class="t">List</span>&lt;<span class="t">Order</span>&gt; findOrders(<span class="t">Long</span> userId) <span class="k">throws</span> <span class="t">SQLException</span> {
+    <span class="k">try</span> (<span class="t">Connection</span> conn = dataSource.getConnection();
+         <span class="t">PreparedStatement</span> ps = conn.prepareStatement(<span class="s">"SELECT * FROM orders WHERE uid = ?"</span>)) {
         ps.setLong(<span class="n">1</span>, userId);
-        <span class="k">try</span> (ResultSet rs = ps.executeQuery()) {
-            <span class="c">// ... 处理结果 ...</span>
+        <span class="k">try</span> (<span class="t">ResultSet</span> rs = ps.executeQuery()) {
+            <span class="k">return</span> map(rs);
         }
-    }  <span class="c">// ← 自动 close，即使发生异常</span>
-    <span class="k">return</span> orders;
-}</pre>
-  </div>
+    }  <span class="c">// ← 自动 close，逆序、异常也执行</span>
+}</code></pre>
+</div>
 
-  <h3>场景 C：内存缓存无淘汰策略</h3>
+<p><strong>加分点：连接池泄漏探测。</strong>HikariCP 提供 <code>leakDetectionThreshold</code>（毫秒）：连接被借出超过阈值还没归还，池就会打印<strong>借出那一刻的完整调用栈</strong>——相当于自动帮你抓"谁拿着连接不还"，比 dump 快得多。生产建议配 30s 量级（覆盖最慢的慢查询）。</p>
 
-  <p>很多开发者自己实现本地缓存，用 <code>HashMap</code> 或 <code>ConcurrentHashMap</code> 存数据，但<strong>从未设置容量上限和淘汰策略</strong>。随着时间推移，缓存只增不减，最终 OOM：</p>
+<div class="crack"><span class="crack-label">易错点</span>
+<p>"连接池耗尽"不等于"堆内存泄漏"。先分清战场：看池指标（active / idle / wait count）确认是不是连接没还；<strong>如果堆里 Connection 对象并不堆积</strong>，问题多半在堆外（线程、文件句柄）或数据库侧，别急着 dump 堆。</p></div>
 
-  <div class="srcbox">
-    <div class="srcbox-head">无淘汰缓存 vs Caffeine 缓存</div>
-    <pre class="srcbox-file"><span class="c">// ===== 泄漏代码：HashMap 缓存无上限 =====</span>
-<span class="k">public class</span> <span class="t">ProductCache</span> {
-    <span class="k">private final</span> Map&lt;String, Product&gt; cache = <span class="k">new</span> ConcurrentHashMap&lt;&gt;();
+<h3>场景三：内存缓存无淘汰策略</h3>
 
-    <span class="k">public</span> Product get(String id) {
-        <span class="k">return</span> cache.computeIfAbsent(id, this::loadFromDB);
-        <span class="c">// 只进不出！cache 无限增长</span>
-    }
-}
+<p>用 <code>static HashMap</code> / <code>ConcurrentHashMap</code> 当缓存、只 put 不删、无容量上限——第 4 站案例的根因就是它。<strong>dump 特征</strong>：Dominator Tree 顶层是某个 Map 实例（retained 巨大），且对比两次 dump 能看到<strong>实例条目数持续增长</strong>（增长源明确）。</p>
 
-<span class="c">// ===== 修复代码：用 Caffeine 设置容量上限 + 过期策略 =====</span>
-<span class="k">public class</span> <span class="t">ProductCache</span> {
-    <span class="k">private final</span> Cache&lt;String, Product&gt; cache = Caffeine.newBuilder()
-        .maximumSize(<span class="n">10_000</span>)              <span class="c">// 最多 10000 条</span>
-        .expireAfterWrite(Duration.ofMinutes(<span class="n">30</span>))  <span class="c">// 写入后 30 分钟过期</span>
-        .recordStats()                     <span class="c">// 开启命中率统计</span>
-        .build();
+<p>修复首选 <strong>Caffeine</strong>：<code>maximumSize</code>（容量上限）+ <code>expireAfterWrite</code>（写后过期）+ <code>recordStats</code>（命中率统计）。它的淘汰策略是 <strong>W-TinyLFU</strong>（窗口 + 频次准入），对偏斜访问（少数热点 key 反复读）比经典 LRU 命中率高得多——这是它"比 HashMap 缓存安全"的完整答案：<strong>有界（maximumSize 封顶）+ 有淘汰（W-TinyLFU 主动驱逐）+ 有统计（命中率可监控，能提前发现缓存被刷穿）</strong>。Guava Cache 思路相同，但 Caffeine 是其重写升级版（并发性与统计更好），新项目直接用 Caffeine。</p>
 
-    <span class="k">public</span> Product get(String id) {
-        <span class="k">return</span> cache.get(id, this::loadFromDB);
-    }
-}</pre>
-  </div>
+<div class="crack"><span class="crack-label">冷知识</span>
+<p>"用 SoftReference 当缓存不是天然安全吗？"——不推荐生产使用。软引用的回收由 GC 决定，<strong>与内存压力强耦合</strong>：压力小时它跟强引用一样赖着不走（没帮你省内存），压力大时一口气全清（缓存瞬间失效、请求全打到 DB）。行为不可控、不可预测，只适合"能放更好、丢了也无所谓"的边缘场景。缓存要可控，就用显式的容量 + 过期。</p></div>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>泄漏场景</th><th>MAT 中的特征</th><th>修复方法</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>ThreadLocal 泄漏</td><td>ThreadLocal$ThreadLocalMap$Entry[] 占用巨大</td><td>finally 中 remove()</td></tr>
-      <tr><td>连接 / 资源未关闭</td><td>Connection、Socket 实例堆积</td><td>try-with-resources</td></tr>
-      <tr><td>缓存无淘汰</td><td>HashMap / ConcurrentHashMap 的 Entry[] 占用巨大</td><td>Caffeine / Guava Cache + 容量上限</td></tr>
-    </tbody>
-  </table>
+<h3>附加场景（简述）：还有两种"长得像泄漏"的问题</h3>
 
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>线上最常见的三种内存泄漏：ThreadLocal 使用后没在 finally 中 remove，JDBC 资源没用 try-with-resources，本地缓存没设容量上限和过期策略。MAT 分析时，ThreadLocal 泄漏看 ThreadLocalMap$Entry[]，连接泄漏看 Connection 实例数，缓存泄漏看 HashMap$Node[]。每种都有固定的修复模式——try-finally、try-with-resources、Caffeine 缓存。</p>
-  </div>
+<ul>
+  <li><strong>内部类持有外部类</strong>：非静态内部类 / 匿名类隐式持有外部实例的 <code>this$0</code> 引用——一个存进长命集合的 Runnable 内部类，会把它所在的外部 Service 整个拽住。修法：内部类改 static、或对依赖用弱引用。GC Roots 视角的分析见《GC Roots 详解》。</li>
+  <li><strong>类加载器泄漏 → Metaspace</strong>：动态代理 / 脚本引擎反复定义新类，旧类加载器因被某处引用无法卸载，Metaspace 只增不减（M 列持续增长就是信号）。<strong>注意它不是堆泄漏，heap dump 查不到</strong>：用 <code>jstat -class</code> 看已加载类数量趋势（持续上涨 = 有类在不停生成），JDK 9+ 用 <code>jcmd &lt;pid&gt; VM.classloader_stats</code> 看每个类加载器加载的类数与字节数，完整排查见《OOM 排查实战》。</li>
+</ul>
+
+<table class="nb-table">
+<thead><tr><th>场景</th><th>典型现象</th><th>dump 特征（MAT 里长什么样）</th><th>修复</th></tr></thead>
+<tbody>
+<tr><td>ThreadLocal 未 remove</td><td>老年代缓慢上涨；线程池线程的 ThreadLocalMap 越挂越多</td><td>大量 <code>ThreadLocal$Entry</code> 且 <code>ref == null</code>；顶层 Dominator 是 Thread</td><td>finally 中 <code>remove()</code>；跨线程用 TransmittableThreadLocal</td></tr>
+<tr><td>连接 / 资源未关闭</td><td>连接池耗尽告警；getConnection 超时</td><td>Connection / Statement / 结果集 byte[] 堆积</td><td>try-with-resources；HikariCP leakDetectionThreshold</td></tr>
+<tr><td>缓存无淘汰</td><td>老年代上涨与请求量弱相关；缓存命中率先升后降</td><td>单个 Map 实例 retained 巨大；两次 dump 条目数持续增长</td><td>Caffeine（maximumSize + expireAfterWrite + recordStats）</td></tr>
+<tr><td>类加载器泄漏（附加）</td><td>M 列持续增长，最终 Metaspace OOM</td><td>heap dump 看不到；看类数量与 classloader 统计</td><td>修复动态生成类的复用；jstat -class / jcmd VM.classloader_stats</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>三大场景各记一句：<strong>ThreadLocal 记"key 弱 value 强 + 线程池长命 = 僵尸 Entry"</strong>，修法是 finally remove；<strong>连接记"异常路径跳过 close"</strong>，修法是 try-with-resources + leakDetectionThreshold；<strong>缓存记"static Map 只进不出"</strong>，修法是 Caffeine 有界有淘汰。dump 特征反过来记：stale Entry、Connection 堆积、单个 Map retained 巨大——看到 dump 就能反推代码。</p></div>
 </section>
 
-<!-- ================================================================
-     第 6 站 — VisualVM
-     ================================================================ -->
+
+<!-- ═══════════════ 第6站：VisualVM ═══════════════ -->
 <section class="station reveal" id="s6">
-  <div class="station-head">
-    <span class="station-no">第 6 站</span>
-    <h2>VisualVM：实时监控与快速诊断工作流</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 6 站</span><h2>VisualVM：听诊器与工具分工</h2></div>
 
-  <p>如果 MAT 是"手术刀"，<strong>VisualVM 就是"听诊器"</strong>——它提供实时的可视化监控，让你在问题发生的第一时间就能感知到，而不必等到 OOM 才开始排查。</p>
+<p>前几站的工具都偏"事后"——问题已经发生了才查。VisualVM 补上"事前感知"这一块：<strong>如果 MAT 是手术刀（深度解剖），VisualVM 就是听诊器（快速听个大概）</strong>。它通过 JMX 实时连到目标 JVM，免费、轻量、开箱即用。</p>
 
-  <h3>VisualVM 三大核心功能</h3>
+<h3>三个面板，三个用法</h3>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>功能</th><th>作用</th><th>使用场景</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>Monitor（监控面板）</td><td>实时显示堆内存、CPU、线程数曲线图</td><td>日常巡检，发现内存上涨趋势</td></tr>
-      <tr><td>Heap Dump（堆转储）</td><td>一键触发堆快照，直接拖入 MAT 分析</td><td>发现问题后立即保留现场</td></tr>
-      <tr><td>Threads（线程面板）</td><td>实时展示所有线程的状态和堆栈</td><td>排查死锁、线程泄漏、阻塞</td></tr>
-    </tbody>
-  </table>
+<ul>
+  <li><strong>Monitor 面板</strong>：堆内存曲线（和 jstat 的 O 列同构）、CPU、GC、线程数四个实时图。日常盯盘就看堆曲线——锯齿形且基线不动 = 健康；基线开始爬坡 = 启动第 2 站的三问流程。线程数曲线单独看：线程数持续上涨不回落，是<strong>线程泄漏</strong>（任务线程创建后从不结束），线程泄漏同样会间接吃内存（每个线程默认 1MB 栈，还在堆外）。</li>
+  <li><strong>Threads 面板</strong>：实时线程列表 + 状态；点 "Thread Dump" 等价于 <code>jstack</code>。排查技巧：<strong>隔 30 秒连打 3 次 Thread Dump 对比</strong>，连续 3 次都卡在同一个栈帧的线程，就是长期阻塞点（死锁、锁竞争、IO 等待）。</li>
+  <li><strong>Sampler 面板</strong>：CPU 采样（谁在空转）和 <strong>Allocation 采样</strong>（新版 VisualVM 1.4+ 对 JDK 8 支持）——<strong>"谁在分配"视图</strong>，直接看分配热点方法。<strong>Allocation 采样比 dump 更早发现泄漏苗头</strong>：老年代还没涨起来时，分配曲线里某个方法的分配量就已经异常了，这是"趋势"阶段的有力补充。</li>
+</ul>
 
-  <h3>快速诊断工作流</h3>
+<h3>四个工具的分工（一张表记住）</h3>
 
-  <p>当线上服务出现内存上涨的苗头时，用 VisualVM 可以快速走完一轮诊断：</p>
+<table class="nb-table">
+<thead><tr><th>工具</th><th>角色</th><th>什么时候用</th><th>产出</th></tr></thead>
+<tbody>
+<tr><td>VisualVM</td><td>听诊器</td><td>日常盯盘、快速感知异常</td><td>实时曲线、Thread Dump、采样热点</td></tr>
+<tr><td>jstat -gcutil</td><td>心电图</td><td>确认趋势（三问定性），低开销长时采样</td><td>数字趋势（FGC 后 O 列残留）</td></tr>
+<tr><td>jcmd GC.heap_dump</td><td>证据箱</td><td>确认后取证（低峰 / 副本 / OOM 自动）</td><td>.hprof 快照</td></tr>
+<tr><td>MAT</td><td>显微镜</td><td>深度解剖：找类、找引用链、找根因</td><td>Leak Suspects / 引用链 / OQL 结果</td></tr>
+</tbody>
+</table>
 
-  <div class="srcbox">
-    <div class="srcbox-head">VisualVM 快速诊断流程</div>
-    <pre class="srcbox-file"><span class="c"># 1. 远程连接目标 JVM</span>
-<span class="c">#    在目标服务器启动 JMX（如果未使用 Spring Boot Actuator）</span>
-<span class="k">java</span> \
-  -Dcom.sun.management.jmxremote \
-  -Dcom.sun.management.jmxremote.port=<span class="n">9010</span> \
-  -Dcom.sun.management.jmxremote.authenticate=<span class="n">false</span> \
-  -Dcom.sun.management.jmxremote.ssl=<span class="n">false</span> \
-  -jar app.jar
+<p>完整工作流：<strong>VisualVM 日常盯盘（感知）→ jstat 确认趋势（判断）→ jcmd 导出 dump（取证）→ MAT 深度分析（定位）</strong>。生产环境的长期监控不要靠 VisualVM 人工盯，用 Prometheus + Grafana 指标告警（第 2 站），VisualVM 留给临时诊断——它需要图形界面和 JMX 通道，不适合 7x24 值守。</p>
 
-<span class="c"># 2. VisualVM 中：File → Add JMX Connection → 输入 host:9010</span>
+<div class="think"><div class="think-q">"VisualVM 和 JDK 自带的 JConsole 有什么区别？"</div>
+<p>同源不同代。JConsole 是 JDK 自带的基础监控（内存 / CPU / 线程 / VM 五个标签页）；VisualVM 在 JConsole 基础上加了 Heap Dump、Thread Dump、Profiler / Sampler 等能力，还能远程连 JMX、多实例并排看。<strong>JDK 9 之后 VisualVM 不再随 JDK 捆绑</strong>，要单独下载（官网或 maven 仓库）。面试里顺带提一句"JDK 9 起不捆绑、生产长期监控交给指标体系"，能体现你跟过版本演进。</p></div>
 
-<span class="c"># 3. Monitor 面板：观察 Heap 曲线</span>
-<span class="c">#    - 正常：锯齿形，GC 后回落稳定基线</span>
-<span class="c">#    - 泄漏：底部持续抬高，Full GC 后回落线越来越高</span>
-
-<span class="c"># 4. 确认泄漏后：Monitor → "Heap Dump" 按钮 → 保存 .hprof</span>
-
-<span class="c"># 5. 将 .hprof 文件拖入 MAT → 按第 4 站流程分析</span></pre>
-  </div>
-
-  <h3>线程面板的关键用法</h3>
-
-  <p>VisualVM 的 Threads 面板不仅能看线程状态，还能做两件非常有价值的事：</p>
-
-  <ul>
-    <li><strong>发现线程泄漏</strong>：如果线程数持续上涨不下降（特别是定时任务线程、异步线程），说明线程创建后没有正确终止</li>
-    <li><strong>一键生成 Thread Dump</strong>：点击 "Thread Dump" 按钮等价于 <code>jstack</code>，可以连续打三次 Thread Dump 做对比，找出长期阻塞的线程</li>
-  </ul>
-
-  <div class="think">
-    <p class="think-q">VisualVM 和 JConsole 有什么区别？该用哪个？</p>
-    <p>JConsole 是 JDK 自带的基础监控工具，功能比较简陋。VisualVM 是 JConsole 的升级版，集成了监控、Heap Dump、Thread Dump、CPU Profiler 等功能。JDK 9 之后 VisualVM 不再随 JDK 捆绑，需要单独下载。生产环境推荐用 Prometheus + Grafana 做长期监控，VisualVM 更适合临时诊断。</p>
-  </div>
-
-  <div class="srcbox">
-    <div class="srcbox-head">生产环境长期监控方案（替代 VisualVM）</div>
-    <pre class="srcbox-file"><span class="c"># Prometheus + JMX Exporter 方案</span>
-<span class="c"># 1. 下载 jmx_prometheus_javaagent.jar</span>
-<span class="c"># 2. 编写 jmx-config.yml 定义采集指标</span>
-<span class="c"># 3. 启动时挂载 agent</span>
-<span class="k">java</span> \
-  -javaagent:jmx_prometheus_javaagent.jar=<span class="n">9404</span>:jmx-config.yml \
-  -jar app.jar
-
-<span class="c"># 4. Prometheus 抓取 :9404/metrics</span>
-<span class="c"># 5. Grafana 导入 JVM Dashboard（模板 ID: 4701）</span>
-<span class="c">#    → 实时监控堆内存、GC、线程，自动告警</span></pre>
-  </div>
-
-  <div class="takeaway">
-    <span class="takeaway-label">面试话术</span>
-    <p>VisualVM 是快速诊断的首选工具——Monitor 面板实时看堆内存曲线判断是否泄漏，一键 Heap Dump 保留现场交给 MAT 分析，Threads 面板排查线程泄漏和死锁。生产环境的长期监控则用 Prometheus + JMX Exporter + Grafana，设置堆使用率和 Full GC 频率的告警阈值，做到问题早发现早处理。</p>
-  </div>
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>VisualVM = 实时听诊：Monitor 看堆曲线与线程数、Threads 连打 3 次 Dump 抓阻塞、Sampler 的 Allocation 视图比 dump 更早看到"谁在分配"。定位和定性仍交给 jstat + jcmd + MAT，四工具各管一段。</p></div>
 </section>
 
-<!-- ================================================================
-     第 7 站 — 总结
-     ================================================================ -->
+<!-- ═══════════════ 第7站：预防体系 ═══════════════ -->
 <section class="station reveal" id="s7">
-  <div class="station-head">
-    <span class="station-no">第 7 站</span>
-    <h2>总结：内存泄漏排查 SOP 与预防体系</h2>
-  </div>
+<div class="station-head"><span class="station-no">第 7 站</span><h2>预防体系：让泄漏不发生，而不是难排查</h2></div>
 
-  <p>把前面 6 站的内容浓缩成一份<strong>标准操作流程（SOP）</strong>，遇到内存问题时按顺序执行：</p>
+<p>排查是救火，预防是防火。泄漏的根因高度集中在"引用生命周期没人管"，所以预防也高度模式化：<strong>编码规范管住手，架构手段兜住底，CI 验证兜住最后一条线。</strong></p>
 
-  <h3>排查 SOP 清单</h3>
+<h3>编码规范：五条铁律</h3>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>步骤</th><th>操作</th><th>工具 / 命令</th><th>判断标准</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>1. 发现</td><td>监控堆使用率趋势</td><td>jstat -gcutil / Grafana</td><td>老年代 Full GC 后残留量持续上涨</td></tr>
-      <tr><td>2. 确认</td><td>快速查看 Top 对象</td><td>jmap -histo:live</td><td>某个类的实例数或大小异常增长</td></tr>
-      <tr><td>3. 保留现场</td><td>导出堆转储</td><td>jmap -dump 或 OOM 自动 dump</td><td>生成 .hprof 文件</td></tr>
-      <tr><td>4. 分析</td><td>MAT 打开 dump 文件</td><td>Eclipse MAT / MAT CLI</td><td>Leak Suspects → Dominator Tree → GC Roots</td></tr>
-      <tr><td>5. 定位</td><td>追踪引用链到代码</td><td>MAT "Path To GC Roots"</td><td>找到持有引用的代码位置</td></tr>
-      <tr><td>6. 修复</td><td>释放引用 + 验证</td><td>代码修复 + 压测验证</td><td>修复后堆使用趋势恢复锯齿形</td></tr>
-    </tbody>
-  </table>
+<ol>
+  <li><strong>ThreadLocal 必须 finally remove</strong>——set 与 remove 必须成对出现，写在同一个方法里，不依赖"框架会帮我清"。</li>
+  <li><strong>Closeable 必须 try-with-resources</strong>——Connection / Stream / Lock / Channel，凡是实现了 AutoCloseable 的，手动 close 一律视为坏味道。</li>
+  <li><strong>本地缓存必须有界 + 有过期</strong>——maximumSize 与 expireAfterWrite 一个都不能少；无界 Map 出现在 static 字段里，Review 直接打回。</li>
+  <li><strong>监听器 / 观察者必须成对注册、注销</strong>——addListener 的地方必须有对称的 removeListener（对象销毁钩子里）。</li>
+  <li><strong>静态集合必须有淘汰机制</strong>——任何 <code>static Map / List / Set</code>，要么有界，要么有定期清理，要么能说出"为什么它永远不会大"。</li>
+</ol>
 
-  <h3>预防最佳实践</h3>
+<h3>架构手段：四个兜底</h3>
 
-  <table class="nb-table">
-    <thead>
-      <tr><th>实践</th><th>说明</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>生产必开 HeapDumpOnOutOfMemoryError</td><td>OOM 自动保留现场，事后分析不慌</td></tr>
-      <tr><td>GC 日志必须开启</td><td>-Xlog:gc* 开销极低，是排查的第一手数据</td></tr>
-      <tr><td>ThreadLocal 必须 try-finally + remove</td><td>这是铁律，不是建议</td></tr>
-      <tr><td>IO 资源必须 try-with-resources</td><td>Connection / Stream / Lock 全部用 TWR</td></tr>
-      <tr><td>本地缓存用 Caffeine 替代 HashMap</td><td>设好 maximumSize + expireAfterWrite</td></tr>
-      <tr><td>Prometheus + Grafana 长期监控</td><td>堆使用率 &gt; 85% 或 Full GC &gt; 1 次/10 分钟触发告警</td></tr>
-      <tr><td>定期 Code Review 关注资源管理</td><td>搜索代码中的 ThreadLocal.set、getConnection 等关键调用</td></tr>
-    </tbody>
-  </table>
+<ul>
+  <li><strong>Caffeine 替代手搓缓存</strong>：统一本地缓存选型，开 <code>recordStats</code> 并把命中率暴露成 Prometheus 指标——命中率突然掉到 30% 以下，往往意味着缓存被异常 key 刷穿（也是泄漏前兆）。</li>
+  <li><strong>对象池关注"归还"</strong>：HikariCP 的 leakDetectionThreshold 常开；自研池子的借出 / 归还必须配对埋点。</li>
+  <li><strong>JFR 长周期录制 + 定期回放</strong>：核心服务常开 JFR（开销可忽略），每周回放一次 allocation 与 GC 事件，泄漏苗头在"趋势"阶段就能被看见。</li>
+  <li><strong>CI / 预发加内存泄漏测试</strong>：同一负载循环跑 N 轮（比如 20 轮压测脚本），每轮记录 Full GC 后老年代基线——<strong>基线稳定 = 没有泄漏，基线逐轮抬高 = 有泄漏</strong>。这就是第 2 站"三问"的工程化版本，把"等两周才发现"压缩到"发布前 30 分钟"。</li>
+</ul>
 
-  <div class="recap">
-    <h3>全文核心要点回顾</h3>
-    <ul>
-      <li><strong>发现泄漏</strong>：jstat -gcutil 监控老年代趋势，Full GC 后残留量持续上涨 = 泄漏</li>
-      <li><strong>导出 Dump</strong>：jmap -dump:format=b 手动导出；-XX:+HeapDumpOnOutOfMemoryError 自动导出</li>
-      <li><strong>MAT 分析</strong>：Leak Suspects → Histogram（看 Retained Heap）→ Dominator Tree → GC Roots 引用链</li>
-      <li><strong>三大泄漏场景</strong>：ThreadLocal 不 remove、JDBC 资源不 close、缓存无淘汰策略</li>
-      <li><strong>VisualVM</strong>：实时监控 + 一键 Heap Dump + 线程面板，快速诊断的首选工具</li>
-      <li><strong>预防体系</strong>：自动 dump + GC 日志 + Prometheus 监控 + 代码规范三重防线</li>
-    </ul>
-  </div>
+<div class="recap">
+<h3>Code Review 检查清单（6 条，可直接贴进团队 Review 模板）</h3>
+<ul>
+  <li>① ThreadLocal.set 之后，finally 里有没有 remove？</li>
+  <li>② 每个 getConnection / openStream 是否都在 try-with-resources 里？</li>
+  <li>③ 这个 Map 有容量上限吗？有过期策略吗？谁负责淘汰？</li>
+  <li>④ listener / observer 注册了，在哪里注销？</li>
+  <li>⑤ 这个 static 集合会一直增长吗？上界是什么？</li>
+  <li>⑥ 放进长命容器（缓存 / 池 / 静态字段）的对象，业务上真的还需要那么久吗？</li>
+</ul>
+</div>
 
-  <div class="crack">
-    <span class="crack-label">面试满分回答模板</span>
-    <p>"内存泄漏排查我分五步走：第一步用 jstat -gcutil 实时看堆使用率，确认老年代 Full GC 后残留量在上涨；第二步用 jmap -histo:live 快速看 Top 对象缩小范围；第三步 jmap -dump 导出堆转储或者依赖 HeapDumpOnOutOfMemoryError 自动 dump；第四步用 MAT 打开 dump 文件，先看 Leak Suspects 报告找嫌疑对象，再用 Dominator Tree 确认支配关系，最后追踪 Path To GC Roots 定位到具体代码；第五步修复后压测验证。线上最常见的三种泄漏是 ThreadLocal 没 remove、JDBC 资源没 try-with-resources、本地缓存没设容量上限。"</p>
-  </div>
+<div class="takeaway"><span class="takeaway-label">一句话核心</span>
+<p>预防 = <strong>五条编码铁律</strong>（remove / TWR / 有界缓存 / 监听器成对 / 静态集合有淘汰）+ <strong>四个架构兜底</strong>（Caffeine 统一 + 泄漏探测 + JFR 常开 + CI 多轮压测看基线）。排查能力决定你多快止血，预防体系决定你多久才流血。</p></div>
+</section>
+
+
+<!-- ═══════════════ 第8站：总结 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>总结：SOP 流程图 + 知识地图 + 面试模板</h2></div>
+
+<h3>排查 SOP 全流程图</h3>
+
+<figure class="fig">
+<svg viewBox="0 0 780 330" role="img" aria-label="内存泄漏排查 SOP 流程图：趋势、取证、定位（MAT 四步）、根因、修复、验证">
+  <defs>
+    <marker id="l30-m6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+    <marker id="l30-m7" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2D7D2D"/></marker>
+  </defs>
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">内存泄漏排查 SOP（全文主线）</text>
+
+  <rect x="20" y="60" width="96" height="64" rx="8" fill="#EDEDED" stroke="#999" stroke-width="1.5"/>
+  <text x="68" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#444">① 趋势</text>
+  <text x="68" y="106" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#666">jstat / 监控</text>
+
+  <rect x="132" y="60" width="96" height="64" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="180" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1B5E1B">② 确认</text>
+  <text x="180" y="106" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2D7D2D">三问定性</text>
+
+  <rect x="244" y="60" width="96" height="64" rx="8" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="292" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1A4D6E">③ 取证</text>
+  <text x="292" y="106" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2B6E91">jcmd dump</text>
+
+  <rect x="356" y="60" width="128" height="64" rx="8" fill="#E0C8A8" stroke="#8B6914" stroke-width="1.8"/>
+  <text x="420" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#6B4E0A">④ 定位（MAT）</text>
+  <text x="420" y="106" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#8B6914">四步走</text>
+
+  <rect x="500" y="60" width="96" height="64" rx="8" fill="#F5D9D8" stroke="#B85450" stroke-width="1.5"/>
+  <text x="548" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#8E3B38">⑤ 根因</text>
+  <text x="548" y="106" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#B85450">引用链→代码</text>
+
+  <rect x="612" y="60" width="80" height="64" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="652" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1B5E1B">⑥ 修复</text>
+  <text x="652" y="106" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2D7D2D">remove/TWR/有界</text>
+
+  <rect x="708" y="60" width="56" height="64" rx="8" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="736" y="86" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#1B5E1B">⑦ 验证</text>
+  <text x="736" y="106" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#2D7D2D">锯齿恢复</text>
+
+  <line x1="118" y1="92" x2="130" y2="92" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#l30-m6)"/>
+  <line x1="230" y1="92" x2="242" y2="92" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#l30-m6)"/>
+  <line x1="342" y1="92" x2="354" y2="92" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#l30-m6)"/>
+  <line x1="486" y1="92" x2="498" y2="92" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#l30-m6)"/>
+  <line x1="598" y1="92" x2="610" y2="92" stroke="#3E6B8F" stroke-width="1.6" marker-end="url(#l30-m6)"/>
+  <line x1="694" y1="92" x2="706" y2="92" stroke="#2D7D2D" stroke-width="1.6" marker-end="url(#l30-m7)"/>
+
+  <line x1="420" y1="126" x2="420" y2="158" stroke="#8B6914" stroke-width="1.4" stroke-dasharray="4,3"/>
+  <rect x="60" y="162" width="700" height="96" rx="8" fill="#FBF6EF" stroke="#8B6914" stroke-width="1.2"/>
+  <text x="410" y="184" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#8B6914">④ 定位 · MAT 四步</text>
+  <rect x="80" y="198" width="150" height="44" rx="6" fill="#fff" stroke="#8B6914"/>
+  <text x="155" y="216" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#6B4E0A" font-weight="700">Leak Suspects</text>
+  <text x="155" y="232" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#8B6914">报告先自首（占比&gt;90%）</text>
+  <rect x="250" y="198" width="150" height="44" rx="6" fill="#fff" stroke="#8B6914"/>
+  <text x="325" y="216" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#6B4E0A" font-weight="700">Histogram</text>
+  <text x="325" y="232" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#8B6914">按 retained 找老板</text>
+  <rect x="420" y="198" width="150" height="44" rx="6" fill="#fff" stroke="#8B6914"/>
+  <text x="495" y="216" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#6B4E0A" font-weight="700">Dominator Tree</text>
+  <text x="495" y="232" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#8B6914">内存归谁管</text>
+  <rect x="590" y="198" width="150" height="44" rx="6" fill="#fff" stroke="#8B6914"/>
+  <text x="665" y="216" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#6B4E0A" font-weight="700">Path to GC Roots</text>
+  <text x="665" y="232" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#8B6914">谁还拽着它</text>
+  <line x1="232" y1="220" x2="248" y2="220" stroke="#8B6914" stroke-width="1.3" marker-end="url(#l30-m6)"/>
+  <line x1="402" y1="220" x2="418" y2="220" stroke="#8B6914" stroke-width="1.3" marker-end="url(#l30-m6)"/>
+  <line x1="572" y1="220" x2="588" y2="220" stroke="#8B6914" stroke-width="1.3" marker-end="url(#l30-m6)"/>
+
+  <text x="390" y="288" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#555">兜底手段：HeapDumpOnOutOfMemoryError（生产必配）· 两次 dump 对比（看增量）· OQL（精确查询）· JFR（谁在分配）</text>
+  <text x="390" y="310" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2D7D2D" font-weight="700">验证标准：Full GC 后老年代基线恢复稳定锯齿形，且持续观察一个完整业务周期</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span> 排查 SOP 七步：趋势 → 确认 → 取证 → 定位（MAT 四步）→ 根因 → 修复 → 验证，每步有固定工具与判断标准</figcaption>
+</figure>
+
+<h3>知识地图</h3>
+
+<div class="recap">
+<p><strong>本文全部知识点（能默画出来就算内化）：</strong></p>
+<ul>
+  <li><strong>定义</strong>：泄漏 = 无用途对象仍被 GC Roots 可达（引用没释放）；与"堆太小 / 大对象"是 OOM 的两种不同根因，看曲线区分（《GC Roots 详解》《JVM 堆内存》《OOM 排查实战》）。</li>
+  <li><strong>发现</strong>：jstat -gcutil 盯 FGC 后 O 列残留，基线逐级抬高 = 强信号；三问定性（能否回落 / 基线抬高否 / 与业务量解耦否）；Prometheus 告警 + JFR 长周期录制（《GC 日志分析实战》）。</li>
+  <li><strong>取证</strong>：三种方式——jmap/jcmd 手动（:live 先 GC 只导存活；STW 与堆成正比，挑低峰/副本）、OOM 自动转储（生产必配，零风险时机）、GUI/JMX；dump 大小 ≈ 存活对象总量，动手前看磁盘（《JVM 调优参数手册》）。</li>
+  <li><strong>定位</strong>：MAT 四步——Leak Suspects（占比 &gt;90% 点名）→ Histogram（<strong>retained</strong> 排序找老板，别被 shallow 的 byte[] 骗）→ Dominator Tree（支配 = 所有路径必经）→ Path to GC Roots（勾 exclude weak/soft/phantom，从下往上读链）；辅助：OQL 三条、两次 dump 对比看增量。</li>
+  <li><strong>根因</strong>：三大场景——ThreadLocal（key 弱 value 强 + 线程池长命 = stale Entry，finally remove）/ 连接资源（异常跳过 close，TWR + leakDetectionThreshold）/ 无界缓存（Caffeine 有界+淘汰+统计）；附加：内部类 this$0、类加载器 → Metaspace（jstat -class / jcmd VM.classloader_stats）。</li>
+  <li><strong>工具分工</strong>：VisualVM 听诊（Monitor / Threads / Allocation 采样）→ jstat 心电图 → jcmd 证据箱 → MAT 显微镜。</li>
+  <li><strong>预防</strong>：五条编码铁律 + 四个架构兜底 + CI 多轮压测看老年代基线 + Code Review 六问。</li>
+</ul>
+</div>
+
+<h3>面试回答模板</h3>
+
+<div class="takeaway"><span class="takeaway-label">30 秒版（先说结论）</span>
+<p>"内存泄漏是对象没用了还被引用链拽着，GC 收不掉。我按五步排查：<strong>趋势</strong>——jstat -gcutil 看 Full GC 后老年代残留是否逐级抬高；<strong>取证</strong>——jcmd GC.heap_dump，生产必配 HeapDumpOnOutOfMemoryError 兜底；<strong>定位</strong>——MAT 三把刀：Leak Suspects 看占比、Histogram 按 retained heap 排序找大户、Path to GC Roots 反查谁持有它；<strong>根因</strong>——九成是 ThreadLocal 没 remove、资源没 close、缓存无淘汰，dump 特征各不相同；<strong>修复</strong>后压测验证基线恢复锯齿形。"</p></div>
+
+<div class="takeaway"><span class="takeaway-label">3 分钟版（拿 ThreadLocal 案例完整走一遍）</span>
+<p>30 秒版 + 一个案例 + 三个深度点。<strong>案例</strong>：服务两周后 OOM，jstat 显示 FGC 后老年代 91%→93%→96% 不回落，三问确认泄漏（低峰也涨）；低峰 jcmd dump，MAT 的 Leak Suspects 没直接点名（占比分散），改看 Dominator Tree——顶层是几个线程对象，展开是 ThreadLocalMap 里大量 <code>ref == null</code> 的 Entry；Path to GC Roots 读出引用链：线程池长命线程 → ThreadLocalMap → stale Entry → value（请求上下文）；定位到 Filter 里 set 后没有 remove。<strong>三个深度点</strong>：① 为什么 value 收不掉——key 是弱引用（JDK 止损设计）但 value 是强引用，弱引用 key 救不了 value；② 为什么线程池放大——线程不销毁、没有"下一次 set/get"触发探测式清理，stale Entry 永久滞留；③ 为什么按 retained 排序——容器 shallow 很小但独占保住几 GB，shallow 榜上排前的是 byte[] 这类"叶子"，不是"老板"。收尾：修复是 finally remove + CI 加多轮压测看老年代基线，把两周才能发现的泄漏压到发布前发现。</p></div>
+
+<h3>高频追问速答</h3>
+
+<table class="nb-table">
+<thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+<tbody>
+<tr><td>怎么区分泄漏和正常增长？</td><td>三问：Full GC 后能否回落？回落基线是否逐次抬高（楼梯状 = 泄漏，稳定 = 堆小）？增长是否与业务量解耦（低峰也涨 = 泄漏）</td></tr>
+<tr><td>dump 会不会影响线上服务？</td><td>会：STW 时长与堆和存活对象数成正比（4G 堆通常数秒）。对策：挑流量低谷 / 副本实例 dump；:live 先 Full GC 只导存活；最稳的是 OOM 自动转储（服务已挂，零成本）；dump 前 df -h 看磁盘</td></tr>
+<tr><td>shallow heap 和 retained heap 区别？</td><td>shallow = 对象自身大小；retained = 删掉它能释放的总量（独占保留）。查泄漏按 retained 排序找容器"老板"，按 shallow 会被 byte[]/char[] 叶子骗</td></tr>
+<tr><td>MAT 里 ref == null 的 Entry 是什么？</td><td>stale entry：ThreadLocalMap 里 key（弱引用）已被回收、value 还活着的僵尸条目，是 ThreadLocal 泄漏指纹；OQL: SELECT ... WHERE e.ref == null 数数量即实锤</td></tr>
+<tr><td>Metaspace 泄漏怎么查？</td><td>不是堆泄漏，heap dump 查不到：jstat -class 看已加载类数量趋势（持续涨 = 有类不停生成）；JDK 9+ jcmd VM.classloader_stats 看各加载器类数；根因多是动态代理/脚本引擎不释放旧加载器（见《OOM 排查实战》）</td></tr>
+<tr><td>Caffeine 为什么比 HashMap 缓存安全？</td><td>三点：有界（maximumSize 封顶内存）、有淘汰（W-TinyLFU 主动驱逐，比 LRU 更抗偏斜访问）、有统计（recordStats 命中率可监控，提前发现刷穿）。HashMap 只进不出，必然 OOM</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">核心记忆</span>
+<p>内存泄漏排查是一条流水线：<strong>趋势</strong>（FGC 后基线抬高）→ <strong>取证</strong>（低峰 dump / OOM 自动兜底）→ <strong>定位</strong>（MAT 三把刀：Leak Suspects 看占比、Histogram 看 retained、Path to GC Roots 读引用链）→ <strong>根因</strong>（ThreadLocal / 连接 / 缓存三大场景，dump 特征反向对应代码）→ <strong>修复验证</strong>（基线恢复锯齿形）。把"谁还拽着它"当成排查的唯一问题，工具只是回答这个问题的不同姿势——下一篇我们换战场，用《CPU 100% 排查五步法》处理另一种最常见的线上告警。</p></div>
 </section>
 
 </main>
 </body>
 </html>
+

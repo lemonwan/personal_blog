@@ -1065,7 +1065,7 @@ map.keySet().removeIf(key -&gt; shouldRemove(key));</code></pre>
     <tr><td><strong>null key/value</strong></td><td>✅ key 最多 1 个 null，value 不限</td><td>❌ 都不允许</td><td>❌ 都不允许</td></tr>
     <tr><td><strong>初始容量 / 扩容</strong></td><td>16 / ×2</td><td>11 / ×2+1</td><td>16 / ×2</td></tr>
     <tr><td><strong>容量形式</strong></td><td>2 的幂</td><td>素数（对取模 % 友好）</td><td>2 的幂</td></tr>
-    <tr><td><strong>定位方式</strong></td><td><code>(n-1) &amp; hash</code></td><td><code>(hash &amp; 0x7FFFFFFF) % len</code></td><td><code>(n-1) &amp; hash</code></td></tr>
+    <tr><td><strong>定位方式</strong></td><td><code style="white-space:normal;overflow-wrap:anywhere">(n-1) &amp; hash</code></td><td><code style="white-space:normal;overflow-wrap:anywhere">(hash &amp; 0x7FFFFFFF) % len</code></td><td><code style="white-space:normal;overflow-wrap:anywhere">(n-1) &amp; hash</code></td></tr>
     <tr><td><strong>锁粒度</strong></td><td>—</td><td>整表（所有方法 synchronized）</td><td>桶头节点（粒度到桶）</td></tr>
     <tr><td><strong>结论</strong></td><td>单线程首选</td><td>❌ 已淘汰</td><td>✅ 并发首选</td></tr>
   </tbody>

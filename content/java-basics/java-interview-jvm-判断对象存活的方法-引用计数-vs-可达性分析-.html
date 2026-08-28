@@ -210,6 +210,145 @@
 <section class="station reveal" id="s4">
   <div class="station-head">
     <span class="station-no">第 4 站</span>
+    <h2>三色标记：并发标记与"漏标"难题</h2>
+  </div>
+
+  <p>串行标记没什么可担心的：先 STW，再遍历，引用关系全程冻结。但<strong>并发标记</strong>（GC 线程和业务线程同时跑）有一个真问题——<strong>GC 线程遍历的同时，业务线程正在修改引用</strong>。为了精确描述这个问题，业界引入了<strong>三色标记模型</strong>。这是 GC 面试里问得最深的问题之一，必须讲透。</p>
+
+  <div class="formula">
+    白色：GC 线程还没访问过<br>
+    灰色：对象自身已访问，但它的引用对象（出边）还没遍历完<br>
+    黑色：对象自身和它的全部出边都遍历完了（GC 认为"处理完毕"）
+  </div>
+
+  <p>串行标记就是个简单状态机：<strong>根是灰色 → 取出白对象压灰栈（白→灰）→ 取出灰对象遍历出边（灰→黑，发现的白出边转灰入栈）</strong>。全程 STW，所以正确。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 800 330" role="img" aria-label="三色标记状态机与漏标场景">
+      <defs>
+        <marker id="l26-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+        <marker id="l26-arr-r" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C2F2F"/></marker>
+      </defs>
+      <rect x="30" y="40" width="120" height="60" rx="8" fill="#F5F5F0" stroke="#8A8A80" stroke-width="1.5"/>
+      <text x="90" y="75" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#55554E">白色</text>
+      <rect x="30" y="150" width="120" height="60" rx="8" fill="#C9C9B8" stroke="#6E6E5C" stroke-width="1.5"/>
+      <text x="90" y="185" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#3C3C30">灰色</text>
+      <rect x="30" y="260" width="120" height="60" rx="8" fill="#2B2B28" stroke="#1B1B18" stroke-width="1.5"/>
+      <text x="90" y="295" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#F5F5F0">黑色</text>
+      <line x1="90" y1="150" x2="90" y2="104" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l26-arr)"/>
+      <text x="100" y="132" font-family="sans-serif" font-size="12" fill="#3E6B8F">白→灰：压入灰栈</text>
+      <line x1="90" y1="260" x2="90" y2="214" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l26-arr)"/>
+      <text x="100" y="242" font-family="sans-serif" font-size="12" fill="#3E6B8F">灰→黑：出边处理完</text>
+      <text x="480" y="35" font-family="sans-serif" font-size="14" font-weight="700" fill="#8C2F2F">并发标记中的漏标场景</text>
+      <rect x="330" y="70" width="130" height="56" rx="8" fill="#2B2B28" stroke="#1B1B18"/>
+      <text x="395" y="103" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#F5F5F0">A（黑）</text>
+      <rect x="330" y="180" width="130" height="56" rx="8" fill="#F5F5F0" stroke="#8A8A80" stroke-width="1.5"/>
+      <text x="395" y="213" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#55554E">B（白）</text>
+      <rect x="580" y="180" width="130" height="56" rx="8" fill="#C9C9B8" stroke="#6E6E5C" stroke-width="1.5"/>
+      <text x="645" y="213" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#3C3C30">C（灰）</text>
+      <line x1="645" y1="180" x2="440" y2="110" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l26-arr)"/>
+      <text x="500" y="140" font-family="sans-serif" font-size="12" fill="#3E6B8F">C 引用 A，A 已处理完</text>
+      <line x1="395" y1="126" x2="395" y2="176" stroke="#8C2F2F" stroke-width="1.8" stroke-dasharray="5,4" marker-end="url(#l26-arr-r)"/>
+      <text x="405" y="158" font-family="sans-serif" font-size="12" fill="#8C2F2F">业务线程：A.newRef = B</text>
+      <rect x="560" y="270" width="220" height="44" rx="8" fill="#F3DCDC" stroke="#8C2F2F"/>
+      <text x="670" y="296" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#8C2F2F">B 仍是白色 → 被误回收</text>
+    </svg>
+    <figcaption><span class="fig-no">图 3</span> 三色状态机（左）与并发标记漏标场景（右）</figcaption>
+  </figure>
+
+  <p>右图就是<strong>对象漏标</strong>——并发标记必须解决的灾难。注意它需要<strong>同时满足两个条件</strong>才会发生：</p>
+  <ol>
+    <li>被修改的是<strong>黑色对象</strong>的引用关系（灰色对象会被重新扫描，不受影响）</li>
+    <li>该对象<strong>新增</strong>了对白色对象的引用（删除旧引用不产生问题）</li>
+  </ol>
+
+  <p>反过来有一类情况<strong>不需要解决</strong>：标记期间业务线程释放了对某白色对象的引用，之后该对象不再被任何根可达——它本来就是垃圾，这轮收和下轮收没区别。这种"标记期间新产生的垃圾"叫<strong>浮动垃圾</strong>，代价只是本轮收不掉，可以接受。</p>
+
+  <h3>解法一：增量更新（CMS 用）</h3>
+  <p>业务线程修改黑色对象的引用时，写屏障记录"这个黑色对象被改过"（加脏位）。并发标记结束后，GC 对所有被改过的黑色对象做一遍 <strong>STW 重新扫描（remark）</strong>，把新增引用指向的白色对象标灰。重扫保证了不漏标，代价是：并发期间引用改得越多，remark 越久，而且这一段必须 STW——CMS 的 remark 阶段在生产里实测过不可忽略。</p>
+
+  <h3>解法二：SATB 原始快照（G1 / ZGC 用）</h3>
+  <p>Snapshot At The Begining，对"标记开始时刻的引用关系"做快照。实现：写屏障把<strong>被覆盖的旧引用</strong>压入<strong>引用变更栈</strong>，标记过程中 GC 线程并发消费这个栈——旧引用指向的白对象照样标灰继续遍历。思路是<strong>保守</strong>的：并发期间把"旧引用关系"视为始终有效。旧引用指向的对象就算实际已该死，也等下轮收（浮动垃圾多一些）；绝不会误杀。</p>
+
+  <table class="nb-table">
+    <thead><tr><th>维度</th><th>增量更新（CMS）</th><th>SATB（G1 / ZGC）</th></tr></thead>
+    <tbody>
+      <tr><td>记录什么</td><td>黑色对象的新引用</td><td>被覆盖的旧引用（压引用变更栈）</td></tr>
+      <tr><td>何时处理</td><td>标记结束后 STW 重扫</td><td>标记过程中并发消费栈</td></tr>
+      <tr><td>STW 开销</td><td>remark 必须 STW，随修改量变长</td><td>无额外重扫 STW</td></tr>
+      <tr><td>浮动垃圾</td><td>较少</td><td>较多（保守策略的代价）</td></tr>
+      <tr><td>额外内存</td><td>仅脏位</td><td>引用变更栈占内存</td></tr>
+      <tr><td>代表收集器</td><td>CMS</td><td>G1、ZGC</td></tr>
+    </tbody>
+  </table>
+
+  <div class="think">
+    <p class="think-q">G1 为什么不用增量更新？它 SATB 多产生浮动垃圾的代价很明显。</p>
+    <p>增量更新的 remark 要"扫完所有被修改黑色对象的新增引用"，工作量正比于并发期修改量，难以并行，且必须 STW——并发度越高越吃亏。SATB 的引用变更栈可以多个 GC 线程并行消费，和 G1 / ZGC 的并行化路线完全匹配，代价（多收不了点浮动垃圾）下一轮就回来了。所以新收集器统一转向 SATB。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">高频追问："SATB 保守"到底保守在哪？</span>
+    <p>两点：① 旧引用指向的对象即使该被回收，也照常遍历——多干了活；② 黑色对象新增的引用指向白对象时，那个白对象可能本轮被收——只要从快照看它确实不可达就合理。一句话：SATB "多留"，绝不"误杀"。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>三色标记的核心是一对破坏条件：黑色对象被修改 + 新增了对白对象的引用。增量更新重扫新引用，SATB 压旧引用进栈——CMS 选前者，G1 / ZGC 选后者。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s5">
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>写屏障：并发 GC 一致性的地基</h2>
+  </div>
+
+  <p>上一站的每个机制——重扫、引用变更栈——都要回答同一个问题："引用被修改的瞬间，改了谁"。这个信息正是<strong>写屏障</strong>（Write Barrier）提供的。它是 JVM 面试的高频词，而且特别容易和 JMM 的内存屏障混。</p>
+
+  <div class="crack">
+    <span class="crack-label">易混淆：写屏障 ≠ 内存屏障</span>
+    <p>写屏障是 <strong>JVM（JIT 编译器）在引用赋值点插入的一小段代码</strong>，给 GC 记录引用变化，服务"垃圾收集的正确性"。内存屏障（load/store barrier）是 <strong>CPU 层面的指令序列</strong>，给线程模型防指令重排、管可见性，服务"并发编程的正确性"。一个给 GC 用，一个给 JMM 用，面试千万别串台。</p>
+  </div>
+
+  <p>以引用赋值 <code>a.b = c</code> 为例：没有写屏障时，JIT 生成的就是一条普通 store；有了写屏障，赋值点会多一段调用：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">伪代码：带写屏障的代码生成（JIT 自动插入，开发者无感）</div>
+    <pre class="srcbox-file"><span class="c">// 你写的</span>
+a.b = c;
+
+<span class="c">// JIT 实际生成的（简化）</span>
+a.b = c;                     <span class="c">// ① 真正的 store</span>
+<span class="n">write_barrier</span>(a, <span class="s">"b"</span>, c);   <span class="c">// ② 写屏障：告知 GC "a.b 这个引用变了，新值是 c"</span>
+
+<span class="c">// write_barrier 内部按收集器分派：</span>
+<span class="c">// Serial/Parallel → 把赋值引用所在卡表卡标脏</span>
+<span class="c">// G1 → 标脏卡 + 若 c 在其他 Region，把 c 记入源 Region 的 RSet</span>
+<span class="c">// G1/ZGC 并发周期 → 额外把旧引用（a.b 的原值）压入引用变更栈（SATB）</span></pre>
+  </div>
+
+  <p>所以写屏障实际是<strong>三件事的分发器</strong>：</p>
+  <ol>
+    <li><strong>脏卡（Card Table）</strong>：堆被划分成 512 字节一张的卡，写屏障把赋值引用所在卡标脏。Minor GC 不必重扫整个老年代，只看脏卡——这是 Minor GC 快的根源，呼应「JVM 堆内存」讲过的"老年代怎么引用年轻代"。</li>
+    <li><strong>RSet（Remembered Set，G1）</strong>：Region 之间互相引用时，把目标对象记在源 Region 的 RSet 里，G1 才能精确地只回收目标 Region。</li>
+    <li><strong>引用变更栈（SATB，G1 / ZGC）</strong>：压入被覆盖的旧引用，由并发标记线程消费（见上一站）。</li>
+  </ol>
+
+  <div class="formula">
+    没有写屏障，并发收集只有两个选择：全堆重扫（太慢）或漏标（错误）<br>
+    写屏障是"修改瞬间被打点"的唯一低成本方式——并发 GC 一致性的地基
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>写屏障 = 引用赋值瞬间插入的额外代码，三职：标脏卡（Minor GC）、记 RSet（G1）、压引用变更栈（SATB）。它不是 JMM 的内存屏障——一个给 GC，一个给线程模型。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s6">
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
     <h2>finalize()：一次"自我救赎"的机会</h2>
   </div>
 
@@ -270,9 +409,9 @@
   </div>
 </section>
 
-<section class="station reveal" id="s5">
+<section class="station reveal" id="s7">
   <div class="station-head">
-    <span class="station-no">第 5 站</span>
+    <span class="station-no">第 7 站</span>
     <h2>四种引用：强、软、弱、虚</h2>
   </div>
 
@@ -308,11 +447,25 @@ cache.<span class="n">put</span>(<span class="t">"avatar"</span>, <span class="k
 
   <p>JVM 保证：<strong>在抛出 OutOfMemoryError 之前，所有软引用对象都会被回收</strong>。所以它非常适合做"有就用，没有也能活"的缓存。</p>
 
+  <p>注意这是<strong>"尽力"语义</strong>：JVM 只是保证 OOM 前"会"回收软引用，不保证"内存一紧张立刻回收"。实践中可以用 <code>-XX:SoftRefLRUPolicyMSPerMB</code>（默认 500）调节——含义是"每 1MB 空闲堆，软引用对象多存活 500 毫秒"。空闲堆越大，软引用活得越久，所以纯软引用实现的缓存经常出现"想挤掉挤不掉"。想要精确过期时间，用 Caffeine / Guava Cache，别依赖软引用。</p>
+
   <h3>弱引用：ThreadLocal 的坑与解</h3>
   <p><code>ThreadLocalMap</code> 的 key 就是 <code>WeakReference&lt;ThreadLocal&gt;</code>。当 ThreadLocal 实例不再有强引用时，下次 GC 就会回收 key，但 value 仍然被线程持有。如果线程长期存活（如线程池），value 就泄漏了——这就是经典的 <strong>ThreadLocal 内存泄漏</strong>。解法是每次用完手动 <code>remove()</code>。</p>
 
+  <p>另一个常见场景是 <code>WeakHashMap</code>：key 是弱引用，key 对象被回收后这条 entry 就成了"陈旧项"；map 在执行写操作（put/remove/clear）时会顺带执行 <code>expungeStaleEntries()</code>，把 key 已失效的 entry 清理掉。注意它只防"key 侧"泄漏——value 如果还被外部强引用，照样活着。</p>
+
+  <div class="think">
+    <p class="think-q">ThreadLocal 的 key 为什么是弱引用？换成强引用不是更安全吗？</p>
+    <p>恰恰相反：key 若是强引用，业务代码用完后，线程池里长期存活的线程的 Entry 仍会一直持有 ThreadLocal 实例，它永远无法回收。key 做成弱引用，业务一放手 key 就能被回收，ThreadLocal 实例才有"死"的机会。但 key 回收后 value 仍被 Entry 挂着，value 就漏了——所以必须手动 remove()。这是 JVM 的"半防御"设计：key 的回收它管，value 的清理留给你。（完整分析见并发卷的 ThreadLocal 专题）</p>
+  </div>
+
   <h3>虚引用：比 finalize() 更好的替代品</h3>
   <p><code>PhantomReference</code> 的 <code>get()</code> 永远返回 <code>null</code>，它唯一的用途是配合 <code>ReferenceQueue</code> 来<strong>获知对象何时被回收</strong>，从而执行清理操作。JDK 9 的 <code>Cleaner</code> 底层就是基于虚引用实现的。</p>
+
+  <p>一个重要的实战用途是<strong>释放堆外资源</strong>：<code>DirectByteBuffer</code> 的内存分配在堆外（直接内存），不直接参与堆的 GC。JVM 在 buffer 对象上挂一个 Cleaner（基于虚引用），buffer 对象被回收时 Cleaner 运行，去释放那块堆外内存——这就是"对象回收 → 释放本地资源"的链路，也是 <code>-XX:MaxDirectMemorySize</code> 生效的背景。</p>
+
+  <h3>Reference 家族的统一结构</h3>
+  <p>四种引用内部结构完全一致：<strong>引用对象 → referent（被引用对象）→ ReferenceQueue</strong>。引用对象的 referent 字段真正指向目标；目标对象被回收时，GC 把<strong>引用对象本身</strong>放入构造时传入的 ReferenceQueue。所以从队列里取到的是"引用对象"，不是业务对象本身——通知的时机是"引用所指向的对象已回收"。四种引用的区别只在于 GC 在什么条件下清空 referent，其余机制共用一套代码。</p>
 
   <div class="takeaway">
     <span class="takeaway-label">一句话记忆</span>
@@ -320,9 +473,9 @@ cache.<span class="n">put</span>(<span class="t">"avatar"</span>, <span class="k
   </div>
 </section>
 
-<section class="station reveal" id="s6">
+<section class="station reveal" id="s8">
   <div class="station-head">
-    <span class="station-no">第 6 站</span>
+    <span class="station-no">第 8 站</span>
     <h2>回收方法区：类也能被卸载</h2>
   </div>
 
@@ -351,15 +504,17 @@ cache.<span class="n">put</span>(<span class="t">"avatar"</span>, <span class="k
   <h3>字符串常量池回收</h3>
   <p>JDK 7+ 字符串常量池从永久代移到了堆中（JDK 8 彻底移除永久代）。常量池中的字符串如果不再被引用，也可以被 GC 回收。不过实际开发中很少需要关注这一点——除非你在大量使用 <code>String.intern()</code>。</p>
 
+  <p>一个容易忽略的细节：堆里的字符串表（string table）本质是一张哈希表，桶数量由 <code>-XX:StringTableSize</code> 控制（默认 60011）。大量 intern 字符串发生哈希冲突时，查表成本会上升；GC 日志里若提示字符串表占用过高，可以调大该参数，或者从代码上减少 intern 的使用。</p>
+
   <div class="crack">
     <span class="crack-label">面试加分项</span>
     <p>提到"Metaspace 默认没有上限，可以通过 <code>-XX:MaxMetaspaceSize</code> 限制。如果动态生成大量类（如反射代理），不设置上限可能导致本地内存持续增长。"——这说明你有生产环境的排障经验。</p>
   </div>
 </section>
 
-<section class="station reveal" id="s7">
+<section class="station reveal" id="s9">
   <div class="station-head">
-    <span class="station-no">第 7 站</span>
+    <span class="station-no">第 9 站</span>
     <h2>总结：一张表 + 实战启示</h2>
   </div>
 

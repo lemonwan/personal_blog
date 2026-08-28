@@ -3,442 +3,353 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JIT 编译优化</title>
+<title>JIT 编译优化：逃逸分析与标量替换</title>
 </head>
 <body>
-
 <main class="lesson-body">
+<!--
+  title: "JIT 编译优化：逃逸分析与标量替换"
+  difficulty: 高级
+  interviewFreq: 高频
+  desc: "HotSpot 的解释器 + JIT 混合执行与五级分层编译，逃逸分析的三个级别，以及它驱动的两大优化：标量替换与锁消除。"
+-->
 
-<!-- ═══════════════ 第1站：开场 ═══════════════ -->
 <section class="station reveal" id="s1">
-<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：JVM 有哪些编译优化？</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>开场：HotSpot 的混合执行模型</h2>
+  </div>
 
-<p>面试中聊到 JVM 优化，大多数候选人能说出的无非是：方法内联、公共子表达式消除、常量折叠。但有一个优化，它的影响范围远超其他所有优化之和，却鲜有人知——<strong>逃逸分析（Escape Analysis）</strong>。</p>
+  <p>Java 程序不是"一启动就全编译成机器码"，而是两条腿走路——<strong>解释器 + JIT 编译器</strong>的混合执行模型。</p>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>InterviewScene.java</b> · 一段看似普通的代码</span></div>
-<pre><code><span class="k">public static double</span> calculateDistance(<span class="k">double</span> x1, <span class="k">double</span> y1,
-                                        <span class="k">double</span> x2, <span class="k">double</span> y2) {
-    <span class="c">// 创建了两个 Point 对象</span>
-    <span class="t">Point</span> p1 = <span class="k">new</span> <span class="t">Point</span>(x1, y1);
-    <span class="t">Point</span> p2 = <span class="k">new</span> <span class="t">Point</span>(x2, y2);
-    <span class="k">return</span> p1.distanceTo(p2);
-}</code></pre>
-</div>
+  <p><strong>解释器</strong>逐条翻译字节码执行：启动快（省去编译等待），但每条指令都要"翻译一步再执行一步"，单条慢。<strong>JIT 编译器</strong>（Just-In-Time）把被反复执行的"热点代码"直接编译成机器码缓存起来：编译要花时间，但编译后单条指令快一个数量级。两者配合的哲学是——<strong>先让解释器带着程序跑起来，再把越跑越热的代码交给 JIT 优化</strong>。</p>
 
-<p>面试官追问：<strong>「这段代码在运行时，真的会在堆上创建两个 Point 对象吗？」</strong></p>
+  <p>"热点"怎么判定？靠<strong>方法调用计数器</strong>和<strong>循环回边计数器</strong>（字节码计数器）：方法被调用、或循环回边达到阈值（默认约 <code>10000</code>，由 <code>-XX:CompileThreshold</code> 控制），就触发 JIT 编译——而且是用后台编译线程异步进行，不阻塞前台执行。</p>
 
-<p>答案是：<strong>不会。</strong>JIT 编译器通过逃逸分析发现 Point 对象没有逃逸出方法作用域，于是把对象拆解为独立的基本类型字段，直接在栈上完成计算——<strong>没有 new，没有堆分配，没有 GC 压力</strong>。</p>
+  <p>JDK 8 起默认开启<strong>分层编译（Tiered Compilation）</strong>，五级由低到高：</p>
 
-<div class="think"><div class="think-q">这不是编译器优化（javac）做的事吗？<br/><br/>
-不是。javac 生成的字节码里确实有 <code>new Point</code> 指令。真正的优化发生在 <strong>JIT 运行时编译</strong>阶段——当 HotSpot 发现这段代码被频繁调用（热点代码），才会触发 C2 编译器进行逃逸分析和标量替换。字节码保持不变，优化的是最终生成的机器码。</div></div>
+  <table class="nb-table">
+    <thead><tr><th>层级</th><th>含义</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td>解释执行</td><td>启动默认，边执行边收集 profile（运行期统计：分支走向、多态类型）</td></tr>
+      <tr><td>1</td><td>C1 编译（无 profile）</td><td>Client 编译器，编译快，代码"够用"</td></tr>
+      <tr><td>2</td><td>C1 + 有限 profile</td><td>带基本统计的 C1</td></tr>
+      <tr><td>3</td><td>C1 + 完整 profile</td><td>同时收集丰富 profile，为 C2 铺路</td></tr>
+      <tr><td>4</td><td>C2 编译</td><td>Server 编译器，编译慢但代码激进优化、性能最高</td></tr>
+    </tbody>
+  </table>
+
+  <p>两个编译器分工明确：<strong>C1（Client）编译快、启动快，负责收集 profile；C2（Server）编译慢、优化狠，吃 C1 攒下的 profile 做激进优化</strong>。所谓 profile，就是运行期真实统计——哪个分支高频、某个虚方法实际调用到的具体类型有几个——它是一切激进优化的依据。</p>
+
+  <p>顺带补一个细节：方法调用计数器和回边计数器都不是"只会涨不会跌"的简单累加，而是<strong>按时间衰减</strong>的——JVM 周期性把计数减半（俗称"衰减/衰减计数器"），目的很务实：只把那些<strong>持续热、反复热</strong>的代码送进编译，避免"某段时间偶尔跑得多、之后永远冷下来"的代码白占编译产物。这个衰减设计，是编译器能长期保持"只优化真正值得优化的代码"的关键。</p>
+
+  <div class="crack">
+    <span class="crack-label">易混点：OSR ≠ 方法内联</span>
+    <p>OSR（On-Stack Replacement，栈上替换）解决的是"循环已经热了怎么办"：一个长循环跑到第 10 万次时触发编译，方法还没返回，JIT 不能等下次调用再换代码，于是直接把<strong>已经在栈上的循环体替换成编译版</strong>——"飞行中换引擎"。而内联是"把被调方法嵌进调用者"，两者完全是两回事，别混。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>解释器先跑（启动快）、热点交给 JIT（单条快）；热点靠计数器判定（阈值约 10000）；五级分层里 C1 快而收集 profile，C2 慢而按 profile 激进优化；OSR 是循环加热时"飞行中换引擎"。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第2站：JIT 编译器概述 ═══════════════ -->
 <section class="station reveal" id="s2">
-<div class="station-head"><span class="station-no">第 2 站</span><h2>JIT 编译器：C1 vs C2 与分层编译</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>什么是逃逸分析：对象"跑出去了吗"</h2>
+  </div>
 
-<p>HotSpot JVM 内置了两个 JIT 编译器，它们各有分工：</p>
+  <p>逃逸分析（Escape Analysis，EA）是 C2 编译阶段做的一次<strong>数据流分析</strong>，回答一个问题：某个 <code>new</code> 出来的对象，它的引用<strong>有没有"逃出"当前方法、甚至当前线程</strong>？分析结果决定这个对象能不能被"就地拆解"优化。三个级别：</p>
 
-<table class="nb-table">
-<thead><tr><th>特性</th><th>C1（Client 编译器）</th><th>C2（Server 编译器）</th></tr></thead>
-<tbody>
-  <tr><td><strong>编译速度</strong></td><td>快，适合快速启动</td><td>慢，做大量分析和优化</td></tr>
-  <tr><td><strong>优化程度</strong></td><td>基础优化（内联、常量折叠）</td><td>激进优化（逃逸分析、循环展开）</td></tr>
-  <tr><td><strong>适用场景</strong></td><td>客户端应用、短生命周期方法</td><td>长期运行的服务端方法</td></tr>
-  <tr><td><strong>Profile 收集</strong></td><td>收集类型信息、调用计数</td><td>利用 Profile 数据做激进推测</td></tr>
-</tbody>
-</table>
+  <table class="nb-table">
+    <thead><tr><th>级别</th><th>判定</th><th>典型代码</th><th>能否优化</th></tr></thead>
+    <tbody>
+      <tr><td><strong>不逃逸</strong></td><td>方法内创建、方法内用完</td><td><code>Point p = new Point(1,2); int v = p.x + 1;</code> 用完即弃</td><td>✅ 可标量替换 / 锁消除</td></tr>
+      <tr><td><strong>方法逃逸</strong></td><td>作为返回值 / 赋给字段 / 传给外部不可控方法</td><td><code>return new Point(...)</code> 或 <code>this.p = p</code></td><td>❌ 方法外还能见，不能拆</td></tr>
+      <tr><td><strong>线程逃逸</strong></td><td>被其他线程可见（共享集合 / 字段 / 传入 Thread）</td><td><code>list.add(p)</code> 且 list 被别的线程读</td><td>❌ 跨线程，必须按共享对象处理</td></tr>
+    </tbody>
+  </table>
 
-<p>从 JDK 8 开始默认启用<strong>分层编译（Tiered Compilation）</strong>，将编译过程分为 5 个层级：</p>
+  <figure class="fig">
+    <svg viewBox="0 0 800 280" role="img" aria-label="逃逸分析三个级别">
+      <defs>
+        <marker id="l36-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2D7D2D"/></marker>
+        <marker id="l36-arr-x" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C2F2F"/></marker>
+        <linearGradient id="l36-g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B8D9B0"/><stop offset="100%" stop-color="#8BC28A"/></linearGradient>
+        <linearGradient id="l36-g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E8D9B8"/><stop offset="100%" stop-color="#D4B97E"/></linearGradient>
+        <linearGradient id="l36-g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F3DCDC"/><stop offset="100%" stop-color="#E8B4B4"/></linearGradient>
+      </defs>
+      <rect x="50" y="70" width="200" height="120" rx="8" fill="url(#l36-g1)" stroke="#2D7D2D" stroke-width="1.5"/>
+      <text x="150" y="95" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1B5E1B">① 不逃逸</text>
+      <text x="150" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1B5E1B">方法内 new、方法内用完</text>
+      <text x="150" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#1B5E1B">→ 可标量替换 / 锁消除</text>
+      <line x1="250" y1="130" x2="308" y2="130" stroke="#2D7D2D" stroke-width="2" marker-end="url(#l36-arr)"/>
+      <rect x="310" y="70" width="200" height="120" rx="8" fill="url(#l36-g2)" stroke="#8A6D1B" stroke-width="1.5"/>
+      <text x="410" y="95" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#5C4A0E">② 方法逃逸</text>
+      <text x="410" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5C4A0E">return / 赋字段 / 传外部</text>
+      <text x="410" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#5C4A0E">→ 方法外可见，不拆</text>
+      <line x1="510" y1="130" x2="568" y2="130" stroke="#8C2F2F" stroke-width="2" marker-end="url(#l36-arr-x)"/>
+      <rect x="550" y="70" width="200" height="120" rx="8" fill="url(#l36-g3)" stroke="#8C2F2F" stroke-width="1.5"/>
+      <text x="650" y="95" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#7A2222">③ 线程逃逸</text>
+      <text x="650" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#7A2222">共享集合 / 字段 / Thread</text>
+      <text x="650" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#7A2222">→ 跨线程，必须保守</text>
+      <rect x="150" y="225" width="500" height="36" rx="8" fill="#F5F5F0" stroke="#8A8A80" stroke-width="1.2"/>
+      <text x="400" y="247" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3C3C30">越往右，对象越"共享"，可优化的空间越小</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> 逃逸分析三个级别：不逃逸才能就地优化</figcaption>
+  </figure>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>TieredCompilation</b> · 编译层级</span></div>
-<pre><code><span class="c">// 分层编译的 5 个 Level：</span>
-Level 0  <span class="c">→ 解释执行（Interpreter）</span>
-Level 1  <span class="c">→ C1 编译，无 profiling</span>
-Level 2  <span class="c">→ C1 编译，轻量 profiling（队列满时过渡）</span>
-Level 3  <span class="c">→ C1 编译，完整 profiling（收集类型、分支信息）</span>
-Level 4  <span class="c">→ C2 编译，利用 profiling 数据做激进优化 ← 逃逸分析在这层</span>
+  <p>工具上，<code>-XX:+DoEscapeAnalysis</code>（C2 默认开）控制开关，<code>-XX:+PrintEscapeAnalysis</code>（JDK 9+ 默认开）能把报告打到日志里——对象会被标记为 <strong>ESCAPED（逃逸）/ NOESCAPES（未逃逸）/ PARAMETERS（作参数逃逸）</strong>。看日志时盯这仨词即可。</p>
 
-<span class="c">// 一个方法的典型晋升路径：</span>
-解释执行 → C1(Level 3, 收集数据) → C2(Level 4, 激进优化)
+  <div class="think">
+    <p class="think-q">为什么"线程逃逸"要单列一级，而不只按"方法逃逸"处理？</p>
+    <p>因为一旦跨线程，问题性质就变了：编译器不仅要保证"能不能拆"，还要保证<strong>并发语义正确</strong>——对象被两个线程同时看，拆成标量后谁先谁后的可见性、锁的互斥、final 的发布安全都会失去载体。所以线程逃逸的对象必须按"真·共享对象"处理，回到堆上、回到内存屏障的约束里。用一句糙话记：<strong>逃出方法是"跑得远"，逃出线程是"被别人看见"</strong>，后者是编译器最不敢碰的高压区。</p>
+  </div>
 
-<span class="c">// 触发编译的阈值（默认值）：</span>
-方法调用次数 ≥ <span class="n">10000</span>  <span class="c">→ 触发 C1 编译</span>
-方法调用次数 ≥ <span class="n">15000</span>  <span class="c">→ 触发 C2 编译（有 Level 3 的 profile 数据后）</span></code></pre>
-</div>
-
-<p>我们可以通过 JVM 参数观察 JIT 编译过程：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>terminal</b> · 观察 JIT 编译</span></div>
-<pre><code><span class="c"># 查看哪些方法被编译了</span>
-java <span class="k">-XX:+PrintCompilation</span> -jar app.jar
-
-<span class="c"># 输出示例：</span>
-<span class="n">1247  345    b  3</span>  com.example.App::calculateDistance (<span class="n">28</span> bytes)
-<span class="n">1248  346    b  4</span>  com.example.App::calculateDistance (<span class="n">28</span> bytes)
-<span class="c">//       ↑         ↑</span>
-<span class="c">//   编译级别    Level 4 = C2 编译，逃逸分析即将生效</span>
-
-<span class="c"># 查看逃逸分析的详细日志（需要 debug 版 JVM）</span>
-java <span class="k">-XX:+PrintEscapeAnalysis</span> -jar app.jar</code></pre>
-</div>
-
-<div class="takeaway"><span class="takeaway-label">要点</span>只有经过 C2 编译（Level 4）的方法，才能享受逃逸分析带来的三大优化。一个方法需要被调用足够多次（默认 ~15000 次），才有机会晋升到 Level 4。</div>
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>逃逸分析判断对象引用是否"逃出"方法与线程：不逃逸、方法逃逸、线程逃逸三级。只有"不逃逸"的对象才能被就地优化；日志看 ESCAPED / NOESCAPES 标记。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第3站：逃逸分析 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>逃逸分析：对象逃出了方法吗？</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>优化一：标量替换（Scalar Replacement）</h2>
+  </div>
 
-<p>逃逸分析的核心问题只有一个：<strong>一个对象是否被方法作用域之外的代码所引用？</strong></p>
+  <p>对象逃不出去，C2 就敢干一件"大胆"的事：<strong>把对象拆散</strong>。一个对象本质是"一堆字段 + 一个对象头"；如果字段都是标量（int/double/reference 这类基础值）、且每个标量都不逃逸，那这个对象就不需要作为一个整体被分配到堆上——<strong>把字段拆成独立的局部变量塞进寄存器或栈槽</strong>，对象本身"消失"了。这就是标量替换。</p>
 
-<p>如果答案是「没有逃逸」，JVM 就可以放心地做一系列激进优化。逃逸分析本质上是一个<strong>数据流分析</strong>，它追踪对象引用的传播路径，判断引用是否会「逃出」定义它的方法。</p>
-
-<div class="fig">
-<svg viewBox="0 0 680 420" xmlns="http://www.w3.org/2000/svg" fill="none">
-  <!-- 起始节点 -->
-  <rect x="220" y="10" width="240" height="44" rx="8" fill="#3b82f6" stroke="#1e40af" stroke-width="1.5"/>
-  <text x="340" y="37" text-anchor="middle" font-size="15" fill="#fff" font-weight="600">对象引用产生</text>
-
-  <!-- 箭头1 -->
-  <line x1="340" y1="54" x2="340" y2="84" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
-
-  <!-- 判断1：是否被返回 -->
-  <polygon points="340,86 460,136 340,186 220,136" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-  <text x="340" y="132" text-anchor="middle" font-size="13" fill="#92400e" font-weight="500">是否作为返回值</text>
-  <text x="340" y="148" text-anchor="middle" font-size="13" fill="#92400e" font-weight="500">传出方法？</text>
-
-  <!-- 是→逃逸 -->
-  <line x1="460" y1="136" x2="530" y2="136" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr-r)"/>
-  <text x="490" y="126" text-anchor="middle" font-size="12" fill="#ef4444" font-weight="600">是</text>
-  <rect x="530" y="116" width="130" height="40" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="595" y="141" text-anchor="middle" font-size="14" fill="#dc2626" font-weight="600">逃逸 ✗</text>
-
-  <!-- 否→继续 -->
-  <line x1="340" y1="186" x2="340" y2="216" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="354" y="206" font-size="12" fill="#22c55e" font-weight="600">否</text>
-
-  <!-- 判断2：是否赋值给堆上对象 -->
-  <polygon points="340,218 480,268 340,318 200,268" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-  <text x="340" y="264" text-anchor="middle" font-size="13" fill="#92400e" font-weight="500">是否赋值给</text>
-  <text x="340" y="280" text-anchor="middle" font-size="13" fill="#92400e" font-weight="500">堆上的对象字段？</text>
-
-  <!-- 是→逃逸 -->
-  <line x1="480" y1="268" x2="530" y2="268" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr-r)"/>
-  <text x="500" y="258" text-anchor="middle" font-size="12" fill="#ef4444" font-weight="600">是</text>
-  <rect x="530" y="248" width="130" height="40" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="595" y="273" text-anchor="middle" font-size="14" fill="#dc2626" font-weight="600">逃逸 ✗</text>
-
-  <!-- 否→继续 -->
-  <line x1="340" y1="318" x2="340" y2="348" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="354" y="338" font-size="12" fill="#22c55e" font-weight="600">否</text>
-
-  <!-- 判断3：是否传递给其他线程 -->
-  <polygon points="340,350 475,395 340,440 205,395" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-  <text x="340" y="391" text-anchor="middle" font-size="13" fill="#92400e" font-weight="500">是否传递给</text>
-  <text x="340" y="407" text-anchor="middle" font-size="13" fill="#92400e" font-weight="500">其他线程？</text>
-
-  <!-- 是→逃逸 -->
-  <line x1="475" y1="395" x2="530" y2="395" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr-r)"/>
-  <text x="498" y="385" text-anchor="middle" font-size="12" fill="#ef4444" font-weight="600">是</text>
-  <rect x="530" y="375" width="130" height="40" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="595" y="400" text-anchor="middle" font-size="14" fill="#dc2626" font-weight="600">逃逸 ✗</text>
-
-  <!-- 否→不逃逸 -->
-  <line x1="340" y1="440" x2="340" y2="470" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="354" y="460" font-size="12" fill="#22c55e" font-weight="600">否</text>
-  <rect x="230" y="470" width="220" height="44" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
-  <text x="340" y="497" text-anchor="middle" font-size="15" fill="#15803d" font-weight="700">未逃逸 → 可优化 ✓</text>
-
-  <!-- 箭头定义 -->
-  <defs>
-    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker>
-    <marker id="arr-r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/></marker>
-  </defs>
-</svg>
-<figcaption><span class="fig-no">图 1</span> 逃逸分析决策树：对象引用从产生到判定的完整路径</figcaption>
-</div>
-
-<p>来看两个对比鲜明的例子：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>EscapeExample.java</b> · 逃逸 vs 不逃逸</span></div>
-<pre><code><span class="c">/* ═══ 案例 A：对象逃逸 ✗ ═══ */</span>
-<span class="k">public</span> <span class="t">Point</span> createPoint(<span class="k">double</span> x, <span class="k">double</span> y) {
-    <span class="t">Point</span> p = <span class="k">new</span> <span class="t">Point</span>(x, y);
-    <span class="k">return</span> p;  <span class="c">// ← p 被返回给调用者，引用逃出方法</span>
-}               <span class="c">//    必须在堆上分配，无法优化</span>
-
-<span class="c">/* ═══ 案例 B：对象未逃逸 ✓ ═══ */</span>
-<span class="k">public static double</span> calcDistance(<span class="k">double</span> x1, <span class="k">double</span> y1,
-                                   <span class="k">double</span> x2, <span class="k">double</span> y2) {
-    <span class="t">Point</span> p1 = <span class="k">new</span> <span class="t">Point</span>(x1, y1);  <span class="c">// 局部变量</span>
-    <span class="t">Point</span> p2 = <span class="k">new</span> <span class="t">Point</span>(x2, y2);  <span class="c">// 局部变量</span>
-    <span class="k">return</span> p1.distanceTo(p2);
-    <span class="c">// p1、p2 都没有逃出方法 → 可以做优化！</span>
+  <div class="srcbox">
+    <div class="srcbox-head">Point3D 举例：优化前的 new 指令在优化后消失</div>
+    <pre class="srcbox-file"><span class="c">// 源码：用一个局部 Point 计算体积的 8 倍</span>
+<span class="k">static int</span> <span class="n">volume8</span>() {
+    <span class="t">Point3D</span> p = <span class="k">new</span> <span class="t">Point3D</span>(<span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>);   <span class="c">// p 只在方法内用，用完即弃 → 不逃逸</span>
+    <span class="k">return</span> <span class="n">8</span> * p.x * p.y * p.z;
 }
 
-<span class="c">/* ═══ 案例 C：隐式逃逸 ✗ ═══ */</span>
-<span class="k">private static</span> <span class="t">List</span>&lt;<span class="t">Point</span>&gt; cache = <span class="k">new</span> <span class="t">ArrayList</span>&lt;&gt;();
+<span class="c">// 优化前（近似字节码）：</span>
+<span class="c">    new Point3D            // 分配对象（进 Eden，见「对象创建全过程」）</span>
+<span class="c">    dup / invokespecial    // 构造</span>
+<span class="c">    getfield x:Point3D     // 读字段……</span>
+<span class="c">    // …… 一堆对象访问指令</span>
 
-<span class="k">public static void</span> processPoint(<span class="k">double</span> x, <span class="k">double</span> y) {
-    <span class="t">Point</span> p = <span class="k">new</span> <span class="t">Point</span>(x, y);
-    cache.add(p);  <span class="c">// ← p 被存入静态字段（堆上），引用逃出</span>
-}
+<span class="c">// 标量替换后（近似）：new 没了，字段变成纯标量运算</span>
+<span class="c">    iconst_2 / iconst_3 / iconst_4   // 字段值直接当局部常量/变量</span>
+<span class="c">    imul ×若干                        // 纯算术，无对象分配、无字段访问</span>
+<span class="c">    ireturn</span></pre>
+  </div>
 
-<span class="c">/* ═══ 案例 D：线程逃逸 ✗ ═══ */</span>
-<span class="k">public static void</span> startCalc(<span class="k">double</span> x, <span class="k">double</span> y) {
-    <span class="t">Point</span> p = <span class="k">new</span> <span class="t">Point</span>(x, y);
-    <span class="k">new</span> <span class="t">Thread</span>(() -&gt; System.out.println(p)).start();
-    <span class="c">// ← p 被另一个线程捕获，属于线程级逃逸</span>
-}</code></pre>
-</div>
+  <div class="crack">
+    <span class="crack-label">高频考点："JVM 有栈上分配吗？"</span>
+    <p>标准答案：<strong>HotSpot 没有真正的"栈上分配"实现</strong>（对象不会真的建在线程栈上），但通过"逃逸分析 + 标量替换"达成了几乎等价的效果——对象根本不被分配。面试听到"栈上分配"四个字时，接一句"其实官方口径是标量替换"最能体现你读的是源码而非二手文章。</p>
+  </div>
 
-<div class="think"><div class="think-q">案例 D 中，p 是局部变量也没返回，为什么算逃逸？<br/><br/>
-逃逸有两个维度：<strong>方法逃逸</strong>（引用传出方法）和<strong>线程逃逸</strong>（引用被其他线程访问）。Lambda 捕获了 p 的引用，而 Lambda 在其他线程执行——这意味着另一个线程可以访问这个对象，所以即使方法本身没有 return p，它依然发生了线程逃逸。</div></div>
+  <p>标量替换省掉的，正是「对象创建全过程」里那整套流程：不在 Eden 分配内存、不写对象头、不产生堆内引用——<strong>GC 的压力从源头被掐掉了</strong>。对象越多、生命周期越短（典型如纯计算中间量），收益越大：这直接减轻「JVM 堆内存」里年轻代的 Eden 分配压力。</p>
+
+  <div class="think">
+    <p class="think-q">对象里还套着对象，也能标量替换吗？</p>
+    <p>能，而且是"递归"的：外层对象的某个字段若本身也是个<strong>不逃逸</strong>的对象，C2 可以一层层往下拆，把整棵"对象树"全部降级成一堆标量局局部变量。这里"标量"不单指基本类型——一个 <code>reference</code> 字段只要不逃逸，同样是标量替换的候选。所以判断标准不是"字段是对象还是基本类型"，而是"这个引用最终有没有跑出可分析的边界"。一旦某一层的引用逃逸，从那一层起就没法再拆，整条折算到此为止。这也是为什么"方法返回对象"会一票否决——根节点逃逸，树就散不了。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>标量替换 = 把不逃逸对象拆成字段标量，塞进寄存器/栈槽，对象整体不再分配。等效于"栈上分配"的效果，但 HotSpot 并未真正实现栈上分配。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第4站：三大优化 ═══════════════ -->
 <section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>三大优化：栈上分配、标量替换、锁消除</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>优化二：锁消除（Lock Elision）</h2>
+  </div>
 
-<p>逃逸分析是<strong>分析手段</strong>，基于它的结论可以实施三大优化。它们是递进关系：</p>
+  <p>逃逸分析的第二大应用是锁消除。逻辑很直白：一个 <code>synchronized</code> 块的锁对象，如果<strong>外界根本看不到它</strong>（不逃逸），那"锁"就锁了个寂寞——其他线程永远访问不到这个对象，加锁纯属浪费 CPU。C2 于是直接把 <code>monitorenter</code> / <code>monitorexit</code> 两条字节码<strong>删掉</strong>。</p>
 
-<div class="crack"><span class="crack-label">优化关系</span>
-<strong>逃逸分析</strong> 判定对象未逃逸 → 触发三大优化：
-<br/>① <strong>栈上分配</strong>（对象不上堆，避免 GC）
-<br/>② <strong>标量替换</strong>（拆解对象为基本类型，连栈上的对象结构都省了）
-<br/>③ <strong>锁消除</strong>（线程私有对象无需同步）
-</div>
-
-<h3>优化一：栈上分配（Stack Allocation）</h3>
-
-<p>未逃逸的对象可以直接在<strong>线程栈</strong>上分配，而不是堆上。方法返回后，栈帧自动弹出，对象所占内存随之释放——<strong>完全不需要 GC 介入</strong>。</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>StackAlloc.java</b> · 栈上分配效果</span></div>
-<pre><code><span class="k">public static double</span> sumDistances() {
-    <span class="k">double</span> sum = <span class="n">0</span>;
-    <span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">1_000_000</span>; i++) {
-        <span class="c">// 每次循环 new 两个 Point</span>
-        <span class="c">// 如果没有逃逸分析：100 万个 Point 上堆 → Young GC 频繁触发</span>
-        <span class="c">// 有逃逸分析：Point 在栈上分配 → 循环结束自动回收 → 零 GC</span>
-        sum += calcDistance(i, i, i + <span class="n">1</span>, i + <span class="n">1</span>);
+  <div class="srcbox">
+    <div class="srcbox-head">锁消除示例：局部 synchronized 块被删掉锁</div>
+    <pre class="srcbox-file"><span class="c">// 源码：方法内 new 一把锁，只为拼接（真实代码不会这么写，但 StringBuffer 就是这么干的）</span>
+<span class="k">public static</span> <span class="t">String</span> <span class="n">concat</span>(<span class="t">String</span> a, <span class="t">String</span> b) {
+    <span class="t">StringBuffer</span> sb = <span class="k">new</span> <span class="t">StringBuffer</span>();   <span class="c">// sb 不逃逸 → 它内部的锁也没意义</span>
+    <span class="k">synchronized</span> (sb) {                    <span class="c">// append 内部本身又有 synchronized</span>
+        sb.<span class="n">append</span>(a).<span class="n">append</span>(b);
     }
-    <span class="k">return</span> sum;
+    <span class="k">return</span> sb.<span class="n">toString</span>();
 }
 
-<span class="c">// 对比测试（JMH 基准测试）：</span>
-<span class="c">// -XX:-DoEscapeAnalysis  → ~120ms, 多次 Young GC</span>
-<span class="c">// -XX:+DoEscapeAnalysis  → ~8ms,   零 GC</span></code></pre>
-</div>
+<span class="c">// StringBuffer.append 是 synchronized 的，每次 append 都 monitorenter/monitorexit；</span>
+<span class="c">// 锁消除后：这些 monitorenter/monitorexit 被 C2 整体删掉，只剩纯粹的字符拷贝。</span></pre>
+  </div>
 
-<h3>优化二：标量替换（Scalar Replacement）</h3>
+  <p>实用的教训：单线程局部拼接时，用 <code>StringBuilder</code>（无锁）而不是 <code>StringBuffer</code>（方法级 synchronized）。现代 JIT 通常能靠逃逸分析把 StringBuffer 的锁消除掉、追平差距，但"编译器能否帮上忙"存在不确定性——<strong>从源头写对，比赌编译器优化更可靠</strong>。</p>
 
-<p>这是逃逸分析<strong>最核心</strong>的优化。JVM 不是在栈上创建一个完整的对象，而是把对象<strong>拆解</strong>为独立的基本类型（标量）变量。</p>
+  <div class="think">
+    <p class="think-q">怎么"看见"锁消除发生了？</p>
+    <p>和标量替换一样没有专门的"锁被删了"日志，但可以用打印汇编的方式：加 <code>-XX:+UnlockDiagnosticVMOptions -XX:+PrintAssembly</code> 输出 JIT 编译后的机器码，对比编译产物里<strong>是否还有锁前缀指令</strong>（如 x86 的 <code>lock cmpxchg</code>）。没有锁前缀，说明锁消除了。这个方法门槛高，但它是最硬核、最没有争议的证据——面试里提一句"看过汇编层面的 lock 指令消失"，区分度极高。</p>
+  </div>
 
-<div class="formula">
-Point p = new Point(x, y) &nbsp;→&nbsp; 标量替换后：double p_x = x; double p_y = y;
-</div>
+  <div class="crack">
+    <span class="crack-label">锁消除 ≠ 偏向锁 / 轻量级锁</span>
+    <p>偏向锁、轻量级锁是锁对象<strong>确实被共享</strong>时，降低加锁开销的手段（锁还在，只是更廉价）；锁消除的前提是锁对象<strong>根本没逃逸</strong>——锁直接不存在。一个"把锁变便宜"，一个"把锁变没有"，别混为一谈（锁的升级细节属于并发卷，此处只需分清边界）。</p>
+  </div>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ScalarReplacement.java</b> · 标量替换详解</span></div>
-<pre><code><span class="c">/* ─── 优化前：源代码 ─── */</span>
-<span class="k">public static double</span> calc(<span class="k">double</span> x, <span class="k">double</span> y) {
-    <span class="t">Point</span> p = <span class="k">new</span> <span class="t">Point</span>(x, y);    <span class="c">// 堆上分配对象</span>
-    <span class="k">return</span> p.getX() + p.getY();      <span class="c">// 通过对象访问字段</span>
-}
-
-<span class="c">/* ─── 优化后：C2 等效伪代码 ─── */</span>
-<span class="k">public static double</span> calc(<span class="k">double</span> x, <span class="k">double</span> y) {
-    <span class="k">double</span> p_x = x;                  <span class="c">// 标量：直接存在寄存器/栈</span>
-    <span class="k">double</span> p_y = y;                  <span class="c">// 标量：直接存在寄存器/栈</span>
-    <span class="k">return</span> p_x + p_y;                <span class="c">// 无对象开销，纯算术运算</span>
-}
-
-<span class="c">/* ─── 更复杂的例子：链式调用 ─── */</span>
-<span class="k">public static double</span> complexCalc() {
-    <span class="t">Point</span> a = <span class="k">new</span> <span class="t">Point</span>(<span class="n">1.0</span>, <span class="n">2.0</span>);
-    <span class="t">Point</span> b = <span class="k">new</span> <span class="t">Point</span>(<span class="n">3.0</span>, <span class="n">4.0</span>);
-    <span class="t">Point</span> mid = <span class="k">new</span> <span class="t">Point</span>(              <span class="c">// mid 也未逃逸</span>
-        (a.getX() + b.getX()) / <span class="n">2</span>,
-        (a.getY() + b.getY()) / <span class="n">2</span>
-    );
-    <span class="k">return</span> mid.getX() * mid.getY();
-
-    <span class="c">// C2 标量替换后等效：</span>
-    <span class="c">// double a_x = 1.0, a_y = 2.0;</span>
-    <span class="c">// double b_x = 3.0, b_y = 4.0;</span>
-    <span class="c">// double mid_x = (a_x + b_x) / 2;  // 2.0</span>
-    <span class="c">// double mid_y = (a_y + b_y) / 2;  // 3.0</span>
-    <span class="c">// return mid_x * mid_y;             // 6.0</span>
-    <span class="c">// → 最终优化为常量 6.0（常量折叠）</span>
-}</code></pre>
-</div>
-
-<p>标量替换的<strong>前提条件</strong>：对象未被逃逸 + 对象的字段可以被独立访问。HotSpot 当前只能对<strong>简单对象</strong>做标量替换——如果对象的字段是数组或其他复杂引用类型，标量替换可能失效。</p>
-
-<h3>优化三：锁消除（Lock Elimination）</h3>
-
-<p>如果一个对象只在一个线程内使用（未发生线程逃逸），那么对它的所有同步操作都是<strong>多余的</strong>。</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>LockElimination.java</b> · 锁消除实战</span></div>
-<pre><code><span class="k">public static</span> <span class="t">String</span> concatString(<span class="t">String</span> a, <span class="t">String</span> b, <span class="t">String</span> c) {
-    <span class="t">StringBuffer</span> sb = <span class="k">new</span> <span class="t">StringBuffer</span>();
-    sb.append(a);
-    sb.append(b);
-    sb.append(c);
-    <span class="k">return</span> sb.toString();
-}
-
-<span class="c">/* StringBuffer 的 append 方法是 synchronized 的：</span>
-<span class="c">   public synchronized StringBuffer append(String str) { ... }</span>
-<span class="c"></span>
-<span class="c">   但 sb 是局部变量，没有逃逸 → 不会有其他线程访问它</span>
-<span class="c">   → C2 锁消除：移除 synchronized 关键字</span>
-<span class="c">   → 等效于使用 StringBuilder（无锁版本）</span>
-<span class="c">*/</span>
-
-<span class="c">// 验证方式：</span>
-<span class="c">// -XX:+PrintEliminateLocks 可以看到被消除的锁</span>
-<span class="c">// 输出：Eliminated lock: StringBuffer::append</span></code></pre>
-</div>
-
-<table class="nb-table">
-<thead><tr><th>优化类型</th><th>触发条件</th><th>效果</th><th>性能收益</th></tr></thead>
-<tbody>
-  <tr><td><strong>栈上分配</strong></td><td>对象未逃逸</td><td>对象在栈上创建，方法返回自动回收</td><td>减少 GC 压力 30-90%</td></tr>
-  <tr><td><strong>标量替换</strong></td><td>对象未逃逸 + 字段可拆分</td><td>对象被拆为独立基本类型变量</td><td>消除对象创建开销，提升缓存命中</td></tr>
-  <tr><td><strong>锁消除</strong></td><td>对象未线程逃逸 + 有锁操作</td><td>移除不必要的 synchronized</td><td>避免线程上下文切换和锁竞争</td></tr>
-</tbody>
-</table>
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>锁消除：锁对象不逃逸（别的线程看不到）时，C2 删掉 monitorenter/monitorexit。它和偏向锁/轻量级锁的区别在于——前者让锁消失，后者让锁变便宜。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第5站：实际影响与限制 ═══════════════ -->
 <section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>实际影响与限制</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>效果验证与量化</h2>
+  </div>
 
-<h3>JVM 参数配置</h3>
+  <p>标量替换和锁消除"听起来很美"，面试和调优时都要能<strong>证明它生效</strong>。四条验证路径，从易到难：</p>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>JVM Flags</b> · 逃逸分析相关参数</span></div>
-<pre><code><span class="c"># 逃逸分析开关（JDK 8+ 默认开启）</span>
-<span class="k">-XX:+DoEscapeAnalysis</span>
+  <ol>
+    <li><strong>javap -c 对比字节码</strong>：优化后目标方法里 <code>new</code> 指令消失（或锁指令消失）——最直观，能直接给面试官看。</li>
+    <li><strong>JIT 日志开关</strong>：<code>-XX:+PrintEscapeAnalysis</code> 看对象是否标记为 <code>NOESCAPES</code>；<code>-XX:+PrintInlining</code> 看方法有没有被内联（内联是逃逸分析的前提，见下一站）。</li>
+    <li><strong>GC 日志对比</strong>：标量替换生效后，Eden 分配速率下降、Young GC 次数变少——同一段负载，开/关 <code>-XX:-DoEscapeAnalysis</code> 各跑一遍对比「GC 日志分析」里的分配速率指标。</li>
+    <li><strong>JMH 微基准</strong>：用 JMH 测吞吐。注意两点：必须<strong>充分预热</strong>（否则结果还在解释器里跑，看不到任何优化），多个 fork 消除抖动。典型纯计算微基准里，标量替换能带来<strong>数倍</strong>吞吐提升、GC 分配速率可降<strong>一个数量级</strong>——具体量级取决于负载，绝不背死数字，但"数量级"这个形容词是对的。</li>
+  </ol>
 
-<span class="c"># 标量替换开关（JDK 8+ 默认开启）</span>
-<span class="k">-XX:+EliminateAllocations</span>
+  <div class="crack">
+    <span class="crack-label">新手大坑：不预热就跑 benchmark</span>
+    <p>JIT 是"先慢后快"的。没预热就直接计时，量到的是<strong>解释器阶段</strong>的慢代码，标量替换、锁消除一个都看不到，得到一堆自欺欺人的数字。所以 JMH 的 <code>warmup</code> 阶段不是走过场，是让热点代码先被 C1/C2 编译好。想对比"有没有优化"，还可以用 <code>-Xcomp</code> 强制所有代码提前编译来放大差异。</p>
 
-<span class="c"># 锁消除开关（JDK 8+ 默认开启）</span>
-<span class="k">-XX:+EliminateLocks</span>
+  <p>做定量对比的关键是对照实验：同一段代码跑两遍，一遍默认、一遍加 <code>-XX:-DoEscapeAnalysis</code>（关掉逃逸分析），其余 JVM 参数完全相同，各做充分预热。对比二者的吞吐和 Young GC 次数，差异就是逃逸分析（连同标量替换、锁消除）的真实贡献。这个 -XX:-DoEscapeAnalysis 的"开关对照法"，是判断"到底是不是 EA 在起作用"最干净的隔离手段。</p>
 
-<span class="c"># 查看逃逸分析结果（需要 UnlockDiagnosticVMOptions）</span>
-<span class="k">-XX:+UnlockDiagnosticVMOptions -XX:+PrintEscapeAnalysis</span>
+  <p>最后补一句常用的第三工具：JOL（Java Object Layout）能打印对象的精确内存布局与地址，配合「对象创建全过程」里讲的对象头/字段排布，可以交叉印证"这个对象本该是多大的开销，而被标量替换后省掉的全是这堆开销"——量化账一算，逃逸分析的价值立刻具体起来。</p>
+  </div>
 
-<span class="c"># 查看被消除的锁</span>
-<span class="k">-XX:+UnlockDiagnosticVMOptions -XX:+PrintEliminateLocks</span>
+  <div class="think">
+    <p class="think-q">有没有办法一眼看出"这个对象到底有没有被标量替换"？</p>
+    <p>严格说没有单一稳定开关打印"此对象已被标量替换"，标量替换通常没有专用的逐对象日志（不像逃逸分析有 PrintEscapeAnalysis）。工程上用"组合拳"：PrintEscapeAnalysis 确认 NOESCAPES → PrintInlining 确认链路已内联 → GC 分配速率下降三件事互相印证。这也是为什么网上说的很多"逃逸分析失效"要慎看——可能只是分析链路没接上，而非 JIT 没做。</p>
+  </div>
 
-<span class="c"># 查看标量替换详情</span>
-<span class="k">-XX:+UnlockDiagnosticVMOptions -XX:+PrintEliminateAllocations</span></code></pre>
-</div>
-
-<h3>最佳生效场景</h3>
-
-<p>逃逸分析在以下场景收益最大：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>BestCase.java</b> · 逃逸分析最佳场景</span></div>
-<pre><code><span class="c">/* ✓ 场景 1：紧密循环中的短生命周期对象 */</span>
-<span class="k">for</span> (<span class="k">int</span> i = <span class="n">0</span>; i &lt; <span class="n">10_000_000</span>; i++) {
-    <span class="t">BigDecimal</span> price = <span class="k">new</span> <span class="t">BigDecimal</span>(i);   <span class="c">// 未逃逸</span>
-    <span class="t">BigDecimal</span> tax = price.multiply(rate);   <span class="c">// 未逃逸</span>
-    total = total.add(tax);
-    <span class="c">// 每次循环创建的 BigDecimal 都在栈上分配 → 零 GC</span>
-}
-
-<span class="c">/* ✓ 场景 2：方法内联 + 逃逸分析 联合优化 */</span>
-<span class="k">public static double</span> process() {
-    <span class="t">Point</span> p = createPoint(<span class="n">1.0</span>, <span class="n">2.0</span>);  <span class="c">// createPoint 被内联</span>
-    <span class="k">return</span> p.getX() * p.getY();
-}
-<span class="c">// 内联前：p 是 createPoint 的返回值 → 逃逸</span>
-<span class="c">// 内联后：p 变成 process() 的局部变量 → 未逃逸 → 标量替换！</span>
-<span class="c">// 方法内联是逃逸分析的"前置放大器"</span>
-
-<span class="c">/* ✗ 场景 3：复杂控制流 → 逃逸分析可能放弃 */</span>
-<span class="k">public static</span> <span class="t">Point</span> complexFlow(<span class="k">boolean</span> flag, <span class="t">Map</span>&lt;<span class="t">String</span>, <span class="t">Point</span>&gt; map) {
-    <span class="t">Point</span> p = <span class="k">new</span> <span class="t">Point</span>(<span class="n">1.0</span>, <span class="n">2.0</span>);
-    <span class="k">if</span> (flag) {
-        map.put(<span class="s">"key"</span>, p);  <span class="c">// 条件分支中可能逃逸</span>
-    }
-    <span class="k">return</span> p.distanceTo(origin);
-    <span class="c">// C2 分析复杂控制流成本高，可能保守地认为"已逃逸"</span>
-}</code></pre>
-</div>
-
-<h3>已知限制</h3>
-
-<table class="nb-table">
-<thead><tr><th>限制</th><th>原因</th><th>规避方法</th></tr></thead>
-<tbody>
-  <tr><td><strong>方法体过大</strong></td><td>C2 对方法大小有限制（默认 ~8000 字节码），超限直接放弃编译</td><td>拆分大方法，让核心逻辑保持紧凑</td></tr>
-  <tr><td><strong>复杂控制流</strong></td><td>分支过多时逃逸分析保守处理，假设对象逃逸</td><td>简化逻辑，减少不必要的分支</td></tr>
-  <tr><td><strong>虚方法调用</strong></td><td>多态调用阻碍内联，间接阻碍逃逸分析</td><td>使用 final 方法或 sealed 类减少多态</td></tr>
-  <tr><td><strong>数组存储</strong></td><td>对象存入数组后，追踪所有数组访问路径代价过高</td><td>尽量使用局部变量而非数组存储临时对象</td></tr>
-  <tr><td><strong>非物化限制</strong></td><td>标量替换后的对象如果需要重新物化（如发生 deoptimization），性能回退</td><td>这是 JVM 内部权衡，开发者一般无需干预</td></tr>
-</tbody>
-</table>
-
-<div class="think"><div class="think-q">逃逸分析失败了怎么办？会不会导致程序出错？<br/><br/>
-不会。逃逸分析是一种<strong>投机性优化</strong>。如果分析失败，JVM 只是放弃优化，按照常规方式在堆上分配对象——程序语义完全不受影响。这也是为什么逃逸分析默认开启却几乎不会引入 bug 的原因。</div></div>
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>验证四件套：javap 看 new 是否消失、PrintEscapeAnalysis 看 NOESCAPES、PrintInlining 看内联、GC 日志看分配速率下降。跑 JMH 必须先预热，否则量的是解释器。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第6站：总结 ═══════════════ -->
 <section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>写出 JIT 友好的代码</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>为什么"内联"是前提</h2>
+  </div>
 
-<p>理解逃逸分析后，我们可以总结出编写 JIT 友好代码的原则：</p>
+  <p>逃逸分析不是孤立的——它只在<strong>方法被内联进调用者之后</strong>才看得见完整的上下文。想给一个方法 <code>m()</code> 里的对象做标量替换，前提是 <code>m()</code> 已经被内联到它的调用者里：内联把"跨方法的对象流转"压平成本地代码，逃逸分析才能判断这个对象其实哪也没去。走到标量替换/锁消除之前，中间那条看不见的管线是：</p>
 
-<div class="crack"><span class="crack-label">JIT 友好编码原则</span>
-<strong>原则 1：小方法优先</strong><br/>
-方法越小，C2 越容易内联 → 内联后逃逸分析作用域更大 → 更多对象被判定为未逃逸。
-<br/><br/>
-<strong>原则 2：局部变量优于字段</strong><br/>
-对象存在局部变量中，天然不逃逸。避免把临时对象存入集合或字段。
-<br/><br/>
-<strong>原则 3：不要过早暴露引用</strong><br/>
-对象创建后只在方法内使用，不要 return 或传给其他线程，让 JIT 有优化的空间。
-<br/><br/>
-<strong>原则 4：信任 JVM</strong><br/>
-不需要为了"避免创建对象"而写难以阅读的代码（如手动对象池）。逃逸分析 + 标量替换在大多数场景下比手动优化更高效。
-</div>
+  <figure class="fig">
+    <svg viewBox="0 0 800 180" role="img" aria-label="内联到标量替换锁消除的流水线">
+      <defs>
+        <marker id="l36b-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+        <linearGradient id="l36b-g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#C9DCE8"/><stop offset="100%" stop-color="#9BBDD4"/></linearGradient>
+        <linearGradient id="l36b-g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B8D9B0"/><stop offset="100%" stop-color="#8BC28A"/></linearGradient>
+        <linearGradient id="l36b-g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E8D9B8"/><stop offset="100%" stop-color="#D4B97E"/></linearGradient>
+      </defs>
+      <rect x="40" y="60" width="200" height="70" rx="8" fill="url(#l36b-g1)" stroke="#3E6B8F" stroke-width="1.5"/>
+      <text x="140" y="88" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1F4E6B">内联（Inlining）</text>
+      <text x="140" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1F4E6B">把被调方法嵌进调用者</text>
+      <line x1="240" y1="95" x2="298" y2="95" stroke="#3E6B8F" stroke-width="2" marker-end="url(#l36b-arr)"/>
+      <rect x="300" y="60" width="200" height="70" rx="8" fill="url(#l36b-g2)" stroke="#2D7D2D" stroke-width="1.5"/>
+      <text x="400" y="88" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1B5E1B">逃逸分析（EA）</text>
+      <text x="400" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1B5E1B">判断对象是否逃出方法/线程</text>
+      <line x1="500" y1="95" x2="558" y2="95" stroke="#3E6B8F" stroke-width="2" marker-end="url(#l36b-arr)"/>
+      <rect x="560" y="60" width="210" height="70" rx="8" fill="url(#l36b-g3)" stroke="#8A6D1B" stroke-width="1.5"/>
+      <text x="665" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#5C4A0E">标量替换 / 锁消除</text>
+      <text x="665" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5C4A0E">对象拆成标量 / 删掉锁</text>
+      <text x="400" y="160" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3C3C30">上一环断了，下一环拿不到上下文 → 优化整体失效</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> 内联 → 逃逸分析 → 标量替换/锁消除 的流水线</figcaption>
+  </figure>
 
-<div class="recap">
-<strong>全文回顾</strong>
+  <p>内联失败，后面全断。哪些会拦路？方法体太大（超过 <code>-XX:MaxInlineSize</code>，默认 35 字节；热点方法 <code>-XX:FreqInlineSize</code> 默认放宽到 325 字节）；虚调用的多态目标太多（常见说法是目标类型 > 4 触发 megamorphic，不再内联）；递归方法；以及被反射调用的方法。这些场景里 C2 全都会退而求其次——不做内联，随之放弃标量替换和锁消除。</p>
 
-<strong>1. JIT 分层编译：</strong>方法从解释执行逐步晋升到 C2 编译（Level 4），逃逸分析在 Level 4 生效。
+  <p>虚调用的内联判定有个更精细的机制值得知道：JIT 靠 profile 统计这个调用点<strong>实际出现过的具体类型</strong>，生成"多态内联缓存（PIC）"——常见形态是"如果目标是类型 A 就走 A 的内联体，是 B 就走 B，两三个都不是就责回虚分派"。当 profile 显示目标类型稳定在少数几个，内联就成立；一旦目标类型激增（megamorphic，巨多态），缓存价值归零，JIT 放弃内联。这也是"面向接口写代码虽好，但过度抽象让调用点巨多态反而伤 JIT"这层权衡的技术根源。</p>
 
-<strong>2. 逃逸分析核心：</strong>判断对象引用是否逃出方法作用域。三种逃逸路径——返回值逃逸、堆字段逃逸、线程逃逸。
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>管线顺序：内联 → 逃逸分析 → 标量替换/锁消除。内联是逃逸分析的"视野"来源；方法太大、虚调用目标过多、递归都会截断内联，从而让后面两环失效。</p>
+  </div>
+</section>
 
-<strong>3. 三大优化手段：</strong>
-<br/> • 栈上分配：对象不上堆，方法返回自动回收，零 GC 开销
-<br/> • 标量替换：把对象拆解为基本类型字段，消除对象头和对齐开销
-<br/> • 锁消除：对线程私有对象移除 synchronized，消除同步开销
+<section class="station reveal" id="s7">
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>边界与失效场景</h2>
+  </div>
 
-<strong>4. 实战指导：</strong>
-<br/> • 保持方法小巧 → 便于内联 → 扩大逃逸分析作用域
-<br/> • 使用局部变量 → 天然不逃逸
-<br/> • -XX:+DoEscapeAnalysis 默认开启，无需手动干预
-<br/> • 用 -XX:+PrintCompilation 和 JMH 验证优化效果
+  <p>逃逸分析不是万能的，边界很多，全是追问密集区：</p>
 
-<strong>面试一句话回答：</strong>逃逸分析是 JIT 编译器的数据流分析技术，通过判断对象是否逃出方法作用域，实现栈上分配、标量替换和锁消除三大优化，将本应在堆上分配的对象优化为栈上的基本类型运算，显著减少 GC 压力和内存开销。
-</div>
+  <ol>
+    <li><strong>对象一旦赋给字段 / 作为返回值</strong>，就逃逸了——调用者可能持着它传给别人，编译器不能赌它只有一个消费者。</li>
+    <li><strong>对象参与"身份类"操作</strong>：<code>==</code> 比较、<code>identityHashCode</code>、<code>synchronized</code>、序列化、反射调用——这些依赖"这个对象以整体身份存在"，拆了就改语义，编译器只能保守放弃。</li>
+    <li><strong>C1 不做逃逸分析</strong>：只有 C2 做。所以分层编译的头几秒（还在 C1/解释层），看不到标量替换的效果。</li>
+    <li><strong>反优化（deoptimization）会撤销</strong>：逃逸分析是"编译期假设"，一旦运行期 profile 推翻假设（多态点变多、新类被加载、内联失效），C2 会<strong>退回解释执行</strong>重新观察（<code>-XX:+Deoptimization</code> 默认开）。所以优化不是一次性买断，而是随 profile 动态进退。</li>
+    <li><strong>逃逸分析 ≠ 对象池</strong>：字符串常量池、<code>Integer</code> 缓存（-128~127）是"复用已有对象"的缓存机制，与逃逸分析"让对象不再分配"完全是两回事。</li>
+  </ol>
+
+  <p>关于第 4 条"反优化"，再点透一点：反优化不是"编译错了回炉"，而是<strong>一个有 safepoint 协作的正式机制</strong>——当运行期观测（比如 profile 里多态目标数量飙升、或新类被加载改写了继承关系）推翻了编译时假设，JVM 会等到一个安全点（safepoint），把对应栈帧从"机器码状态"安全地搬回"解释器状态"，继续以解释方式执行，并重新采集 profile。代价是"已优化的机器码作废 + 一段时间解释执行变慢"，换来的是语义永远正确。理解了它是"优化可以被撤销"，才不会被"JIT 优化一次就永久生效"这类坑问倒。</p>
+
+  <div class="crack">
+    <span class="crack-label">高频误判："逃逸分析失效一定是 bug"</span>
+    <p>看到 <code>PrintInlining</code> 里某方法没被内联，第一反应往往是"JIT 有问题"。其实多数是方法体超了 <code>MaxInlineSize</code>、或虚调用多态目标过多——是<strong>代码形态</strong>导致内联失败，进而 EA 拿不到上下文。与其怀疑编译器，不如先查内联日志，再决定要不要拆小方法、少用重多态接口。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>五大失效场景：对象逃逸、身份类操作（== / hashCode / synchronized / 序列化 / 反射）、C1 不做 EA、deoptimization 撤销、以及"对象池 ≠ 逃逸分析"。失效先查内联日志，别急着怪编译器。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="summary">
+  <div class="station-head">
+    <span class="station-no">第 8 站</span>
+    <h2>总结：一张地图 + 面试模板</h2>
+  </div>
+
+  <div class="recap">
+    <p><strong>知识地图</strong>：混合执行（解释器启动快 + JIT 单条快）→ 热点判定（计数器阈值约 10000）→ 五级分层（C1 快收 profile，C2 慢吃 profile 激进优化，OSR 飞行中换引擎）→ 逃逸分析（不逃逸 / 方法逃逸 / 线程逃逸三级）→ 两大优化（标量替换拆对象省分配、锁消除删锁）→ 前提（内联给 EA 视野）→ 失效场景（逃逸 / 身份操作 / C1 不做 / 反优化 / 对象池≠EA）。</p>
+    <ul>
+      <li><strong>标量替换</strong>：不逃逸对象拆成字段标量，对象整体不分配，等效"栈上分配"效果（但 HotSpot 未真正实现栈上分配）。</li>
+      <li><strong>锁消除</strong>：不逃逸的锁对象，monitorenter/monitorexit 被删，锁直接不存在。</li>
+      <li><strong>验证</strong>：javap 看 new 消失 → PrintEscapeAnalysis 看 NOESCAPES → PrintInlining 看内联 → GC 日志看分配速率；JMH 必先预热。</li>
+    </ul>
+  </div>
+
+  <h3>面试回答模板</h3>
+  <div class="takeaway">
+    <span class="takeaway-label">30 秒版</span>
+    <p>"HotSpot 是解释器和 JIT 的组合：冷代码解释执行、热点代码编译成机器码。JIT 里有个逃逸分析，判断 new 出来的对象有没有逃出方法或线程；一个不逃逸的对象，能被标量替换——拆成字段塞进寄存器，省掉堆分配和 GC 压力；不逃逸的锁对象还能被锁消除，直接把加锁字节码删掉。这就是逃逸分析驱动的两大优化。"</p>
+  </div>
+  <div class="takeaway">
+    <span class="takeaway-label">3 分钟版（展开）</span>
+    <p>先展开执行模型：解释器逐条慢但启动快，JIT 编译热点、C1 快收 profile、C2 慢但按 profile 激进优化，中间还有 OSR 让热点循环"飞行中换引擎"、deoptimization 随时可退回。再讲逃逸分析三级，用 Point3D 例子把标量替换讲透——new 指令消失、字段变标量、省的是「对象创建全过程」整套分配流程；顺带把锁消除和"偏向锁/轻量级锁"的边界划清。然后落到"怎么证明"：javap 对比、PrintEscapeAnalysis、PrintInlining（内联是前提）、GC 分配速率，强调 JMH 必须预热。最后主动提失效场景——对象逃逸、identityHashCode/synchronized/反射等身份操作、C1 不做 EA、反优化撤销——展示你知道 EA 的边界在哪，而不是吹成万能。</p>
+  </div>
+
+  <h3>高频追问表</h3>
+  <table class="nb-table">
+    <thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+    <tbody>
+      <tr><td>JVM 有栈上分配吗？</td><td>没有显式实现；靠"逃逸分析 + 标量替换"达成类似效果——对象根本不分配</td></tr>
+      <tr><td>OSR 是什么？和 inlining 什么区别？</td><td>OSR 是热点循环"飞行中"把栈上循环换成编译版；inlining 是方法调用被嵌进调用者，两者不同维度</td></tr>
+      <tr><td>C1 和 C2 的分工？为什么默认 C1 先上？</td><td>C1 编译快、启动快、负责收集 profile；C2 吃 profile 做激进优化。先 C1 换来的既是快启动，也是给 C2 的观测数据</td></tr>
+      <tr><td>怎么证明逃逸分析生效？</td><td>javap -c 看 new 消失 / PrintEscapeAnalysis 看 NOESCAPES / GC 分配速率对比</td></tr>
+      <tr><td>为什么方法返回对象就一定逃逸？</td><td>返回值交到调用者手里，后续可能被赋字段、传线程，编译器无法证明它不扩散，只能保守当作逃逸</td></tr>
+      <tr><td>deoptimization 什么时候发生？</td><td>运行期 profile 推翻编译期假设：多态目标变多、新类加载、内联失效——退回解释执行重新观察</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">离场前记一句</span>
+    <p>逃逸分析的价值不是"又省了几个字节"，而是它把"分配对象"这个最常见的动作，从堆上抬进了寄存器和栈槽里——摸透了这条"内联 → 逃逸分析 → 标量替换/锁消除"的链路，你才算真正听懂 HotSpot 在帮你干什么，也知道它帮不了你什么。</p>
+  </div>
 </section>
 
 </main>
-
 </body>
 </html>

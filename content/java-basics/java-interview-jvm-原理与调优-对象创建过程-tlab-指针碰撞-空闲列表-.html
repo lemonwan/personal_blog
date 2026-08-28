@@ -9,490 +9,773 @@
 
 <main class="lesson-body">
 
-<!-- ═══════════════ 第1站：开场 ═══════════════ -->
+<!-- ========== 元数据（隐藏） ========== -->
+<!--
+  title: "对象创建全过程：类加载检查 → TLAB → 内存分配 → 初始化"
+  difficulty: 高级
+  interviewFreq: 极高
+  desc: "new 一个对象，JVM 内部发生了什么？指针碰撞 vs 空闲列表、TLAB 分配、对象头布局——从字节码到内存的完整链路。"
+-->
+
+<!-- ═══════════════ 第1站：全链路总览 ═══════════════ -->
 <section class="station reveal" id="s1">
-<div class="station-head"><span class="station-no">第 1 站</span><h2>面试官：new Object() 在 JVM 内部到底做了什么？</h2></div>
+<div class="station-head"><span class="station-no">第 1 站</span><h2>new 指令到对象落地的五阶段完整链路</h2></div>
 
-<p>面试官放下简历，问了一个看似"入门级"的问题：</p>
+<p>面试官喜欢用一个"入门级"问题开场，恰恰是因为它危险——人人都会答两句，而他要的是你能答出两句以上：</p>
 
-<div class="think"><div class="think-q">"new Object() 这行代码执行时，JVM 内部经历了哪些步骤？"</div></div>
+<div class="think"><div class="think-q">"写一句 new Person("Alice", 18)，从 JVM 执行它到对象可用，中间到底发生了什么？"</div>
+<p>大多数候选人的回答是"在堆上分配内存，然后调用构造方法"。这句话没错，但就像把去医院描述成"看个病、拿个药"——省掉了分诊、挂号、检查、出报告的全过程。这篇文章把这"一次就诊"拆成五个阶段，逐个讲清楚每个阶段在做什么、为什么必须做、面试官会怎么追问。</p></div>
 
-<p>80% 的候选人回答不超过两句——"在堆上分配内存，然后调用构造方法"。面试官已经在心里把你归到了<strong>会写代码但不懂底层</strong>那一档。</p>
+<p>先给结论。一条 <code>new</code> 指令从字节码到对象落地，必须经历<strong>五个阶段</strong>：</p>
 
-<p>事实是，一个 <code>new</code> 指令从字节码到最终的对象落地，至少涉及<strong>五个关键阶段</strong>：类加载检查、内存分配策略选择（指针碰撞还是空闲列表？TLAB 还是直接分配？）、零值初始化、对象头设置、构造方法执行。每个阶段背后都藏着 JVM 的精心设计。</p>
+<figure class="fig">
+<svg viewBox="0 0 780 330" role="img" aria-label="对象创建五阶段时间线">
+  <defs>
+    <marker id="l25-arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2B6E91"/></marker>
+  </defs>
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">对象创建五阶段时间线（从 new 指令到对象可用）</text>
 
-<p>读完这篇文章，你将能够：</p>
+  <rect x="285" y="38" width="210" height="26" rx="13" fill="#2B6E91"/>
+  <text x="390" y="55" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#fff" font-weight="600">JVM 执行 new 指令（字节码）</text>
+  <line x1="390" y1="64" x2="390" y2="100" stroke="#2B6E91" stroke-width="1.5" marker-end="url(#l25-arr)"/>
 
-<ul>
-  <li>完整描述 <code>new</code> 指令从字节码到内存的 <strong>5 步链路</strong></li>
-  <li>解释<strong>指针碰撞</strong>与<strong>空闲列表</strong>的适用场景，以及 TLAB 如何解决并发分配问题</li>
-  <li>画出 64 位 JVM 下<strong>对象头的位级布局</strong>（含 Compressed Oops）</li>
-  <li>说出 <code>&lt;init&gt;</code> 方法的执行顺序，并理解字段初始化器的编译行为</li>
-</ul>
+  <line x1="100" y1="105" x2="674" y2="105" stroke="#2B6E91" stroke-width="2" marker-end="url(#l25-arr)"/>
 
-<p>发车之前，先问自己：</p>
+  <circle cx="100" cy="105" r="24" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="100" y="111" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1A4D6E">1</text>
+  <text x="100" y="152" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1A4D6E">类加载检查</text>
+  <rect x="38" y="162" width="124" height="60" rx="5" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="100" y="180" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">类加载了没？</text>
+  <text x="100" y="194" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">链接、初始化做了没？</text>
+  <text x="100" y="208" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">没做 → 先补上</text>
 
-<ul>
-  <li>TLAB 分配失败后会怎么做？直接 Eden 分配还是直接老年代？</li>
-  <li>为什么 Java 对象的字段一定有默认值，而 C++ 没有？</li>
-  <li>对象头里的 Mark Word 在刚创建时存了什么？</li>
-</ul>
+  <circle cx="245" cy="105" r="24" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="245" y="111" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1B5E1B">2</text>
+  <text x="245" y="152" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1B5E1B">内存分配</text>
+  <rect x="183" y="162" width="124" height="60" rx="5" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="245" y="180" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">堆里找一块空间</text>
+  <text x="245" y="194" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">指针碰撞 / 空闲列表</text>
+  <text x="245" y="208" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">通常落在线程 TLAB</text>
 
-<p>带着问题，我们从字节码出发。</p>
-</section>
+  <circle cx="390" cy="105" r="24" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="390" y="111" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1B5E1B">3</text>
+  <text x="390" y="152" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1B5E1B">零值初始化</text>
+  <rect x="328" y="162" width="124" height="60" rx="5" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="390" y="180" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">字段 → 0 / null / false</text>
+  <text x="390" y="194" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">构造器里能读到</text>
+  <text x="390" y="208" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">零值，不是脏数据</text>
 
-<!-- ═══════════════ 第2站：字节码层面 ═══════════════ -->
-<section class="station reveal" id="s2">
-<div class="station-head"><span class="station-no">第 2 站</span><h2>字节码层面：new 指令做了什么？</h2></div>
+  <circle cx="535" cy="105" r="24" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="535" y="111" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#1A4D6E">4</text>
+  <text x="535" y="152" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1A4D6E">设置对象头</text>
+  <rect x="473" y="162" width="124" height="60" rx="5" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="535" y="180" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">写入 Mark Word</text>
+  <text x="535" y="194" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">写入类指针</text>
+  <text x="535" y="208" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">数组再写长度</text>
 
-<p>先看一段最简单的 Java 代码：</p>
+  <circle cx="680" cy="105" r="24" fill="#E0C8A8" stroke="#8B6914" stroke-width="1.5"/>
+  <text x="680" y="111" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#6B4E0A">5</text>
+  <text x="680" y="152" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#6B4E0A">执行 init</text>
+  <rect x="618" y="162" width="124" height="60" rx="5" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="680" y="180" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">super() → 字段初始化</text>
+  <text x="680" y="194" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">初始化块 → 构造体</text>
+  <text x="680" y="208" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#555">唯一执行用户逻辑的阶段</text>
 
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ObjectDemo.java</b></span></div>
-<pre><code><span class="k">public</span> <span class="k">class</span> <span class="t">ObjectDemo</span> {
-    <span class="k">public static void</span> <span class="n">main</span>(<span class="t">String</span>[] args) {
-        <span class="t">Object</span> obj = <span class="k">new</span> <span class="t">Object</span>();
-    }
-}</code></pre>
-</div>
-
-<p>用 <code>javap -c ObjectDemo</code> 反编译后，<code>main</code> 方法的字节码如下：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ObjectDemo.class（javap -c 反编译）</b></span></div>
-<pre><code><span class="c">// main 方法字节码</span>
-<span class="n"> 0</span>: <span class="k">new</span>           <span class="t">#2</span>    <span class="c">// class java/lang/Object</span>
-<span class="n"> 3</span>: <span class="k">dup</span>
-<span class="n"> 4</span>: <span class="k">invokespecial</span> <span class="t">#3</span>    <span class="c">// Method java/lang/Object."&lt;init&gt;":()V</span>
-<span class="n"> 7</span>: <span class="k">astore_1</span>
-<span class="n"> 8</span>: <span class="k">return</span></code></pre>
-</div>
-
-<p>短短 5 条字节码，却隐藏了 JVM 内部的大量工作。我们把 <code>new</code> 指令的执行过程拆解为 <strong>5 个阶段</strong>：</p>
+  <rect x="60" y="246" width="660" height="52" rx="8" fill="#F3F8FB" stroke="#2B6E91" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="390" y="268" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333" font-weight="600">②③④ 在分配内存的那一刻一并完成（JVM 内部工作，用户不可见）</text>
+  <text x="390" y="288" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333">⑤ 才执行用户可见的构造器逻辑——后面六站，一站拆一个阶段</text>
+</svg>
+<figcaption><span class="fig-no">图 1</span> 对象创建五阶段：类加载检查 → 内存分配 → 零值初始化 → 设置对象头 → 执行构造器；前四步都是 JVM 的自动动作</figcaption>
+</figure>
 
 <table class="nb-table">
-<thead><tr><th>阶段</th><th>动作</th><th>对应字节码</th></tr></thead>
+<thead><tr><th>阶段</th><th>做什么</th><th>发生在哪</th><th>由谁完成</th></tr></thead>
 <tbody>
-  <tr><td><strong>① 类加载检查</strong></td><td>检查 <code>java/lang/Object</code> 是否已加载、链接、初始化</td><td><code>new #2</code></td></tr>
-  <tr><td><strong>② 分配内存</strong></td><td>根据对象大小在堆上分配空间（指针碰撞 / 空闲列表）</td><td><code>new #2</code></td></tr>
-  <tr><td><strong>③ 零值初始化</strong></td><td>将所有字段设为默认值（int→0, reference→null）</td><td><code>new #2</code></td></tr>
-  <tr><td><strong>④ 设置对象头</strong></td><td>写入 Mark Word、Klass Pointer 等元信息</td><td><code>new #2</code></td></tr>
-  <tr><td><strong>⑤ 调用 &lt;init&gt;</strong></td><td>执行构造方法（字段初始化 → 初始化块 → 构造体）</td><td><code>invokespecial #3</code></td></tr>
+<tr><td><strong>① 类加载检查</strong></td><td>检查目标类是否已加载 / 链接 / 初始化，没有则先走类加载流程</td><td>方法区（类元信息）/ 堆（Class 对象）</td><td>JVM，由 new 指令自动触发</td></tr>
+<tr><td><strong>② 内存分配</strong></td><td>按对象大小在堆上划出一块空间（指针碰撞 / 空闲列表，TLAB 优化并发）</td><td>堆，通常是 Eden 里该线程的 TLAB</td><td>JVM 分配逻辑</td></tr>
+<tr><td><strong>③ 零值初始化</strong></td><td>所有实例字段赋默认零值：0 / null / false / 0.0</td><td>堆上刚分配的那块空间</td><td>JVM，与分配同一瞬间</td></tr>
+<tr><td><strong>④ 设置对象头</strong></td><td>写入 Mark Word、类指针；数组对象再写入长度</td><td>堆上那块空间的头部</td><td>JVM，与分配同一瞬间</td></tr>
+<tr><td><strong>⑤ 执行 &lt;init&gt;</strong></td><td>执行构造器字节码：super() → 字段初始化 → 构造器方法体</td><td>栈帧（执行）+ 堆（字段写回）</td><td>解释器 / JIT + 构造器字节码</td></tr>
 </tbody>
 </table>
 
-<p>注意 <code>dup</code> 指令——它复制栈顶的对象引用。一份留给 <code>invokespecial</code> 作为 <code>this</code> 参数消费，另一份留给后续的 <code>astore_1</code> 赋值给局部变量。这是 JVM 基于栈的执行模型的典型特征。</p>
+<p>注意一个关键区分：<strong>阶段 ②③④ 都是"JVM 内部工作"，在分配内存的那一刻一并完成</strong>；只有阶段 ⑤ 执行用户可见的构造器逻辑。很多面试陷阱的根源都在这——比如"为什么构造器里能读到字段的零值""为什么构造器抛异常的对象不会泄漏"，答案都藏在"②③④ 先于 ⑤"这个顺序里。</p>
 
-<div class="takeaway"><span class="takeaway-label">面试要点</span> <code>new</code> 指令 ≠ 分配内存。它还包含类加载检查、零值初始化和对象头设置，这些都是 <strong>JVM 自动完成</strong> 的，不等 <code>&lt;init&gt;</code> 执行。</div>
+<div class="crack"><span class="crack-label">易错点</span>
+<p>阶段顺序容易记混：有资料把"设置对象头"写在"零值初始化"前面。HotSpot 实际的分配流程是<strong>先零值初始化、再设置对象头</strong>——先把整块内存（对象头部分除外）清零，再往头部写入 Mark Word 和类指针。两步发生在同一次分配里，中间没有任何业务逻辑。面试时按"先零值、后对象头"的口述是标准答案。</p>
+</div>
+
+<p>为什么 JVM 要把"一个 new"拆成五个阶段？因为每个阶段解决的是一个独立的问题：① 解决"类存不存在"，② 解决"放在哪"，③④ 解决"这块内存有没有确定状态"，⑤ 解决"对象值是什么"。后面六站一站拆一个阶段：</p>
+
+<ul>
+  <li>第 2 站：<strong>类加载检查</strong>——为什么是"检查"而不是"加载"；Class 对象其实住在堆里，不在方法区。</li>
+  <li>第 3~4 站：<strong>内存分配</strong>——指针碰撞 vs 空闲列表怎么选；多线程同时分配怎么不打架，TLAB 如何把竞争变成偶发事件。</li>
+  <li>第 5 站：<strong>零值初始化</strong>——为什么 Java 字段总有默认值而 C/C++ 没有；boolean 字段其实是 1 个字节。</li>
+  <li>第 6 站：<strong>对象头</strong>——Mark Word 的位级布局与五种锁状态、压缩指针、字段布局规则、用 JOL 算出任意对象的真实大小。</li>
+  <li>第 7 站：<strong>执行构造器</strong>——new → dup → invokespecial 的字节码真相，&lt;init&gt; 三部分的执行顺序。</li>
+  <li>第 8 站：<strong>JIT 限定词</strong>——"new 出来的对象一定在堆里"？不完全是。</li>
+</ul>
+
+<p>发车前，把三个问题揣在兜里，边走边验证：</p>
+<ul>
+  <li>多个线程同时 new 对象，谁保证两个对象不会"撞"到同一块地址？</li>
+  <li>TLAB 是固定大小吗？TLAB 申请失败之后会走哪条路？</li>
+  <li>8 字节的 Mark Word 凭什么同时装得下 hashcode、GC 年龄和锁状态？</li>
+</ul>
 </section>
+<!-- ═══════════════ 第2站：类加载检查 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><span class="station-no">第 2 站</span><h2>阶段一：类加载检查——类准备好了吗？</h2></div>
 
-<!-- ═══════════════ 第3站：内存分配 ═══════════════ -->
+<p>面试官的第一个追问，通常就打在这个最不起眼的阶段上：</p>
+
+<div class="think"><div class="think-q">"你说第一步是类加载检查——检查什么？类到这时候不是早加载完了吗？为什么还要再查一遍？"</div>
+<p>答"检查类加载了没有，没加载就加载"——80 分。想拿 100 分，要再说出两件事：<strong>"准备好"具体指哪三件事（加载 / 链接 / 初始化）</strong>，以及<strong>类的"档案"到底存在哪（方法区 vs 堆）</strong>。</p></div>
+
+<h3>检查什么：三个"就绪"状态</h3>
+
+<p><code>new</code> 指令执行时，目标类在字节码里以<strong>类常量引用</strong>的形式出现（常量池索引，比如 <code>#2</code>）。JVM 在使用这个引用之前，必须确认它指向的类处于"可用"状态。一个类从出生到可用要经历<strong>加载 → 链接（验证 / 准备 / 解析）→ 初始化</strong>，new 指令要求这三件事至少都已完成：</p>
+
+<ol>
+  <li><strong>已加载</strong>：类的字节码流（来自 .class 文件、jar、网络、运行时生成）已被读取，堆里生成了 <code>java.lang.Class</code> 对象，方法区里建好了类的元信息。</li>
+  <li><strong>已链接</strong>：验证（字节码符合规范）、准备（给静态变量分配内存并赋零值）、解析（符号引用转成直接引用）都已完成。</li>
+  <li><strong>已初始化</strong>：执行过类的 <code>&lt;clinit&gt;</code>（静态变量赋值和静态代码块编译后的字节码）——类的"静态世界"真正生效的那一刻。</li>
+</ol>
+
+<p>重点来了：<strong>这一步是"检查"，不是"加载"</strong>。绝大多数场景下，<code>new</code> 指令执行时类早已加载、初始化完毕——类在一个类加载器里只会被加载一次，业务类的"第一次使用"往往远早于此刻这个 new。new 指令做的只是确认"它在"；只有确认"它不在"，才会真正走完整的加载流程（委派父加载器、读字节码、验证、执行 <code>&lt;clinit&gt;</code>）。加载链接的完整流程见《类加载机制：双亲委派模型与三种破坏场景》。</p>
+
+<h3>为什么 new 能触发类初始化</h3>
+
+<p>有候选人会问："类加载时不就一起初始化了吗，规范为什么还要单独强调 new 能触发类初始化？"因为加载、链接、初始化<strong>不保证一口气做完</strong>——初始化会一直延迟到第一次"主动使用"才发生。JVM 规范列举了几种必须触发类初始化的主动引用场景，其中<strong>"创建该类的实例（new，但 new 数组除外）"是最直接的一条</strong>；其余还包括：读写静态字段（非编译期常量）、调用静态方法、初始化子类（父类必须先行初始化）、JVM 直接执行的主类等。</p>
+
+<p>所以 new 指令里的"检查"在极端情况下会"触发连锁反应"：类还没初始化，JVM 先把完整的初始化流程（含静态块）走完，再继续分配内存。这也是线上"第一次请求特别慢"的微观解释之一——服务刚启动时的首个调用，常常撞上类加载 + 初始化 + JIT 冷启动，耗时比稳态大一个数量级很正常。</p>
+
+<div class="crack"><span class="crack-label">经典陷阱题</span>
+<p>"Class 对象在哪？"——高频陷阱题。答案要一分为二：<strong>类的元信息（Klass、虚方法表、方法表、字段描述）在方法区</strong>（JDK 8 起是 Metaspace，位于堆外本地内存）；<strong>Class 对象本身是一个普通的 Java 对象</strong>，分配在堆里。第 6 站讲的"类指针"指向方法区，是为了找到元信息；而你在代码里 <code>.getClass()</code> 拿到的，是堆里那个 Class 对象。两个区域的分工见《JVM 运行时数据区全景：堆、栈、方法区、程序计数器》。</p>
+</div>
+
+<h3>特殊对象：数组</h3>
+
+<p>写 <code>new int[100]</code> 时容易忽略：<code>int[]</code> 本身也是一个"类"。但数组类<strong>不来自任何 .class 文件</strong>，它由 JVM 在运行时按需创建——数组类的元信息（元素类型、长度字段）是 JVM 当场组装的，初始化也在创建时一并完成。所以数组对象的"类加载检查"依然成立，只是这个类的"出生证明"是 JVM 自己开的，不走读文件的流程。数组对象的对象头结构（多一个长度字段）在第 6 站展开。</p>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>new 执行前，JVM 做的是"检查"而非"加载"：确认类已加载、已链接、已初始化。绝大多数时候类早已就绪；只有首次使用时才走完整类加载流程（《类加载机制：双亲委派模型与三种破坏场景》）。记住位置分工：类元信息在方法区（Metaspace），Class 对象在堆里；数组类是 JVM 运行时生成的，没有类文件。</p>
+</div>
+</section>
+<!-- ═══════════════ 第3站：指针碰撞 vs 空闲列表 ═══════════════ -->
 <section class="station reveal" id="s3">
-<div class="station-head"><span class="station-no">第 3 站</span><h2>内存分配：指针碰撞、空闲列表与 TLAB</h2></div>
+<div class="station-head"><span class="station-no">第 3 站</span><h2>阶段二：指针碰撞 vs 空闲列表</h2></div>
 
-<p>对象创建的核心问题是：<strong>在堆上找到一块足够大的连续内存</strong>。JVM 根据当前使用的垃圾收集器，采用不同的分配策略。</p>
+<p>阶段 ② 的核心问题只有一个：<strong>在堆上找到一块足够大的连续空间</strong>。听起来简单，但"找"的方式完全取决于一个前提——</p>
 
-<h3>3.1 指针碰撞（Pointer Bumping）</h3>
+<div class="think"><div class="think-q">"分配之前，JVM 先要判断什么？"</div>
+<p>答案是：<strong>当前堆内存是否"规整"</strong>——已用内存和空闲内存是否各占一侧、边界清晰。规整，就"碰指针"；不规整，就"翻列表"。这两种方式叫<strong>指针碰撞（Bump the Pointer）</strong>和<strong>空闲列表（Free List）</strong>，是 JVM 分配策略的两条基本路线。注意：这是"策略"层面的二选一，和"哪个线程来分配"（第 4 站的 TLAB）是两个正交的问题。</p></div>
 
-<p>当堆内存是<strong>规整</strong>的——即已用内存和空闲内存各占一侧——JVM 只需移动一个指针就能完成分配。这个指针叫做 <strong>Allocation Pointer</strong>，指向可用内存的起始地址。</p>
+<h3>指针碰撞：一根指针顶完</h3>
+
+<p>当内存规整时，JVM 只需维护一根<strong>分配指针（Allocation Pointer）</strong>，指向"已用内存"和"空闲内存"的分界线。分配一个 size 字节的对象：把指针往前挪 size 个字节，对象就放进了挪出来的那块空间。<strong>整个过程一次加法、一次指针更新，O(1)，不需要遍历任何东西</strong>。</p>
+
+<p>指针碰撞能用，靠的是"每次 GC 之后内存依然规整"。用<strong>复制算法</strong>的年轻代天然满足：每次 Minor GC 把存活对象紧凑复制到 To 区，Eden 和 From 区"指针拨回底部即清空"，内存永远是"已用在前、空闲在后"的整齐形态。用<strong>标记-整理</strong>的区域同理——整理完成后对象紧凑排列，指针碰撞照样成立。</p>
+
+<h3>空闲列表：碎片化堆的无奈之选</h3>
+
+<p>当内存不规整——已用和空闲内存交错成碎片——指针碰撞就失效了：指针往前挪得到的空间里可能插着别的对象。这时 JVM 必须维护一张<strong>空闲列表</strong>：把每块空闲内存的（起始地址，大小）记下来，分配时遍历列表，找到第一块放得下的空闲块（first fit 一类策略）。对象放进去后，这块空闲内存被切掉，列表更新。</p>
+
+<p>成本显而易见：<strong>分配从 O(1) 变成"查表 + 可能切块 + 更新列表"</strong>，还要付出维护列表本身的 CPU 与内存开销。但这是标记-清除算法的必然代价——CMS 老年代用标记-清除回收（不整理），GC 之后堆就是碎片的，只能靠空闲列表分配。碎片越积越多时，一个稍大的对象可能"明明有空闲总量却找不到连续块"，CMS 就会在 Full GC 时退而求其次做一次整理（Serial Old 单线程兜底，很慢）。各收集器用什么算法，见《垃圾收集器全览：Serial → Parallel → CMS → G1 → ZGC》。</p>
 
 <figure class="fig">
-<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
-  <rect width="760" height="200" rx="10" fill="#f8f9fb"/>
-  <text x="380" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a2e">指针碰撞（Pointer Bumping）</text>
+<svg viewBox="0 0 780 350" role="img" aria-label="指针碰撞与空闲列表两种分配策略对比图">
+  <defs>
+    <marker id="l25-arrR" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+    <marker id="l25-arrB" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2B6E91"/></marker>
+  </defs>
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">两种分配策略：内存规整碰指针，内存碎片翻列表</text>
 
-  <!-- Heap bar -->
-  <rect x="60" y="60" width="640" height="60" rx="6" fill="#e0e0e0" stroke="#bbb" stroke-width="1"/>
+  <text x="190" y="56" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2D7D2D">指针碰撞（内存规整）</text>
+  <rect x="30" y="68" width="320" height="64" rx="6" fill="#EEE" stroke="#999"/>
+  <rect x="30" y="68" width="170" height="64" rx="6" fill="#E0C8A8" stroke="#8B6914"/>
+  <text x="115" y="104" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="600" fill="#6B4E0A">已用对象</text>
+  <rect x="206" y="68" width="144" height="64" rx="6" fill="#B8D9B0" stroke="#2D7D2D"/>
+  <text x="300" y="104" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="600" fill="#2D7D2D">空闲内存</text>
+  <rect x="208" y="76" width="40" height="48" rx="3" fill="#fff" stroke="#2D7D2D" stroke-dasharray="3,2"/>
+  <text x="228" y="103" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="600" fill="#2D7D2D">新对象</text>
+  <line x1="206" y1="58" x2="206" y2="142" stroke="#B85450" stroke-width="2" stroke-dasharray="4,3"/>
+  <text x="206" y="156" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="600" fill="#B85450">分配指针</text>
+  <line x1="206" y1="176" x2="286" y2="176" stroke="#B85450" stroke-width="1.5" marker-end="url(#l25-arrR)"/>
+  <text x="246" y="192" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450">指针前移 = 分配完成（O(1)）</text>
+  <text x="190" y="216" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#555">适用：复制算法 / 标记-整理之后的区域</text>
+  <text x="190" y="232" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#555">Serial、ParNew、Parallel 的年轻代，Serial Old，G1 Region 内</text>
 
-  <!-- Used region -->
-  <rect x="60" y="60" width="380" height="60" rx="6" fill="#90caf9" stroke="#42a5f5" stroke-width="1"/>
-  <text x="250" y="95" text-anchor="middle" font-size="13" font-weight="600" fill="#0d47a1">已用内存</text>
+  <text x="595" y="56" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2B6E91">空闲列表（内存碎片）</text>
+  <rect x="420" y="68" width="330" height="64" rx="6" fill="#EEE" stroke="#999"/>
+  <rect x="420" y="68" width="66" height="64" rx="4" fill="#E0C8A8" stroke="#8B6914"/>
+  <rect x="488" y="68" width="34" height="64" rx="4" fill="#B8D9B0" stroke="#2D7D2D"/>
+  <text x="505" y="104" text-anchor="middle" font-family="monospace" font-size="8" fill="#2D7D2D">32B</text>
+  <rect x="524" y="68" width="54" height="64" rx="4" fill="#E0C8A8" stroke="#8B6914"/>
+  <rect x="580" y="68" width="56" height="64" rx="4" fill="#B8D9B0" stroke="#2D7D2D"/>
+  <text x="608" y="104" text-anchor="middle" font-family="monospace" font-size="8" fill="#2D7D2D">64B</text>
+  <rect x="638" y="68" width="44" height="64" rx="4" fill="#E0C8A8" stroke="#8B6914"/>
+  <rect x="684" y="68" width="66" height="64" rx="4" fill="#B8D9B0" stroke="#2D7D2D"/>
+  <text x="717" y="104" text-anchor="middle" font-family="monospace" font-size="8" fill="#2D7D2D">24B</text>
+  <line x1="608" y1="132" x2="608" y2="156" stroke="#2B6E91" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#l25-arrB)"/>
+  <text x="620" y="148" font-family="sans-serif" font-size="9" fill="#2B6E91">挑放得下的块</text>
+  <rect x="420" y="160" width="330" height="62" rx="6" fill="#F3F8FB" stroke="#2B6E91" stroke-width="1.2"/>
+  <text x="585" y="178" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#2B6E91">空闲列表（JVM 维护：地址 + 大小）</text>
+  <text x="585" y="196" text-anchor="middle" font-family="monospace" font-size="10" fill="#333">[ 32B @ 0x488 ]  [ 64B @ 0x580 ]  [ 24B @ 0x684 ]</text>
+  <text x="585" y="212" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#555">分配时遍历找块，放入后切块、更新列表</text>
+  <text x="595" y="240" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#555">适用：CMS 老年代（标记-清除不整理，天然碎片）</text>
+  <text x="595" y="256" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#555">ZGC 因并发转移，在 Region 内用块级（chunk）空闲列表分配</text>
 
-  <!-- Free region -->
-  <rect x="440" y="60" width="260" height="60" rx="6" fill="#c8e6c9" stroke="#81c784" stroke-width="1"/>
-  <text x="570" y="95" text-anchor="middle" font-size="13" font-weight="600" fill="#2e7d32">空闲内存</text>
-
-  <!-- Allocation pointer -->
-  <line x1="440" y1="48" x2="440" y2="130" stroke="#d32f2f" stroke-width="2" stroke-dasharray="4,3"/>
-  <polygon points="440,45 435,35 445,35" fill="#d32f2f"/>
-  <text x="440" y="150" text-anchor="middle" font-size="11" font-weight="600" fill="#d32f2f">Allocation Pointer</text>
-
-  <!-- New object -->
-  <rect x="440" y="60" width="80" height="60" rx="4" fill="#fff9c4" stroke="#f9a825" stroke-width="1.5" opacity="0.8"/>
-  <text x="480" y="88" text-anchor="middle" font-size="10" font-weight="600" fill="#f57f17">新对象</text>
-  <text x="480" y="102" text-anchor="middle" font-size="9" fill="#f57f17">32 bytes</text>
-
-  <!-- Arrow showing pointer movement -->
-  <line x1="440" y1="170" x2="520" y2="170" stroke="#d32f2f" stroke-width="1.5" marker-end="url(#arrowRed)"/>
-  <text x="480" y="186" text-anchor="middle" font-size="10" fill="#d32f2f">指针右移 = 分配完成</text>
-
-  <defs><marker id="arrowRed" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#d32f2f"/></marker></defs>
+  <rect x="30" y="272" width="720" height="52" rx="8" fill="#F8F9FA" stroke="#DEE2E6" stroke-width="1"/>
+  <text x="390" y="294" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#333" font-weight="600">关键：内存"规整不规整"由收集算法决定——复制 / 标记-整理 → 规整 → 指针碰撞；标记-清除 → 碎片 → 空闲列表</text>
+  <text x="390" y="312" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#666">碎片化严重时"空闲总量够、连续块不够"，是 CMS 大对象分配失败、被迫 Full GC 整理的原因</text>
 </svg>
-<figcaption><span class="fig-no">图 1</span> 指针碰撞：移动指针即完成分配，Serial / ParNew 收集器默认使用</figcaption>
+<figcaption><span class="fig-no">图 2</span> 指针碰撞与空闲列表：左图规整内存一次指针前移完成分配；右图碎片化堆靠空闲列表查找空闲块</figcaption>
 </figure>
 
-<p>适用场景：<strong>Serial</strong> 和 <strong>ParNew</strong> 收集器。因为它们执行 GC 后会压缩存活对象，使堆内存保持规整。</p>
+<h3>一张表说清选型</h3>
 
-<h3>3.2 空闲列表（Free List）</h3>
+<table class="nb-table">
+<thead><tr><th>策略</th><th>前提</th><th>分配成本</th><th>典型场景</th></tr></thead>
+<tbody>
+<tr><td><strong>指针碰撞</strong></td><td>内存规整（已用/空闲各占一侧）</td><td>O(1)，一次指针前移</td><td>年轻代（复制算法后）、Serial Old（整理后）、G1 Region 内</td></tr>
+<tr><td><strong>空闲列表</strong></td><td>内存碎片化（已用/空闲交错）</td><td>查表 + 切块 + 更新列表，慢</td><td>CMS 老年代（标记-清除后）；ZGC 的 Region 内块级分配</td></tr>
+</tbody>
+</table>
 
-<p>当堆内存<strong>不规整</strong>时——已用和空闲内存交错分布——指针碰撞就失效了。JVM 需要维护一张<strong>空闲列表</strong>，记录每块可用内存的位置和大小，分配时遍历列表找到足够大的块。</p>
+<div class="think"><div class="think-q">"那对象放不下的时候怎么办？"</div>
+<p>分配决策是一条向后的退路链：对象 ≤ Eden 剩余空间 → 在 Eden 分配（实际落在线程的 TLAB，第 4 站）；Eden 剩余空间装不下（注意：是"剩余空间"，不是 Eden 总大小）→ 直接在<strong>老年代</strong>分配；老年代也装不下 → 先触发 Full GC 腾空间再试；仍失败 → <code>OutOfMemoryError: Java heap space</code>。大对象直通老年代、G1 的 Humongous 对象这些细则，见《JVM 堆内存：年轻代三区与老年代的生命周期》第 3 站；OOM 本身的识别与排查，见《OOM 排查实战：六种 OutOfMemoryError 全解》。</p></div>
 
-<p>适用场景：<strong>CMS（Concurrent Mark Sweep）</strong> 收集器。CMS 采用标记-清除算法，不压缩堆，因此内存天然碎片化。</p>
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>分配策略看"内存规整不规整"：规整 → 指针碰撞（O(1)），碎片 → 空闲列表（查表切块）。规整与否由收集算法决定——复制和标记-整理保持规整，标记-清除制造碎片。面试时把"策略（怎么找空间）"和"并发（谁来分配）"拆成两层说，层次感立刻不一样。</p>
+</div>
+</section>
+<!-- ═══════════════ 第4站：TLAB ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><span class="station-no">第 4 站</span><h2>并发安全：CAS 重试与 TLAB 私有缓冲区</h2></div>
 
-<div class="crack"><span class="crack-label">深入一步</span> CMS 的 <code>-XX:UseCMSCompactAtFullCollection</code> 参数可以在 Full GC 时压缩堆，但代价是 STW 时间显著增加。G1 和 ZGC 虽然使用 Region 化内存管理，但每个 Region 内部仍然使用指针碰撞。</div>
+<p>第 3 站解决了"怎么找空间"，这一站解决"谁来分配"——<strong>多线程同时 new 对象时，如何保证两个线程不会把对象写到同一块地址</strong>。这是"对象创建全过程"里工程含量最高的一个知识点。</p>
 
-<h3>3.3 TLAB：Thread Local Allocation Buffer</h3>
+<div class="think"><div class="think-q">"Eden 里那根分配指针是共享的，100 个线程每秒各分配几万次对象，直接锁不是要死吗？JVM 怎么办？"</div>
+<p>两个方案：<strong>CAS + 失败重试</strong>（无锁，原子地改指针）和 <strong>TLAB</strong>（给每个线程一块"私房钱"）。先说 CAS 为什么不够，再说 TLAB 怎么把高频竞争变成偶发事件。</p></div>
 
-<p>无论用哪种分配策略，对象分配都是<strong>高频操作</strong>。如果每次分配都加锁同步 Allocation Pointer，多线程环境下的性能将惨不忍睹。<strong>TLAB</strong> 就是为了解决这个问题。</p>
+<h3>方案一：CAS + 失败重试</h3>
 
-<p>核心思想：<strong>JVM 在 Eden 区为每个线程预分配一小块内存（默认约 32KB），线程在自己的 TLAB 内分配对象时无需任何同步</strong>。只有当 TLAB 用完时，才需要竞争 Eden 区的 Allocation Pointer 来获取新的 TLAB。</p>
+<p>把"分配 size 字节"实现成对分配指针的原子操作：CAS（Compare-And-Swap）期望指针还在 old 位置，就改成 old + size；失败了说明别的线程抢先挪了指针，<strong>重试</strong>。低并发下这很高效，完全无锁。</p>
+
+<p>但高并发下它有三个硬伤：① 所有线程挤在<strong>同一根指针、同一条缓存行</strong>上竞争，缓存行在核心间反复弹跳（cache line bouncing），CPU 大量耗在等内存一致性协议上；② 分配是<strong>每秒百万次级别</strong>的高频操作，竞争次数与分配频率成正比，自旋重试的开销直接线性放大；③ 重试还可能放大尾延迟——一个线程可能被连续"截胡"好几轮。</p>
+
+<h3>方案二：TLAB——线程私有分配缓冲区</h3>
+
+<p><strong>TLAB（Thread Local Allocation Buffer，线程本地分配缓冲区）</strong>的思路是：既然大家抢同一根指针很贵，那就<strong>预先在 Eden 里给每个线程划一块私有缓冲区</strong>，线程在自己 TLAB 里分配对象时，动的是一根"私有指针"——<strong>不需要任何同步</strong>，还是指针碰撞，只是指针不再共享。只有当 TLAB 用完，才需要回 Eden "申请下一块"，这时才发生一次 CAS 竞争。</p>
+
+<p>本质是一笔交易：<strong>用"少量内存浪费"换"高频竞争的消失"</strong>。每次 TLAB 用完时，里面没用的剩余空间直接废弃（计入浪费）；但换来的是 TLAB 装满之前（通常几百到几千个对象）该线程的每次分配都是零同步的。竞争从"每个对象一次"降频为"每个 TLAB 一次"，频率差几个数量级。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 460" role="img" aria-label="TLAB 分配决策流程图">
+  <defs>
+    <marker id="l25-arrD" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2B6E91"/></marker>
+    <marker id="l25-arrRD" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#B85450"/></marker>
+  </defs>
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">TLAB 分配决策：对象装不下 TLAB 时走哪条路？</text>
+
+  <rect x="30" y="86" width="228" height="150" rx="6" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="144" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#333">TLAB 速记</text>
+  <text x="44" y="126" font-family="sans-serif" font-size="9.5" fill="#555">-XX:+UseTLAB：Server 模式默认 true</text>
+  <text x="44" y="144" font-family="sans-serif" font-size="9.5" fill="#555">大小：JVM 自适应，不是固定值</text>
+  <text x="44" y="162" font-family="sans-serif" font-size="9.5" fill="#555">-XX:TLABSize 可手动固定（字节）</text>
+  <text x="44" y="180" font-family="sans-serif" font-size="9.5" fill="#555">-XX:TLABWasteTarget 默认 1%</text>
+  <text x="44" y="198" font-family="sans-serif" font-size="9.5" font-weight="700" fill="#B85450">1% 是浪费目标，不是 Eden 占比</text>
+  <text x="44" y="216" font-family="sans-serif" font-size="9.5" fill="#555">G1 下 TLAB 取自当前 Eden Region</text>
+
+  <rect x="300" y="44" width="180" height="34" rx="6" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="390" y="65" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#1A4D6E">待分配对象（大小 S）</text>
+
+  <line x1="390" y1="78" x2="390" y2="96" stroke="#2B6E91" stroke-width="1.5" marker-end="url(#l25-arrD)"/>
+  <polygon points="390,100 492,138 390,176 288,138" fill="#FFF3CD" stroke="#B8860B" stroke-width="1.5"/>
+  <text x="390" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#7A5C00">S ≤ TLAB 剩余空间？</text>
+
+  <line x1="492" y1="138" x2="560" y2="138" stroke="#2B6E91" stroke-width="1.5" marker-end="url(#l25-arrD)"/>
+  <text x="526" y="128" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="700" fill="#2D7D2D">是</text>
+  <rect x="565" y="104" width="190" height="68" rx="6" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.5"/>
+  <text x="660" y="126" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#1B5E1B">在 TLAB 内分配</text>
+  <text x="660" y="144" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1B5E1B">私有指针前移，零同步（快路径）</text>
+  <text x="660" y="160" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#3A7A3A">绝大多数对象走这条路</text>
+
+  <line x1="390" y1="176" x2="390" y2="198" stroke="#B85450" stroke-width="1.5" marker-end="url(#l25-arrRD)"/>
+  <text x="402" y="192" font-family="sans-serif" font-size="10" fill="#B85450" font-weight="700">否</text>
+  <polygon points="390,202 500,242 390,282 280,242" fill="#FFF3CD" stroke="#B8860B" stroke-width="1.5"/>
+  <text x="390" y="238" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#7A5C00">S ≤ 新 TLAB 的大小？</text>
+  <text x="390" y="254" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#7A5C00">（JVM 计划申请的下一块大小）</text>
+
+  <line x1="500" y1="242" x2="560" y2="242" stroke="#2B6E91" stroke-width="1.5" marker-end="url(#l25-arrD)"/>
+  <text x="528" y="232" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="700" fill="#2D7D2D">是</text>
+  <rect x="565" y="204" width="190" height="76" rx="6" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="660" y="226" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#1A4D6E">refill：申请新 TLAB</text>
+  <text x="660" y="244" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">CAS 竞争 Eden 分配指针</text>
+  <text x="660" y="262" text-anchor="middle" font-family="sans-serif" font-size="9.5" font-weight="700" fill="#B85450">旧 TLAB 剩余空间 = 浪费</text>
+  <text x="660" y="276" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#3A7A3A">新对象放进新 TLAB</text>
+
+  <line x1="390" y1="282" x2="390" y2="308" stroke="#B85450" stroke-width="1.5" marker-end="url(#l25-arrRD)"/>
+  <text x="468" y="300" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#B85450" font-weight="700">否（比一块新 TLAB 还大）</text>
+  <rect x="300" y="312" width="180" height="44" rx="6" fill="#F3F8FB" stroke="#2B6E91" stroke-width="1.5"/>
+  <text x="390" y="330" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#1A4D6E">绕过 TLAB</text>
+  <text x="390" y="347" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#1A4D6E">CAS 直接在 Eden 分配</text>
+
+  <line x1="390" y1="356" x2="390" y2="380" stroke="#B85450" stroke-width="1.5" marker-end="url(#l25-arrRD)"/>
+  <text x="472" y="372" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#B85450">Eden 剩余空间也不够时</text>
+  <rect x="270" y="384" width="240" height="48" rx="6" fill="#E0C8A8" stroke="#8B6914" stroke-width="1.5"/>
+  <text x="390" y="404" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#6B4E0A">直接分配在老年代（大对象路径）</text>
+  <text x="390" y="421" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#8B6914">见《JVM 堆内存：年轻代三区与老年代的生命周期》</text>
+
+  <text x="390" y="450" text-anchor="middle" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#B85450">老年代也放不下 → Full GC 再试 → 仍失败 → OOM: Java heap space</text>
+</svg>
+<figcaption><span class="fig-no">图 3</span> TLAB 分配决策树：TLAB 装得下 → 零同步分配；装不下但够开新 TLAB → refill；比新 TLAB 还大 → 绕过 TLAB 直接 Eden；Eden 也不够 → 老年代</figcaption>
+</figure>
+
+<h3>TLAB 的大小：自适应，不是固定值</h3>
+
+<p>这是本题最大的陷阱区。三个参数各管一件事，面试时别串位：</p>
+
+<ul>
+  <li><code>-XX:+UseTLAB</code>：开关，<strong>Server 模式默认开启</strong>（生产 JVM 都是 Server 模式，所以默认就有 TLAB）。</li>
+  <li><code>-XX:TLABSize</code>：手动固定 TLAB 大小（字节）。<strong>默认不固定</strong>——JVM 会观察每个线程的对象大小分布，动态调整 TLAB 大小：分配大对象的线程给大 TLAB，分配小对象的线程给小 TLAB，初始大小与线程近期分配的平均对象大小相关。</li>
+  <li><code>-XX:TLABWasteTarget</code>：默认 <strong>1%</strong>，含义是"TLAB 浪费目标"——JVM 希望"用不完就废弃的剩余空间"不超过 TLAB 大小的 1%。它约束的是<strong>浪费比例</strong>，不是 TLAB 占 Eden 的比例。</li>
+</ul>
+
+<div class="crack"><span class="crack-label">高频陷阱</span>
+<p>"TLAB 是 Eden 的 1%"或"TLAB 默认 32KB"——<strong>都是错的</strong>。TLAB 与 Eden 大小没有固定比例关系，也没有一个写死的默认大小：它是<strong>每线程独立、动态自适应</strong>的。1% 是 <code>TLABWasteTarget</code>（浪费目标）。面试被问"TLAB 多大"，标准答法是："默认自适应，JVM 按线程的对象分配模式动态调整；可用 TLABSize 手动固定，用 TLABWasteTarget（默认 1%）控制可接受的浪费比例。"</p>
+</div>
+
+<h3>观察 TLAB：参数与日志</h3>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>TLAB 相关 JVM 参数</b></span></div>
-<pre><code><span class="c"># 启用 TLAB（HotSpot 默认开启）</span>
+<div class="srcbox-head"><span class="srcbox-file"><b>TLAB 相关 JVM 参数</b> · 开关 / 大小 / 浪费目标 / 日志</span></div>
+<pre><code><span class="c"># 开关：Server 模式默认 true（生产 JVM 默认就有 TLAB）</span>
 <span class="k">-XX:+UseTLAB</span>
 
-<span class="c"># 设置 TLAB 大小（默认约为 32KB，由 JVM 自动调整）</span>
-<span class="k">-XX:TLABSize=</span><span class="n">65536</span>
+<span class="c"># 手动固定 TLAB 大小（字节）。默认不设：JVM 按线程分配模式自适应</span>
+<span class="k">-XX:TLABSize=</span><span class="n">262144</span>
 
-<span class="c"># TLAB 分配失败时的行为：refill（重新分配 TLAB）还是直接在 Eden 分配</span>
-<span class="c"># 大对象会直接走 Eden 分配（超出 TLAB 容量的对象）</span>
+<span class="c"># 浪费目标：TLAB 用完时废弃的剩余空间 ≤ TLAB 大小 × 1%（默认 1%）</span>
+<span class="c"># 注意：这是"浪费目标"，不是"TLAB 占 Eden 的比例"</span>
+<span class="k">-XX:TLABWasteTarget=</span><span class="n">1</span>
 
-<span class="c"># 查看 TLAB 统计信息</span>
+<span class="c"># JDK 8：GC 时打印各线程 TLAB 统计（示例日志，字段名以实际版本为准）</span>
 <span class="k">-XX:+PrintTLAB</span>
+<span class="c">#   Thread 0x00007f8a1c008800  tlab_size=262144  fills=12  waste=8192  slowAllocs=3</span>
+<span class="c">#   fills      = TLAB 用完后 refill（重新申请）的次数</span>
+<span class="c">#   waste      = 被废弃的剩余空间字节数（refill 时计入）</span>
+<span class="c">#   slowAllocs = TLAB 路径失败、回退到慢速路径分配的次数</span>
 
-<span class="c"># 示例输出：</span>
-<span class="c"># Thread 0x00007f8a1c008800 tlab: fills 12 waste 2345 slow alloc 3</span>
-<span class="c">#   fills    = TLAB 用完后重新分配的次数</span>
-<span class="c">#   waste    = TLAB 中未使用就废弃的字节数</span>
-<span class="c">#   slow alloc = TLAB 和 Eden 都分配失败的回退次数</span></code></pre>
+<span class="c"># JDK 9+：统一日志框架输出 TLAB 分配信息（gc 日志 tlab 标签，具体输出随版本变化）</span>
+<span class="k">-Xlog:gc+tlab=trace</span></code></pre>
 </div>
 
-<p>TLAB 的分配流程：</p>
+<p>读这三个数字的方法：<code>fills</code> 很高说明 TLAB 偏小（频繁 refill，竞争回来了）；<code>waste</code> 占比远超 1% 说明 TLAB 偏大（浪费内存）；<code>slowAllocs</code> 持续非零说明对象经常大到绕过 TLAB（大对象多，去查分配源头）。G1 下 TLAB 取自<strong>当前 Eden Region</strong>，每次 Young GC 后旧 TLAB 作废、从新 Region 重新申请——所以 TLAB 统计和 GC 日志放在一起看才有意义。</p>
 
-<table class="nb-table">
-<thead><tr><th>步骤</th><th>操作</th><th>是否需要同步</th></tr></thead>
-<tbody>
-  <tr><td>1</td><td>尝试在当前线程的 TLAB 中分配</td><td>❌ 无需同步</td></tr>
-  <tr><td>2a</td><td>TLAB 空间足够 → 移动 TLAB 内指针，分配完成</td><td>❌ 无需同步</td></tr>
-  <tr><td>2b</td><td>TLAB 空间不足 → 对象大于 TLAB 剩余空间</td><td>—</td></tr>
-  <tr><td>3</td><td>大对象直接在 Eden 区分配（CAS 竞争 Allocation Pointer）</td><td>✅ CAS 操作</td></tr>
-  <tr><td>4</td><td>小对象申请新的 TLAB（CAS 竞争），旧 TLAB 剩余空间归还 Eden</td><td>✅ CAS 操作</td></tr>
-</tbody>
-</table>
-
-<div class="takeaway"><span class="takeaway-label">面试要点</span> 被问到"对象内存分配"时，先说分配策略（指针碰撞 vs 空闲列表），再说并发优化（TLAB），最后提一句大对象直接走 Eden 分配。三层递进，展示你的理解深度。</div>
-</section>
-
-<!-- ═══════════════ 第4站：对象头布局 ═══════════════ -->
-<section class="station reveal" id="s4">
-<div class="station-head"><span class="station-no">第 4 站</span><h2>对象头布局：Mark Word + Klass Pointer</h2></div>
-
-<p>内存分配完成后，JVM 要做的第一件事是<strong>设置对象头</strong>。在 64 位 HotSpot JVM 下，一个普通对象的内存布局如下：</p>
-
-<figure class="fig">
-<svg viewBox="0 0 780 420" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
-  <rect width="780" height="420" rx="10" fill="#f8f9fb"/>
-  <text x="390" y="30" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a2e">64 位 JVM 对象内存布局（开启 Compressed Oops）</text>
-
-  <!-- Object outline -->
-  <rect x="160" y="50" width="460" height="350" rx="8" fill="none" stroke="#455a64" stroke-width="2"/>
-  <text x="390" y="72" text-anchor="middle" font-size="12" fill="#455a64" font-weight="600">一个普通 Java 对象</text>
-
-  <!-- ═══ 对象头 ═══ -->
-  <rect x="160" y="80" width="460" height="36" rx="4" fill="#455a64" stroke="#37474f" stroke-width="1"/>
-  <text x="390" y="103" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">对象头（Object Header）</text>
-
-  <!-- Mark Word -->
-  <rect x="170" y="124" width="340" height="56" rx="5" fill="#e8f5e9" stroke="#66bb6a" stroke-width="1.2"/>
-  <text x="340" y="145" text-anchor="middle" font-size="12" font-weight="600" fill="#2e7d32">Mark Word（8 字节 = 64 bits）</text>
-  <text x="340" y="162" text-anchor="middle" font-size="10" fill="#558b2f">锁状态 | hashCode | GC 年龄 | 偏向线程 ID</text>
-
-  <!-- Mark Word bit layout -->
-  <rect x="170" y="186" width="60" height="24" rx="3" fill="#fff9c4" stroke="#f9a825" stroke-width="0.8"/>
-  <text x="200" y="202" text-anchor="middle" font-size="8" fill="#e65100">lock(2)</text>
-  <rect x="234" y="186" width="100" height="24" rx="3" fill="#e1f5fe" stroke="#4fc3f7" stroke-width="0.8"/>
-  <text x="284" y="202" text-anchor="middle" font-size="8" fill="#01579b">biased_lock(1)+thread(54)</text>
-  <rect x="338" y="186" width="52" height="24" rx="3" fill="#f3e5f5" stroke="#ce93d8" stroke-width="0.8"/>
-  <text x="364" y="202" text-anchor="middle" font-size="8" fill="#6a1b9a">epoch(2)</text>
-  <rect x="394" y="186" width="56" height="24" rx="3" fill="#fce4ec" stroke="#f48fb1" stroke-width="0.8"/>
-  <text x="422" y="202" text-anchor="middle" font-size="8" fill="#880e4f">age(4)</text>
-  <rect x="454" y="186" width="56" height="24" rx="3" fill="#e8f5e9" stroke="#81c784" stroke-width="0.8"/>
-  <text x="482" y="202" text-anchor="middle" font-size="8" fill="#2e7d32">hash(31)</text>
-
-  <!-- Klass Pointer -->
-  <rect x="520" y="124" width="90" height="56" rx="5" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1.2"/>
-  <text x="565" y="148" text-anchor="middle" font-size="11" font-weight="600" fill="#1565c0">Klass Ptr</text>
-  <text x="565" y="165" text-anchor="middle" font-size="9" fill="#42a5f5">4 字节(压缩)</text>
-
-  <!-- Padding -->
-  <rect x="170" y="220" width="440" height="24" rx="3" fill="#f5f5f5" stroke="#e0e0e0" stroke-width="1"/>
-  <text x="390" y="236" text-anchor="middle" font-size="10" fill="#9e9e9e">对齐填充 Padding（4 字节，保证对象头 8 字节对齐）</text>
-
-  <!-- ═══ 实例数据 ═══ -->
-  <rect x="160" y="254" width="460" height="80" rx="5" fill="#fff3e0" stroke="#ffb74d" stroke-width="1.2"/>
-  <text x="390" y="278" text-anchor="middle" font-size="13" font-weight="600" fill="#e65100">实例数据（Instance Data）</text>
-  <text x="390" y="298" text-anchor="middle" font-size="10" fill="#bf360c">各字段值：int(4B), long(8B), reference(4B/8B) ...</text>
-  <text x="390" y="318" text-anchor="middle" font-size="10" fill="#bf360c">注意：开启 Compressed Oops 后，引用占 4 字节而非 8 字节</text>
-
-  <!-- ═══ 对齐填充 ═══ -->
-  <rect x="160" y="344" width="460" height="46" rx="5" fill="#fafafa" stroke="#e0e0e0" stroke-width="1"/>
-  <text x="390" y="366" text-anchor="middle" font-size="12" font-weight="600" fill="#757575">对齐填充（Padding）</text>
-  <text x="390" y="383" text-anchor="middle" font-size="10" fill="#9e9e9e">HotSpot 要求对象大小是 8 字节的整数倍</text>
-
-  <!-- Annotations -->
-  <text x="640" y="150" font-size="10" fill="#66bb6a">← 8 bytes</text>
-  <text x="640" y="190" font-size="10" fill="#42a5f5">← 4 bytes</text>
-  <text x="640" y="290" font-size="10" fill="#ffb74d">← 可变</text>
-</svg>
-<figcaption><span class="fig-no">图 2</span> 64 位 JVM 对象内存布局（Compressed Oops 开启时，Klass Pointer 压缩为 4 字节）</figcaption>
-</figure>
-
-<h3>4.1 Mark Word 详解</h3>
-
-<p>Mark Word 是对象头中最"热闹"的部分。刚创建的对象处于<strong>无锁态</strong>，Mark Word 存储的是：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>Mark Word 位布局（64 位 JVM，无锁态）</b></span></div>
-<pre><code><span class="c">// 64 bits Mark Word — 无锁态（刚创建的对象）</span>
-<span class="k">┌──────────────────────────────────────────────────────────────┐</span>
-<span class="k">│</span> unused (25 bits) <span class="k">│</span> <span class="t">hashCode</span> (31 bits) <span class="k">│</span> <span class="n">age</span> (4) <span class="k">│</span> 0 <span class="k">│</span> 01 <span class="k">│</span>
-<span class="k">└──────────────────────────────────────────────────────────────┘</span>
-<span class="c">//                                       ↑        ↑   ↑</span>
-<span class="c">//                                  GC分代年龄  偏向标志 锁标志(01=无锁/偏向)</span></code></pre>
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>CAS + 重试无锁但高频竞争下缓存行弹跳 + 自旋开销大；TLAB 给每个线程一块 Eden 里的私有缓冲区，线程内分配零同步，竞争降频为"每个 TLAB 一次"的 refill。大小自适应（TLABSize 可手动固定），TLABWasteTarget（默认 1%）是浪费目标而非 Eden 占比。装不下的对象：能开新 TLAB 就 refill，比新 TLAB 还大就绕过 TLAB 直接 Eden，Eden 也不够就进老年代。</p>
 </div>
-
-<p>关键细节：</p>
-
-<ul>
-  <li><strong>hashCode</strong>：首次调用 <code>hashCode()</code> 时才计算并写入（惰性计算），并非创建时就生成</li>
-  <li><strong>age</strong>：GC 分代年龄，每经历一次 Minor GC 存活就 +1，达到阈值（默认 15）晋升老年代</li>
-  <li><strong>锁标志位</strong>：最后 2 位标识锁状态（01=无锁/偏向，00=轻量级锁，10=重量级锁，11=GC 标记）</li>
-</ul>
-
-<h3>4.2 Compressed Oops</h3>
-
-<p>在 64 位 JVM 下，指针本应占 8 字节。但 <strong>Compressed Oops</strong>（<code>-XX:+UseCompressedOops</code>，默认开启）将对象引用压缩为 4 字节，条件：堆大小 &lt; 32GB。这意味着对象头从 16 字节（8+8）缩减为 12 字节（8+4），再加上 4 字节对齐填充，总共仍是 16 字节——但节省了大量引用字段的空间。</p>
-
-<div class="formula">对象头大小 = Mark Word (8B) + Klass Pointer (4B 压缩 / 8B 未压缩) + Padding (保证 8B 对齐)</div>
 </section>
-
 <!-- ═══════════════ 第5站：零值初始化 ═══════════════ -->
 <section class="station reveal" id="s5">
-<div class="station-head"><span class="station-no">第 5 站</span><h2>零值初始化：为什么 Java 字段总有默认值？</h2></div>
+<div class="station-head"><span class="station-no">第 5 站</span><h2>阶段三：零值初始化——字段为什么总有默认值</h2></div>
 
-<p>对象头设置完成后，JVM 会将分配的内存空间（不含对象头）全部<strong>初始化为零值</strong>。这一步保证了 Java 对象的字段即使没有显式赋值，也有确定的默认值。</p>
-
-<table class="nb-table">
-<thead><tr><th>数据类型</th><th>默认值</th><th>底层表示</th></tr></thead>
-<tbody>
-  <tr><td><code>int / short / byte / char</code></td><td><code>0</code> / <code>'\u0000'</code></td><td>全 0 位</td></tr>
-  <tr><td><code>long</code></td><td><code>0L</code></td><td>64 位全 0</td></tr>
-  <tr><td><code>float</code></td><td><code>0.0f</code></td><td>IEEE 754 正零</td></tr>
-  <tr><td><code>double</code></td><td><code>0.0d</code></td><td>IEEE 754 正零</td></tr>
-  <tr><td><code>boolean</code></td><td><code>false</code></td><td>0（JVM 用 int 存储）</td></tr>
-  <tr><td><code>reference</code></td><td><code>null</code></td><td>全 0 位</td></tr>
-</tbody>
-</table>
-
-<p>这一步发生在 <code>&lt;init&gt;</code> 方法执行<strong>之前</strong>。这也是为什么在构造方法里，即使你还没给字段赋值，访问字段也不会报错——它们已经是零值了。</p>
+<p>内存分配完成的那一刻，JVM 顺手做了一件"看起来多余"的事：把刚划出来的那块空间（对象头部分除外）<strong>全部写成零值</strong>。于是 <code>new</code> 出来一个对象，即使你一行字段赋值都没写，它的字段也"有值"：</p>
 
 <div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>ZeroInit.java — 验证零值初始化</b></span></div>
-<pre><code><span class="k">public</span> <span class="k">class</span> <span class="t">ZeroInit</span> {
+<div class="srcbox-head"><span class="srcbox-file"><b>ZeroInit.java</b> · 构造器第一行就读字段（可运行）</span></div>
+<pre><code><span class="k">public class</span> <span class="t">ZeroInit</span> {
     <span class="k">int</span> a;
+    <span class="k">long</span> b;
     <span class="k">boolean</span> flag;
     <span class="t">String</span> name;
 
     <span class="k">public</span> <span class="t">ZeroInit</span>() {
-        <span class="c">// 此时字段已经是零值</span>
-        System.out.<span class="n">println</span>(a);     <span class="c">// 输出: 0</span>
-        System.out.<span class="n">println</span>(flag);  <span class="c">// 输出: false</span>
-        System.out.<span class="n">println</span>(name);  <span class="c">// 输出: null</span>
+        <span class="c">// 构造器还没做任何赋值，字段已经是确定的零值</span>
+        System.out.<span class="n">println</span>(a);      <span class="c">// 输出: 0</span>
+        System.out.<span class="n">println</span>(b);      <span class="c">// 输出: 0</span>
+        System.out.<span class="n">println</span>(flag);   <span class="c">// 输出: false</span>
+        System.out.<span class="n">println</span>(name);   <span class="c">// 输出: null</span>
     }
 }</code></pre>
 </div>
-
-<div class="crack"><span class="crack-label">对比 C/C++</span> C/C++ 的局部变量和堆分配对象（malloc）不会自动初始化，访问未初始化变量会得到随机值。Java 选择在 JVM 层面强制零值初始化，牺牲少量性能换来了<strong>内存安全</strong>——你永远不可能读到一块"脏"内存。</div>
-
-<p>实现层面，HotSpot 对小型对象使用逐字清零（<code>memset</code>），对大型对象（如大数组）则可能使用更高效的批量清零指令。在 TLAB 场景下，分配新 TLAB 时就会对整块内存做零值初始化。</p>
-</section>
-
-<!-- ═══════════════ 第6站：<init> 方法 ═══════════════ -->
-<section class="station reveal" id="s6">
-<div class="station-head"><span class="station-no">第 6 站</span><h2>&lt;init&gt; 方法：构造函数的字节码真相</h2></div>
-
-<p>零值初始化完成后，JVM 调用 <code>invokespecial</code> 执行对象的 <code>&lt;init&gt;</code> 方法。这个方法由编译器自动生成，融合了三个部分：</p>
-
-<ol>
-  <li><strong>父类构造方法</strong>调用（<code>super()</code>）</li>
-  <li><strong>字段初始化器</strong>和<strong>实例初始化块</strong>（按源码出现顺序）</li>
-  <li><strong>构造方法体</strong></li>
-</ol>
-
-<p>看一个综合示例：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>InitOrder.java</b></span></div>
-<pre><code><span class="k">public</span> <span class="k">class</span> <span class="t">InitOrder</span> <span class="k">extends</span> <span class="t">Base</span> {
-    <span class="k">int</span> x = <span class="n">10</span>;                  <span class="c">// ① 字段初始化器</span>
-    <span class="k">int</span> y;
-
-    { y = <span class="n">20</span>; }                    <span class="c">// ② 实例初始化块</span>
-
-    <span class="k">public</span> <span class="t">InitOrder</span>(<span class="k">int</span> z) {
-        <span class="k">super</span>();                  <span class="c">// ③ 隐式/显式 super 调用</span>
-        <span class="k">this</span>.y = z;               <span class="c">// ④ 构造方法体</span>
-        System.out.<span class="n">println</span>(<span class="t">"done"</span>);
-    }
-}</code></pre>
-</div>
-
-<p>编译器生成的 <code>&lt;init&gt;</code> 字节码等价于：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>编译器生成的 &lt;init&gt; 等价代码</b></span></div>
-<pre><code><span class="c">// 编译器实际生成的 &lt;init&gt;(I)V 方法等价伪码：</span>
-<span class="k">public</span> <span class="t">InitOrder</span>(<span class="k">int</span> z) {
-    <span class="c">// Step 1: super() — 必须最先执行</span>
-    <span class="k">super</span>();
-
-    <span class="c">// Step 2: 字段初始化器（按声明顺序）</span>
-    <span class="k">this</span>.x = <span class="n">10</span>;
-
-    <span class="c">// Step 3: 实例初始化块</span>
-    <span class="k">this</span>.y = <span class="n">20</span>;
-
-    <span class="c">// Step 4: 构造方法体（用户代码）</span>
-    <span class="k">this</span>.y = z;
-    System.out.<span class="n">println</span>(<span class="t">"done"</span>);
-}</code></pre>
-</div>
-
-<p>用 <code>javap -p -c InitOrder</code> 可以看到真实的字节码：</p>
-
-<div class="srcbox">
-<div class="srcbox-head"><span class="srcbox-file"><b>javap 输出（&lt;init&gt;(I)V）</b></span></div>
-<pre><code><span class="c">// InitOrder.&lt;init&gt;(int) 字节码</span>
-<span class="n"> 0</span>: <span class="k">aload_0</span>                <span class="c">// 加载 this</span>
-<span class="n"> 1</span>: <span class="k">invokespecial</span> <span class="t">#1</span>     <span class="c">// super() → Base.&lt;init&gt;</span>
-<span class="n"> 4</span>: <span class="k">aload_0</span>                <span class="c">// 加载 this</span>
-<span class="n"> 5</span>: <span class="k">bipush</span>        <span class="n">10</span>
-<span class="n"> 7</span>: <span class="k">putfield</span>      <span class="t">#2</span>     <span class="c">// this.x = 10（字段初始化器）</span>
-<span class="n">10</span>: <span class="k">aload_0</span>
-<span class="n">11</span>: <span class="k">bipush</span>        <span class="n">20</span>
-<span class="n">13</span>: <span class="k">putfield</span>      <span class="t">#3</span>     <span class="c">// this.y = 20（初始化块）</span>
-<span class="n">16</span>: <span class="k">aload_0</span>
-<span class="n">17</span>: <span class="k">iload_1</span>                <span class="c">// 加载参数 z</span>
-<span class="n">18</span>: <span class="k">putfield</span>      <span class="t">#3</span>     <span class="c">// this.y = z（构造体）</span>
-<span class="n">21</span>: <span class="k">getstatic</span>     <span class="t">#4</span>     <span class="c">// System.out</span>
-<span class="n">24</span>: <span class="k">ldc</span>           <span class="t">#5</span>     <span class="c">// "done"</span>
-<span class="n">26</span>: <span class="k">invokevirtual</span> <span class="t">#6</span>     <span class="c">// println("done")</span>
-<span class="n">29</span>: <span class="k">return</span></code></pre>
-</div>
-
-<div class="think"><div class="think-q">为什么 super() 必须在第一行？</div></div>
-
-<p>因为父类构造方法可能初始化一些字段，子类的字段初始化器和构造体可能依赖这些字段。如果允许 <code>super()</code> 不放在第一行，就可能出现"子类代码访问了尚未初始化的父类状态"的问题。<strong>Java 语言规范（JLS §8.8.7.1）强制要求 super 必须是 &lt;init&gt; 的第一条语句</strong>。</p>
-
-<div class="takeaway"><span class="takeaway-label">面试要点</span> &lt;init&gt; 的执行顺序：<strong>super() → 字段初始化器 → 实例初始化块 → 构造方法体</strong>。字段初始化器和初始化块按源码顺序交织执行，不是先全部字段再全部块。</div>
-</section>
-
-<!-- ═══════════════ 第7站：总结 ═══════════════ -->
-<section class="station reveal" id="s7">
-<div class="station-head"><span class="station-no">第 7 站</span><h2>总结：从 new 到对象落地的完整链路</h2></div>
-
-<p>让我们用一张完整的流程图回顾整个过程：</p>
-
-<figure class="fig">
-<svg viewBox="0 0 800 520" xmlns="http://www.w3.org/2000/svg" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
-  <rect width="800" height="520" rx="12" fill="#f8f9fb"/>
-  <text x="400" y="32" text-anchor="middle" font-size="16" font-weight="700" fill="#1a1a2e">对象创建完整流程</text>
-
-  <defs>
-    <marker id="arrowFlow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-      <path d="M0,0 L8,3 L0,6 Z" fill="#37474f"/>
-    </marker>
-  </defs>
-
-  <!-- Step 1: new 指令 -->
-  <rect x="260" y="52" width="280" height="44" rx="22" fill="#1565c0" stroke="none"/>
-  <text x="400" y="79" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">① JVM 遇到 new 指令</text>
-
-  <!-- Arrow -->
-  <line x1="400" y1="96" x2="400" y2="120" stroke="#37474f" stroke-width="1.5" marker-end="url(#arrowFlow)"/>
-
-  <!-- Step 2: Class check -->
-  <rect x="220" y="122" width="360" height="50" rx="6" fill="#e3f2fd" stroke="#42a5f5" stroke-width="1.2"/>
-  <text x="400" y="143" text-anchor="middle" font-size="12" font-weight="600" fill="#0d47a1">② 类加载检查</text>
-  <text x="400" y="161" text-anchor="middle" font-size="10" fill="#1565c0">检查目标类是否已 加载 → 链接 → 初始化</text>
-
-  <!-- Arrow -->
-  <line x1="400" y1="172" x2="400" y2="196" stroke="#37474f" stroke-width="1.5" marker-end="url(#arrowFlow)"/>
-
-  <!-- Step 3: Memory allocation -->
-  <rect x="140" y="198" width="520" height="90" rx="6" fill="#e8f5e9" stroke="#66bb6a" stroke-width="1.2"/>
-  <text x="400" y="219" text-anchor="middle" font-size="12" font-weight="600" fill="#2e7d32">③ 分配内存</text>
-
-  <!-- Two sub-boxes -->
-  <rect x="160" y="228" width="230" height="48" rx="4" fill="#fff" stroke="#81c784" stroke-width="1"/>
-  <text x="275" y="248" text-anchor="middle" font-size="10" font-weight="600" fill="#2e7d32">指针碰撞</text>
-  <text x="275" y="264" text-anchor="middle" font-size="9" fill="#558b2f">Serial / ParNew（规整堆）</text>
-
-  <rect x="410" y="228" width="230" height="48" rx="4" fill="#fff" stroke="#81c784" stroke-width="1"/>
-  <text x="525" y="248" text-anchor="middle" font-size="10" font-weight="600" fill="#2e7d32">空闲列表</text>
-  <text x="525" y="264" text-anchor="middle" font-size="9" fill="#558b2f">CMS（碎片化堆）</text>
-
-  <!-- TLAB annotation -->
-  <rect x="160" y="294" width="480" height="28" rx="4" fill="#fff8e1" stroke="#ffca28" stroke-width="1"/>
-  <text x="400" y="313" text-anchor="middle" font-size="10" font-weight="600" fill="#f57f17">TLAB 优化：线程私有缓冲区分配 → 无需同步 → 大对象直接 Eden 分配</text>
-
-  <!-- Arrow -->
-  <line x1="400" y1="326" x2="400" y2="350" stroke="#37474f" stroke-width="1.5" marker-end="url(#arrowFlow)"/>
-
-  <!-- Step 4: Zero init -->
-  <rect x="240" y="352" width="320" height="44" rx="6" fill="#fff3e0" stroke="#ffb74d" stroke-width="1.2"/>
-  <text x="400" y="370" text-anchor="middle" font-size="12" font-weight="600" fill="#e65100">④ 零值初始化</text>
-  <text x="400" y="387" text-anchor="middle" font-size="10" fill="#bf360c">int→0  reference→null  boolean→false</text>
-
-  <!-- Arrow -->
-  <line x1="400" y1="396" x2="400" y2="420" stroke="#37474f" stroke-width="1.5" marker-end="url(#arrowFlow)"/>
-
-  <!-- Step 5: Object header -->
-  <rect x="200" y="422" width="400" height="44" rx="6" fill="#f3e5f5" stroke="#ce93d8" stroke-width="1.2"/>
-  <text x="400" y="440" text-anchor="middle" font-size="12" font-weight="600" fill="#6a1b9a">⑤ 设置对象头（Mark Word + Klass Pointer）</text>
-  <text x="400" y="457" text-anchor="middle" font-size="10" fill="#8e24aa">写入锁状态标志、GC 年龄、类元数据指针</text>
-
-  <!-- Arrow -->
-  <line x1="400" y1="466" x2="400" y2="490" stroke="#37474f" stroke-width="1.5" marker-end="url(#arrowFlow)"/>
-
-  <!-- Step 6: <init> -->
-  <rect x="200" y="492" width="400" height="20" rx="4" fill="#e8eaf6" stroke="#7986cb" stroke-width="1"/>
-  <text x="400" y="507" text-anchor="middle" font-size="11" font-weight="600" fill="#283593">⑥ 执行 &lt;init&gt;: super() → 字段初始化 → 初始化块 → 构造体</text>
-</svg>
-<figcaption><span class="fig-no">图 3</span> 从 new 指令到对象落地的完整 6 步链路</figcaption>
-</figure>
-
-<h3>关键 JVM 参数速查</h3>
 
 <table class="nb-table">
-<thead><tr><th>参数</th><th>默认值</th><th>说明</th></tr></thead>
+<thead><tr><th>字段类型</th><th>默认零值</th><th>底层位模式</th><th>实例字段占用（HotSpot）</th></tr></thead>
 <tbody>
-  <tr><td><code>-XX:+UseTLAB</code></td><td>开启</td><td>启用线程本地分配缓冲区</td></tr>
-  <tr><td><code>-XX:TLABSize=N</code></td><td>~32KB</td><td>TLAB 大小（字节）</td></tr>
-  <tr><td><code>-XX:+UseCompressedOops</code></td><td>开启</td><td>压缩对象引用指针（堆 &lt; 32GB 时）</td></tr>
-  <tr><td><code>-XX:+PrintTLAB</code></td><td>关闭</td><td>打印 TLAB 使用统计</td></tr>
-  <tr><td><code>-XX:PretenureSizeThreshold=N</code></td><td>0(自适应)</td><td>大于此值的对象直接分配在老年代</td></tr>
-  <tr><td><code>-XX:MaxTenuringThreshold=N</code></td><td>15</td><td>对象晋升老年代的 GC 年龄阈值</td></tr>
+<tr><td><code>int / short / byte</code></td><td><code>0</code></td><td>全 0 位</td><td>4B / 2B / 1B</td></tr>
+<tr><td><code>char</code></td><td><code>'\u0000'</code></td><td>全 0 位</td><td>2B</td></tr>
+<tr><td><code>long</code></td><td><code>0L</code></td><td>64 位全 0</td><td>8B</td></tr>
+<tr><td><code>float / double</code></td><td><code>0.0f / 0.0d</code></td><td>IEEE 754 正零</td><td>4B / 8B</td></tr>
+<tr><td><code>boolean</code></td><td><code>false</code></td><td>0</td><td><strong>1B</strong></td></tr>
+<tr><td><code>引用类型</code></td><td><code>null</code></td><td>全 0 位</td><td>4B（压缩指针）/ 8B</td></tr>
 </tbody>
 </table>
 
+<h3>为什么必须做：三条理由</h3>
+
+<p><strong>理由一：堆内存是复用的，上面可能留着"尸体"。</strong>这块空间上一任住户可能是另一个已回收的对象，里面残留着它字段的字节。如果不清零，你 new 出来的对象读到的就是前任的"脏数据"——一个 <code>int</code> 字段可能"恰好"是上轮循环的计数值。清零是唯一能保证"字段有确定值"的手段。</p>
+
+<p><strong>理由二：Java 的语言契约允许"不赋值就使用"。</strong>实例字段不显式初始化就读取，语言是放行的（编译不报错），那么 JVM 就必须为这种放行兜底——保证任何字段在任何时刻都有确定值。对比一下局部变量：不赋值就使用是<strong>编译错误</strong>，因为局部变量的活跃区间短、编译器可以静态检查；字段会被跨方法、跨时间访问，编译器管不住，只能由 JVM 在分配时统一兜底。</p>
+
+<p><strong>理由三：对比 C/C++ 就能看出设计取舍。</strong><code>malloc</code> 出来的内存不初始化，读到未初始化值是未定义行为。Java 选择在运行时统一清零，牺牲一点 CPU（每次分配多一次写零），换来"永远不会读到脏内存"的强保证——这是托管语言的典型做法：<strong>把安全做进运行时，而不是留给程序员自律</strong>。</p>
+
+<div class="crack"><span class="crack-label">纠错：boolean 字段是 1 个字节</span>
+<p>不少资料（包括一些老版面试书）写"boolean 在 JVM 里按 int（4 字节）存储"——<strong>对实例字段不成立</strong>。HotSpot 中实例字段的 boolean 占 <strong>1 个字节</strong>（用 JOL 一看便知，第 6 站有工具）。"boolean 按 int 处理"说的是<strong>操作数栈</strong>上的行为：字节码栈里 boolean 以 32 位整型值存在（1 为 true，0 为 false），那是栈的粒度问题，和字段在对象里占几个字节是两回事。两个语境别混。</p>
+</div>
+
+<div class="think"><div class="think-q">"零值初始化为什么不放进构造器里做？反正构造器也要给字段赋值。"</div>
+<p>三个原因：① 构造器是<strong>用户代码</strong>，可能抛异常、可能被继承体系改写顺序——JVM 必须在用户代码开始执行<strong>之前</strong>就把内存置成"安全状态"：即使 <code>&lt;init&gt;</code> 第一行就抛异常，字段依然是零值而不是脏值，任何拿到这个半成品对象的代码（比如父类构造器里）都不会读到垃圾。② <strong>父类构造器可能读到子类字段</strong>——此刻子类的 <code>&lt;init&gt;</code> 还没执行，子类字段如果没被清零，父类代码读到的就是脏数据。③ 职责分层：<strong>零值初始化是"内存层"契约（JVM 负责，保证有值），构造器赋值是"逻辑层"行为（程序员负责，保证值正确）</strong>。零值是安全网，不是最终值——构造器随后会把它覆盖成真正的业务值，这次"重复劳动"正是分层的代价，也是分层的好处。</p></div>
+
+<p>实现层面：HotSpot 在分配时就完成清零。小对象按字（8B/16B 粒度）批量写零；大对象（典型如大数组）用 memset 一类的高效率块清零指令。注意堆内存是"复用内存"，不能依赖"新内存本来就是零"——OS 刚提交的新页常常是零页，但堆里循环使用的空间不是，所以 JVM 必须显式清零。</p>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>零值初始化发生在分配同一瞬间、构造器执行之前：字段默认 0 / null / false，boolean 实例字段占 1 字节。动机：堆内存复用会有脏数据 + 语言契约允许字段不赋值就读。零值是"内存层安全网"，构造器赋值是"逻辑层真值"，后者覆盖前者——所以"字段被赋值两次"不是 bug，是分层。</p>
+</div>
+</section>
+<!-- ═══════════════ 第6站：对象头与内存布局 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><span class="station-no">第 6 站</span><h2>阶段四：对象头与内存布局</h2></div>
+
+<p>零值写完后，JVM 往这块内存的<strong>头部</strong>写元信息。对象头是 JVM 的"户口本"——GC 靠它判断对象死活与年龄，锁靠它判断对象有没有人占，方法调用靠它找到类的元信息。这一站是全文信息密度最高的一站。</p>
+
+<h3>对象内存布局：头、数据、对齐三件套</h3>
+
+<p>HotSpot 里每个 Java 对象的内存布局由三部分组成：<strong>对象头（Header）</strong>、<strong>实例数据（Instance Data）</strong>、<strong>对齐填充（Padding）</strong>。HotSpot 要求对象总大小是 <code>-XX:ObjectAlignmentInBytes</code>（<strong>默认 8 字节</strong>）的整数倍，不够就补 Padding——所以对象的最小尺寸就是 16 字节（2 个对齐单元），<code>new Object()</code> 的真实大小就是 16B。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 780 470" role="img" aria-label="64 位 JVM 对象内存布局与 Mark Word 五种状态">
+  <text x="390" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" fill="#333">对象内存布局（64 位 HotSpot，压缩指针开启）</text>
+
+  <rect x="60" y="44" width="380" height="306" rx="8" fill="#fff" stroke="#455a64" stroke-width="2"/>
+  <text x="250" y="64" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#455a64">一个普通对象（以 LayoutDemo { int i; long l; } 为例）</text>
+
+  <rect x="72" y="76" width="356" height="44" rx="4" fill="#B8D9B0" stroke="#2D7D2D" stroke-width="1.2"/>
+  <text x="250" y="95" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1B5E1B">Mark Word（8 字节）</text>
+  <text x="250" y="112" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#3A7A3A">hashcode | GC 年龄 | 锁状态——五种状态复用同一块 8B</text>
+
+  <rect x="72" y="128" width="176" height="42" rx="4" fill="#A8CDE0" stroke="#2B6E91" stroke-width="1.2"/>
+  <text x="160" y="146" text-anchor="middle" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#1A4D6E">类指针（4B 压缩）</text>
+  <text x="160" y="162" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#1A4D6E">→ 方法区的类元信息</text>
+
+  <rect x="256" y="128" width="172" height="42" rx="4" fill="#F5F5F5" stroke="#BBB"/>
+  <text x="342" y="146" text-anchor="middle" font-family="sans-serif" font-size="10.5" font-weight="600" fill="#777">对齐填充（4B）</text>
+  <text x="342" y="162" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#777">凑满 16 字节头部</text>
+  <text x="452" y="104" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#333">头部合计</text>
+  <text x="452" y="122" font-family="sans-serif" font-size="10.5" fill="#333">8 + 4 + 4 = 16B</text>
+
+  <rect x="72" y="178" width="356" height="100" rx="4" fill="#FBF3E6" stroke="#8B6914" stroke-width="1.2"/>
+  <text x="250" y="198" text-anchor="middle" font-family="sans-serif" font-size="11.5" font-weight="700" fill="#6B4E0A">实例数据（字段值）</text>
+  <rect x="84" y="208" width="150" height="22" rx="3" fill="#E0C8A8" stroke="#8B6914"/>
+  <text x="159" y="223" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#6B4E0A">long l（8B，排前面）</text>
+  <rect x="84" y="234" width="150" height="22" rx="3" fill="#E0C8A8" stroke="#8B6914"/>
+  <text x="159" y="249" text-anchor="middle" font-family="monospace" font-size="9.5" fill="#6B4E0A">int i（4B）</text>
+  <text x="250" y="220" font-family="sans-serif" font-size="9" fill="#8B6914">字段顺序由 JVM 决定</text>
+  <text x="250" y="234" font-family="sans-serif" font-size="9" fill="#8B6914">（long 优先于 int，</text>
+  <text x="250" y="248" font-family="sans-serif" font-size="9" fill="#8B6914">与声明顺序无关）</text>
+
+  <rect x="72" y="286" width="356" height="24" rx="3" fill="#F5F5F5" stroke="#BBB"/>
+  <text x="250" y="302" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#777">对齐填充（0B，本例 16+12 已凑成 24 的倍数，无需再补）</text>
+  <text x="250" y="332" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#333">Instance size: 24 bytes</text>
+
+  <text x="620" y="60" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#333">Mark Word 五种状态（64 位）</text>
+  <rect x="480" y="72" width="280" height="36" rx="4" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="530" y="89" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#333">无锁</text>
+  <text x="530" y="102" font-family="sans-serif" font-size="8.5" fill="#666">hashcode(31b) + age(4b) + 偏向标志(1b)</text>
+  <text x="748" y="95" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#2D7D2D">01</text>
+  <rect x="480" y="112" width="280" height="36" rx="4" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="530" y="129" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#333">偏向锁</text>
+  <text x="530" y="142" font-family="sans-serif" font-size="8.5" fill="#666">偏向线程ID(54b) + epoch(2b) + age(4b)</text>
+  <text x="748" y="135" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#2D7D2D">01</text>
+  <rect x="480" y="152" width="280" height="36" rx="4" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="530" y="169" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#333">轻量级锁</text>
+  <text x="530" y="182" font-family="sans-serif" font-size="8.5" fill="#666">指向线程栈中锁记录的指针(62b)</text>
+  <text x="748" y="175" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#B85450">00</text>
+  <rect x="480" y="192" width="280" height="36" rx="4" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="530" y="209" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#333">重量级锁</text>
+  <text x="530" y="222" font-family="sans-serif" font-size="8.5" fill="#666">指向堆中 Monitor（ObjectMonitor）的指针(62b)</text>
+  <text x="748" y="215" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#B85450">10</text>
+  <rect x="480" y="232" width="280" height="36" rx="4" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="530" y="249" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#333">GC 标记</text>
+  <text x="530" y="262" font-family="sans-serif" font-size="8.5" fill="#666">GC 期间的临时标志位</text>
+  <text x="748" y="255" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="#999">11</text>
+  <text x="620" y="284" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#666">末 2 位 = 锁标志位；状态切换时内容整体改写</text>
+  <text x="620" y="300" text-anchor="middle" font-family="sans-serif" font-size="9.5" fill="#666">偏向锁：JDK 15 起默认禁用，JDK 17 起移除相关选项</text>
+
+  <rect x="60" y="366" width="680" height="86" rx="8" fill="#F8F9FA" stroke="#DEE2E6"/>
+  <text x="80" y="388" font-family="sans-serif" font-size="11" font-weight="700" fill="#333">数组对象：对象头 = Mark Word + 类指针 + 长度（4B）</text>
+  <rect x="80" y="398" width="90" height="34" rx="3" fill="#B8D9B0" stroke="#2D7D2D"/>
+  <text x="125" y="419" text-anchor="middle" font-family="monospace" font-size="9" fill="#1B5E1B">Mark Word 8B</text>
+  <rect x="172" y="398" width="52" height="34" rx="3" fill="#A8CDE0" stroke="#2B6E91"/>
+  <text x="198" y="419" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#1A4D6E">类指针 4B</text>
+  <rect x="226" y="398" width="52" height="34" rx="3" fill="#A8CDE0" stroke="#2B6E91"/>
+  <text x="252" y="419" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#1A4D6E">长度 4B</text>
+  <rect x="280" y="398" width="270" height="34" rx="3" fill="#E0C8A8" stroke="#8B6914"/>
+  <text x="415" y="419" text-anchor="middle" font-family="monospace" font-size="9" fill="#6B4E0A">元素数据（int[8] = 32B）</text>
+  <text x="620" y="419" text-anchor="middle" font-family="sans-serif" font-size="10.5" font-weight="700" fill="#555">int[8] = 16 + 32 = 48B</text>
+</svg>
+<figcaption><span class="fig-no">图 4</span> 64 位、压缩指针开启时：普通对象头 16B（Mark Word 8B + 类指针 4B + 填充 4B）；数组头再多一个 4B 长度字段；Mark Word 用 8 字节复用五种状态</figcaption>
+</figure>
+
+<h3>Mark Word：8 字节的"复用账本"</h3>
+
+<p>Mark Word 在 64 位 JVM 下固定 <strong>8 字节</strong>，但它的"户口内容"随对象状态变化——五种状态各存各的信息，靠<strong>最低 2 位的锁标志位</strong>区分：</p>
+
+<table class="nb-table">
+<thead><tr><th>状态</th><th>8 字节里存了什么（64 位）</th><th>锁标志（低 2 位）</th></tr></thead>
+<tbody>
+<tr><td><strong>无锁</strong></td><td>hashcode（31 位，惰性计算）+ GC 分代年龄（4 位）+ 偏向标志（1 位），其余位未用</td><td><code>01</code></td></tr>
+<tr><td><strong>偏向锁</strong></td><td>偏向线程 ID（54 位）+ epoch（2 位）+ GC 年龄（4 位）</td><td><code>01</code></td></tr>
+<tr><td><strong>轻量级锁</strong></td><td>指向<strong>线程栈中锁记录</strong>（Lock Record）的指针（62 位）</td><td><code>00</code></td></tr>
+<tr><td><strong>重量级锁</strong></td><td>指向<strong>堆中 Monitor（ObjectMonitor）</strong>的指针（62 位）</td><td><code>10</code></td></tr>
+<tr><td><strong>GC 标记</strong></td><td>GC 期间的临时标志（标记/清除过程使用）</td><td><code>11</code></td></tr>
+</tbody>
+</table>
+
+<p>三个必须说清的细节：</p>
+
+<ul>
+  <li><strong>hashcode 是惰性计算的</strong>：无锁态里预留了 31 位 hashcode 空间，但直到第一次调用 <code>hashCode()</code>（或 <code>System.identityHashCode()</code>）才真正计算并写入。刚 new 出来的对象，这块是空的。</li>
+  <li><strong>age（GC 分代年龄）</strong>：每熬过一次 Minor GC 存活下来就 +1，达到晋升阈值（<code>-XX:MaxTenuringThreshold</code>，<strong>默认 15</strong>）晋升老年代——age 就存在 Mark Word 这 4 个位里，晋升机制详见《JVM 堆内存：年轻代三区与老年代的生命周期》。</li>
+  <li><strong>版本差异（必背）</strong>：偏向锁<strong>从 JDK 15 起默认禁用</strong>（高竞争场景下偏向锁的撤销成本大于收益），<strong>从 JDK 17 起偏向锁相关选项被移除</strong>——所以现代 JDK 上实际存在的锁升级路径是：无锁 → 轻量级锁 → 重量级锁。</li>
+</ul>
+
+<div class="think"><div class="think-q">面试追问："8 个字节的 Mark Word，凭什么装得下 hashcode、GC 年龄、锁状态？它们不同时都需要吗？"</div>
+<p>答：<strong>因为它们是"复用"关系，不是"并列"关系。</strong>同一块 8 字节，在不同时刻被不同状态解读：无锁/偏向前期存 hash + age；一旦上锁，整块改写成"指向锁结构的指针"（此时 hash 暂时不存放在 Mark Word 里，需要时 JVM 实时计算，解锁后再按需写回）；GC 期间临时改写为标记位。8 字节是"按当前使用者整块改写"的账本，不是"每个字段各占固定槽位"的表格——这正是对象头能做到 8 字节的原因。追问再深一层：锁升级路径（无锁 → 轻量级 → 重量级，含 CAS 重试与 Monitor 的互斥量/等待队列）见并发卷的《synchronized 锁升级：偏向锁 → 轻量级锁 → 重量级锁》。</p></div>
+
+<h3>类指针：对象的"户籍地"</h3>
+
+<p>对象头的第二块是<strong>类指针（Klass Pointer）</strong>，指向方法区里该类的元信息（Klass：常量池、虚方法表、方法表、字段描述符）。它回答"这个对象是哪个类的实例"，用途很多：虚方法分派（<code>invokevirtual</code> 靠它找到 vtable）、<code>instanceof</code> 判断、反射拿到字段/方法列表。压缩指针开启时它占 <strong>4 字节</strong>（未压缩 8 字节）。</p>
+<h3>压缩指针：4 字节的引用怎么撑起 32GB 堆</h3>
+
+<p>64 位 JVM 下对象引用"名义上"该占 8 字节，但 HotSpot 默认开启<strong>压缩指针（Compressed Oops，<code>-XX:+UseCompressedOops</code> 默认 true）</strong>：堆小于 32GB 时，对象引用只占 <strong>4 字节</strong>。原理值得在面试里完整推一遍：</p>
+
+<ol>
+  <li>引用存的是<strong>相对于堆起始地址的偏移</strong>，不是完整 64 位地址——堆在内存中的具体位置由 OS 决定，VM 自己记录基址，省掉高位。</li>
+  <li>对象按 8 字节对齐（<code>-XX:ObjectAlignmentInBytes</code> 默认 8），偏移量的<strong>低 3 位恒为 0</strong>，不需要存——实际存的是 偏移 ÷ 8。</li>
+  <li>于是 32 位能表示 2<sup>32</sup> 个不同的 8 字节对齐位置，寻址空间 = 2<sup>32</sup> × 8B = <strong>32GB</strong>——"32GB 上限"就是这么来的。</li>
+  <li>读引用时做一次左移（shift 3）恢复完整地址；若 <code>-XX:ObjectAlignmentInBytes=16</code>，低 4 位恒 0，shift 4，寻址空间减半为 16GB。</li>
+</ol>
+
+<div class="formula">压缩指针寻址上限 = 2<sup>32</sup> × 对齐字节数（8B 对齐 → 32GB；16B 对齐 → 16GB）<br>收益：对象头类指针 4B（头部 16B 而非 24B）+ 所有引用字段 4B——对象普遍变小，同堆容量装更多对象，GC 扫描的数据量也降下来</div>
+
+<p>这是"堆为什么默认不超过 32GB"的底层原因之一：堆到 32GB，压缩指针自动关闭，所有引用翻倍，内存占用和 GC 压力同时跳档——所以很多大堆服务会刻意把堆压在 31G 左右。堆与引用占用的全景见《JVM 运行时数据区全景：堆、栈、方法区、程序计数器》。</p>
+
+<h3>对象访问定位：直接指针 vs 句柄池</h3>
+
+<p>引用"怎么找到对象"，JVM 规范允许两种方式：
+
+<ul>
+  <li><strong>直接指针（HotSpot 采用）</strong>：对象引用直接指向对象头。优点：访问快，少一层间接；代价：GC 移动对象后要更新所有指向它的引用（靠根扫描 + 写屏障处理）。</li>
+  <li><strong>句柄池（Handle Pool）</strong>：引用指向一张句柄表，表里再存对象指针。优点：对象移动时只需改表，引用不变；代价：每次访问多一次间接寻址，还要维护这张表。JVM 规范允许，但 HotSpot 没有采用。</li>
+</ul>
+
+面试提一句"规范允许两种，HotSpot 用直接指针，因为访问频率远高于 GC 移动频率"就够了，不用展开。</p>
+
+<h3>实例数据的字段布局：顺序由 JVM 决定，不是声明顺序</h3>
+
+<p>字段在"实例数据"里怎么排？JVM 规范（JVMS 2.13）只规定了一条：<strong>同宽度的字段要分配给更宽字段留下的空位</strong>（long/double 不会和 int 挤在一起浪费空间）。具体顺序由 JVM 实现自己定，HotSpot 的策略是：</p>
+
+<ol>
+  <li>按字段宽度分组：先放 8 字节宽字段（long/double），再放 4 字节（int/float/压缩后的引用），最后 1~2 字节（short/char/byte/boolean）；</li>
+  <li>同宽度内：<strong>父类字段优先于子类字段</strong>，同一类里按声明顺序（LongSize 策略——宽字段优先布局，减少空洞）。</li>
+</ol>
+
+<p>经典反直觉例子：<strong>即使 <code>int i</code> 声明在前，<code>long l</code> 也会排在前面</strong>——因为 long 要 8 字节对齐，放后面反而多出一个 4B 空洞。用 JOL（JOL 全称 Java Object Layout，<code>org.openjdk.jol:jol</code>）看一眼就记住了：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>JOL 对象布局实测</b> · ClassLayout.parseInstance(obj).toLayout()（示例输出）</span></div>
+<pre><code><span class="c">// 代码：class LayoutDemo { int i; long l; }   （int 声明在前）</span>
+<span class="t">ClassLayout</span>.<span class="n">parseInstance</span>(<span class="k">new</span> <span class="t">LayoutDemo</span>()).<span class="n">toLayout</span>()
+
+<span class="c">// 示例输出（64 位，压缩指针开启）：</span>
+<span class="n">LayoutDemo instance layout:</span>
+<span class="n">offset  size  type         description</span>
+<span class="n">---------------------------</span>
+<span class="n"> 0       8     (object header) 1 word</span>
+<span class="n"> 8       4     (loss of alignment)</span>
+<span class="n"> 8       8     long         LayoutDemo.l</span>        <span class="c">// long 排在前面！</span>
+<span class="n">16       4     int          LayoutDemo.i</span>
+<span class="n">20       4     (4 bytes of padding)</span>
+<span class="n">Instance size: 24 bytes</span>
+<span class="n">Space wasted: 0 bytes (0%)</span>
+
+<span class="c">// 对照：数组 int[8] = 16B 头（含长度）+ 32B 元素 = 48 bytes</span>
+<span class="c">// 空对象 new Object() = 16 bytes（对象头即最小尺寸）</span></code></pre>
+</div>
+
+<p>JOL 的用法：Maven 引入 <code>org.openjdk.jol:jol</code>（0.16 / 0.17 等版本），对任意对象调用 <code>ClassLayout.parseInstance(obj).toLayout()</code> 即可看到逐字节的布局——<strong>算对象大小永远以 JOL 输出为准</strong>，别手算（字段布局规则、压缩指针开关、数组长度字段，一个细节算错就差 4~8 字节）。三个常用结论：<code>new Object()</code> = 16B；<code>int[8]</code> = 48B；<code>{int i; long l}</code> = 24B。</p>
+
+<div class="crack"><span class="crack-label">面试加分</span>
+<p>"能不能通过调整字段声明顺序省内存？"——<strong>能，但收益有限</strong>。因为 HotSpot 按宽度分组布局，把 long/double 集中声明、引用和 int 放一起，确实可能减少 1~2 处 4B 空洞（对海量小对象有 5%~10% 量级的影响，通常）。但现代代码不建议为这点空间扭曲可读性——真要抠对象大小，先查"对象该不该存在"（能不能复用、能不能基本类型化），而不是字段排列。</p>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>对象 = 对象头 + 实例数据 + 对齐填充（8B 对齐，最小 16B）。头部：Mark Word 8B（五种状态复用，末 2 位锁标志：01 无锁/偏向、00 轻量级、10 重量级、11 GC 标记；hash 惰性计算；age 默认 15 晋升；偏向锁 JDK 15 默认禁用、JDK 17 移除选项）+ 类指针 4B（压缩指针，堆 &lt; 32GB）+ 填充。数组头再多 4B 长度。字段布局：宽字段优先、父先于子、同宽按声明——用 JOL 实测为准。</p>
+</div>
+</section>
+<!-- ═══════════════ 第7站：执行 init ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><span class="station-no">第 7 站</span><h2>阶段五：执行 &lt;init&gt;——构造器的字节码真相</h2></div>
+
+<p>走到最后一步，JVM 终于要执行"用户代码"了。先回到字节码层面，看一条 <code>new</code> 到底被编译成了什么：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>javap -c 输出</b> · new Object() 的字节码（示例）</span></div>
+<pre><code><span class="c">// 源码：Object obj = new Object();</span>
+<span class="c">// javap -c 反编译 main 方法：</span>
+<span class="n"> 0:</span> <span class="k">new</span>           <span class="n">#2</span>   <span class="c">// class java/lang/Object</span>
+<span class="n"> 3:</span> <span class="k">dup</span>
+<span class="n"> 4:</span> <span class="k">invokespecial</span> <span class="n">#3</span>   <span class="c">// Method java/lang/Object.&lt;init&gt;:()V</span>
+<span class="n"> 7:</span> <span class="k">astore_1</span>               <span class="c">// 对象引用存入局部变量 obj</span>
+<span class="n"> 8:</span> <span class="k">return</span></code></pre>
+</div>
+
+<p>三条核心指令，各司其职：</p>
+
+<ul>
+  <li><strong><code>new</code></strong>：触发前四个阶段——类加载检查、内存分配、零值初始化、设置对象头，然后把<strong>新对象的引用</strong>压上操作数栈。注意：<code>new</code> 执行完，对象在堆里已经"存在"了，只是字段全是零值、构造器还没跑。</li>
+  <li><strong><code>dup</code></strong>：复制栈顶的引用。为什么要复制？因为下一条 <code>invokespecial</code> 会<strong>消费</strong>栈顶引用（把它当构造器的 <code>this</code> 参数），如果不复制，构造器执行完栈上就什么都没了，后面没法赋给局部变量。</li>
+  <li><strong><code>invokespecial</code></strong>：调用对象的 <code>&lt;init&gt;</code> 方法（构造器）。构造器执行期间，<code>this</code> 指向的是一块"已经分配、已经清零、已经写好对象头"的完整内存。</li>
+</ul>
+
+<p>换成带字段的类，看看构造器内部长什么样：</p>
+
+<div class="srcbox">
+<div class="srcbox-head"><span class="srcbox-file"><b>javap -p -c 输出</b> · Person 构造器字节码（示例）</span></div>
+<pre><code><span class="c">// 源码：class Person { String name; int age;</span>
+<span class="c">//         Person(String name, int age) { this.name = name; this.age = age; } }</span>
+<span class="k">public</span> <span class="t">Person</span>(<span class="t">String</span>, <span class="k">int</span>);
+  <span class="c">// 构造器 &lt;init&gt; 的字节码：</span>
+<span class="n"> 0:</span> <span class="k">aload_0</span>                <span class="c">// 加载 this</span>
+<span class="n"> 1:</span> <span class="k">invokespecial</span> <span class="n">#1</span>     <span class="c">// ① super() → Object.&lt;init&gt;（隐式插入，必须是第一句）</span>
+<span class="n"> 4:</span> <span class="k">aload_0</span>
+<span class="n"> 5:</span> <span class="k">aload_1</span>
+<span class="n"> 6:</span> <span class="k">putfield</span>      <span class="n">#2</span>     <span class="c">// ② this.name = name</span>
+<span class="n"> 9:</span> <span class="k">aload_0</span>
+<span class="n">10:</span> <span class="k">iload_2</span>
+<span class="n">11:</span> <span class="k">putfield</span>      <span class="n">#3</span>     <span class="c">// ③ this.age = age</span>
+<span class="n">14:</span> <span class="k">return</span></code></pre>
+</div>
+
+<h3>&lt;init&gt; 的三段式结构</h3>
+
+<p>编译器生成的 <code>&lt;init&gt;</code> 永远是三段，顺序雷打不动：</p>
+
+<ol>
+  <li><strong>super()</strong>——调用父类构造器（字节码里第一条 <code>invokespecial</code>）。你不写它，编译器也会在第一行隐式插入 <code>super()</code>。</li>
+  <li><strong>字段初始化器 + 实例初始化块</strong>——按<strong>源码中出现顺序</strong>交织编译成 <code>putfield</code>（不是"先全部字段、再全部块"）。</li>
+  <li><strong>构造器方法体</strong>——你自己写的代码。</li>
+</ol>
+
+<p>为什么 <code>super()</code> 必须排第一？Java 语言规范（JLS §8.8.7.1）强制规定：<strong>构造器的第一条语句必须是 super(...) 或 this(...)</strong>。原因是"先壳后瓤"——父类构造器可能初始化子类会依赖的字段，如果允许子类代码先跑，就可能读到尚未构造的父类状态，语义直接失控。</p>
+
+<p>这也解释了一个经典面试题：<strong>父类构造器里读子类字段，读到什么？</strong>——零值。因为执行到父类 <code>&lt;init&gt;</code> 时，子类 <code>&lt;init&gt;</code> 里的字段初始化器还没跑，而第 5 站的零值初始化早已完成，所以子类字段此刻是 0 / null，不是"未定义"。</p>
+
+<div class="think"><div class="think-q">"构造器里抛异常，堆里这个对象怎么办？会泄漏吗？"</div>
+<p>不会"泄漏"，但会留下<strong>半成品</strong>。执行 <code>invokespecial &lt;init&gt;</code> 时，对象已经完整走完分配 + 零值 + 对象头（第 1 站的 ②③ 先于 ⑤），它实实在在占着堆内存。<code>&lt;init&gt;</code> 抛异常后：① 异常沿调用栈传播，局部变量<strong>不会被赋值</strong>（<code>astore</code> 没执行到）；② 堆里这个对象没有任何引用指向它，成了垃圾，等待 GC 回收；③ 但构造器里<strong>已经执行过的副作用是真实的</strong>——资源已打开、事件已注册、静态计数器已加一。所以"构造器抛异常不泄漏对象"的完整说法是：对象会被 GC 回收，但<strong>副作用不会自动回滚</strong>，这是资源管理要格外小心的地方。</p></div>
+
+<div class="crack"><span class="crack-label">this 逸出（点到为止）</span>
+<p>构造器还没执行完，<code>this</code> 就已经是一个"合法的引用"了——所以你在构造器里把 <code>this</code> 交给别人（注册监听器、赋值给静态字段、启动线程），等于把<strong>一个字段还是零值/未赋值完的半成品对象</strong>暴露给了别的线程。别的线程可能在你构造完成之前读到"半初始化"状态。正确姿势：构造器里不做任何发布动作，构造完成后再注册。锁与线程安全的细节见并发卷的《synchronized 锁升级：偏向锁 → 轻量级锁 → 重量级锁》和《JMM 内存模型：happens-before 八条规则全解》。</p>
+</div>
+
+<p>最后把"字段被赋值两次"这件事钉死：第 5 站的零值初始化（JVM，内存层，保证"有值"）→ 本阶段的 <code>putfield</code>（构造器，逻辑层，保证"值对"）。<strong>零值是安全网，构造器赋值是覆盖</strong>——两次写入是分层设计的代价，不是冗余 bug。</p>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>new 的字节码真相：<code>new</code>（完成分配+零值+对象头，压引用）→ <code>dup</code>（复制引用，一份给 this、一份留给赋值）→ <code>invokespecial</code>（执行 &lt;init&gt;）。&lt;init&gt; 三段式：super()（必须第一句，JLS 8.8.7.1）→ 字段初始化器 + 初始化块（按源码顺序交织）→ 构造体。构造器抛异常：对象变垃圾被回收，但副作用不回滚；构造器里暴露 this = this 逸出，半成品对象泄露给其他线程。</p>
+</div>
+</section>
+<!-- ═══════════════ 第8站：JIT 限定词 ═══════════════ -->
+<section class="station reveal" id="s8">
+<div class="station-head"><span class="station-no">第 8 站</span><h2>限定词："new 的对象一定在堆里"吗？</h2></div>
+
+<p>五个阶段讲完，该给"对象在堆里"这个认知打补丁了。面试官如果听你一路说"new 在堆上分配"，最后一定会补一刀：</p>
+
+<div class="think"><div class="think-q">"逃逸分析命中的对象还在堆里吗？'new 出来的对象一定在堆里'这句话严谨吗？"</div>
+<p>不严谨——这句话需要<strong>限定词</strong>。默认情况下（解释执行、C1 编译）确实如此：对象在堆（TLAB/Eden）分配。但 C2 编译器开启逃逸分析后，如果判定对象<strong>"不逃逸"</strong>（方法内创建、没被返回、没被存到静态字段/被其他线程访问），可以做两个优化：</p></div>
+
+<ul>
+  <li><strong>标量替换（Scalar Replacement）</strong>：把对象的字段拆成独立的<strong>标量变量</strong>（本地变量），"对象"不再作为一个整体被组装出来——<strong>堆上分配被彻底消除</strong>，GC 也没有目标。HotSpot 所谓"栈上分配"的效果，本质就是标量替换：<em>不是把对象搬到栈上，而是让这个对象不再以对象形态存在</em>。</li>
+  <li><strong>锁消除（Lock Elision）</strong>：对象是线程私有的（不逃逸），对它加的锁永远不会被竞争，编译器直接把锁去掉。</li>
+</ul>
+
+<p>所以严谨的说法是：<strong>从 Java 语言和默认运行时视角看，new 出来的对象在堆里分配内存；但在 JIT（C2）+ 逃逸分析下，不逃逸的对象可以连堆分配都省掉（标量替换），锁也可以消除</strong>。面试时这句话的完整版本是："对象默认分配在堆，这是语言语义的底线；JIT 可以在不改变语义的前提下，把不逃逸的对象'化整为零'，消除堆分配——优化的是实现，不变的是语义。"</p>
+
+<div class="crack"><span class="crack-label">两个说法别踩</span>
+<p>① 别说"JVM 会把对象分配到栈上"——HotSpot <strong>没有真正的栈上分配</strong>，机制是标量替换（字段变成局部变量），说"栈上分配"会被追问到墙角。② 别把逃逸分析说成"一定生效"——它是 C2 的热方法优化，方法不热、对象逃逸（被 return、被存储、被线程共享）时都不生效，而且版本间优化策略会变。验证手段：JDK 8 可用 <code>-XX:+UnlockDiagnosticVMOptions</code> 加 <code>-XX:+PrintEscapeAnalysis</code> 打印分析结果（JDK 9+ 走统一 JIT 日志）；标量替换与逃逸分析的完整机制见《JIT 编译优化：逃逸分析与标量替换》。</p>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">本站要点</span>
+<p>"new 一定在堆里"要加限定词：默认运行时 = 堆；C2 + 逃逸分析 + 对象不逃逸 = 标量替换消除堆分配、锁消除。机制是"化整为零"，不是"搬到栈上"。这句话是区分"背过对象创建"和"理解对象创建"的分水岭。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 总结站 ═══════════════ -->
+<section class="station reveal" id="summary">
+<div class="station-head"><span class="station-no">第 9 站</span><h2>总结：知识地图与面试模板</h2></div>
+
+<h3>知识地图</h3>
+
 <div class="recap">
-  <strong>一句话总结：</strong><code>new</code> 指令触发 6 步链路——类加载检查 → 内存分配（指针碰撞/空闲列表，TLAB 优化并发）→ 零值初始化 → 设置对象头 → 执行 <code>&lt;init&gt;</code> 构造方法。面试官追问时，从分配策略、TLAB 机制、对象头布局三个维度展开即可。
+<p><strong>本文全部知识点的结构（能默画出来就算内化）：</strong></p>
+<ul>
+  <li><strong>五阶段链路</strong>：类加载检查 → 内存分配 → 零值初始化 → 设置对象头 → 执行 &lt;init&gt;。②③ 在分配同一瞬间完成（JVM 内部），⑤ 才执行用户逻辑；顺序是"先零值、后对象头"。</li>
+  <li><strong>类加载检查</strong>：是"检查"不是"加载"——确认类已加载/链接/初始化，首次使用才走完整流程；new（非数组）是触发类初始化的主动引用；类元信息在方法区（Metaspace），Class 对象在堆里；数组类运行时生成。</li>
+  <li><strong>分配策略</strong>：内存规整 → 指针碰撞（O(1)）；碎片 → 空闲列表（查表切块）。规整与否由收集算法决定（复制/整理 → 规整；标记-清除 → 碎片）。Eden 剩余不够 → 老年代 → Full GC → OOM。</li>
+  <li><strong>TLAB</strong>：每线程 Eden 私有缓冲区，线程内分配零同步；refill 时 CAS 竞争 + 旧 TLAB 剩余 = 浪费；大小自适应（TLABSize 手动固定），TLABWasteTarget 默认 1% 是浪费目标不是 Eden 占比；决策树：TLAB 够 → 用；不够但够开新 TLAB → refill；比新 TLAB 大 → 直接 Eden；Eden 不够 → 老年代。</li>
+  <li><strong>零值初始化</strong>：字段 → 0 / null / false（boolean 实例字段 1B）；动机：复用内存有脏数据 + 语言契约；零值是内存层安全网，构造器是逻辑层覆盖。</li>
+  <li><strong>对象头</strong>：头 16B = Mark Word 8B + 类指针 4B + 填充 4B（压缩指针，堆 &lt; 32GB，2<sup>32</sup>×8B 上限）；数组头 +4B 长度；Mark Word 五状态复用 8B（01 无锁/偏向、00 轻量级、10 重量级、11 GC 标记），hash 惰性计算，age 默认 15 晋升，偏向锁 JDK 15 默认禁用 / JDK 17 移除选项；字段布局宽字段优先、父先于子、同宽按声明，JOL 实测为准（Object()=16B，int[8]=48B）。</li>
+  <li><strong>&lt;init&gt;</strong>：new → dup → invokespecial；三段式 super()（第一句）→ 字段初始化器 + 初始化块（源码顺序）→ 构造体；构造器抛异常对象变垃圾但副作用不回滚；this 逸出 = 暴露半成品对象。</li>
+  <li><strong>JIT 限定词</strong>：C2 + 逃逸分析 + 不逃逸 → 标量替换消除堆分配 + 锁消除；不是真正的栈上分配。</li>
+</ul>
+</div>
+<h3>面试回答模板</h3>
+
+<div class="takeaway"><span class="takeaway-label">30 秒版（先说结论）</span>
+<p>"new 一个对象，JVM 走五个阶段：<strong>类加载检查</strong>——确认类已加载、链接、初始化，通常早就就绪；<strong>内存分配</strong>——内存规整用指针碰撞、碎片用空闲列表，多线程靠 TLAB 把竞争降频；<strong>零值初始化</strong>——字段先填 0 / null / false；<strong>设置对象头</strong>——Mark Word 加类指针，64 位压缩指针下头 16 字节；最后<strong>执行构造器</strong>——super 先行、字段初始化、构造体。前四步 JVM 自动完成，构造器才跑用户逻辑。"</p>
+</div>
+
+<div class="takeaway"><span class="takeaway-label">3 分钟版（追问三层展开）</span>
+<p>30 秒版 + 三个"为什么"：① <strong>为什么 TLAB</strong>——CAS 重试无锁，但高频分配下所有线程挤同一根指针、缓存行反复弹跳；TLAB 给每线程一块 Eden 私有缓冲区，线程内零同步，竞争降频为"每个 TLAB 一次"的 refill，代价是可控浪费（TLABWasteTarget 默认 1%，注意这是浪费目标不是 Eden 占比）；TLAB 大小自适应，不是固定值。② <strong>为什么 Mark Word 只有 8 字节</strong>——五种状态（无锁/偏向/轻量级/重量级/GC 标记）复用同一块 8B，末 2 位锁标志区分；无锁态存 hash（惰性计算）+ 年龄，上锁后整块改成指向锁结构的指针——是"复用账本"不是"固定槽位"。③ <strong>为什么字段先零值再赋值</strong>——堆内存复用会有脏数据，语言契约允许字段不赋值就读，JVM 必须在构造器（用户代码）之前保证内存处于安全状态；零值是安全网，构造器是覆盖。收尾加限定词："默认对象分配在堆，但 C2 逃逸分析可以对不逃逸对象标量替换、彻底消除堆分配——机制是化整为零，不是栈上分配。"</p>
+</div>
+
+<h3>参数速查</h3>
+
+<table class="nb-table">
+<thead><tr><th>参数</th><th>默认值</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>-XX:+UseTLAB</code></td><td>Server 模式 true</td><td>启用线程本地分配缓冲区（生产 JVM 默认就有）</td></tr>
+<tr><td><code>-XX:TLABSize</code></td><td>不设（自适应）</td><td>手动固定 TLAB 大小（字节）；默认由 JVM 按线程分配模式动态调整</td></tr>
+<tr><td><code>-XX:TLABWasteTarget</code></td><td>1</td><td>TLAB 浪费目标：废弃剩余空间 ≤ TLAB 大小 × 1%（是浪费目标，不是 Eden 占比）</td></tr>
+<tr><td><code>-XX:ObjectAlignmentInBytes</code></td><td>8</td><td>对象对齐粒度（字节）；对象总大小必须是它的倍数，决定最小对象尺寸 16B</td></tr>
+<tr><td><code>-XX:+UseCompressedOops</code></td><td>true</td><td>压缩对象引用为 4B；堆 &lt; 32GB 时生效（2<sup>32</sup> × 8B 对齐）</td></tr>
+<tr><td><code>-XX:MaxTenuringThreshold</code></td><td>15</td><td>晋升老年代的 GC 年龄阈值（age 存在 Mark Word 的 4 个位里）</td></tr>
+<tr><td><code>-XX:PretenureSizeThreshold</code></td><td>0（关闭）</td><td>超过该大小的对象直接分配老年代（仅 Serial / ParNew 生效）</td></tr>
+<tr><td><code>-XX:+PrintTLAB</code></td><td>false</td><td>JDK 8：GC 时打印 TLAB 统计（fills / waste / slowAllocs）；JDK 9+ 用 -Xlog:gc+tlab</td></tr>
+</tbody>
+</table>
+
+<h3>高频追问速答</h3>
+
+<table class="nb-table">
+<thead><tr><th>追问</th><th>答案要点</th></tr></thead>
+<tbody>
+<tr><td>new 出来的对象一定在堆里吗？</td><td>默认运行时是；C2 + 逃逸分析下，不逃逸对象可被标量替换——拆成标量变量，堆分配彻底消除（不是"搬到栈上"），锁也可消除。优化的是实现，不变的是语义</td></tr>
+<tr><td>TLAB 多大？是固定的吗？</td><td>不固定。默认自适应：JVM 按线程的对象大小分布动态调整；-XX:TLABSize 可手动固定；-XX:TLABWasteTarget 默认 1% 是"浪费目标"（废弃剩余 ≤ 1%），常被误说成"TLAB 是 Eden 的 1%"——错</td></tr>
+<tr><td>为什么 Mark Word 只有 8 字节？</td><td>状态复用：无锁/偏向存 hash(31b) + age(4b)，轻量级/重量级整块改成指向锁结构的指针(62b)，GC 时临时标记；末 2 位锁标志（01/00/10/11）区分状态。同一块 8B 按"当前使用者"整块改写，不是各字段固定槽位</td></tr>
+<tr><td>两个对象 new 出来内存一定连续吗？</td><td>不一定。同一线程 TLAB 内按分配顺序连续；跨线程各用各的 TLAB，地址取决于各自 TLAB 的位置；TLAB refill 后还换了区域。"连续"只在"同线程、同一 TLAB、先后分配"时成立</td></tr>
+<tr><td>压缩指针怎么工作？32GB 上限怎么来的？</td><td>引用存"堆内偏移 ÷ 对齐字节数"（8B 对齐 → 低 3 位恒 0 不存），32 位可表 2<sup>32</sup> 个位置 × 8B = 32GB；读时左移 3 位恢复。对齐改 16B → 上限减半 16GB。这也是大堆服务把堆压在 31G 附近的原因</td></tr>
+<tr><td>对象大小怎么算？</td><td>对象头（普通对象 16B；数组 16B 含长度字段）+ 实例数据（字段按宽度分组布局：long/double 优先，父类先于子类，同宽按声明）+ 对齐填充（8B 倍数）。别手算——JOL 的 ClassLayout.parseInstance().toLayout() 实测为准：Object()=16B，int[8]=48B，{int;long}=24B</td></tr>
+</tbody>
+</table>
+
+<div class="takeaway"><span class="takeaway-label">核心记忆</span>
+<p>一个 <code>new</code> = 五个阶段：<strong>查类 → 分空间 → 填零值 → 写头部 → 跑构造器</strong>。前四步是 JVM 的"出厂设置"（分配即安全：有确定的零值、有完整的对象头、有正确的类归属），第五步才是"用户装修"。掌握这条链路，对象在堆里的一生就看清了出生这一刻——下一篇我们接着看它的另一头：<strong>它怎么被判定为"死了"</strong>——引用计数为什么不行、可达性分析怎么标活对象，见《对象存活判定：引用计数 vs 可达性分析》。</p>
 </div>
 </section>
 
 </main>
-
 </body>
 </html>
