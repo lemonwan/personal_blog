@@ -352,7 +352,138 @@
             <p class="subtitle">❝ 一图看尽Transformer的每一层、每一个组件 ❞</p>
         </div>
 
-        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="3D 全景图" data-num="A" id="s1"><div class="station-head"><span class="station-no">附录</span><h2>Transformer 3D 全景图</h2></div><p>前面 30 课，是把 Transformer <strong>一块一块拆开</strong>讲的。这篇附录反过来——把所有零件重新拼回原位， 摆进一个可以<strong>平移、旋转、缩放</strong>的三维空间，让你一眼看到数据从「一句话」到「下一个词」的完整旅程。</p><p>用鼠标左键<strong>拖动平移</strong>、右键<strong>旋转</strong>、滚轮<strong>缩放</strong>。看够了静态结构， 就点下方的<strong>「开始训练」</strong>按钮——一束光点会从左端的输入出发，逐层流过 Q/K/V、注意力矩阵、 FFN 节点和最终 Softmax。需要看细节时，点<strong>「全屏查看」</strong>。</p><div class="tf3d"><div class="tf3d-shell"><div class="tf3d-stage"><div class="tf3d-canvas"></div><div class="tf3d-note" aria-live="polite"></div></div><div class="tf3d-bar"><button class="tf3d-play"><span aria-hidden="true">▶</span>开始训练：逐步推演</button><button class="tf3d-full" aria-label="全屏查看 Transformer 3D 图" title="全屏查看"><span class="tf3d-full-icon" aria-hidden="true"></span>全屏查看</button><span class="tf3d-hint">左键拖动平移 · 右键拖动旋转 · 滚轮缩放</span></div></div></div><ul class="tf3d-legend"><li><span class="tf3d-swatch" style="background:#E0703A"></span><span><strong>橙色块</strong>：输入 token 与最终预测的「下一个词」（第 22 课分词）。</span></li><li><span class="tf3d-swatch" style="background:#4F8FC0"></span><span><strong>蓝色球阵</strong>：token embedding，表示词义本身（第 1 / 15 课）。</span></li><li><span class="tf3d-swatch" style="background:#D7665B"></span><span><strong>红色节点 x</strong>：token embedding 加上 position embedding 之后的当前位置表示，Q/K/V 都从这里投影出来。</span></li><li><span class="tf3d-swatch" style="background:#D8B23A"></span><span><strong>金色节点 + 矩阵</strong>：Q/K/V 投影、QKᵀ 打分、softmax 权重、A·V 加权求和（第 19 / 20 课）。</span></li><li><span class="tf3d-swatch" style="background:#4FB07A"></span><span><strong>绿色小网络</strong>：FFN 的 W1、GELU、W2 三步，每个位置各自加工（第 21 课）。</span></li><li><span class="tf3d-swatch" style="background:#4F8FC0"></span><span><strong>三组概率柱</strong>：logits → exp(z) → softmax 概率，最高的就是答案（第 11 课）。</span></li><li><span class="tf3d-swatch" style="background:#FF8A4C"></span><span><strong>流动光点</strong>：一次前向传播——信息正在逐层向右传递。</span></li></ul></section><section class="station reveal" data-title="怎么读" data-num="B" id="s2"><div class="station-head"><span class="station-no">导读</span><h2>顺着光点走一遍</h2></div><p>点「演示」后，光点经过的每一站，正好对应前面学过的一课：</p><div class="recap"><h3>图中六站 ↔ 对应课程</h3><ul><li><strong>① 分词</strong>：句子「猫坐在垫子」被切成 4 个 token，各自配一个 id（第 22 课）。</li><li><strong>② 词向量</strong>：每个 token 查表变成一列数字，也就是 token embedding（蓝色球阵，第 1 / 15 课）。</li><li><strong>③ 加位置</strong>：先把 token embedding 和 position embedding 相加，得到当前位置表示 x（红色节点）。</li><li><strong>④ 自注意力</strong>：再把 x 乘三套权重得到 Q/K/V，算 QKᵀ/√d、逐行 softmax，最后用 A·V 混合上下文（第 19 / 20 课）。</li><li><strong>⑤ FFN</strong>：每个位置单独经过 W1 → GELU → W2；图中把节点数缩小，只保留计算骨架（第 21 课）。</li><li><strong>⑥ 2 个 Block + Softmax</strong>：④⑤ 打包成一个 Block；图中画 2 层，最后取末位置做 logits、exp、归一化，得到下一个词概率（第 11 / 24 课）。</li></ul></div><p>把光点多放几遍，你会发现：所谓「大模型生成文字」，不过是<strong>这条流水线一次又一次地跑</strong>—— 每吐出一个词，就把它接到句尾，再从头跑一遍，预测再下一个词（第 23 课的自回归）。 ChatGPT 写一篇长文，就是这条流水线跑了成千上万次。</p><div class="takeaway"><div class="takeaway-label">尾声 · TAKEAWAY</div><p>这张图里没有任何新东西——<span class="tk-hl">每一块你都亲手推导过</span>。 从一根数轴上的向量，到此刻在你眼前旋转的整座 Transformer， AI 始终是<span class="tk-hl">一连串可以追溯的数学与工程决策</span>，垒起来的。旅程到此，山，你已登顶。</p></div></section></div></div></main>
+        <main class="lesson-body"><div style="position:relative"><div><section class="station reveal" data-title="3D 全景图" data-num="A" id="s1"><div class="station-head"><span class="station-no">附录</span><h2>Transformer 3D 全景图</h2></div><p>前面 30 课，是把 Transformer <strong>一块一块拆开</strong>讲的。这篇附录反过来——把所有零件重新拼回原位，让你一眼看到数据从「一句话」到「下一个词」的完整旅程。</p><p>看够了静态结构，就点下方的<strong>「开始训练：逐步推演」</strong>按钮——高亮会从左端的输入出发，<strong>逐站</strong>流过词向量、位置编码、自注意力、FFN，直到最终 Softmax，每一站都标注了对应的课程。</p><div class="tf3d"><div class="tf3d-shell"><div class="tf3d-stage"><div class="tf3d-canvas">
+<svg viewBox="0 0 1100 470" role="img" aria-label="Transformer 前向传播六站全景图：分词、词向量、加位置、自注意力、FFN、Softmax 输出">
+  <rect x="0" y="0" width="1100" height="470" fill="#14141E"/>
+  <text x="30" y="52" font-family="AlimamaShuHeiTi, Noto Sans SC, sans-serif" font-size="17" font-weight="800" fill="#F5EDDB">「猫坐在垫子」的一次前向传播</text>
+  <text x="30" y="74" font-family="JetBrains Mono, monospace" font-size="11" fill="#8C8676">六站流水线 · 每一站对应前面学过的一课</text>
+  <rect x="520" y="66" width="360" height="24" rx="12" fill="none" stroke="#8C8676" stroke-dasharray="4 3"/>
+  <text x="700" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#8C8676">④ 自注意力 ＋ ⑤ FFN = 一个 Block，图中叠 2 层（第 24 课）</text>
+
+  <g stroke="#FF8A4C" stroke-width="2">
+    <line x1="174" y1="240" x2="190" y2="240"/><line x1="334" y1="240" x2="350" y2="240"/>
+    <line x1="484" y1="240" x2="500" y2="240"/><line x1="714" y1="240" x2="730" y2="240"/>
+    <line x1="854" y1="240" x2="870" y2="240"/>
+  </g>
+  <g fill="#FF8A4C">
+    <polygon points="194,240 184,235 184,245"/><polygon points="354,240 344,235 344,245"/>
+    <polygon points="504,240 494,235 494,245"/><polygon points="734,240 724,235 724,245"/>
+    <polygon points="874,240 864,235 864,245"/>
+  </g>
+
+  <g fill="none" stroke="#2E2E44"><rect x="24" y="96" width="150" height="300" rx="12"/><rect x="194" y="96" width="140" height="300" rx="12"/><rect x="354" y="96" width="130" height="300" rx="12"/><rect x="504" y="96" width="210" height="300" rx="12"/><rect x="734" y="96" width="120" height="300" rx="12"/><rect x="874" y="96" width="202" height="300" rx="12"/></g>
+
+  <g class="tf3d-hl" data-step="1" opacity="0"><rect x="24" y="96" width="150" height="300" rx="12" fill="rgba(250,201,74,0.07)" stroke="#FAC94A" stroke-width="3"/></g>
+  <g class="tf3d-hl" data-step="2" opacity="0"><rect x="194" y="96" width="140" height="300" rx="12" fill="rgba(250,201,74,0.07)" stroke="#FAC94A" stroke-width="3"/></g>
+  <g class="tf3d-hl" data-step="3" opacity="0"><rect x="354" y="96" width="130" height="300" rx="12" fill="rgba(250,201,74,0.07)" stroke="#FAC94A" stroke-width="3"/></g>
+  <g class="tf3d-hl" data-step="4" opacity="0"><rect x="504" y="96" width="210" height="300" rx="12" fill="rgba(250,201,74,0.07)" stroke="#FAC94A" stroke-width="3"/></g>
+  <g class="tf3d-hl" data-step="5" opacity="0"><rect x="734" y="96" width="120" height="300" rx="12" fill="rgba(250,201,74,0.07)" stroke="#FAC94A" stroke-width="3"/></g>
+  <g class="tf3d-hl" data-step="6" opacity="0"><rect x="874" y="96" width="202" height="300" rx="12" fill="rgba(250,201,74,0.07)" stroke="#FAC94A" stroke-width="3"/></g>
+
+  <g font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="800" fill="#F5EDDB">
+    <circle cx="46" cy="124" r="11" fill="#E0703A"/><text x="46" y="129" text-anchor="middle" font-size="12">1</text><text x="64" y="129">分词</text>
+    <circle cx="216" cy="124" r="11" fill="#4F8FC0"/><text x="216" y="129" text-anchor="middle" font-size="12">2</text><text x="234" y="129">词向量</text>
+    <circle cx="376" cy="124" r="11" fill="#D7665B"/><text x="376" y="129" text-anchor="middle" font-size="12">3</text><text x="394" y="129">加位置</text>
+    <circle cx="526" cy="124" r="11" fill="#D8B23A"/><text x="526" y="129" text-anchor="middle" font-size="12">4</text><text x="544" y="129">自注意力</text>
+    <circle cx="756" cy="124" r="11" fill="#4FB07A"/><text x="756" y="129" text-anchor="middle" font-size="12">5</text><text x="774" y="129">FFN</text>
+    <circle cx="896" cy="124" r="11" fill="#4F8FC0"/><text x="896" y="129" text-anchor="middle" font-size="12">6</text><text x="914" y="129">Softmax 输出</text>
+  </g>
+  <g font-family="JetBrains Mono, monospace" font-size="10" fill="#8C8676">
+    <text x="64" y="146">第 22 课</text><text x="234" y="146">第 1 / 15 课</text><text x="394" y="146">位置编码</text>
+    <text x="544" y="146">第 19 / 20 课</text><text x="774" y="146">第 21 课</text><text x="914" y="146">第 11 / 24 课</text>
+  </g>
+
+  <g font-family="Noto Sans SC, sans-serif" font-size="13.5" font-weight="700" fill="#fff" text-anchor="middle">
+    <rect x="48" y="170" width="94" height="30" rx="6" fill="#E0703A"/><text x="95" y="190">猫</text>
+    <rect x="48" y="216" width="94" height="30" rx="6" fill="#E0703A"/><text x="95" y="236">坐</text>
+    <rect x="48" y="262" width="94" height="30" rx="6" fill="#E0703A"/><text x="95" y="282">在</text>
+    <rect x="48" y="308" width="94" height="30" rx="6" fill="#E0703A"/><text x="95" y="328">垫子</text>
+  </g>
+  <g font-family="JetBrains Mono, monospace" font-size="10" fill="#8C8676">
+    <text x="148" y="190">· 301</text><text x="148" y="236">· 88</text><text x="148" y="282">· 12</text><text x="148" y="328">· 756</text>
+  </g>
+  <text x="99" y="374" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8C8676">4 个 token + id</text>
+
+  <g fill="#4F8FC0">
+    <g><circle cx="232" cy="185" r="5.5"/><circle cx="250" cy="185" r="5.5"/><circle cx="268" cy="185" r="5.5"/><circle cx="286" cy="185" r="5.5"/></g>
+    <g><circle cx="232" cy="230" r="5.5"/><circle cx="250" cy="230" r="5.5"/><circle cx="268" cy="230" r="5.5"/><circle cx="286" cy="230" r="5.5"/></g>
+    <g><circle cx="232" cy="275" r="5.5"/><circle cx="250" cy="275" r="5.5"/><circle cx="268" cy="275" r="5.5"/><circle cx="286" cy="275" r="5.5"/></g>
+    <g><circle cx="232" cy="320" r="5.5"/><circle cx="250" cy="320" r="5.5"/><circle cx="268" cy="320" r="5.5"/><circle cx="286" cy="320" r="5.5"/></g>
+  </g>
+  <text x="264" y="358" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8C8676">查表 → 4 × d 数字</text>
+
+  <g stroke="#8C8676" stroke-width="1" opacity="0.7">
+    <line x1="360" y1="177" x2="411" y2="185"/><line x1="360" y1="193" x2="411" y2="185"/>
+    <line x1="360" y1="222" x2="411" y2="230"/><line x1="360" y1="238" x2="411" y2="230"/>
+    <line x1="360" y1="267" x2="411" y2="275"/><line x1="360" y1="283" x2="411" y2="275"/>
+    <line x1="360" y1="312" x2="411" y2="320"/><line x1="360" y1="328" x2="411" y2="320"/>
+  </g>
+  <g fill="#D7665B">
+    <circle cx="419" cy="185" r="8"/><circle cx="419" cy="230" r="8"/><circle cx="419" cy="275" r="8"/><circle cx="419" cy="320" r="8"/>
+  </g>
+  <g font-family="JetBrains Mono, monospace" font-size="10.5" fill="#F5EDDB">
+    <text x="433" y="189">x₁</text><text x="433" y="234">x₂</text><text x="433" y="279">x₃</text><text x="433" y="324">x₄</text>
+  </g>
+  <text x="419" y="358" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8C8676">词向量 ＋ 位置向量</text>
+
+  <g fill="none" stroke="#D8B23A" stroke-width="1.4">
+    <rect x="518" y="168" width="36" height="22" rx="4"/><rect x="560" y="168" width="36" height="22" rx="4"/><rect x="602" y="168" width="36" height="22" rx="4"/>
+  </g>
+  <g font-family="JetBrains Mono, monospace" font-size="11" fill="#D8B23A" text-anchor="middle">
+    <text x="536" y="183">Q</text><text x="578" y="183">K</text><text x="620" y="183">V</text>
+  </g>
+  <g stroke="#D8B23A" opacity="0.75">
+    <g fill="#D8B23A">
+      <rect x="524" y="206" width="13" height="13" opacity="0.9"/><rect x="537" y="206" width="13" height="13" opacity="0.3"/><rect x="550" y="206" width="13" height="13" opacity="0.5"/><rect x="563" y="206" width="13" height="13" opacity="0.2"/>
+      <rect x="524" y="219" width="13" height="13" opacity="0.3"/><rect x="537" y="219" width="13" height="13" opacity="0.85"/><rect x="550" y="219" width="13" height="13" opacity="0.4"/><rect x="563" y="219" width="13" height="13" opacity="0.15"/>
+      <rect x="524" y="232" width="13" height="13" opacity="0.45"/><rect x="537" y="232" width="13" height="13" opacity="0.5"/><rect x="550" y="232" width="13" height="13" opacity="0.7"/><rect x="563" y="232" width="13" height="13" opacity="0.2"/>
+      <rect x="524" y="245" width="13" height="13" opacity="0.15"/><rect x="537" y="245" width="13" height="13" opacity="0.3"/><rect x="550" y="245" width="13" height="13" opacity="0.4"/><rect x="563" y="245" width="13" height="13" opacity="0.9"/>
+    </g>
+    <rect x="524" y="206" width="52" height="52" fill="none"/>
+  </g>
+  <line x1="584" y1="232" x2="622" y2="232" stroke="#D8B23A" stroke-width="1.6"/>
+  <polygon points="626,232 617,227.5 617,236.5" fill="#D8B23A"/>
+  <text x="604" y="226" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8C8676">逐行 softmax</text>
+  <rect x="630" y="210" width="64" height="44" rx="8" fill="none" stroke="#D8B23A" stroke-width="1.6"/>
+  <text x="662" y="237" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#D8B23A">A·V</text>
+  <text x="609" y="284" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8C8676">QKᵀ/√d 打分 → 加权求和</text>
+  <text x="609" y="358" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8C8676">每个 token 混合全句上下文</text>
+
+  <g stroke="#4FB07A" stroke-width="1" opacity="0.55">
+    <line x1="766" y1="205" x2="798" y2="192"/><line x1="766" y1="205" x2="798" y2="222"/><line x1="766" y1="205" x2="798" y2="252"/><line x1="766" y1="205" x2="798" y2="282"/>
+    <line x1="766" y1="245" x2="798" y2="192"/><line x1="766" y1="245" x2="798" y2="222"/><line x1="766" y1="245" x2="798" y2="252"/><line x1="766" y1="245" x2="798" y2="282"/>
+    <line x1="766" y1="285" x2="798" y2="192"/><line x1="766" y1="285" x2="798" y2="222"/><line x1="766" y1="285" x2="798" y2="252"/><line x1="766" y1="285" x2="798" y2="282"/>
+    <line x1="802" y1="192" x2="832" y2="205"/><line x1="802" y1="192" x2="832" y2="245"/><line x1="802" y1="192" x2="832" y2="285"/>
+    <line x1="802" y1="222" x2="832" y2="205"/><line x1="802" y1="222" x2="832" y2="245"/><line x1="802" y1="222" x2="832" y2="285"/>
+    <line x1="802" y1="252" x2="832" y2="205"/><line x1="802" y1="252" x2="832" y2="245"/><line x1="802" y1="252" x2="832" y2="285"/>
+    <line x1="802" y1="282" x2="832" y2="205"/><line x1="802" y1="282" x2="832" y2="245"/><line x1="802" y1="282" x2="832" y2="285"/>
+  </g>
+  <g fill="#4FB07A">
+    <circle cx="762" cy="205" r="5.5"/><circle cx="762" cy="245" r="5.5"/><circle cx="762" cy="285" r="5.5"/>
+    <circle cx="800" cy="192" r="5"/><circle cx="800" cy="222" r="5"/><circle cx="800" cy="252" r="5"/><circle cx="800" cy="282" r="5"/>
+    <circle cx="836" cy="205" r="5.5"/><circle cx="836" cy="245" r="5.5"/><circle cx="836" cy="285" r="5.5"/>
+  </g>
+  <g font-family="JetBrains Mono, monospace" font-size="10" fill="#4FB07A" text-anchor="middle">
+    <text x="762" y="316">W1</text><text x="800" y="316">GELU</text><text x="836" y="316">W2</text>
+  </g>
+  <text x="794" y="358" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8C8676">每个位置独立加工</text>
+
+  <g>
+    <rect x="902" y="286" width="18" height="44" rx="3" fill="#4F8FC0" opacity="0.85"/>
+    <rect x="930" y="236" width="18" height="94" rx="3" fill="#FF8A4C"/>
+    <rect x="958" y="300" width="18" height="30" rx="3" fill="#4F8FC0" opacity="0.85"/>
+    <line x1="896" y1="330" x2="992" y2="330" stroke="#8C8676" stroke-width="1.2"/>
+  </g>
+  <line x1="996" y1="316" x2="1010" y2="316" stroke="#FF8A4C" stroke-width="1.6"/>
+  <polygon points="1014,316 1006,312 1006,320" fill="#FF8A4C"/>
+  <rect x="1016" y="296" width="48" height="40" rx="6" fill="#E0703A"/>
+  <text x="1040" y="321" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="800" fill="#fff">毛</text>
+  <g font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8C8676" text-anchor="middle">
+    <text x="948" y="358">logits → exp → 归一化</text>
+    <text x="1040" y="374">下一个词</text>
+  </g>
+  <text x="550" y="446" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5A5A74">静帧全景 · 原图为可旋转 3D 场景 · 点击下方按钮逐站推演</text>
+</svg></div><div class="tf3d-note" aria-live="polite">点击下方按钮，跟随高亮逐站推演一次前向传播</div></div><div class="tf3d-bar"><button class="tf3d-play"><span aria-hidden="true">▶</span>开始训练：逐步推演</button><span class="tf3d-hint">▶ 点击按钮 · 逐站推演一次前向传播</span></div></div></div><ul class="tf3d-legend"><li><span class="tf3d-swatch" style="background:#E0703A"></span><span><strong>橙色块</strong>：输入 token 与最终预测的「下一个词」（第 22 课分词）。</span></li><li><span class="tf3d-swatch" style="background:#4F8FC0"></span><span><strong>蓝色球阵</strong>：token embedding，表示词义本身（第 1 / 15 课）。</span></li><li><span class="tf3d-swatch" style="background:#D7665B"></span><span><strong>红色节点 x</strong>：token embedding 加上 position embedding 之后的当前位置表示，Q/K/V 都从这里投影出来。</span></li><li><span class="tf3d-swatch" style="background:#D8B23A"></span><span><strong>金色节点 + 矩阵</strong>：Q/K/V 投影、QKᵀ 打分、softmax 权重、A·V 加权求和（第 19 / 20 课）。</span></li><li><span class="tf3d-swatch" style="background:#4FB07A"></span><span><strong>绿色小网络</strong>：FFN 的 W1、GELU、W2 三步，每个位置各自加工（第 21 课）。</span></li><li><span class="tf3d-swatch" style="background:#4F8FC0"></span><span><strong>三组概率柱</strong>：logits → exp(z) → softmax 概率，最高的就是答案（第 11 课）。</span></li><li><span class="tf3d-swatch" style="background:#FF8A4C"></span><span><strong>流动光点</strong>：一次前向传播——信息正在逐层向右传递。</span></li></ul></section><section class="station reveal" data-title="怎么读" data-num="B" id="s2"><div class="station-head"><span class="station-no">导读</span><h2>顺着光点走一遍</h2></div><p>点「演示」后，光点经过的每一站，正好对应前面学过的一课：</p><div class="recap"><h3>图中六站 ↔ 对应课程</h3><ul><li><strong>① 分词</strong>：句子「猫坐在垫子」被切成 4 个 token，各自配一个 id（第 22 课）。</li><li><strong>② 词向量</strong>：每个 token 查表变成一列数字，也就是 token embedding（蓝色球阵，第 1 / 15 课）。</li><li><strong>③ 加位置</strong>：先把 token embedding 和 position embedding 相加，得到当前位置表示 x（红色节点）。</li><li><strong>④ 自注意力</strong>：再把 x 乘三套权重得到 Q/K/V，算 QKᵀ/√d、逐行 softmax，最后用 A·V 混合上下文（第 19 / 20 课）。</li><li><strong>⑤ FFN</strong>：每个位置单独经过 W1 → GELU → W2；图中把节点数缩小，只保留计算骨架（第 21 课）。</li><li><strong>⑥ 2 个 Block + Softmax</strong>：④⑤ 打包成一个 Block；图中画 2 层，最后取末位置做 logits、exp、归一化，得到下一个词概率（第 11 / 24 课）。</li></ul></div><p>把光点多放几遍，你会发现：所谓「大模型生成文字」，不过是<strong>这条流水线一次又一次地跑</strong>—— 每吐出一个词，就把它接到句尾，再从头跑一遍，预测再下一个词（第 23 课的自回归）。 ChatGPT 写一篇长文，就是这条流水线跑了成千上万次。</p><div class="takeaway"><div class="takeaway-label">尾声 · TAKEAWAY</div><p>这张图里没有任何新东西——<span class="tk-hl">每一块你都亲手推导过</span>。 从一根数轴上的向量，到此刻在你眼前旋转的整座 Transformer， AI 始终是<span class="tk-hl">一连串可以追溯的数学与工程决策</span>，垒起来的。旅程到此，山，你已登顶。</p></div></section></div></div></main>
         
         <a href="appendix-attention-paper.html" class="next-card">
                     <span class="next-arrow">→</span>
