@@ -1,9 +1,10 @@
 # 自动部署：推送到 main 后，在 GitHub Actions 上构建静态产物，
 # 并通过 rsync + SSH 同步到服务器的 nginx 根目录。
 #
-# 首次使用前需要做两件事（见 README 或对话说明）：
-# 1. 把下面 DEPLOY_PATH 改成服务器上 nginx 的根目录；
-# 2. 在仓库 Settings → Secrets and variables → Actions 里配置：
+# 首次使用前需要做的配置（见 README 或对话说明）：
+# 1. nginx 根目录：在仓库 Settings → Secrets and variables → Actions 里
+#    配置 NGINX_ROOT（配在 Variables 或 Secrets 里都可以）；
+# 2. 配置以下 secrets：
 #    - SSH_HOST          服务器 IP 或域名
 #    - SSH_USER          SSH 登录用户（需对 DEPLOY_PATH 有写权限）
 #    - SSH_PRIVATE_KEY   部署专用私钥（公钥需加入服务器 ~/.ssh/authorized_keys）
@@ -25,8 +26,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # TODO: 改成你服务器上 nginx 的根目录
-      DEPLOY_PATH: /home/wanzhijun/workspace/docker/nginx/html
+      # nginx 根目录：优先读 Variables 里的 NGINX_ROOT，兼容配在 Secrets 里的情况
+      DEPLOY_PATH: ${{ vars.NGINX_ROOT || secrets.NGINX_ROOT }}
     steps:
       - name: 拉取代码
         uses: actions/checkout@v5
@@ -65,6 +66,12 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
         run: |
+          # 空值保护：NGINX_ROOT 没配置时 rsync 目标会变成服务器根目录，
+          # 叠加 --delete 可能误删文件，必须直接失败
+          if [ -z "$DEPLOY_PATH" ] || [ "$DEPLOY_PATH" = "/" ]; then
+            echo "DEPLOY_PATH 为空，请检查仓库 Variables / Secrets 里的 NGINX_ROOT"
+            exit 1
+          fi
           rsync -az --delete \
             -e "ssh -p ${SSH_PORT:-22} -i ~/.ssh/deploy_key" \
             out/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
