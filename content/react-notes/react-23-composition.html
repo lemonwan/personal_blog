@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>组合优于继承：Java 设计原则的前端回响</title>
+</head>
+<body>
+
+<!-- ═══ 第1站：Java 里的教训 ═══ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>一条你背过的原则，先在 Java 里翻过车</h2></div>
+
+<p>卷三到上一站正式收官：状态分了类（第 17 篇）、选了容器（第 18~20 篇）、收服了表单（第 21 篇）、钉进了磁盘（第 22 篇）。卷四「组件设计与工程化」开篇，第一课不讲新 API，讲一条你八成在《Effective Java》里背过的原则——<strong>组合优于继承（Favor composition over inheritance）</strong>。因为 React 把这条原则执行到了极致，而理解「为什么极致」，恰好要从 Java 翻过的车看起。</p>
+
+<p>先复现一次经典车祸。模板方法模式，基类定流程、子类填坑：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderService.java</b> · 继承式扩展：三个月后的定时炸弹</span></div>
+  <pre><code><span class="c">// 模板方法：基类定死流程，子类填坑</span>
+public abstract class BaseOrderService {
+    public final Order place(Order order) {
+        applyDiscount(order);   <span class="c">// 步骤 1：折扣</span>
+        applyShipping(order);   <span class="c">// 步骤 2：运费</span>
+        return save(order);     <span class="c">// 步骤 3：落库</span>
+    }
+    protected abstract void applyDiscount(Order order);
+}
+
+public class VipOrderService extends BaseOrderService {
+    @Override
+    protected void applyDiscount(Order order) {
+        <span class="c">// 心照不宣地依赖了父类「折扣一定发生在运费之前」</span>
+        order.setPrice(order.getPrice().multiply(new BigDecimal("0.8")));
+    }
+}</code></pre>
+</div>
+
+<p>三个月后，有人为了优化运费计算，把基类里两步对调了位置。编译照样绿，测试也许照样过——直到财务发现 VIP 订单的价格全算错了。这就是<strong>脆弱基类问题（fragile base class）</strong>：子类看不见、却依赖着父类的实现细节，父类改一行，子孙满堂陪葬。再加上「为一点差异就 extends」导致的继承层次腐烂——五层之后没人说得清 <code>order</code> 到底走了哪个覆写——Java 社区早就用血泪换来了那条原则。</p>
+
+<p>有意思的是，Spring 自己也在逃离继承：<code>WebSecurityConfigurerAdapter</code>（继承式安全配置）在 5.7 被弃用，官方改推声明一个 <code>SecurityFilterChain</code> Bean 的组合式写法；<code>HandlerInterceptorAdapter</code> 同样退场，直接实现接口即可。框架的进化方向，就是答案。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：白盒复用 vs 黑盒复用</div>
+  <p>继承是白盒复用：子类看得见父类内部，复用越深，耦合越死，父类一动全塔震动。组合是黑盒复用：只依赖对方暴露的接口，内部实现随便换。你在 Java 里学的这条设计原则，React 不是「借鉴」，而是把它设成了默认值——后面四站讲的就是「默认值」长什么样。</p>
+</div>
+</section>
+
+<!-- ═══ 第2站：React 没有继承 ═══ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>React 的答案：压根没有继承这回事</h2></div>
+
+<p>React 组件之间<strong>不能继承</strong>。函数组件连类都没有，extends 无从谈起；class 组件时代的 <code>extends React.Component</code> 只是接入框架的仪式，官方从未鼓励业务组件之间互相继承，如今更是全面转向函数组件。想复用一个组件？不是继承它，而是<strong>把它装进另一个组件里用</strong>。</p>
+
+<p>第一个组合手段：<strong>children 包裹</strong>。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Card.tsx</b> · 最小形态的组合：泛化容器</span></div>
+  <pre><code>import type { ReactNode } from "react";
+
+<span class="c">// Card 不知道、也不关心 children 里是什么——黑盒</span>
+function Card({ children }: { children: ReactNode }) {
+  return (
+    &lt;div className="card"&gt;
+      &lt;div className="card-body"&gt;{children}&lt;/div&gt;
+    &lt;/div&gt;
+  );
+}
+
+<span class="c">// 使用处：装什么都行，复用的是「结构 + 样式」</span>
+&lt;Card&gt;
+  &lt;h3&gt;订单已支付&lt;/h3&gt;
+  &lt;p&gt;预计 3 天内送达&lt;/p&gt;
+&lt;/Card&gt;</code></pre>
+</div>
+
+<p>Card 复用的是卡片的外壳（边框、内边距、阴影），内容作为参数传入。它不继承任何业务组件，也不被任何业务组件继承——内容与容器之间只隔着 props 这一层薄薄的契约。试着用继承表达这张卡片？你会得到 <code>BaseCard</code>、<code>TextCard</code>、<code>ImageCard</code>、<code>TextImageCard</code>……而 children 一个参数就终结了讨论。</p>
+
+<div class="think">
+  <div class="think-q">children 的本质是什么？你其实早就会：依赖注入。Card 在参数表里声明「我需要一个内容」，调用方注入具体内容——和构造器注入一个协作对象是同一个思想，只不过注入的不是 Bean，而是一段待渲染的 UI。children 还有更多玩法（函数式 children、插槽复合组件），第 25 篇展开。</div>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：注入协作对象，而不是继承它</div>
+  <p>订单服务需要发短信，你的选择从来不是 extends SmsService 去偷它的方法，而是 @Autowired 注入一个 SmsSender 接口。children 就是这个思路在 UI 层的样子：容器声明需要的「坑位」，调用方填内容——黑盒、可替换、零父子耦合。</p>
+</div>
+</section>
+
+<!-- ═══ 第3站：多插槽与 props 传组件 ═══ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>多插槽与「props 传组件」</h2></div>
+
+<p>children 只有一个口。页面骨架通常需要三个口：顶栏、侧边栏、主内容。解法顺理成章——<strong>插槽做成 props</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>PageLayout.tsx</b> · 多插槽布局：骨架是容器，内容是参数</span></div>
+  <pre><code>import type { ReactNode } from "react";
+
+interface PageLayoutProps {
+  top: ReactNode;      <span class="c">// 插槽 1：顶栏</span>
+  sidebar: ReactNode;  <span class="c">// 插槽 2：侧边栏</span>
+  children: ReactNode; <span class="c">// 插槽 3：主内容</span>
+}
+
+function PageLayout({ top, sidebar, children }: PageLayoutProps) {
+  return (
+    &lt;div className="page"&gt;
+      &lt;div className="page-top"&gt;{top}&lt;/div&gt;
+      &lt;div className="page-main"&gt;
+        &lt;aside&gt;{sidebar}&lt;/aside&gt;
+        &lt;main&gt;{children}&lt;/main&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  );
+}
+
+<span class="c">// 调用方自由拼装，Layout 对内容零感知</span>
+&lt;PageLayout top={&lt;TopNav /&gt;} sidebar={&lt;CategoryTree /&gt;}&gt;
+  &lt;ProductList /&gt;
+&lt;/PageLayout&gt;</code></pre>
+</div>
+
+<p>注意 props 里放的是 <code>&lt;TopNav /&gt;</code> 这种<strong>已经创建好的元素（element）</strong>，而不只是数据。传元素还是传组件类型（比如收一个 <code>Comp: ComponentType</code> 再在内部渲染 <code>&lt;Comp /&gt;</code>）各有场景，后者的关键是：变量必须<strong>大写开头</strong>才会被 JSX 当组件渲染——这正是第 2 篇讲过的 JSX 规则在组合场景的直接应用。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="继承金字塔与组合积木的对比">
+  <defs>
+    <marker id="arr23" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/>
+    </marker>
+  </defs>
+
+  <text x="150" y="34" text-anchor="middle" font-size="13" fill="#C2410C">继承：塔越垒越高</text>
+
+  <rect x="100" y="92" width="100" height="44" rx="6" fill="#FFFFFF" stroke="#C2410C"/>
+  <text x="150" y="118" text-anchor="middle" font-size="12" fill="#C2410C">第 5 层…</text>
+
+  <rect x="85" y="156" width="130" height="44" rx="6" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="150" y="182" text-anchor="middle" font-size="12" fill="#1C1C1C">VipOrderService</text>
+
+  <rect x="70" y="220" width="160" height="44" rx="6" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="150" y="246" text-anchor="middle" font-size="12" fill="#1C1C1C">BaseOrderService</text>
+
+  <line x1="150" y1="136" x2="150" y2="152" stroke="#C2410C" marker-end="url(#arr23)"/>
+  <line x1="150" y1="200" x2="150" y2="216" stroke="#C2410C" marker-end="url(#arr23)"/>
+  <text x="205" y="130" font-size="11" fill="#8C8676">extends</text>
+  <text x="205" y="194" font-size="11" fill="#8C8676">extends</text>
+  <text x="150" y="286" text-anchor="middle" font-size="11" fill="#8C8676">改基类一步，全塔震动</text>
+
+  <text x="465" y="34" text-anchor="middle" font-size="13" fill="#177245">组合：骨架装内容</text>
+
+  <rect x="360" y="60" width="210" height="200" rx="6" fill="#FFFFFF" stroke="#1C1C1C"/>
+  <rect x="372" y="72" width="186" height="34" rx="4" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="465" y="94" text-anchor="middle" font-size="12" fill="#1C1C1C">top 插槽</text>
+
+  <rect x="372" y="118" width="80" height="130" rx="4" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="412" y="178" text-anchor="middle" font-size="12" fill="#1C1C1C">sidebar</text>
+  <text x="412" y="196" text-anchor="middle" font-size="11" fill="#8C8676">想换就换</text>
+
+  <rect x="464" y="118" width="94" height="130" rx="4" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="511" y="178" text-anchor="middle" font-size="12" fill="#1C1C1C">children</text>
+  <text x="511" y="196" text-anchor="middle" font-size="11" fill="#8C8676">随便装什么</text>
+
+  <text x="465" y="286" text-anchor="middle" font-size="11" fill="#8C8676">内容是参数，不是子类</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>同一个「页面骨架」需求：左边继承塔牵一发动全身，右边一个布局组件收插槽</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：模板方法模式的正解</div>
+  <p>BasePage 定骨架、子类填坑的模板方法，在 React 里就是一个收 ReactNode props 的布局组件：骨架是「结构复用」，坑位是「参数」。没有父子耦合，想换顶栏换顶栏，想换内容换内容——你要的「定流程、留扩展点」，插槽全部给了，且不用付继承的税。</p>
+</div>
+</section>
+
+<!-- ═══ 第4站：组合爆炸与一个 Button ═══ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>组合爆炸：四个按钮类的教训与一个 Button 的解法</h2></div>
+
+<p>组合的第三种手法出现在一个经典困境里。做按钮组件库，起步很顺：<code>PrimaryButton</code>、<code>DangerButton</code> 各继承自 <code>Button</code>。新需求来了：提交时要 loading 态——于是 <code>LoadingButton</code>、<code>LoadingPrimaryButton</code>、<code>LoadingDangerButton</code>……再加一个 size 维度，类数量直接翻倍。<strong>继承是乘法：每加一个正交维度，子类数量乘以 2</strong>。Java 仓库里那些 <code>AbstractPrimaryLoadingIconButton</code> 就这么来的。</p>
+
+<p>React 的解法：只留一个 Button，把维度全部变成 props。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Button.tsx</b> · 类矩阵 → 参数组合：乘法变加法</span></div>
+  <pre><code>import type { ReactNode } from "react";
+
+interface ButtonProps {
+  variant?: "primary" | "danger"; <span class="c">// 颜色维度</span>
+  loading?: boolean;              <span class="c">// 状态维度</span>
+  children: ReactNode;
+}
+
+function Button({ variant = "primary", loading = false, children }: ButtonProps) {
+  return (
+    &lt;button className={"btn btn-" + variant} disabled={loading}&gt;
+      {loading ? "处理中…" : children}
+    &lt;/button&gt;
+  );
+}
+
+<span class="c">// 4 种组合，0 个子类：维度正交，各管各的</span>
+&lt;Button variant="primary" loading&gt;保存&lt;/Button&gt;
+&lt;Button variant="danger"&gt;删除&lt;/Button&gt;</code></pre>
+</div>
+
+<p>类的数量是 1，表达力是全组合。新增维度就是加一个 prop，不动任何已有代码——对脆弱基类问题釜底抽薪：<strong>压根没有基类</strong>。原来 2×2×2 的类矩阵，塌缩成一个接收三个参数的函数。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：把「分类」变成「参数」</div>
+  <p>继承是先分类再实例化（IS-A），组合是直接描述特征（HAS-A）。就像你用 @ConditionalOnProperty 一个配置类切遍所有环境，而不是给每个环境复制一个子工程；又像把嵌套的 if-else 换成策略表——维度正交化之后，复杂度从指数级掉回线性。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">那什么时候该收「元素」（children/插槽）而不是收 props？判断标准是可枚举性：variant、loading 这种有限可枚举的变化，收 props；不可枚举的变化（卡片里到底装什么内容只有调用方知道），退回 children。两个工具不冲突，Button 里照样可以放 children。</div>
+</div>
+</section>
+
+<!-- ═══ 第5站：三层复用观 + 收官 ═══ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>三层复用观：逻辑、结构、样式各找各妈</h2></div>
+
+<p>把前四站和卷二的知识拼起来，React 生态其实把「复用」拆成了三个正交的层，每层有专属工具：</p>
+
+<table>
+  <thead>
+    <tr><th>你想复用什么</th><th>正解</th><th>反模式</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>逻辑</strong>：取数、防抖、计时、订阅</td><td>自定义 Hook（第 13 篇）</td><td>搞个基类放 protected 方法</td></tr>
+    <tr><td><strong>结构</strong>：布局、卡片、模态框骨架</td><td>组合：children / 插槽 props</td><td>模板方法式的组件基类</td></tr>
+    <tr><td><strong>样式</strong>：颜色、间距、圆角</td><td>CSS / class / 设计 token</td><td>用组件继承链层层传递样式</td></tr>
+  </tbody>
+</table>
+
+<p>补两个历史坐标：HOC 与 render props（第 26 篇）本质也是组合，只是 Hooks 出现之前复用逻辑的过渡方案——读老代码遇到时不必慌；组件拆到什么粒度、边界划在哪，第 27 篇接着谈。</p>
+
+<p>归结成一句话：《Effective Java》说组合优于继承，是提醒你「能不用就不用」；React 更进一步——<strong>几乎没有继承，一切复用皆组合</strong>。你在 Java 里好不容易养成的「少用继承」直觉，在 React 里是默认设置，连纠结的机会都省了。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>继承的三宗病：脆弱基类（子类依赖父类实现细节）、层次腐烂、组合爆炸；Spring 自己都在弃用继承式扩展点（WebSecurityConfigurerAdapter）。</li>
+    <li>React 组件之间没有继承：复用结构靠 children 包裹、多插槽 props、props 传组件（变量大写开头才当组件渲染）。</li>
+    <li>正交维度收成参数（variant / loading），别造类矩阵；不可枚举的内容才收 children。</li>
+    <li>三层复用观：逻辑 → 自定义 Hook，结构 → 组合，样式 → CSS；HOC / render props 是历史过渡形态。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>卷四开篇立了总纲：组件复用的一切手段——children、插槽、收组件的 props、自定义 Hook——都是「组合」这个 Java 老原则的具体化。但组合出来的组件有个绕不开的接头问题：input 里的值到底听 React 的，还是听 DOM 的？第 21 篇 register 用非受控埋下的伏笔，下一篇第 24 篇「受控与非受控组件」正式回收。</p>
+</div>
+</section>
+
+</body>
+</html>

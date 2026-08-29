@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>动态路由与参数解析</title>
+</head>
+<body>
+
+<!-- ═══ 第1站：路径参数与 useParams ═══ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>路径参数：useParams 就是前端的 @PathVariable</h2></div>
+
+<p>上一篇第 30 篇的路由表里出现了 <code>users/:id</code>，这个 <code>:id</code> 就是<strong>路径参数</strong>——同一条路由规则，配千变万化的 URL。你在后端早就天天用它：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserController.java</b> · 后端的路径参数</span></div>
+  <pre><code>@GetMapping("/users/{id}")
+public String detail(@PathVariable Long id, Model model) {
+    <span class="c">// Spring 把 URL 里的 "42" 抽出来，还顺手转成了 Long</span>
+    model.addAttribute("user", userService.findById(id));
+    return "user/detail";
+}</code></pre>
+</div>
+
+<p>前端的用法几乎逐字对应，只是取参数从方法签名换成了一个 Hook：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserDetail.tsx</b> · 前端的路径参数</span></div>
+  <pre><code>import { useParams } from "react-router-dom";
+
+function UserDetail() {
+  <span class="c">// 路由表注册的是 "users/:id"，这里用同名 key 取</span>
+  const { id } = useParams&lt;{ id: string }&gt;();
+
+  return &lt;h2&gt;用户 #{id} 的详情&lt;/h2&gt;;
+}</code></pre>
+</div>
+
+<p>两个必须刻在脑子里的差异：<strong>第一，<code>useParams</code> 拿到的永远是字符串</strong>——URL 里的 <code>42</code> 到手是 <code>"42"</code>，没有 Long 自动转换，想算术运算得自己 <code>Number()</code>；<strong>第二，嵌套路由各层的参数会合并进同一个对象</strong>——路由表里父级是 <code>users/:userId</code>、子级是 <code>orders/:orderId</code>，在子组件里 <code>useParams()</code> 一把全拿到。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="一条 URL 的两个参数区：路径参数与查询参数">
+  <text x="310" y="34" text-anchor="middle" font-size="13" fill="#1C1C1C">一条 URL 的两个参数区</text>
+
+  <rect x="50" y="58" width="520" height="40" rx="8" fill="#1C1C1C"/>
+  <text x="310" y="83" text-anchor="middle" font-size="14" fill="#FFFFFF">/users/42/orders?tab=paid&amp;page=2</text>
+
+  <line x1="308" y1="58" x2="308" y2="112" stroke="#8C8676" stroke-dasharray="4 3"/>
+
+  <line x1="176" y1="112" x2="176" y2="120" stroke="#177245"/>
+  <line x1="176" y1="120" x2="306" y2="120" stroke="#177245"/>
+  <line x1="306" y1="112" x2="306" y2="120" stroke="#177245"/>
+  <text x="241" y="138" text-anchor="middle" font-size="12" fill="#177245">路径参数 :id → useParams</text>
+  <text x="241" y="158" text-anchor="middle" font-size="11" fill="#8C8676">到手是 "42"，字符串</text>
+
+  <line x1="318" y1="112" x2="318" y2="120" stroke="#C2410C"/>
+  <line x1="318" y1="120" x2="448" y2="120" stroke="#C2410C"/>
+  <line x1="448" y1="112" x2="448" y2="120" stroke="#C2410C"/>
+  <text x="383" y="138" text-anchor="middle" font-size="12" fill="#C2410C">查询参数 → useSearchParams</text>
+  <text x="383" y="158" text-anchor="middle" font-size="11" fill="#8C8676">tab、page，可缺省</text>
+
+  <rect x="96" y="212" width="14" height="14" fill="#177245"/>
+  <text x="118" y="224" font-size="12" fill="#1C1C1C">@PathVariable Long id</text>
+  <text x="118" y="244" font-size="11" fill="#8C8676">框架帮你抽参数、转类型</text>
+
+  <rect x="330" y="212" width="14" height="14" fill="#C2410C"/>
+  <text x="352" y="224" font-size="12" fill="#1C1C1C">@RequestParam String tab</text>
+  <text x="352" y="244" font-size="11" fill="#8C8676">参数名 + 默认值，前端要自己兜</text>
+
+  <text x="310" y="280" text-anchor="middle" font-size="12" fill="#8C8676">两路参数都是字符串进来：转不转、信不信，前端要自己把关</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>一条 URL 的两个参数区：问号前是路径参数（useParams），问号后是查询参数（useSearchParams）</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：丢了类型转换这一层</div>
+  <p>@PathVariable Long id 一步到位：抽取 + 类型转换都是框架的事，转不动还直接给你抛异常。前端 useParams 只负责抽取，返回的全是 string——类型转换和校验这两步从框架手里还给了你，这一站先记账，最后一站还账。</p>
+</div>
+</section>
+
+<!-- ═══ 第2站：查询参数与 useSearchParams ═══ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>查询参数：useSearchParams 就是 @RequestParam</h2></div>
+
+<p>什么时候用查询参数？判断标准和后端一致：<strong>不改变「资源本身」、只是视图状态的，放查询参数</strong>。还是 /users/42 这个资源，但看第几页、筛哪个状态、开哪个 tab——<code>?tab=orders&amp;page=2</code>。这些状态放 URL 里还有个好处：用户刷新、收藏、分享链接，状态都还在，和后端接口的翻页参数一个道理。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserOrders.tsx</b> · 读取与写入查询参数</span></div>
+  <pre><code>import { useSearchParams } from "react-router-dom";
+
+function UserOrders() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  <span class="c">// 读：get 返回 string | null，默认值要自己兜（对照 defaultValue）</span>
+  const page = Number(searchParams.get("page") ?? "1");
+  const status = searchParams.get("status") ?? "all";
+
+  function selectStatus(next: string) {
+    <span class="c">// 写：函数式更新，prev 是当前的查询参数，改完整体替换</span>
+    setSearchParams(prev =&gt; {
+      prev.set("status", next);
+      prev.set("page", "1");   <span class="c">// 筛选变了，页码回 1</span>
+      return prev;
+    });
+    <span class="c">// 这一次 setSearchParams 就是一次客户端导航（默认压入历史）</span>
+    <span class="c">// 翻页不想要历史记录的话：setSearchParams(prev => ..., { replace: true })</span>
+  }
+
+  return (
+    &lt;select value={status} onChange={e =&gt; selectStatus(e.target.value)}&gt;
+      &lt;option value="all"&gt;全部&lt;/option&gt;
+      &lt;option value="paid"&gt;已支付&lt;/option&gt;
+      &lt;option value="refunded"&gt;已退款&lt;/option&gt;
+    &lt;/select&gt;
+  );
+}</code></pre>
+</div>
+
+<p>三个使用要点：</p>
+
+<ol>
+  <li><strong>读</strong>：<code>searchParams.get("page")</code> 返回 <code>string | null</code>，null 的话用 <code>??</code> 兜默认值——<code>@RequestParam(defaultValue = "1")</code> 那行的活儿，前端要自己干。</li>
+  <li><strong>写</strong>：<code>setSearchParams({...})</code> 对象写法是<strong>整体替换</strong>，会丢掉没写的参数；要保留其他参数就用上面的函数式写法，在 <code>prev</code> 上 <code>set</code>。</li>
+  <li><strong>写就是导航</strong>：<code>setSearchParams</code> 会触发重渲染并改 URL，组件不用再手动 <code>setState</code>——「URL 即状态」，你把状态的变化全权托付给了地址栏。</li>
+</ol>
+
+<div class="crack">
+  <div class="crack-label">后端类比：筛选条件上不下不上 URL</div>
+  <p>你给列表接口写 @RequestParam page、size、status，从不把这些塞进 POST body——因为它们是「这一次查询」的描述，理应出现在 URL 里、能被书签复现。前端同理：页码、筛选、tab 放 useSearchParams（URL），而「选中了某一行」这种临时交互态放组件 state。判据和后端一模一样。</p>
+</div>
+</section>
+
+<!-- ═══ 第3站：location.state ═══ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>URL 之外的暗道：location.state</h2></div>
+
+<p>还有第三种传数据的方式：跳转时<strong>不写进 URL、只夹在这次导航里</strong>。后端也有这个机制——redirect attributes / flash attribute：重定向时捎带一次性的数据，用完即焚。<code>useLocation</code> 读到的 <code>state</code> 就是前端的这个暗道：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>AuthGuard.tsx / LoginPage.tsx</b> · 最典型场景：登录后回跳</span></div>
+  <pre><code>import { useNavigate, useLocation } from "react-router-dom";
+
+<span class="c">// 守卫发现没登录：带着「用户本来想去哪」跳去登录页（第 35 篇展开）</span>
+navigate("/login", {
+  state: { from: location.pathname },
+  replace: true,
+});
+
+<span class="c">// 登录页：登录成功，从 state 里取出原目的地</span>
+function LoginPage() {
+  const { state } = useLocation();
+  const from = (state as { from?: string } | null)?.from ?? "/dashboard";
+  navigate(from, { replace: true });
+}</code></pre>
+</div>
+
+<p>它的三条性质，决定了什么时候该用它：</p>
+
+<ul>
+  <li><strong>不出现在 URL 里</strong>：用户复制链接发给别人，<code>state</code> 带不过去——所以只放「这一次跳转」需要的 UI 态（来源标记、回跳地址），别放业务数据。</li>
+  <li><strong>可以传对象</strong>：不用像查询参数那样全是字符串，对象直接塞，<code>useLocation().state</code> 原样取回。</li>
+  <li><strong>存在浏览器历史条目里</strong>：刷新后 state 还在（浏览器替你存着），但这是「赠品」不是契约，业务上别依赖它必须存在——所以取值时老老实实判空兜底。</li>
+</ul>
+
+<div class="think">
+  <div class="think-q">三种通道怎么选？会出现在地址栏、要能被收藏分享的（页码、筛选、tab）→ useSearchParams；只服务「这一次跳转」的（回跳地址、来源）→ location.state；资源的身份本身（用户 id）→ 路径参数。和后端的 @PathVariable / @RequestParam / flash attribute 的分工完全同构。</div>
+</div>
+</section>
+
+<!-- ═══ 第4站：参数变化组件不重启 ═══ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>参数变了，组件却不「重启」</h2></div>
+
+<p>这一站是后端思维最容易翻车的地方。从 <code>/users/1</code> 点到 <code>/users/2</code>，直觉上「换页面了」；但对 React Router 来说，<strong>两条 URL 命中的是同一条路由规则 → 组件根本不重新挂载，只是带着新参数重渲染了一次</strong>。</p>
+
+<p>类比一下：这不是「重新 new 一个 Controller」，而是<strong>同一个单例 Bean 的方法被再次调用</strong>——实例里的字段原样保留。映射到组件里：你的 <code>useState</code> 不会归零、<code>useEffect</code> 不会自动重跑。后果就是经典的「点了下一个用户，页面还显示上一个用户的数据」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserDetail.tsx</b> · 两个解法</span></div>
+  <pre><code><span class="c">// 坑：没有依赖数组时，effect 只在挂载时跑一次</span>
+<span class="c">// 之后 id 从 1 变 2，effect 假装不知道——页面停在旧数据</span>
+useEffect(() =&gt; {
+  loadUser(id);
+}, [id]);    <span class="c">// 解法一：把 id 放进依赖数组，id 变了就重跑（第 10 篇）</span>
+
+<span class="c">// 解法二：有时你就是要「每个 id 一个全新实例」——</span>
+<span class="c">// 重置滚动条、重置表单、重放动画。key 一变，React 直接</span>
+<span class="c">// 丢弃旧实例、重新挂载（第 7 篇 key 的老规则，用在路由上）</span>
+&lt;UserDetail key={id} /&gt;</code></pre>
+</div>
+
+<p><code>key</code> 这个技巧值得多说一句：与其在组件里写一堆「参数变了就重置」的 if-else，不如让 React 把旧实例整个扔掉、当它是个新组件——就像与其在一个长生命周期对象里维护 reset 逻辑，不如直接 new 一个新的。代价是全部 state 归零、子树全部重建，所以只在「确实需要全新起点」时用。</p>
+
+<p>顺便补上「嵌套参数与相对链接」。当前 URL 是 <code>/users/42</code>（父路由 <code>users/:id</code>），页面里的链接可以写相对路径，React Router 按路由层级解析：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserDetail.tsx</b> · 相对链接</span></div>
+  <pre><code>&lt;Link to="orders"&gt;他的订单&lt;/Link&gt;  <span class="c">// → /users/42/orders，:id 自动拼上</span>
+&lt;Link to=".."&gt;返回列表&lt;/Link&gt;    <span class="c">// → /users，相对当前路由层级</span></code></pre>
+</div>
+
+<p>相对链接写的是「路由结构」而不是「URL 字符串」——父子路由的层级就是链接的坐标系。哪天你把 <code>users/:id</code> 改名成 <code>members/:id</code>，这些链接一个都不用动，和 REST 风格里「资源间用相对引用」是一个味道。</p>
+</section>
+
+<!-- ═══ 第5站：实战串讲与对照表 ═══ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>实战：用户详情页全流程</h2></div>
+
+<p>把五站的知识焊成一个真实页面：<code>/users/:id?tab=orders</code>——路径参数定资源、查询参数定视图，外加参数校验：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserDetailPage.tsx</b> · /users/:id?tab=orders</span></div>
+  <pre><code>import { useParams, useSearchParams, Link, Navigate } from "react-router-dom";
+
+function UserDetailPage() {
+  const { id } = useParams&lt;{ id: string }&gt;();
+  const [searchParams] = useSearchParams();
+  const tab = searchParams.get("tab") ?? "profile";
+
+  <span class="c">// 校验：id 必须是正整数。Number("12abc") 是 NaN，直接拦下</span>
+  const userId = Number(id);
+  if (id === undefined || !Number.isInteger(userId) || userId &lt;= 0) {
+    return &lt;Navigate to="/404" replace /&gt;;  <span class="c">// 非法参数，重定向走人</span>
+  }
+
+  return (
+    &lt;div&gt;
+      &lt;nav&gt;
+        <span class="c">// 只改查询参数、路径参数原样保留的相对写法</span>
+        &lt;Link to="?tab=profile"&gt;资料&lt;/Link&gt;
+        &lt;Link to="?tab=orders"&gt;订单&lt;/Link&gt;
+      &lt;/nav&gt;
+      {tab === "orders"
+        ? &lt;UserOrders userId={userId} /&gt;
+        : &lt;UserProfile userId={userId} /&gt;}
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>关于校验再补一句：手写 <code>Number.isInteger</code> 够用在简单场景；参数一多，用 Zod 声明式校验更清爽——<code>z.coerce.number().int().positive()</code> 一行把「字符串变数字 + 必须正整数」全说了，和你第 21 篇做表单校验是同一套思路、同一个库：<strong>入口数据不可信，先校验再使用</strong>，这条铁律不分前后端。</p>
+
+<table>
+  <thead>
+    <tr><th>你在 Spring 里的</th><th>前端对应</th><th>关键差异</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>@PathVariable Long id</code></td><td><code>useParams()</code></td><td>前端拿到的是 string，转换自己做</td></tr>
+    <tr><td><code>@RequestParam(defaultValue = "1")</code></td><td><code>useSearchParams()</code></td><td><code>get()</code> 返回 <code>string | null</code>，默认值自己兜</td></tr>
+    <tr><td>redirect attributes / <code>@SessionAttribute</code></td><td><code>useLocation().state</code></td><td>一次性、不进 URL，复制链接带不走</td></tr>
+    <tr><td>每个请求一次新的方法调用</td><td>同路由复用组件实例</td><td>参数变了只重渲染，<code>key</code> 才重挂载</td></tr>
+    <tr><td><code>@Valid</code> + 校验注解</td><td>手写判断 / Zod</td><td>第 21 篇同款思路：入口数据先校验</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>路径参数 <code>useParams</code> 对照 <code>@PathVariable</code>，但永远是 string；嵌套路由各层参数合并返回。</li>
+    <li>查询参数 <code>useSearchParams</code> 对照 <code>@RequestParam</code>：get 要兜默认值，set 是一次导航，函数式写法才能保留其他参数。</li>
+    <li>跳转夹带数据用 <code>location.state</code>，对照 redirect attributes：一次性、不进 URL。</li>
+    <li>同路由参数变化只重渲染不重挂载：<code>useEffect</code> 依赖加 <code>id</code>，要「全新实例」就上 <code>key</code>。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇把 URL 拆成了三个通道：路径参数定「哪个资源」（useParams / @PathVariable），查询参数定「怎么看它」（useSearchParams / @RequestParam），跳转暗道带「一次性的话」（state / redirect attributes）。外加两记后端思维的耳光：参数变了组件不重启，以及所有参数都是 string、校验自己做。现在参数全部到手，下一步自然是拿着它去找后端要数据——fetch、axios、useEffect 取数模板和竞态问题，下一篇第 32 篇见。</p>
+</div>
+</section>
+
+</body>
+</html>

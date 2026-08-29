@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TanStack Query：服务端缓存管理</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：手写取数的账单 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>第 32 篇欠下的账，该还了</h2></div>
+
+<p>上一篇第 32 篇用 useEffect + fetch 手写取数，写到最后你也觉得别扭：一个「拿到列表、渲染出来」的需求，真正和业务相关的代码不到三分之一，其余全在伺候请求本身。把痛点列成清单：</p>
+
+<ul>
+  <li><strong>竞态</strong>：关键词快速变化，两个请求乱序返回，慢的反杀了快的；</li>
+  <li><strong>无缓存</strong>：列表页进详情页再返回，列表重新请求一遍，白屏重来；</li>
+  <li><strong>三态手写</strong>：每个组件都要 useState 一对 loading/error，复制粘贴；</li>
+  <li><strong>重复请求</strong>：三个组件同时挂载，同一个接口被打三次。</li>
+</ul>
+
+<p>这些痛点的共同根因，是你在手搓一个<strong>缓存客户端</strong>。这事后端有历史版本：没有 Spring Cache 的年代，大家也自己 new 一个 ConcurrentHashMap 当缓存，过期、并发全要自己处理。后来 <code>@Cacheable</code> 一出，这些逻辑被抽进框架，业务代码里只剩一个注解。</p>
+
+<p>前端同样的抽离发生在 <strong>TanStack Query</strong>（npm 包名 <code>@tanstack/react-query</code>）身上：它把自己定位成「服务端状态管理库」，接口数据的缓存、去重、失效、重取，全部收编。第 17 篇说过服务端状态不该塞进 useState，第 18 篇又叮嘱过别塞进 Zustand——一直欠着的那块拼图，就是它。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：手写缓存 → Spring Cache 抽象</div>
+  <p>第 32 篇的手写取数 = 手写 ConcurrentHashMap 缓存：能用，但过期、并发、重试全要自己管。TanStack Query 是前端的 Spring Cache，也是 MyBatis 二级缓存的前端版：你只声明「这个 key 的数据怎么取」（queryFn），缓存多久、何时失效、失败重试，框架按统一策略处理——可配置、全局一致。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：装配 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>装配：QueryClient 就是前端的缓存容器</h2></div>
+
+<p>用之前先装配。两步：创建一个 QueryClient 全局实例，再用 Provider 把它注入组件树——这套路数你在 Spring 里熟透了：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>main.tsx</b> · 创建并注入缓存客户端</span></div>
+  <pre><code>import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import App from "./App";
+
+<span class="c">// 1. 缓存客户端：整个应用就一份，所有缓存条目都存在它肚子里</span>
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,  <span class="c">// 数据 30 秒内视为新鲜，不重复请求</span>
+      retry: 1,           <span class="c">// 失败重试 1 次（库默认 3 次）</span>
+    },
+  },
+});
+
+createRoot(document.getElementById("root")!).render(
+  &lt;StrictMode&gt;
+    <span class="c">// 2. 注入：组件树内任何 useQuery 都能拿到同一个实例</span>
+    &lt;QueryClientProvider client={queryClient}&gt;
+      &lt;App /&gt;
+    &lt;/QueryClientProvider&gt;
+  &lt;/StrictMode&gt;
+);</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：容器与 Bean 装配</div>
+  <p>QueryClient 相当于亲手 new 出来的 CacheManager 单例；QueryClientProvider 把它放进容器供全局注入；defaultOptions 是 application.yml 里的全局缓存配置，单个 useQuery 里写的参数就是方法级覆盖——全局默认、局部覆盖、优先级就近，Spring 里天天用。</p>
+</div>
+
+<p>装配完，取数组件长这样：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoList.tsx</b> · useQuery 声明一次，缓存全自动</span></div>
+  <pre><code>import { useQuery } from "@tanstack/react-query";
+
+interface Todo { id: number; title: string; done: boolean; }
+
+async function fetchTodos(): Promise&lt;Todo[]&gt; {
+  const res = await fetch("/api/todos");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function TodoList() {
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: ["todos"],  <span class="c">// 这份数据的缓存 key</span>
+    queryFn: fetchTodos,  <span class="c">// 缓存未命中时怎么取</span>
+  });
+
+  if (isPending) return &lt;p&gt;加载中…&lt;/p&gt;;
+  if (isError) return &lt;p&gt;加载失败：{error.message}&lt;/p&gt;;
+
+  return (
+    &lt;ul&gt;
+      {data.map((t) =&gt; &lt;li key={t.id}&gt;{t.title}&lt;/li&gt;)}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>注意两件事。第一，fetchTodos 抛出的异常不会被吞掉——Query 接住它放进 <code>error</code>，isError 变 true，你不需要 try-catch。第二，v5 把「还没有任何数据」的标志位改名为 <code>isPending</code>（老教程的 <code>isLoading</code> 在 v5 是 isPending 与 isFetching 的组合），看文档先对版本。三态标志位全由库供给，第 32 篇那对 useState 可以删了。</p>
+
+<div class="think">
+  <div class="think-q">组件卸载时，缓存并不跟着走。跳去详情页再点返回，TodoList 重新挂载，先立刻用缓存渲染，再按新鲜度决定要不要后台刷新——「返回不再白屏」是免费拿到的。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：queryKey 与缓存五要素 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>queryKey：缓存世界的唯一身份证</h2></div>
+
+<p>@Cacheable 你写过：<code>@Cacheable(cacheNames = "user", key = "'user:' + #id")</code>。Query 里的 queryKey 扮演同一个角色——<strong>key 唯一确定一份缓存</strong>。但它比字符串 key 强在「层级」：key 是数组，从粗到细排列，像文件夹路径：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>keys.ts</b> · 数组 key 的层级设计</span></div>
+  <pre><code>useQuery({ queryKey: ["todos"], ... })      <span class="c">// 全量列表</span>
+
+useQuery({ queryKey: ["todo", id], ... })   <span class="c">// 详情：id 变 = 换一条缓存</span>
+
+useQuery({
+  queryKey: ["todos", { page, keyword }],   <span class="c">// 分页、搜索参数也进 key</span>
+  queryFn: () =&gt; fetchTodos({ page, keyword }),
+});</code></pre>
+</div>
+
+<p>数组元素做<strong>深度比较</strong>决定是不是同一条缓存：id 从 1 变 2，key 不同，自动换缓存、重新请求——不用写任何「key 变了重新取」的代码。失效时还有福利：<code>invalidateQueries</code> 按<strong>前缀匹配</strong>，首项是 "todos" 的所有缓存（列表、各种分页）一次全失效，像按 cacheNames 整组清理。key 的设计原则和包结构一样：从粗到细、可序列化、参数全进 key。</p>
+
+<p>一条缓存条目的完整一生，用一张图看懂：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="一条缓存的生命周期：未命中发请求，fresh 期内直接复用，过期变 stale 后先给旧值再后台重取，无人订阅后 gcTime 倒计时回收">
+  <defs>
+    <marker id="arr33a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+    <marker id="arr33g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#177245"/>
+    </marker>
+  </defs>
+  <rect x="25" y="56" width="115" height="46" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="82" y="84" text-anchor="middle" font-size="13" fill="#1C1C1C">无缓存</text>
+  <rect x="205" y="56" width="125" height="46" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="267" y="84" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">fresh 新鲜</text>
+  <rect x="395" y="56" width="125" height="46" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="457" y="84" text-anchor="middle" font-size="13" fill="#C2410C">stale 过期</text>
+  <rect x="395" y="196" width="125" height="46" rx="8" fill="#EDE3C4" stroke="#8C8676" stroke-width="1.5"/>
+  <text x="457" y="224" text-anchor="middle" font-size="13" fill="#8C8676">gc 倒计时</text>
+
+  <line x1="140" y1="79" x2="200" y2="79" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr33a)"/>
+  <text x="171" y="68" text-anchor="middle" font-size="11" fill="#1C1C1C">未命中，发请求</text>
+  <line x1="330" y1="79" x2="390" y2="79" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr33a)"/>
+  <text x="361" y="68" text-anchor="middle" font-size="11" fill="#1C1C1C">staleTime 到期</text>
+
+  <path d="M 425 54 C 400 16, 305 16, 285 54" fill="none" stroke="#177245" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr33g)"/>
+  <text x="352" y="22" text-anchor="middle" font-size="11" fill="#177245">再次使用：先给旧值，后台重取</text>
+
+  <line x1="457" y1="102" x2="457" y2="191" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr33a)"/>
+  <text x="467" y="140" text-anchor="start" font-size="11" fill="#1C1C1C">所有订阅组件卸载</text>
+  <text x="467" y="156" text-anchor="start" font-size="11" fill="#1C1C1C">gcTime 开始倒计时</text>
+
+  <path d="M 393 214 C 300 216, 240 165, 256 108" fill="none" stroke="#177245" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr33g)"/>
+  <text x="290" y="252" text-anchor="middle" font-size="11" fill="#177245">倒计时内重新挂载：直接复用</text>
+
+  <text x="457" y="270" text-anchor="middle" font-size="11" fill="#8C8676">倒计时结束：条目回收，下次访问重新请求</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>一条缓存条目的一生：fresh 期内直接复用；过期后下次使用先给旧值、后台重取；订阅者全卸载后 gcTime 倒计时回收。</figcaption>
+</figure>
+
+<p>控制这条生命线的旋钮一共五个，覆盖 90% 的场景：</p>
+
+<table>
+  <thead>
+    <tr><th>配置</th><th>默认值</th><th>管什么</th><th>后端对应物</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>staleTime</code></td><td>0</td><td>数据多久内算「新鲜」，新鲜期内直接用缓存不发请求</td><td>缓存 TTL</td></tr>
+    <tr><td><code>gcTime</code></td><td>5 分钟</td><td>没有组件订阅后，缓存再留多久才回收</td><td>空闲键驻留时间</td></tr>
+    <tr><td><code>refetchOnWindowFocus</code></td><td>true</td><td>切回浏览器标签页时，自动重取已过期的数据</td><td>主动刷新策略</td></tr>
+    <tr><td><code>retry</code></td><td>3 次</td><td>失败自动重试，指数退避</td><td>Resilience4j / Feign 重试</td></tr>
+    <tr><td><code>enabled</code></td><td>true</td><td>false 时不发起请求，等条件满足再发</td><td>条件装配</td></tr>
+  </tbody>
+</table>
+
+<p>一句话记住最易混的两个：<strong>staleTime 管「要不要重新请求」，gcTime 管「缓存还留不留」</strong>——前者是新鲜度，后者是内存回收。默认值整体偏激进（staleTime=0 意味着每次挂载都后台重取），后端出身的你大概想调大 staleTime 换稳定，defaultOptions 一行搞定。</p>
+</section>
+
+<!-- ═══════════════ 第4站：写操作 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>写操作：useMutation 与失效重取</h2></div>
+
+<p>读用 useQuery，写用 useMutation。关键动作在 onSuccess 里：<strong>写库成功后，把相关查询缓存标记为失效</strong>——正在挂载的相关组件自动重取：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>AddTodo.tsx</b> · 写库成功后失效列表缓存</span></div>
+  <pre><code>import { useState, type FormEvent } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { addTodoApi } from "./api";
+
+function AddTodo() {
+  const [title, setTitle] = useState("");
+  const queryClient = useQueryClient();  <span class="c">// 从「容器」拿到那个全局 client</span>
+
+  const addTodo = useMutation({
+    mutationFn: (title: string) =&gt; addTodoApi(title),
+    onSuccess: () =&gt; {
+      <span class="c">// 等价于「更新 DB 后 @CacheEvict("todos")」：</span>
+      <span class="c">// 前缀匹配，所有以 "todos" 开头的缓存一起失效</span>
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    },
+  });
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    addTodo.mutate(title);
+    setTitle("");
+  }
+
+  return (
+    &lt;form onSubmit={handleSubmit}&gt;
+      &lt;input value={title} onChange={(e) =&gt; setTitle(e.target.value)} /&gt;
+      &lt;button disabled={addTodo.isPending}&gt;
+        {addTodo.isPending ? "提交中…" : "添加"}
+      &lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>为什么失效、而不是手动把新数据塞进缓存？因为<strong>服务端才是数据的唯一真源</strong>。手动改缓存意味着前端要复刻一遍服务端逻辑（排序、分页总数、统计字段），复刻错了，界面就和数据库悄悄分叉；失效重取永远对齐服务端——与「@CachePut 容易脏、@CacheEvict 粗暴但不会错」是同一个权衡。</p>
+
+<p>产品经理若要求「点添加立即看到新条目、不等重取」，那是<strong>乐观更新</strong>：onMutate 里先用 <code>setQueryData</code> 把假想结果写进缓存（UI 立即变化），失败在 onError 里用快照回滚，onSettled 里统一 invalidate 兜底。三段式套路固定——先改缓存、失败回滚、终态对账——记住思路即可，用到再查官方文档 Optimistic Updates 一节。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：失效优先，更新靠后</div>
+  <p>缓存领域的老原则「invalidate 优先于 update」：多端写同一份数据时，主动计算缓存新值容易算错；先失效、让下一次读来重建，永远收敛到正确值。invalidateQueries 就是这个原则的前端实现——提交成功不猜结果，把缓存作废，让真源重新说话。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：销账 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>销账：第 32 篇的痛点清单逐条对账</h2></div>
+
+<p>回到第 1 站那张痛点清单，逐条销账：</p>
+
+<table>
+  <thead>
+    <tr><th>第 32 篇的痛点</th><th>手写时代的方案</th><th>TanStack Query 的答案</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>竞态：慢请求反杀</td><td>ignore 标志 + 闭包判断</td><td>queryKey 变化自动隔离，配合 signal 真取消请求（第 34 篇细讲）</td></tr>
+    <tr><td>无缓存：返回页白屏重来</td><td>没人写，或手搓 Map</td><td>queryKey 命中缓存：先渲染旧数据，再按 staleTime 决定后台刷新</td></tr>
+    <tr><td>三态手写：每个组件一对 useState</td><td>复制粘贴 loading / error</td><td>isPending / isError / isSuccess 标志位统一供给</td></tr>
+    <tr><td>重复请求：同接口打多次</td><td>防抖、手写去重 Set</td><td>相同 key 的并发请求自动合并成一次</td></tr>
+    <tr><td>失败重试：几乎没人写</td><td>裸奔</td><td>retry 默认 3 次指数退避，可全局配置</td></tr>
+    <tr><td>数据过期：完全没管</td><td>裸奔</td><td>窗口聚焦、断网重连时自动重取过期数据</td></tr>
+  </tbody>
+</table>
+
+<p>清完账，第 17 篇悬着的问题也该收尾了：「服务端状态到底放哪」——答案是<strong>哪也不放，交给 Query</strong>。Zustand / Redux 从此只放真正的客户端状态：登录态、购物车、主题、抽屉开关。判断标准还是第 17 篇那句话：真源在服务端数据库吗？是，就别进 store、也别进 useState——用 useQuery 声明一份，缓存、失效、重试全部外包。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>TanStack Query 是服务端状态的缓存客户端：装配全局 QueryClient、Provider 注入，组件只声明 queryKey + queryFn。</li>
+    <li>queryKey 是数组层级的缓存 key（类比 @Cacheable key）：key 变即换缓存自动重取；invalidateQueries 按前缀整组失效。</li>
+    <li>五要素：staleTime 管新鲜度、gcTime 管回收、refetchOnWindowFocus 管聚焦刷新、retry 管重试、enabled 管条件发起。</li>
+    <li>写操作 useMutation + onSuccess 里 invalidateQueries，等价于「更新 DB 后 @CacheEvict」；乐观更新 onMutate 先改缓存、失败回滚。</li>
+    <li>服务端状态不再进 Redux / Zustand / useState——store 只留客户端状态，第 17 篇分类的最终落地。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>第 32 篇手写取数暴露的所有痛点——竞态、缓存、三态、重复请求——在本篇被一个声明式缓存客户端批量销账：读用 useQuery，写用 useMutation + invalidateQueries，你从「伺候请求」回到「描述数据」。但标志位给了，不代表 UI 就讲究了：骨架屏还是转圈？错误怎么给重试出口？竞态怎么被 key 隔离？下一篇第 34 篇，把「请求的三种状态」在界面上建模清楚，你的前端代码会稳妥一个档次。</p>
+</div>
+</section>
+
+</body>
+</html>

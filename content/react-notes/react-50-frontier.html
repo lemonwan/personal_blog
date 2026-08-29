@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>前沿展望：Server Actions / 边缘计算</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：Server Actions ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>Server Actions：一个不写 endpoint 的远程调用</h2></div>
+
+<p>先看一个你写了几十遍的流程：新建书签 = 前端写 fetch 打 <code>/api/bookmarks</code> + 后端写 Controller 接 + 两边对请求体结构。四个字的功能，两端各写一遍「传输层胶水」。Server Actions 的野心就是撕掉这层胶水：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/actions.ts</b> · 加了 'use server' 的函数：客户端直接调用，服务端执行</span></div>
+  <pre><code>"use server";
+
+import { revalidatePath } from "next/cache";
+import { db } from "@/lib/db";
+
+export async function addBookmark(formData: FormData) {
+  const title = String(formData.get("title") ?? "");
+  const url = String(formData.get("url") ?? "");
+
+  await db.bookmark.create({ data: { title, url } });   <span class="c">// 直接写库，没有中间 HTTP 层</span>
+  revalidatePath("/bookmarks");   <span class="c">// 让列表缓存失效、重新渲染（第 33 篇失效思路的服务端版）</span>
+}</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/bookmarks/new/page.tsx</b> · 表单直接绑服务端函数</span></div>
+  <pre><code>import { addBookmark } from "@/app/actions";
+
+export default function NewBookmarkPage() {
+  return (
+    &lt;form action={addBookmark}&gt;
+      &lt;input name="title" placeholder="标题" /&gt;
+      &lt;input name="url" placeholder="https://example.com" /&gt;
+      &lt;button type="submit"&gt;保存&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>没有 fetch、没有 URL、没有手写的 loading/error 分发。原理一句话：<strong>'use server' 让编译器把函数变成「只能服务端执行」的安全桩</strong>——客户端调用时框架自动生成 POST 端点，参数序列化发过去、服务端执行、结果发回来，再由 revalidatePath 让受影响页面缓存失效。第 42 篇你手工布线的「前端 → /api → 后端」，被折叠成一个函数调用。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：RPC / @Remote 的既视感</div>
+  <p>你大概率写过 Dubbo 或 OpenFeign：接口在本地、实现在远端，框架负责序列化与网络——「像调本地方法一样调远端方法」。Server Actions 就是 React 官方钦定的前端→服务端 RPC，契约都不用手写：函数签名即契约，框架两端自动生成桩。Next.js 全包的同进程全栈用 Actions 最顺；跨服务集成，该走 HTTP 还走 HTTP。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">「客户端能 import 服务端函数」，像把数据库暴露给了浏览器？没有——客户端拿到的只是自动生成的端点引用，执行的永远是服务端代码。但这个端点默认公网可达，<strong>鉴权必须在函数体内自己做</strong>，不能指望「页面有守卫」挡住它。和你写 Controller 时「不能信前端传来的任何东西」同一条军规。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：Partial Prerendering ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>Partial Prerendering：静态壳秒开，动态洞流式补</h2></div>
+
+<p>第 40 篇见过静态站的速度，第 44 篇见过服务端渲染的灵活，能不能<strong>既要又要</strong>？Partial Prerendering（PPR，Next.js 15 起以实验特性提供）的答案：把页面拆成「静态壳 + 动态洞」：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="PPR 示意：静态壳预渲染秒开，动态部分以骨架占位、流式填充">
+  <rect x="40" y="26" width="540" height="240" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <rect x="56" y="42" width="508" height="34" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="310" y="63" text-anchor="middle" font-size="12" fill="#1C1C1C">站点导航 · 静态（构建时预渲染，秒开）</text>
+
+  <rect x="56" y="88" width="130" height="160" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="121" y="172" text-anchor="middle" font-size="11" fill="#8C8676">标签云 · 静态</text>
+
+  <rect x="198" y="88" width="366" height="70" fill="#FFFFFF" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="381" y="116" text-anchor="middle" font-size="12" fill="#C2410C">动态洞 1：我的书签列表</text>
+  <text x="381" y="136" text-anchor="middle" font-size="11" fill="#8C8676">请求时流式填充（Suspense fallback 先占位）</text>
+
+  <rect x="198" y="170" width="366" height="60" fill="#FFFFFF" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="381" y="195" text-anchor="middle" font-size="12" fill="#C2410C">动态洞 2：实时统计</text>
+  <text x="381" y="214" text-anchor="middle" font-size="11" fill="#8C8676">数据到一块补一块</text>
+
+  <text x="310" y="286" text-anchor="middle" font-size="12" fill="#8C8676">壳先到（毫秒级，躺在 CDN 里），洞随后流式补齐</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>PPR：整页只有「洞」需要等数据，静态壳构建时就渲染完毕、直接从 CDN 秒开。</figcaption>
+</figure>
+
+<p>声明方式你可能已经猜到——就是第 34 篇的 Suspense 边界：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/bookmarks/page.tsx</b> · Suspense 边界 = 缓存粒度声明</span></div>
+  <pre><code>import { Suspense } from "react";
+
+export default function BookmarksPage() {
+  return (
+    &lt;&gt;
+      &lt;SiteHeader /&gt;                    <span class="c">// 静态：构建时渲染好，秒开</span>
+      &lt;Suspense fallback={&lt;ListSkeleton /&gt;}&gt;
+        &lt;BookmarkList /&gt;                <span class="c">// 动态洞：请求时流式填充</span>
+      &lt;/Suspense&gt;
+      &lt;SiteFooter /&gt;                    <span class="c">// 静态</span>
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>静态壳毫秒级到达；动态洞先以骨架占位，数据到了流式补上。第 34 篇你设计的加载态，在这里被框架内建成渲染策略——<strong>你声明「哪里会慢」，框架保证「其余全都快」</strong>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：整页缓存 + 片段动态的老手艺</div>
+  <p>你干过「整页走缓存、个别模块 ajax 实时刷新」：页面 90% 缓存五分钟，用户余额那一格单独取。PPR 是同一思想被框架收编——不用自己拆接口、写占位，组件级 Suspense 边界就是「缓存粒度的声明」，失效对应 revalidatePath。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">串起来看：第 5 篇渲染模型 → 第 44 篇 RSC 决定「在哪渲染」→ 本篇 PPR 决定「何时渲染」。概念一直在加，心智模型没换过——始终是那棵组件树，从不同维度切分。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：Edge Runtime ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>Edge Runtime：把代码部署到离用户 20ms 的地方</h2></div>
+
+<p>第 42 篇的部署模型是「一簇源站服务全国」：上海 10ms，乌鲁木齐 80ms。CDN 解决了静态资源（hash 文件名天生为它而生），动态逻辑仍要回源。<strong>Edge Runtime 再进一步：把「执行代码」推到全球数百个边缘节点</strong>——渲染、鉴权、个性化在离用户最近的机房完成。</p>
+
+<p>用起来只是多一行声明：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/api/health/route.ts</b> · 该路由跑在边缘运行时</span></div>
+  <pre><code>export const runtime = "edge";
+
+export async function GET(request: Request) {
+  const city = request.headers.get("x-vercel-ip-city") ?? "unknown";
+  return Response.json({ ok: true, servedFrom: city });
+}</code></pre>
+</div>
+
+<p>能力与代价要一起看。它不是「缩小版 Node」，而是<strong>不带标准库的轻量沙箱</strong>（V8 isolate）：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>Node 运行时（第 42 篇的部署方式）</th><th>Edge 运行时</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>冷启动</td><td>秒级（≈ JVM 冷启动）</td><td>毫秒级，几乎无感</td></tr>
+    <tr><td>能力</td><td>完整 Node API、文件系统、长连接</td><td>受限沙箱：部分 npm 包与 Node API 不可用</td></tr>
+    <tr><td>部署位置</td><td>你指定的机房</td><td>全球数百节点，自动就近</td></tr>
+    <tr><td>适合</td><td>重逻辑、数据库长连接、后台任务</td><td>轻渲染、鉴权、个性化重定向、A/B 分流</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：多活部署被产品化了</div>
+  <p>你见识过同城双活、异地多活：DNS 就近调度、数据同步、机房运维，复杂度翻倍。Edge Runtime 把它打包成平台能力：部署单元从「机器」变成「代码」，push 一次全球生效，节点、调度、扩缩容都不用你管。代价是上表那列沙箱限制——当「CDN 上的轻量函数」用，别当缩小版 JVM。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：React Compiler 与 AI ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>React Compiler 与 AI：优化和写码的方式都在变</h2></div>
+
+<h3>React Compiler：memo 化被编译器接管</h3>
+
+<p>第 37 篇你练过 memo、useCallback、useMemo，那是「人肉保证引用稳定」。React Compiler 在构建期分析组件，自动插入等价的缓存代码——同样的优化，从「人肉纪律」变成「机器保证」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoList.tsx</b> · 手写优化 → 编译器接管后</span></div>
+  <pre><code><span class="c">// 第 37 篇的手工优化……</span>
+const visible = useMemo(
+  () =&gt; todos.filter((t) =&gt; t.title.includes(keyword)),
+  [todos, keyword]
+);
+const toggle = useCallback((id: number) =&gt; {
+  setTodos((prev) =&gt;
+    prev.map((t) =&gt; (t.id === id ? { ...t, done: !t.done } : t))
+  );
+}, []);
+
+<span class="c">// 开启 babel-plugin-react-compiler 后，直接写朴素代码：</span>
+const visible = todos.filter((t) =&gt; t.title.includes(keyword));
+const toggle = (id: number) =&gt; {
+  setTodos((prev) =&gt;
+    prev.map((t) =&gt; (t.id === id ? { ...t, done: !t.done } : t))
+  );
+};</code></pre>
+</div>
+
+<p>前提还是第 37 篇那条规则：引用稳定才跳过重渲染——只是「检查引用是否被篡改」交给了编译器。第 37 篇没有白学：懂「为什么」才看得懂编译器「做了什么」，才能在它对不合规代码放弃优化时（渲染期改 props）手动兜底。JVM 替你管内存，GC 调优工程师依然值钱，同理。</p>
+
+<h3>AI：交付单元从「组件」升级到「功能」</h3>
+
+<p>第 47 篇你和 AI 结过对，第 48 篇理解了工具调用与状态机。往前看，两条曲线正在合流：</p>
+
+<ul>
+  <li><strong>自然语言到 UI</strong>：一句话生成可用的 React 页面，表单、列表、CRUD 这类「模式化代码」加速最猛——对 AI 这是「分布内」任务，见得多就写得好；</li>
+  <li><strong>Agent 生成整个功能</strong>：「规划 → 工具调用 → 校验 → 自修复」用于编码 Agent，能跨文件改代码、跑测试、迭代到通过——交付单元从「你写一个组件」变成「你验收一个功能」。</li>
+</ul>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>Server Actions = 官方 RPC：函数签名即契约，胶水由框架生成；鉴权要在函数体内自己做。</li>
+    <li>PPR：静态壳 + 动态洞，Suspense 边界就是缓存粒度声明；第 34 篇的加载态被框架内建。</li>
+    <li>Edge Runtime：代码即部署单元，全球就近执行；能力受限，当「CDN 上的轻量函数」用。</li>
+    <li>React Compiler 接管机械 memo 化；第 37 篇的心智模型是看懂它、兜底它的前提。</li>
+    <li>AI 改变「写」的效率；稀缺的是「判断」——契约、架构、归因，恰是本卷反复强调的。</li>
+  </ul>
+</div>
+
+<div class="think">
+  <div class="think-q">当 boilerplate 能被 AI 一句话生成，「你」的价值剩什么？判断力：状态放哪（第 17 篇）、工具怎么选（第 20 篇）、瓶颈在哪（第 41 篇）、契约怎么设计（第 49 篇）。AI 最难替你的，恰是专栏花最多篇幅讲的那些「为什么」。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：全系列总结 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>全系列回顾：UI = f(state) 是起点，也是终点</h2></div>
+
+<p>50 篇，7 卷。合上之前，把主线摊在一张表里：</p>
+
+<table>
+  <thead>
+    <tr><th>卷</th><th>主线问题</th><th>关键收获</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>一 · 核心原语</td><td>界面为什么这样画？</td><td>UI = f(state) 心智模型、JSX、State、diff</td></tr>
+    <tr><td>二 · Hooks 精讲</td><td>函数组件怎么「记住」与「响应」？</td><td>useEffect、闭包陷阱、自定义 Hook</td></tr>
+    <tr><td>三 · 状态管理</td><td>状态放哪、谁说了算？</td><td>客户端/服务端状态分类、Zustand、选型</td></tr>
+    <tr><td>四 · 组件工程</td><td>怎么组织才不会烂？</td><td>组合优于继承、TS、职责边界</td></tr>
+    <tr><td>五 · 路由与取数</td><td>SPA 的「后端半边天」怎么补？</td><td>Router、TanStack Query、加载/错误/竞态</td></tr>
+    <tr><td>六 · 性能与部署</td><td>怎么又快又稳地送到用户手上？</td><td>memo、Profiler、构建、Nginx、CI</td></tr>
+    <tr><td>七 · AI 时代</td><td>边界正在怎样消失？</td><td>RSC、Server Actions、Agent、边缘计算</td></tr>
+  </tbody>
+</table>
+
+<p>第 1 篇那句 <code>UI = f(state)</code>，走了 50 篇，它长出了三层含义：</p>
+
+<ul>
+  <li><strong>f 在长大</strong>：从组件函数长成 RSC（第 44 篇）、Server Actions、边缘函数——「渲染」被推到离数据和用户更近的地方；</li>
+  <li><strong>state 在长大</strong>：从 useState 到 URL 参数（第 31 篇）、服务端缓存（第 33 篇）——「状态」的边界从内存扩展到整个系统；</li>
+  <li><strong>UI 在长大</strong>：从 div 到流式 UI（第 45 篇）、AI 生成的界面（第 47 篇）——界面未必全由你手写，但「状态到界面的映射」从未变过。</li>
+</ul>
+
+<p>框架会换代，API 会过时，但<strong>「声明式、组件化、状态驱动」这套模型稳定了十年，大概率再稳十年</strong>——这是笔记敢以模型为主线的底气。回头看第 43 篇那张转型路线图：基础、生态、工程化、全栈、AI 协作，50 篇下来你把整张图走了一遍。</p>
+
+<p>最后三件事，留给合上专栏之后的你：</p>
+
+<ol>
+  <li><strong>做项目</strong>：把第 49 篇的书签系统扩成简历级产品——加协作、导入导出、PWA。项目是知识唯一的保鲜手段；</li>
+  <li><strong>读源码</strong>：从 zustand 这类几百行的小库读实现，到 react.dev 读设计——小库读「怎么写」，大框架读「为什么」；</li>
+  <li><strong>保持在线</strong>：订阅 react.dev 与 Next.js 官方博客，盯 RSC、PPR、React Compiler 从实验走向稳定的时间线。</li>
+</ol>
+
+<div class="recap">
+  <h3>本章回顾 · 全系列收官</h3>
+  <p>回到第 1 篇那个「点击加一」的计数器：那时你抱着一身 Spring 功力，对着一颗手动改 DOM 的心。50 篇之后，你有心智模型、Hooks、状态分层、组件工程、路由取数、性能部署的完整链路，看清了 Server Actions、边缘计算与 AI 重塑的方向，还交付过一个全栈产品。UI = f(state) 是起点也是终点——起点是它完成了你从后端到全栈的心智跃迁，终点是你有资格在更大的尺度上重新定义自己的 f 和 state。江湖路远，带着这套模型继续走。</p>
+</div>
+</section>
+
+</body>
+</html>

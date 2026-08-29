@@ -147,7 +147,7 @@ export default function ReactNotesPage() {
       <div className="volumes-wrap">
         <p className="section-kicker reveal" style={{ marginTop: "72px" }}>EXPAND · 逐卷展开</p>
         <p className="section-lede reveal" style={{ marginTop: "10px" }}>
-          下面把 {ROMAN[7]} 个部分逐一摊开。第一章 8 篇已完成正文，后续章节正在持续编写中。
+          下面把 {ROMAN[7]} 个部分逐一摊开，{REACT_VOLUMES.length} 卷 {totalCount} 篇正文已全部完成，建议按顺序阅读。
         </p>
 
         {REACT_VOLUMES.map((vol) => {

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据获取：fetch / axios 与 useEffect 取数</title>
+</head>
+<body>
+
+<!-- ═══ 第1站：fetch 与它的两个坑 ═══ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>最朴素的取数：fetch 与它的两个坑</h2></div>
+
+<p>第 9 篇学过 useEffect 处理副作用，第 31 篇把 URL 参数解析到手——现在把两件事接起来：<strong>拿参数 → 发请求 → 渲染数据</strong>。这就是前端最日常的「服务端状态」消费场景（第 17 篇埋的伏笔终于上线）。先从浏览器原生的 <code>fetch</code> 说起，它的 API 简洁得名副其实，但有两个坑专坑后端转来的你：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>fetchUser.ts</b> · fetch 的正确打开方式</span></div>
+  <pre><code>// 坑 1：404、500 不会 reject——照样走进「成功」流程
+// 坑 2：res.json() 返回的是 Promise，不是对象，还得再 await 一次
+async function fetchUser(id: number) {
+  const res = await fetch(`/api/users/${id}`);
+
+  if (!res.ok) {                    // HTTP 错误必须手动检查
+    throw new Error(`请求失败：${res.status}`);
+  }
+
+  const user = await res.json();    // 坑 2 在这：再 await 一次
+  return user;
+}</code></pre>
+</div>
+
+<p>展开说说这两个坑。<strong>坑 1</strong>：只有网络层挂掉（断网、DNS 解析失败）fetch 才 reject；服务器回了 404、500，那也是一个「完整送达的 HTTP 响应」，fetch 照样 resolve，只是 <code>res.ok</code> 是 false。你如果只写 try-catch，404 的响应体会被当成正常数据往下走，报错报在十万八千里之外。<strong>坑 2</strong>：<code>res.json()</code> 之所以返回 Promise，是因为响应体要流式读完才能解析——所以读 JSON 永远是两步 <code>await</code>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：RestTemplate 会抛，fetch 不会</div>
+  <p>RestTemplate 默认对 4xx/5xx 直接抛 HttpClientErrorException——「HTTP 错误即异常」是你多年的肌肉记忆。fetch 的哲学相反：拿到响应就是成功，状态码自己看。结果就是你必须给每个请求补上 if (!res.ok)，漏了就是「界面显示异常数据但不报错」这种最难查的 bug。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">为什么 fetch 要这么设计？规范制定者认为 404 也是一个「合法的 HTTP 响应」，如何解读是调用方的自由。哲学归哲学，业务上你几乎总想把它当错误处理——所以记住结论即可：用 fetch，<code>if (!res.ok)</code> 一行都不能省。</div>
+</div>
+</section>
+
+<!-- ═══ 第2站：axios 封装与拦截器 ═══ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>换 axios：封装一次，处处受益</h2></div>
+
+<p>真实项目里，每个请求都要做三件同样的事：拼 baseURL、带 token、统一处理错误。散落在每个组件里就是灾难——改个头信息要全局搜索。所以前端惯例是<strong>封装一个客户端实例</strong>，全项目共用：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>api/client.ts</b> · axios 实例 + 拦截器</span></div>
+  <pre><code>import axios from "axios";
+
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE ?? "/api",
+  timeout: 10_000,
+});
+
+// 请求拦截器：统一带上 token（对照 Feign 的 RequestInterceptor）
+api.interceptors.request.use((config) =&gt; {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// 响应拦截器：统一解包、统一处理 401
+api.interceptors.response.use(
+  (res) =&gt; res.data,   <span class="c">// 调用处拿到的直接是业务数据，省掉 res.data.data</span>
+  (error) =&gt; {
+    if (error.response?.status === 401) {
+      <span class="c">// 未登录 / token 过期：踢去登录页，第 35 篇细讲</span>
+    }
+    return Promise.reject(error);
+  }
+);</code></pre>
+</div>
+
+<p>顺带一提，axios 替你填掉了 fetch 的两个坑：非 2xx 默认 reject（不用手写 <code>if (!res.ok)</code>），响应体自动 <code>JSON.parse</code>（不用二次 await）。业务代码退化成一句 <code>const user = await api.get("/users/42")</code>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：拦截器是个你天天在写的概念</div>
+  <p>Feign 的 RequestInterceptor、RestTemplate 的 ClientHttpRequestInterceptor、OkHttp 的 Interceptor、Servlet Filter——「横切关注点集中一处，请求流过管道」这个模型完全一致，唯一区别是这次拦截发生在浏览器里。token 注入、统一错误码、日志埋点，前后端用的是同一张设计图。</p>
+</div>
+</section>
+
+<!-- ═══ 第3站：useEffect 取数完整模板 ═══ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>放进 useEffect：完整取数模板</h2></div>
+
+<p>现在把请求放进组件。先复习第 9 篇的一条铁律：<strong>useEffect 的回调不能是 async 函数</strong>——它的返回值必须是清理函数，而 async 函数返回的是 Promise。所以套路是在 effect 内部定义一个 async 函数再调用它。再加上第 31 篇的参数，一个能上生产的取数组件长这样：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserDetail.tsx</b> · useEffect 取数完整模板</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+import axios from "axios";
+import { useParams } from "react-router-dom";
+import { api } from "../api/client";
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+function UserDetail() {
+  const { id } = useParams&lt;{ id: string }&gt;();
+  const [user, setUser] = useState&lt;User | null&gt;(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState&lt;Error | null&gt;(null);
+
+  useEffect(() =&gt; {
+    let ignore = false;               // 本次 effect 是否已作废
+    const controller = new AbortController();
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await api.get(`/users/${id}`, {
+          signal: controller.signal,  <span class="c">// 请求层面也支持取消</span>
+        });
+        if (!ignore) setUser(data);
+      } catch (e) {
+        if (!ignore &amp;&amp; !axios.isCancel(e)) {
+          setError(e as Error);       <span class="c">// 被主动取消的不算错误</span>
+        }
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+
+    load();
+    return () =&gt; {
+      ignore = true;         <span class="c">// 依赖变了 / 组件卸载：旧的一次作废</span>
+      controller.abort();    <span class="c">// 真正掐断在途的请求，省流量省内存</span>
+    };
+  }, [id]);
+
+  if (loading) return &lt;p&gt;加载中…&lt;/p&gt;;
+  if (error) return &lt;p&gt;出错了：{error.message}&lt;/p&gt;;
+  return &lt;h2&gt;{user?.name}（{user?.email}）&lt;/h2&gt;;
+}</code></pre>
+</div>
+
+<p>两个保护机制各司其职，别混为一谈：<strong>ignore 标志</strong>管的是「结果还能不能 setState」——React 保证下次 effect 执行前先跑上一次的 cleanup，所以只有时间上最新的那次 effect 的 <code>ignore</code> 是 false；<strong>AbortController</strong> 管的是「请求本身还要不要飞」——ignore 只是不认结果，请求还在白耗带宽和后端资源，abort 才是真取消。一个是丢弃判决书，一个是拦下快递员，双保险。</p>
+
+<p>再看渲染部分：<code>loading / error / data</code> 三个 state、三段 if，这还只是最简版——没有重试、没有骨架屏、没有错误码分支。加载态、错误态、竞态的系统打法，第 34 篇专门展开；这里你只需要先闻到一丝味道：<strong>这活儿又重复又容易错</strong>。这一站先按下不表，最后一站算总账。</p>
+</section>
+
+<!-- ═══ 第4站：竞态 ═══ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>竞态：两次请求的时序车祸</h2></div>
+
+<p>如果上一站的 ignore 和 abort 你觉得是花架子，看看这场车祸。用户详情页有个「下一个」按钮，用户手快连点，id 从 1 切到 2——两次请求同时在天上飞，而网络的快慢不由代码说了算：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>race.ts</b> · 复现步骤</span></div>
+  <pre><code>// t1: 点「下一个」→ 发出请求 A（id=1），恰好赶上网络抖动，飞得慢
+// t2: 再点「下一个」→ 发出请求 B（id=2），一路畅通，先返回
+//     → setUser(用户2)，屏幕显示用户 2，看起来一切正常
+// t3: 请求 A 迟到返回 → setUser(用户1) → 屏幕被旧数据覆盖！
+//     而此时地址栏明明是 /users/2</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="两次请求乱序返回的竞态时间线对比">
+  <defs>
+    <marker id="arr32o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/>
+    </marker>
+    <marker id="arr32g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#177245"/>
+    </marker>
+  </defs>
+
+  <text x="160" y="22" text-anchor="middle" font-size="13" fill="#C2410C">没有防护：迟到的旧请求覆盖新结果</text>
+
+  <line x1="100" y1="42" x2="100" y2="136" stroke="#8C8676" stroke-dasharray="4 3"/>
+  <line x1="200" y1="42" x2="200" y2="136" stroke="#8C8676" stroke-dasharray="4 3"/>
+  <text x="100" y="38" text-anchor="middle" font-size="11" fill="#1C1C1C">t1 点用户1</text>
+  <text x="200" y="38" text-anchor="middle" font-size="11" fill="#1C1C1C">t2 点用户2</text>
+  <text x="560" y="38" text-anchor="middle" font-size="11" fill="#8C8676">时间 →</text>
+
+  <text x="94" y="74" text-anchor="end" font-size="11" fill="#C2410C">请求 A（id=1）</text>
+  <line x1="100" y1="70" x2="430" y2="70" stroke="#C2410C" stroke-width="2" marker-end="url(#arr32o)"/>
+  <text x="438" y="74" font-size="11" fill="#C2410C">A 迟到，覆盖！</text>
+
+  <text x="194" y="114" text-anchor="end" font-size="11" fill="#177245">请求 B（id=2）</text>
+  <line x1="200" y1="110" x2="280" y2="110" stroke="#177245" stroke-width="2" marker-end="url(#arr32g)"/>
+  <text x="288" y="114" font-size="11" fill="#177245">B 先返回，渲染</text>
+
+  <text x="320" y="152" text-anchor="middle" font-size="12" fill="#C2410C">屏幕显示 id=1 的数据，地址栏却是 /users/2 —— 错</text>
+
+  <text x="160" y="178" text-anchor="middle" font-size="13" fill="#177245">cleanup + ignore：过期的结果直接丢弃</text>
+
+  <line x1="100" y1="188" x2="100" y2="280" stroke="#8C8676" stroke-dasharray="4 3"/>
+  <line x1="200" y1="188" x2="200" y2="280" stroke="#8C8676" stroke-dasharray="4 3"/>
+
+  <text x="94" y="218" text-anchor="end" font-size="11" fill="#C2410C">请求 A（id=1）</text>
+  <line x1="100" y1="214" x2="410" y2="214" stroke="#C2410C" stroke-width="2" marker-end="url(#arr32o)"/>
+  <line x1="416" y1="208" x2="428" y2="220" stroke="#1C1C1C" stroke-width="2"/>
+  <line x1="428" y1="208" x2="416" y2="220" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="438" y="212" font-size="11" fill="#C2410C">A 迟到返回</text>
+  <text x="438" y="228" font-size="11" fill="#8C8676">被 ignore 拦下</text>
+
+  <text x="194" y="258" text-anchor="end" font-size="11" fill="#177245">请求 B（id=2）</text>
+  <line x1="200" y1="254" x2="280" y2="254" stroke="#177245" stroke-width="2" marker-end="url(#arr32g)"/>
+  <text x="288" y="258" font-size="11" fill="#177245">B 先返回，渲染</text>
+
+  <text x="320" y="290" text-anchor="middle" font-size="12" fill="#177245">屏幕始终显示 id=2 —— 对</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>竞态时间线：上图旧请求迟到覆盖新数据；下图 cleanup 里的 ignore 把过期结果拦下</figcaption>
+</figure>
+
+<p>为什么上一站的模板能治它？因为 <strong>React 保证：下一次 effect 执行前，先执行上一次的 cleanup</strong>。时间线里 t2 时刻点下用户 2 的瞬间，第一次 effect 的 cleanup 先跑（A 的 ignore 变 true、A 被 abort），然后才发起 B——迟到的 A 就算回来了，<code>if (!ignore)</code> 也把它挡在 setState 门外。治愈的关键不是「取消得快」，而是<strong>给每一次 effect 发一张时效戳，过期的判决一律作废</strong>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：过期写入，你处理并发写的老朋友</div>
+  <p>两个事务并发写同一行，先发起的不一定先提交，你不会让迟到的旧事务覆盖新数据——数据库靠版本号（乐观锁）判过期，谁「最后发言」由提交顺序决定。useEffect 的 cleanup 就是 React 发给你的版本号：ignore=false 的那一次才是最新版本。思路同源，只是战场从数据库行搬到了组件 state。</p>
+</div>
+</section>
+
+<!-- ═══ 第5站：痛点清单与下一步 ═══ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>算总账：这些痛点指向第 33 篇</h2></div>
+
+<p>手写一遍之后，把账摊开算算。哪怕只做一个最普通的详情页，你已经付过的成本和欠下的债：</p>
+
+<table>
+  <thead>
+    <tr><th>痛点</th><th>手写的代价</th><th>第 33 篇 TanStack Query 的答案</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>loading / error / data 三态</td><td>三个 useState + 三段 if，每个组件抄一遍</td><td><code>useQuery</code> 一行，三态直接返回</td></tr>
+    <tr><td>竞态</td><td>ignore + abort 靠自觉，忘了就是线上 bug</td><td>框架内部按 key 自动丢弃过期结果</td></tr>
+    <tr><td>没有缓存</td><td>列表 → 详情 → 返回列表，列表又白屏重请求</td><td>按 key 缓存，返回秒显旧数据、后台静默刷新</td></tr>
+    <tr><td>没有去重</td><td>两个组件同时挂载，同一接口发两次</td><td>同 key 的并发请求自动合并成一次</td></tr>
+    <tr><td>失效与重取</td><td>提交表单后手动到处调 refresh，越理越乱</td><td>声明式失效：改完数据 invalidate 对应 key</td></tr>
+  </tbody>
+</table>
+
+<p>前两行你已经亲身踩过，后三行是还没爆的雷：缓存缺失意味着「每次切页都白屏」；没有去重意味着「同一份数据被请求 N 遍」；失效混乱意味着「用户改完头像，列表里还是旧的」。每一项单看都能忍，加起来就是每个前端项目里那坨越写越重的「数据层胶水代码」。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：手写 JDBC vs MyBatis</div>
+  <p>手写取数像手写 JDBC：getConnection、prepareStatement、execute、close，每个 DAO 重复一遍，漏一步就是连接泄漏——于是有了 MyBatis，你只声明「SQL + 映射」，事务和资源管理框架全包。TanStack Query 就是前端界的那一步：你只声明「queryKey + fetcher」，缓存、去重、竞态、重试、失效全归框架。你在后端早就完成过一次这次跃迁。</p>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>fetch 两个坑：HTTP 错误不 reject（必写 <code>if (!res.ok)</code>）、<code>res.json()</code> 是异步要二次 await；axios 默认替你处理这两条。</li>
+    <li>axios 实例 + 拦截器 = 前端版的 Feign/OkHttp 拦截器：baseURL、token、统一错误一处收口。</li>
+    <li>useEffect 取数模板三件套：内部 async 函数、ignore 标志、AbortController——ignore 管结果作废，abort 管请求取消。</li>
+    <li>竞态的本质是「迟到的旧响应覆盖新状态」；cleanup 就是 React 给每次 effect 的时效戳。</li>
+    <li>三态样板、无缓存、无去重、无失效——这份痛点清单就是 TanStack Query 的功能清单。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇打通了「参数到手 → 发起请求 → 三态渲染」的完整链路：fetch 便宜但有坑，axios 用拦截器把横切关注点收口，useEffect 模板用 ignore 和 AbortController 防住了竞态。但你也亲眼看到了：防一个竞态要写多少仪式感代码，而这还只是「单个请求」的账——缓存、去重、失效根本还没开始算。手写 JDBC 的日子该结束了：下一篇第 33 篇，请出前端界的 MyBatis——TanStack Query，把这份痛点清单逐条划掉。</p>
+</div>
+</section>
+
+</body>
+</html>

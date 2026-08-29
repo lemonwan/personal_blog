@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>useEffect 与生命周期：副作用该放哪？</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：副作用该放哪 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>渲染是纯函数，副作用该放哪？</h2></div>
+
+<p>第 8 篇的 Todo 实战跑通，卷一「核心原语」正式收官。从本篇起进入卷二「Hooks 精讲」，第一个要正面攻克的，就是坑倒无数转型同学的 <code>useEffect</code>。</p>
+
+<p>先把第 5 篇埋下的伏笔补完：每次渲染，React 都把组件函数<strong>从头到尾重新执行一遍</strong>。这隐含一条纪律——<strong>组件函数必须是纯函数</strong>：同样的 props 和 state，永远渲染出同样的 JSX；渲染过程不碰「外部世界」：不发请求、不动 <code>document</code>、不开定时器。反过来说，下面这种写法就是头号大忌：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserCard.tsx</b> · ❌ 反例：把请求塞进渲染</span></div>
+  <pre><code>import { useState } from "react";
+
+function UserCard({ userId }: { userId: number }) {
+  <span class="c">// ❌ 渲染期间发请求：fetch 返回的是 Promise，</span>
+  <span class="c">// 既不纯，user.name 也压根不存在</span>
+  const user = fetch(`/api/users/${userId}`).then(r =&gt; r.json());
+
+  return &lt;div&gt;{user.name}&lt;/div&gt;;
+}</code></pre>
+</div>
+
+<p>这段代码有两宗罪。其一，<strong>不纯</strong>：同样的输入不再保证同样的输出。其二，更隐蔽——<strong>React 不保证组件函数只执行一次</strong>：并发渲染下计算可能被丢弃重来，StrictMode 还会故意双调用（最后一站细说）。塞进渲染的副作用会莫名跑两遍、白做一遍。</p>
+
+<p>这类「与外部世界的交互」叫<strong>副作用（Side Effect）</strong>：网络请求、读写 <code>document.title</code> 与 <code>localStorage</code>、定时器、订阅（WebSocket）、埋点日志，都是典型代表。React 的态度不是禁止副作用，而是给它划一块<strong>专属场地</strong>：<code>useEffect</code>。取数的完整套路（竞态、清理、重试）第 32 篇专门讲，托管方案 TanStack Query 在第 33 篇。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：GET 请求不该有副作用</div>
+<p>写 REST 接口你一定遵守过：<strong>GET 必须幂等、无副作用</strong>，写操作走 POST/PUT/DELETE 专属通道。React 的渲染就是那次「GET」——只读、可重放；<code>useEffect</code> 是那条「写通道」。把请求塞进渲染，等于在 GET 接口里偷偷改库，大忌。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：基本用法与依赖数组 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>useEffect：画完屏幕，再帮我做这件事</h2></div>
+
+<p><code>useEffect(fn, deps)</code> 的语义一句话：<strong>「React，等你把界面渲染完、画到屏幕上之后，帮我执行这个函数。」</strong>它把副作用从渲染里剥出来，推迟到渲染之后执行。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>PageTitle.tsx</b> · 把购物车数量同步到浏览器标签页标题</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function Cart() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() =&gt; {
+    <span class="c">// 副作用：改的是 document（渲染之外的世界）</span>
+    document.title = `购物车(${count})`;
+  }, [count]); <span class="c">// 依赖数组：count 变了才重新执行</span>
+
+  return &lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count}&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>第二个参数 <code>deps</code>（依赖数组）是 useEffect 的「阀门」：React 拿新旧 deps <strong>逐项做 <code>Object.is</code> 比较</strong>，全部相同就跳过本次 effect。四种常见形态，务必背下来：</p>
+
+<table>
+  <thead>
+    <tr><th>写法</th><th>执行时机</th><th>Java 心智对照</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>useEffect(fn)</code>（不传 deps）</td><td>挂载后 + <strong>每次渲染后</strong>都执行</td><td>AOP 的 afterReturning 通知：每次方法调用完都执行——基本失控，别用</td></tr>
+    <tr><td><code>useEffect(fn, [])</code></td><td>仅<strong>首次挂载后</strong>执行一次</td><td><code>@PostConstruct</code>：初始化完成后执行一次</td></tr>
+    <tr><td><code>useEffect(fn, [a])</code></td><td>挂载后 + <strong>a 变化后</strong>再执行</td><td><code>@PostConstruct</code> + 监听 a：变了就销毁重建</td></tr>
+    <tr><td><code>useEffect(fn, [a, b])</code></td><td>挂载后 + <strong>任一依赖变化后</strong>执行</td><td>同上，多监听源，任一触发</td></tr>
+  </tbody>
+</table>
+
+<p>把这张表翻译成 Spring 的语言：<code>[]</code> 就是 <code>@PostConstruct</code>，依赖数组就是「监听变化、销毁重建」，清理函数就是 <code>@PreDestroy</code>。区别是：Bean 的生命周期只走一轮，effect 的「初始化 → 销毁」由依赖数组驱动，可以反复多轮。</p>
+</section>
+
+<!-- ═══════════════ 第3站：清理函数 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>清理函数：effect 自带的 finally 块</h2></div>
+
+<p>副作用常伴着「开资源」——定时器、订阅、连接——就必然要「关资源」。useEffect 的返回值就是干这个的：<strong>返回一个函数（cleanup），它会在下一次 effect 执行前、以及组件卸载前被调用</strong>。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Timer.tsx</b> · 定时器必须清理</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function Timer() {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() =&gt; {
+    const id = setInterval(() =&gt; {
+      setSeconds(s =&gt; s + 1);
+    }, 1000);
+
+    <span class="c">// cleanup：下一轮 effect 前 / 卸载前，先干掉旧定时器</span>
+    return () =&gt; clearInterval(id);
+  }, []);
+
+  return &lt;p&gt;已停留 {seconds} 秒&lt;/p&gt;;
+}</code></pre>
+</div>
+
+<p>不写 cleanup 会怎样？组件卸载了，定时器还活着，继续 <code>setState</code>——内存泄漏加控制台警告，和后端「借了连接不归还」是同一种事故。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：try-with-resources 与 @PreDestroy</div>
+  <p>Java 里你早有两个熟悉的机制：<strong>try-with-resources</strong> 把 <code>conn.close()</code> 托管给语法，无论正常返回还是抛异常都保证归还资源；<strong><code>@PreDestroy</code></strong> 保证容器关闭时 Bean 释放资源。cleanup 是两者合体，触发更细：<strong>不只是卸载时，每次 effect 因依赖变化重新执行前，也会先跑上一轮的 cleanup</strong>——每一轮 effect 都活在自己的 try-with-resources 块里。</p>
+</div>
+
+<p>完整的执行时序如下图，关键是<strong>更新那一行：先清理旧 effect，再执行新 effect</strong>：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="useEffect 执行时序图">
+  <defs>
+    <marker id="arr-useeffect" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <text x="10" y="64" font-size="14" font-weight="bold" fill="#1C1C1C">挂载</text>
+  <text x="10" y="154" font-size="14" font-weight="bold" fill="#1C1C1C">更新</text>
+  <text x="10" y="244" font-size="14" font-weight="bold" fill="#1C1C1C">卸载</text>
+  <rect x="80" y="44" width="88" height="32" rx="4" fill="#FAC94A"/>
+  <text x="124" y="64" text-anchor="middle" font-size="13" fill="#1C1C1C">渲染（纯）</text>
+  <line x1="172" y1="60" x2="184" y2="60" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-useeffect)"/>
+  <rect x="188" y="44" width="104" height="32" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="240" y="64" text-anchor="middle" font-size="13" fill="#1C1C1C">提交 DOM·绘制</text>
+  <line x1="296" y1="60" x2="308" y2="60" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-useeffect)"/>
+  <rect x="312" y="44" width="110" height="32" rx="4" fill="#C2410C"/>
+  <text x="367" y="64" text-anchor="middle" font-size="13" fill="#FFFFFF">effect（首次）</text>
+  <text x="432" y="64" font-size="11" fill="#8C8676">此后进入等待</text>
+  <rect x="80" y="134" width="88" height="32" rx="4" fill="#FAC94A"/>
+  <text x="124" y="154" text-anchor="middle" font-size="13" fill="#1C1C1C">渲染（纯）</text>
+  <line x1="172" y1="150" x2="184" y2="150" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-useeffect)"/>
+  <rect x="188" y="134" width="104" height="32" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="240" y="154" text-anchor="middle" font-size="13" fill="#1C1C1C">提交 DOM·绘制</text>
+  <line x1="296" y1="150" x2="308" y2="150" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-useeffect)"/>
+  <rect x="312" y="134" width="110" height="32" rx="4" fill="#177245"/>
+  <text x="367" y="154" text-anchor="middle" font-size="13" fill="#FFFFFF">cleanup（旧）</text>
+  <line x1="426" y1="150" x2="438" y2="150" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-useeffect)"/>
+  <rect x="442" y="134" width="110" height="32" rx="4" fill="#C2410C"/>
+  <text x="497" y="154" text-anchor="middle" font-size="13" fill="#FFFFFF">effect（新）</text>
+  <line x1="200" y1="240" x2="308" y2="240" stroke="#8C8676" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-useeffect)"/>
+  <text x="254" y="232" text-anchor="middle" font-size="11" fill="#8C8676">组件卸载</text>
+  <rect x="312" y="224" width="110" height="32" rx="4" fill="#177245"/>
+  <text x="367" y="244" text-anchor="middle" font-size="13" fill="#FFFFFF">cleanup（最后）</text>
+  <text x="432" y="244" font-size="11" fill="#8C8676">没有下一轮了</text>
+  <text x="80" y="286" font-size="12" fill="#8C8676">更新时先清上一轮，再跑新一轮：每轮 effect 都是一次完整的「开资源 → 关资源」</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>useEffect 完整时序：挂载执行 effect；更新时先跑上一轮 cleanup 再跑新一轮；卸载跑最后一轮 cleanup</figcaption>
+</figure>
+
+<div class="think">
+  <div class="think-q">cleanup = 「擦掉自己留下的痕迹」：改了标题就恢复、加了监听就移除。能恢复原状的 effect 才「可重入」——StrictMode 双调用也就伤不到你了。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：拆分与两个误用 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>一个 effect 一件事：拆分与两个典型误用</h2></div>
+
+<p>需要同步标题、又要订阅 WebSocket？<strong>拆成两个 effect</strong>——各自的依赖数组和清理函数，互不牵连：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Dashboard.tsx</b> · 按用途拆分：单一职责</span></div>
+  <pre><code><span class="c">// 假设 subscribeRoom 返回一个带 close() 的订阅句柄</span>
+
+useEffect(() =&gt; {
+  document.title = `未读消息 ${unread}`;
+  return () =&gt; { document.title = "我的应用"; };
+}, [unread]);
+
+useEffect(() =&gt; {
+  const ws = subscribeRoom(roomId);
+  return () =&gt; ws.close();
+}, [roomId]);</code></pre>
+</div>
+
+<p>这和「一个方法只做一件事」同构：标题逻辑和订阅逻辑揉进一个 effect，<code>unread</code> 一变，毫不相干的 WebSocket 连接就被拆了重建。effect 的粒度，按用途切。</p>
+
+<h3>误用一：把「事件驱动」的逻辑写进 effect</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderPage.tsx</b> · ❌ 用 effect 监听「提交了」状态</span></div>
+  <pre><code>function OrderPage() {
+  const [submitted, setSubmitted] = useState(false);
+
+  <span class="c">// ❌ 绕远路：点击 → 改状态 → effect 发现状态变了 → 才发请求</span>
+  useEffect(() =&gt; {
+    if (submitted) {
+      fetch("/api/orders", { method: "POST" });
+    }
+  }, [submitted]);
+}</code></pre>
+</div>
+
+<p>「用户点了提交」是一个<strong>事件</strong>，不是<strong>状态</strong>。明确知道是哪个交互触发的，就直接写在事件处理器里：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderPage.tsx</b> · ✅ 事件归事件，effect 归同步</span></div>
+  <pre><code>function OrderPage() {
+  <span class="c">// ✅ 交互触发的写操作，放事件处理器（第 6 篇）</span>
+  function handleSubmit() {
+    fetch("/api/orders", { method: "POST" });
+  }
+
+  return &lt;button onClick={handleSubmit}&gt;提交订单&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>经验法则：<strong>effect 用于「让组件与外部系统保持同步」</strong>（标题、订阅、定时器这类持续关系）；「响应某个具体动作」属于事件处理器。判断标准：是「用户做了某下操作」触发的，还是「数据处于某种状态」要求的？前者进事件处理器，后者进 effect。</p>
+
+<h3>误用二：用 effect 做派生状态</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Profile.tsx</b> · ❌ 多余的 state 加多余的 effect</span></div>
+  <pre><code>function Profile({ first, last }: { first: string; last: string }) {
+  const [fullName, setFullName] = useState("");
+
+  <span class="c">// ❌ fullName 完全由 props 推得出来，不需要 state + effect</span>
+  useEffect(() =&gt; {
+    setFullName(first + " " + last);
+  }, [first, last]);
+}</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Profile.tsx</b> · ✅ 渲染时直接算</span></div>
+  <pre><code>function Profile({ first, last }: { first: string; last: string }) {
+  const fullName = first + " " + last; <span class="c">// 普通局部变量，随每次渲染自动更新</span>
+  return &lt;h1&gt;{fullName}&lt;/h1&gt;;
+}</code></pre>
+</div>
+
+<p>这正是第 4 篇「数据能推出来，就不要放进 state」的 effect 版：能算出来的就在渲染时算，别用 effect 复制一遍——那只会引入「晚一拍」的中间状态和多余重渲染。计算很贵怎么办？第 11 篇 <code>useMemo</code> 的主场，也不是 effect 的。</p>
+</section>
+
+<!-- ═══════════════ 第5站：StrictMode 双调用 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>StrictMode：为什么我的 effect 执行了两次？</h2></div>
+
+<p>开发环境里，Timer 的 effect 日志会成对出现：<strong>挂载 → 清理 → 再挂载</strong>。这不是 bug，是 <code>&lt;StrictMode&gt;</code>（第 3 篇入口文件里见过）在 React 18+ 的<strong>开发模式</strong>下，故意对每个组件做一轮「挂载 → 卸载 → 再挂载」演练：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>main.tsx</b> · 入口处的 StrictMode</span></div>
+  <pre><code>import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+
+createRoot(document.getElementById("root")!).render(
+  &lt;StrictMode&gt;
+    &lt;App /&gt;
+  &lt;/StrictMode&gt;
+);</code></pre>
+</div>
+
+<p>演练的目的：其一，<strong>提前暴露隐患</strong>——双调用会出事的 effect（漏 cleanup、不幂等），放到真实世界的「快速切路由、反复开弹窗」场景一样会出事；其二，为未来「组件树可复用、状态可保留」铺路。<strong>生产构建完全不受影响</strong>，effect 只执行一轮。正确态度是把 cleanup 写全、让 effect 可重入，而不是摘掉 StrictMode——那等于拆掉烟雾报警器。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>渲染必须是纯函数；副作用统一放进 <code>useEffect</code>，在「画完屏幕之后」执行。</li>
+    <li>deps 四种形态：<strong>不传</strong>=每次渲染、<code>[]</code>=仅挂载（≈<code>@PostConstruct</code>）、<code>[a]</code>=a 变化时、<code>[a, b]</code>=任一变化时。</li>
+    <li>cleanup 是 effect 的「finally」：下一轮执行前 + 卸载前必跑，≈ try-with-resources + <code>@PreDestroy</code>。</li>
+    <li>一个 effect 一件事；事件驱动的逻辑放事件处理器；能算出来的值不要用 effect 同步成 state。</li>
+    <li>StrictMode 的开发模式双调用是健壮性体检，cleanup 写全即可免疫。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>卷二开篇，你拿到了 effect 的完整手册：<strong>渲染管「声明界面」，effect 管「与外部系统同步」，事件处理器管「响应用户动作」</strong>；依赖数组是阀门，cleanup 善后，StrictMode 体检。但「何时重跑」取决于「依赖的值有没有变」——而 JS 闭包会让 effect 偷偷读到「上一个版本的值」。下一篇第 10 篇，直击后端转前端公认的第一困惑点：<strong>闭包陷阱（stale closure）</strong>。见。</p>
+</div>
+</section>
+
+</body>
+</html>

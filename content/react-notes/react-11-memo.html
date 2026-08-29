@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>useMemo 与 useCallback：何时真正需要？</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：引用相等 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>一切的前提：React 只认「引用相等」</h2></div>
+
+<p>第 10 篇结尾留了个尾巴：诚实补全依赖之后，新的麻烦来了——有些依赖「看起来没变，每次渲染却都变」。要理解这件事，得先补一块地基：<strong>React 判断「相等」的方式</strong>。</p>
+
+<p>React 判断依赖变没变、props 变没变、state 变没变，用的都是<strong>严格相等</strong>（<code>Object.is</code>，可以粗略当成 <code>===</code>）：原始值（number、string、boolean）比「内容」；对象、数组、函数比<strong>「引用」</strong>——是不是同一个东西，而不是长得一样不一样。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：== 与 equals</div>
+  <p>Java 里 <code>==</code> 比引用、<code>equals()</code> 比内容，分工明确。JS 的 <code>===</code> 遇到对象时，行为更像 Java 的 <code>==</code>：<code>{ name: "Tom" } === { name: "Tom" }</code> 是 <code>false</code>——两个不同的对象。更麻烦的是，JS <strong>没有</strong>内置的「内容相等」：没有 <code>equals</code>，也没有 <code>hashCode</code>，React 也不会深比较你的对象（逐字段比较太贵）。它只认引用。</p>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>equality.ts</b> · 原始值比内容，对象比引用</span></div>
+  <pre><code>1 === 1;            <span class="c">// true：原始值，比值</span>
+"abc" === "abc";    <span class="c">// true：原始值，比值</span>
+
+{ name: "Tom" } === { name: "Tom" };  <span class="c">// false：两个不同的对象！</span>
+[1, 2] === [1, 2];                    <span class="c">// false：两个不同的数组！</span>
+
+const a = { name: "Tom" };
+const b = a;        <span class="c">// b 和 a 指向同一个对象</span>
+a === b;            <span class="c">// true：同一个引用</span></code></pre>
+</div>
+
+<p>把这条规则记牢，下一站你会亲眼看到：<strong>什么都不做，依赖也会天天变</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第2站：每次渲染一切都新建 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>每次渲染，一切都「焕然一新」</h2></div>
+
+<p>第 10 篇说过：每次渲染都重新执行一遍组件函数。现在结合引用相等，可以推出一个必然结论——<strong>函数体里现场创建的一切，每次渲染都是全新的引用</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>FilterList.tsx</b> · 看似平静，实则每次都「换新」</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function FilterList({ keyword }: { keyword: string }) {
+  const [items] = useState(["ant", "bee", "cat"]);
+
+  <span class="c">// 每次渲染，这都是一个新数组（新引用）</span>
+  const filtered = items.filter(i =&gt; i.includes(keyword));
+
+  useEffect(() =&gt; {
+    console.log("effect 执行了");
+  }, [filtered]); <span class="c">// 😱 filtered 每次渲染都是新引用 → effect 每次渲染都跑</span>
+
+  return &lt;ul&gt;{filtered.map(i =&gt; &lt;li key={i}&gt;{i}&lt;/li&gt;)}&lt;/ul&gt;;
+}</code></pre>
+</div>
+
+<p>诡异的事情发生了：<code>keyword</code> 明明没变、<code>items</code> 明明没变，effect 却<strong>每次渲染都执行</strong>。原因就藏在引用相等里——<code>filtered</code> 这个数组每次渲染都是现场 <code>filter</code> 出来的<strong>新对象</strong>，哪怕内容和上一次一模一样，引用也永远不同，React 只能判定「变了」。</p>
+
+<p>对象、数组、函数三兄弟全中招：只要它们是在组件函数体里「现场创建」的，就逃不过「每次渲染都是新引用」的命运。原始值则完全没事——值相同，就是「没变」。</p>
+
+<div class="think">
+  <div class="think-q">这就是第 10 篇「诚实补全依赖」策略的边界：对原始值，补全又诚实又高效；对引用类型的依赖，诚实补全会让 effect 高频重建。出路只有两条：要么别把「每次新建」的东西当依赖，要么让它的引用稳定下来——后者正是本篇主角 useMemo/useCallback 的本职工作。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：useMemo ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>useMemo：缓存「值」，只在两种场合出场</h2></div>
+
+<p><code>useMemo(fn, deps)</code> 的语义：<strong>deps 不变时，不重新执行 fn，直接返回上次缓存的结果</strong>。它缓存的是「计算结果」。真实需要它的场合只有两类。</p>
+
+<h3>场景一：计算真的很重</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Stats.tsx</b> · 十万行数据的过滤与汇总</span></div>
+  <pre><code>import { useMemo, useState } from "react";
+
+type Row = { name: string; amount: number };
+
+function Stats({ rows }: { rows: Row[] }) {
+  const [query, setQuery] = useState("");
+  const [compact, setCompact] = useState(false); <span class="c">// 无关的 UI 开关</span>
+
+  const stats = useMemo(() =&gt; {
+    <span class="c">// 十万行：过滤 + 汇总，一次几十毫秒</span>
+    const matched = rows.filter(r =&gt; r.name.includes(query));
+    return { total: matched.length, sum: matched.reduce((a, r) =&gt; a + r.amount, 0) };
+  }, [rows, query]); <span class="c">// 只有数据源变化才重算</span>
+
+  return (
+    &lt;&gt;
+      &lt;input value={query} onChange={e =&gt; setQuery(e.target.value)} /&gt;
+      &lt;label&gt;&lt;input type="checkbox" checked={compact}
+        onChange={e =&gt; setCompact(e.target.checked)} /&gt;紧凑模式&lt;/label&gt;
+      &lt;p&gt;共 {stats.total} 条，合计 {stats.sum}&lt;/p&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>不包 <code>useMemo</code> 会怎样？每敲一个字、每勾一次「紧凑模式」，组件重渲染，十万行的过滤汇总就重跑一次。包上之后，<code>rows</code>、<code>query</code> 不变，重算直接跳过。判断标准很朴素：<strong>没有 useMemo，这个计算每次渲染都会跑——它有多贵？渲染有多频繁？</strong>对几十条数据做一次 <code>filter</code>，微秒级，包了纯属浪费；对十万行做统计，才值得包。</p>
+
+<h3>场景二：结果不贵，但「引用稳定」很重要</h3>
+
+<p>两个子场景，都和第一站的引用相等有关：</p>
+
+<ol>
+  <li><strong>作为其它 Hook 的依赖</strong>：像上一站那个 <code>filtered</code>，用 useMemo 包住，引用稳定，依赖它的 effect 不再每次渲染都跑；</li>
+  <li><strong>传给 memo 化的子组件</strong>：<code>React.memo</code> 包裹的子组件靠「浅比较 props」跳过重渲染，而对象/函数 props 每次都是新引用，浅比较永远失败——memo 等于白包。用 useMemo/useCallback 把 props 的引用稳住，memo 才能真正生效。</li>
+</ol>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserList.tsx</b> · useMemo 与 React.memo 的完整配合</span></div>
+  <pre><code>import { memo, useMemo, useState } from "react";
+
+type User = { id: number; name: string };
+
+<span class="c">// 子组件：memo 化，props 浅比较相同 → 跳过重渲染</span>
+const UserRow = memo(function UserRow({ user }: { user: User }) {
+  console.log("render:", user.name);
+  return &lt;li&gt;{user.name}&lt;/li&gt;;
+});
+
+function UserList({ users, keyword }: { users: User[]; keyword: string }) {
+  const [tab, setTab] = useState("all");
+
+  <span class="c">// ✅ 过滤结果被缓存：users/keyword 没变时，filtered 引用不变</span>
+  const filtered = useMemo(
+    () =&gt; users.filter(u =&gt; u.name.includes(keyword)),
+    [users, keyword]
+  );
+
+  return (
+    &lt;&gt;
+      &lt;button onClick={() =&gt; setTab("fav")}&gt;切 Tab&lt;/button&gt;
+      &lt;ul&gt;{filtered.map(u =&gt; &lt;UserRow key={u.id} user={u} /&gt;)}&lt;/ul&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>点「切 Tab」时 <code>UserList</code> 重渲染，但 <code>users</code>、<code>keyword</code> 没变 → <code>filtered</code> 引用不变 → 每个 <code>UserRow</code> 的 <code>user</code> prop 都「没变」→ <code>memo</code> 判定跳过，控制台不会再刷出一排 render 日志。注意这是一套<strong>组合拳</strong>：只包 memo 不稳引用、或只稳引用但子组件没 memo，都可能白忙。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：方法级本地缓存，deps 就是缓存键</div>
+  <p><code>useMemo(fn, deps)</code> 活脱脱是一个「方法级本地缓存」：<code>deps</code> 是<strong>缓存键</strong>，<code>fn</code> 是<strong>回源计算</strong>。键没变 → 命中缓存直接返回；键变了 → 重新计算并回填。你也懂缓存的铁律：<strong>键选漏了（少声明真依赖）会读到脏数据，键选太敏感（多了无关依赖）则命中率惨淡</strong>。这里的键必须是「参与计算的全部输入」，一个都不能少——和第 10 篇 exhaustive-deps 的纪律完全同源。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：useCallback ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>useCallback：缓存「函数」的语法糖</h2></div>
+
+<p>函数也是值，也遵循引用相等。所以「把函数缓存住」和「把对象缓存住」是同一件事——<code>useCallback(fn, deps)</code> 就是 <code>useMemo</code> 的语法糖：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>sugar.tsx</b> · 两者完全等价</span></div>
+  <pre><code><span class="c">// 假设外层组件作用域里有 id 和 save：</span>
+
+<span class="c">// 下面两行完全等价（deps 相同的前提下）：</span>
+const handler  = useCallback(() =&gt; save(id), [id]);
+const handler2 = useMemo(() =&gt; () =&gt; save(id), [id]);
+
+<span class="c">// 规律：useCallback(fn, deps) ≈ useMemo(() =&gt; fn, deps)</span>
+<span class="c">// 「要缓存的东西恰好是函数」时，useCallback 只是少包一层</span></code></pre>
+</div>
+
+<p>它最常见的用途，是稳住「传给 memo 子组件的回调」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoList.tsx</b> · 稳住回调，让 memo 生效</span></div>
+  <pre><code>import { memo, useCallback, useState } from "react";
+
+type Todo = { id: number; text: string; done: boolean };
+
+const TodoItem = memo(function TodoItem({ todo, onToggle }: {
+  todo: Todo;
+  onToggle: (id: number) =&gt; void;
+}) {
+  return &lt;li onClick={() =&gt; onToggle(todo.id)}&gt;{todo.text}&lt;/li&gt;;
+});
+
+function TodoList() {
+  const [todos, setTodos] = useState&lt;Todo[]&gt;([]);
+
+  <span class="c">// 不包 useCallback：每次重渲染 onToggle 都是新函数</span>
+  <span class="c">// → 所有 TodoItem 的 props 都「变了」→ memo 集体失效</span>
+  const onToggle = useCallback((id: number) =&gt; {
+    setTodos(ts =&gt; ts.map(t =&gt; (t.id === id ? { ...t, done: !t.done } : t)));
+  }, []);  <span class="c">// ✅ 用函数式更新、不读外部值，deps 才能是 []</span>
+
+  return (
+    &lt;ul&gt;
+      {todos.map(t =&gt; (
+        &lt;TodoItem key={t.id} todo={t} onToggle={onToggle} /&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>注意回调里用的是<strong>函数式更新</strong> <code>setTodos(ts =&gt; …)</code>——第 4 篇的「连续 set 正确姿势」、第 10 篇的「修复板斧一」，这里是它第三次出场：正因为不直接读 <code>todos</code>，deps 才能老实写 <code>[]</code>，函数引用真正稳定。<strong>函数式更新的隐藏价值：让依赖更少、缓存更稳。</strong></p>
+
+<p>引用稳定性的高发区还有几处：传给 Provider 的 <code>value</code> 对象（第 15 篇 useContext 会遇到）、自定义 Hook 返回的对象（第 13 篇）——套路一致：会变的声明进 deps，不变的用缓存稳住。</p>
+</section>
+
+<!-- ═══════════════ 第5站：反模式与判断清单 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>反模式：到处包 useMemo，反而更慢</h2></div>
+
+<p>看完前两站，很容易走火入魔：「缓存在后端总是好东西，那我给每个变量、每个函数都包上 useMemo/useCallback，性能起飞？」——恰恰相反。<strong>缓存本身是有成本的</strong>：</p>
+
+<ol>
+  <li><strong>内存成本</strong>：每份缓存都要一直占着内存，直到 deps 变化才释放旧值；</li>
+  <li><strong>簿记成本</strong>：React 每次渲染都要保存旧 deps、逐项比较、维护缓存链表——包得越多，这套簿记越重；</li>
+  <li><strong>代码成本</strong>：满屏的 useMemo/useCallback 让依赖关系更难读，还常常掩盖真正的性能问题。</li>
+</ol>
+
+<p>对一次微秒级的 <code>filter</code>：不包，渲染时直接算，便宜又干净；包上，React 要为它保存依赖、比较引用、维护缓存——<strong>簿记开销可能比计算本身还贵</strong>。这就是「过早优化」的 React 版，和后端同一个道理：<strong>没有 profile 数据，别加缓存</strong>（第 41 篇会讲怎么用 Profiler 测量）。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：给每张表都套一层 Redis</div>
+  <p>你不会给每个查询都套 Redis：查询本身 2ms，引入缓存后多一次网络往返、多一份一致性维护，可能变成 5ms。<code>useMemo</code> 同理——它是给「贵的计算」和「必须稳的引用」准备的工具，不是荣誉勋章，不是每个函数体都该穿的衣服。</p>
+</div>
+
+<p>顺带一个「免费的 useMemo」常识：把常量提到组件外面，比任何 Hook 都干净——</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>FilterBar.tsx</b> · 常量外提，天生引用稳定</span></div>
+  <pre><code><span class="c">// ✅ 写在组件函数外面：无论渲染多少次，都是同一个引用</span>
+const FILTER_OPTIONS = ["all", "done", "todo"];
+
+function FilterBar() {
+  return &lt;select&gt;{FILTER_OPTIONS.map(o =&gt; &lt;option key={o}&gt;{o}&lt;/option&gt;)}&lt;/select&gt;;
+}</code></pre>
+</div>
+
+<h3>判断清单：到底要不要包？</h3>
+
+<table>
+  <thead>
+    <tr><th>遇到的情况</th><th>要不要包</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>计算很重（大列表过滤/排序/统计、复杂数值计算），且渲染频繁</td><td><strong>useMemo</strong>，先确认它确实在每次渲染重复执行</td></tr>
+    <tr><td>计算结果作为<strong>其它 Hook 的依赖</strong>，希望 effect 别乱跑</td><td><strong>useMemo</strong> 稳住引用</td></tr>
+    <tr><td>对象/数组/函数要传给 <strong>memo 子组件</strong></td><td><strong>useMemo / useCallback</strong> 稳住引用，否则 memo 失效</td></tr>
+    <tr><td>函数作为<strong>其它 Hook 的依赖</strong>（effect 里要调用它）</td><td><strong>useCallback</strong>，或干脆把函数挪进 effect 内部定义</td></tr>
+    <tr><td>普通的小计算、小对象、事件处理器</td><td><strong>都不包</strong>，直接写</td></tr>
+    <tr><td>子组件几乎每次渲染 props 都在变</td><td>先别急着 memo——先查是不是「状态放得太低」或该拆组件（第 27 篇）</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>React 只认<strong>引用相等</strong>；组件体里每次新建的对象/数组/函数，引用必然不同。</li>
+    <li><strong>useMemo 缓存值，useCallback 缓存函数</strong>——后者就是 <code>useMemo(() =&gt; fn, deps)</code> 的语法糖。</li>
+    <li>真正需要的场景只有两类：<strong>计算重</strong>、<strong>引用要稳</strong>（供依赖数组 / memo 子组件用）。</li>
+    <li>与 <code>React.memo</code> 是组合拳，单独用常常白忙。</li>
+    <li>缓存有成本：先测量（第 41 篇 Profiler）再优化，别无脑全包。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇你补上了「引用相等」这块地基：React 的世界里没有 <code>equals()</code>，只有「是不是同一个引用」。由此看透了 <code>useMemo</code> / <code>useCallback</code> 的本质——<strong>不是性能装饰品，而是「引用稳定性」工具</strong>，只在「计算贵」和「引用必须稳」两种场合出场，并且和 <code>React.memo</code> 要配合使用。至此，第 9、10、11 篇把 effect 三件套讲完了：何时跑（第 9 篇）、读到哪一版的值（第 10 篇）、依赖怎么稳（本篇）。而 <code>useRef</code> 在第 10 篇的板斧三里已经露过一面——它可不只是「存最新值」这么简单。下一篇第 12 篇，我们就把这个「跨渲染的可变盒子」讲透：DOM 引用、定时器句柄、不触发重渲染的任意值，全是它的舞台。</p>
+</div>
+</section>
+
+</body>
+</html>

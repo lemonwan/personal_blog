@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 前端：工具调用与状态机</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：Chat 与 Agent 的分水岭 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>Chat 与 Agent：一次 RPC 与一条工作流</h2></div>
+
+<p>第 46 篇我们拆完的 Chat 前端有个隐含假设：<strong>一次提问，一次回答</strong>——中间只有一条流式消息在动。Agent 打破了这个假设：你问一句，它自己干十步。先把两者摆在一张表里看清楚：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>Chat（一问一答）</th><th>Agent（多步自主调用）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>交互轮次</td><td>一次请求，一次响应</td><td>一次目标，模型自己拆成多步执行</td></tr>
+    <tr><td>单次时长</td><td>秒级</td><td>十几秒到几分钟</td></tr>
+    <tr><td>前端要展示的</td><td>一条流式消息（第 45 篇）</td><td>过程（思考 / 工具 / 结果）+ 最终结论</td></tr>
+    <tr><td>失败形态</td><td>请求失败，整条重来</td><td>中途某步失败，要能定位、能单独重试</td></tr>
+    <tr><td>风险</td><td>内容不当</td><td>真实世界副作用：下单、退款、发消息</td></tr>
+  </tbody>
+</table>
+
+<p>后端视角一看就懂：<strong>Chat 是一次 RPC，Agent 是一条工作流</strong>。LLM 在「思考」和「调工具」之间反复横跳，期间要查订单库、调内部 API、比对结果，最后才给你答案。前端的工作随之从「渲染响应」升级为「渲染工作流」——这可比多画几个转圈动画深刻得多。</p>
+
+<div class="think">
+  <div class="think-q">试试把第 46 篇的状态模型硬套到 Agent 上：你会发现「正在生成」这个词的语义分裂了——是在「想」，还是在「查订单」？查了三步，哪步成了哪步败？不是补丁不够多，是这个模型装不下了：得从「一条消息的状态」升级为「一次执行的状态机」。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：tool-call 回放与事件流 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>tool-call 回放：把黑盒过程搬上台面</h2></div>
+
+<p>先看 Agent 在后端是怎么跑的：用户提问 → 后端把对话历史和工具清单发给 LLM → LLM 不直接回答，返回 <code>tool_calls</code>（「我要查订单」）→ 后端执行真工具（查订单库、调内部 API）→ 结果回填进对话序列 → 再问 LLM → 它可能再调下一个工具……直到它认为可以回答了，才开始输出 delta。这条内部过程，用户原本完全看不见。</p>
+
+<p><strong>Agent 体验的核心，就是把这个黑盒过程「回放」给用户看</strong>：思考中 → 正在查询订单（勾）→ 正在比对库存（勾）→ 生成中 → 答案逐字出现。前端看到的是一条 SSE 事件流，照例先建模——可辨识联合，第 28 篇和第 45 篇的老朋友：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>types.ts</b> · Agent 事件流的五种事件</span></div>
+  <pre><code>type AgentEvent =
+  | { type: "delta"; text: string }                       <span class="c">// 最终回答的流式片段（第 45 篇）</span>
+  | { type: "tool_call"; id: string; name: string; args: unknown }      <span class="c">// 模型要调工具了</span>
+  | { type: "tool_result"; id: string; ok: boolean; summary: string } <span class="c">// 后端执行完毕</span>
+  | { type: "done"; totalTokens: number }
+  | { type: "error"; message: string };</code></pre>
+</div>
+
+<p>五种事件，对应五处 UI：<code>delta</code> → 正文逐字追加；<code>tool_call</code> → 时间线里新增一张「正在执行」的卡片；<code>tool_result</code> → 对应卡片打勾或变红；<code>done</code> → 收官；<code>error</code> → 错误横幅。事件流是输入，界面是输出——又回到第 1 篇那句话 <code>UI = f(state)</code>，只是这次 state 要靠事件流喂出来。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：工作流引擎的审计事件 + 监控大屏</div>
+  <p>你在后端早就见过这套架构：流程引擎每走一步发一条事件，监控大屏按事件更新节点状态，事后还能靠事件序列回放整个执行过程。前端这里做的事一模一样——给 Agent 装一块「监控大屏」，SSE 事件流就是那条 MQ。区别只在于：这块大屏的渲染介质是 React 组件树。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：useReducer 状态机 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>useReducer：给 Agent 装一台状态机</h2></div>
+
+<p>为什么不用 useState？因为 Agent 的状态是一伙的：阶段（phase）、工具步骤（steps）、正在生成的回答（answer），一个事件常常要同时改好几处。拆成多个 useState，就会出现「delta 都到了、phase 还停在 tool_running」这种互相踩脚的中间态。useReducer 把「事件 → 状态迁移」集中成一张表——这正是状态机的教科书写法。先定义状态与动作：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>agentMachine.ts</b> · 状态与动作定义</span></div>
+  <pre><code>interface ToolStep {
+  id: string;
+  name: string;                    <span class="c">// 工具名，如 queryOrder</span>
+  status: "running" | "ok" | "fail";
+  summary?: string;                <span class="c">// 结果一句话摘要，折叠时展示</span>
+}
+
+interface AgentState {
+  phase: "idle" | "thinking" | "tool_running" | "streaming" | "done" | "error";
+  steps: ToolStep[];               <span class="c">// 时间线卡片的数据源</span>
+  answer: string;                  <span class="c">// 最终回答，流式追加</span>
+}
+
+type AgentAction =
+  | { type: "SUBMIT" }
+  | { type: "TOOL_CALL"; id: string; name: string }
+  | { type: "TOOL_RESULT"; id: string; ok: boolean; summary: string }
+  | { type: "DELTA"; text: string }
+  | { type: "DONE" }
+  | { type: "ERROR" };</code></pre>
+</div>
+
+<p>然后是迁移表本体——整个 Agent 界面的「宪法」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>agentMachine.ts</b> · reducer：事件 → 状态迁移</span></div>
+  <pre><code>function reducer(state: AgentState, action: AgentAction): AgentState {
+  switch (action.type) {
+    case "SUBMIT":
+      return { phase: "thinking", steps: [], answer: "" }; <span class="c">// 全量重置，进入思考</span>
+
+    case "TOOL_CALL":
+      return {
+        ...state,
+        phase: "tool_running",
+        steps: [...state.steps, { id: action.id, name: action.name, status: "running" }],
+      };
+
+    case "TOOL_RESULT": {
+      const status: ToolStep["status"] = action.ok ? "ok" : "fail";
+      const steps = state.steps.map((s) =&gt;
+        s.id === action.id ? { ...s, status, summary: action.summary } : s
+      );
+      return { ...state, phase: "thinking", steps }; <span class="c">// 一步结束，回 thinking 等模型下一步</span>
+    }
+
+    case "DELTA":
+      return { ...state, phase: "streaming", answer: state.answer + action.text };
+
+    case "DONE":
+      return { ...state, phase: "done" };
+
+    case "ERROR":
+      return { ...state, phase: "error" };
+  }
+}</code></pre>
+</div>
+
+<p>注意 switch 故意不写 default：六个动作全覆盖，将来少写一个分支，TS 会盯着返回类型报错——可辨识联合的福利。SSE 事件到达后，一个薄薄的适配层把 <code>AgentEvent</code> 翻译成 action 再 dispatch，单向流转：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useAgentStream.ts</b> · 事件流接入状态机</span></div>
+  <pre><code>eventSource.onmessage = (e) =&gt; {
+  const event: AgentEvent = JSON.parse(e.data);
+  switch (event.type) {
+    case "delta":       return dispatch({ type: "DELTA", text: event.text });
+    case "tool_call":   return dispatch({ type: "TOOL_CALL", id: event.id, name: event.name });
+    case "tool_result": return dispatch({ type: "TOOL_RESULT", id: event.id, ok: event.ok, summary: event.summary });
+    case "done":        return dispatch({ type: "DONE" });
+    case "error":       return dispatch({ type: "ERROR" });
+  }
+};</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="Agent 执行期的前端状态机：idle 经 SUBMIT 进入 thinking，tool_call 事件进入 tool_running，tool_result 后回到 thinking 循环，首个 delta 切入 streaming，done 事件收官；任一进行中阶段出错进入 error">
+  <defs>
+    <marker id="arr48a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <rect x="16" y="40" width="100" height="48" rx="8" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="66" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">idle</text>
+  <text x="66" y="78" text-anchor="middle" font-size="11" fill="#1C1C1C">待命</text>
+  <line x1="116" y1="64" x2="192" y2="64" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr48a)"/>
+  <text x="154" y="56" text-anchor="middle" font-size="11" fill="#1C1C1C">SUBMIT</text>
+  <rect x="196" y="40" width="120" height="48" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="256" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">thinking</text>
+  <text x="256" y="78" text-anchor="middle" font-size="11" fill="#1C1C1C">思考中</text>
+  <line x1="316" y1="64" x2="392" y2="64" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr48a)"/>
+  <text x="354" y="56" text-anchor="middle" font-size="11" fill="#1C1C1C">tool_call</text>
+  <rect x="396" y="40" width="140" height="48" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="466" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">tool_running</text>
+  <text x="466" y="78" text-anchor="middle" font-size="11" fill="#1C1C1C">执行工具</text>
+  <path d="M466,36 C466,8 256,8 256,36" fill="none" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr48a)"/>
+  <text x="361" y="18" text-anchor="middle" font-size="11" fill="#1C1C1C">tool_result：一步结束，回来想下一步</text>
+  <line x1="256" y1="88" x2="256" y2="186" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr48a)"/>
+  <text x="268" y="142" text-anchor="start" font-size="11" fill="#1C1C1C">首个 delta</text>
+  <rect x="196" y="190" width="120" height="48" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="256" y="210" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">streaming</text>
+  <text x="256" y="228" text-anchor="middle" font-size="11" fill="#1C1C1C">生成回答</text>
+  <line x1="316" y1="214" x2="416" y2="214" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr48a)"/>
+  <text x="366" y="206" text-anchor="middle" font-size="11" fill="#1C1C1C">done 事件</text>
+  <rect x="420" y="190" width="110" height="48" rx="8" fill="#FFFFFF" stroke="#177245" stroke-width="1.5"/>
+  <text x="475" y="210" text-anchor="middle" font-size="13" font-weight="bold" fill="#177245">done</text>
+  <text x="475" y="228" text-anchor="middle" font-size="11" fill="#1C1C1C">完成</text>
+  <line x1="212" y1="88" x2="84" y2="186" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr48a)"/>
+  <text x="118" y="130" text-anchor="middle" font-size="11" fill="#C2410C">error 事件</text>
+  <rect x="16" y="190" width="130" height="48" rx="8" fill="#FFFFFF" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="81" y="210" text-anchor="middle" font-size="13" font-weight="bold" fill="#C2410C">error</text>
+  <text x="81" y="228" text-anchor="middle" font-size="11" fill="#1C1C1C">出错，可重试</text>
+  <text x="310" y="276" text-anchor="middle" font-size="11" fill="#8C8676">任一进行中阶段收到 error 都迁入 error；界面只能出现这张图里的状态</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>Agent 执行期的前端状态机：SUBMIT 点火，tool_call 与 tool_result 驱动 thinking / tool_running 循环，首个 delta 切入 streaming，done 收官——UI 不再自作主张，只做这张图的投影。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Spring StateMachine 与审批流</div>
+  <p>这张图你在后端画过无数次：Spring StateMachine、审批流、订单状态机。有限状态、事件驱动迁移、非法迁移直接不发生。区别只是：后端状态机管业务流程，前端状态机管「界面上该显示什么」。有了它，复杂度从「散落各处的布尔标志」降维成「查一张迁移表」——转圈动画该出现在哪、什么时候停，全都由 phase 一个字段说了算。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：时间线卡片与人在回路 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>时间线卡片与「人在回路」：把过程摊开给用户看</h2></div>
+
+<p>状态机有了，渲染层只剩两件事：把 steps 画成时间线，把危险步骤交还给人。每个工具步骤渲染成一张默认折叠的卡片——running 转圈、ok 打勾、fail 给重试按钮：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>StepCard.tsx</b> · 可折叠的工具步骤卡片</span></div>
+  <pre><code>const STEP_LABEL: Record&lt;string, string&gt; = {
+  queryOrder: "正在查询订单",
+  checkStock: "正在比对库存",
+  createRefund: "正在创建退款单",
+};
+
+function StepCard({ step, onRetry }: { step: ToolStep; onRetry: (id: string) =&gt; void }) {
+  const [open, setOpen] = useState(false); <span class="c">// 默认折叠，只留一行摘要</span>
+
+  return (
+    &lt;div className="step-card" data-status={step.status}&gt;
+      &lt;button onClick={() =&gt; setOpen(!open)}&gt;
+        &lt;StatusIcon status={step.status} /&gt;
+        {/* running 转圈 / ok 打勾 / fail 叉号 */}
+        &lt;span&gt;{STEP_LABEL[step.name] ?? step.name}&lt;/span&gt;
+        {step.status === "fail" &amp;&amp; (
+          &lt;span onClick={(e) =&gt; { e.stopPropagation(); onRetry(step.id); }}&gt;重试&lt;/span&gt;
+        )}
+      &lt;/button&gt;
+      {open &amp;&amp; &lt;pre className="step-detail"&gt;{step.summary}&lt;/pre&gt;}
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>时间线是「过程可视化」，还差半块拼图：<strong>危险工具不能由模型一句话就执行</strong>。退款、删除、对外发消息，必须用户亲自拍板——「人在回路」（human-in-the-loop）。正确的建模方式：它是状态机里的<strong>一等状态</strong>，不是 UI 上一个弹窗。事件协议给 tool_call 加 <code>needsConfirm</code> 标记，reducer 收到后分流：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>agentMachine.ts</b> · 危险工具进入「待确认」状态</span></div>
+  <pre><code><span class="c">// AgentAction 的 TOOL_CALL 扩展：{ type: "TOOL_CALL"; id; name; needsConfirm: boolean }</span>
+<span class="c">// AgentState 的 phase 扩展："awaiting_confirmation"</span>
+<span class="c">// ToolStep 的 status 扩展："waiting_confirm"</span>
+
+case "TOOL_CALL": {
+  const step: ToolStep = {
+    id: action.id,
+    name: action.name,
+    status: action.needsConfirm ? "waiting_confirm" : "running",
+  };
+  return {
+    ...state,
+    phase: action.needsConfirm ? "awaiting_confirmation" : "tool_running",
+    steps: [...state.steps, step],
+  };
+}</code></pre>
+</div>
+
+<p><code>phase === "awaiting_confirmation"</code> 时，那张卡片渲染出「确认执行 / 取消」按钮；用户点击后前端调确认接口，后端才真正执行工具，tool_result 事件继续推进状态机。为什么必须建<strong>状态</strong>而不是弹窗？弹窗是视图层的临时物：刷新页面它就没了，两个标签页各弹各的，超时没人管。状态是可恢复、可同步、可测试的：刷新后从持久化恢复出 awaiting_confirmation（第 22 篇的功课），超时由后端兜底——到点回一条 <code>ok: false</code> 的 tool_result，状态机自然流转到失败。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：审批流里的人工审批节点</div>
+  <p>流程实例停在 WAITING_APPROVAL，审批动作触发迁移，超时未审自动驳回——没人把「审批」做成一个前端弹窗就完事，因为重启、超时、并发审批都得靠状态兜底。Agent 的确认节点就是审批节点，用户就是那个审批人。你后端攒下的工作流经验，在这里原封不动地复用。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">反过来想：如果产品要求「确认等待超过 60 秒自动视为拒绝」，你会改哪里？不该改 UI——应该让后端定时发一条 tool_result(ok=false)。UI 只是状态的投影；当你发现自己想用 setTimeout 直接改界面时，先想想是不是状态机里缺了一条迁移边。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：收官 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>收官：Agent 前端三件套</h2></div>
+
+<p>把事件、动作、状态、界面四层的对应关系收进一张速查表，对着它就能写出完整的 Agent 界面：</p>
+
+<table>
+  <thead>
+    <tr><th>SSE 事件</th><th>dispatch 动作</th><th>状态迁移</th><th>界面表现</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>tool_call</code></td><td>TOOL_CALL</td><td>thinking → tool_running / awaiting_confirmation</td><td>时间线新卡片转圈，或显示「等待确认」</td></tr>
+    <tr><td><code>tool_result</code></td><td>TOOL_RESULT</td><td>steps 更新，回 thinking</td><td>卡片打勾或变红，失败给重试</td></tr>
+    <tr><td><code>delta</code></td><td>DELTA</td><td>→ streaming，answer 追加</td><td>结论逐字出现（第 45 篇）</td></tr>
+    <tr><td><code>done</code></td><td>DONE</td><td>→ done</td><td>定格答案，展示 token 用量</td></tr>
+    <tr><td><code>error</code></td><td>ERROR</td><td>→ error</td><td>错误横幅 + 整体重试入口</td></tr>
+  </tbody>
+</table>
+
+<p>一句话收束本篇，也是卷七前半程的方法论总纲：<strong>Agent 前端 = 状态机 + 事件流 UI + 人在回路</strong>。状态机保证界面永远处于合法状态，事件流保证后端每一步都被看见，人在回路保证危险的副作用有人签字。三者齐了，多步自主执行才敢放到用户面前。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>Agent ≠ Chat：多步、长耗时、有真实副作用，前端从「渲染响应」升级为「渲染工作流」。</li>
+    <li>SSE 事件建模成可辨识联合（delta / tool_call / tool_result / done / error），事件流是输入，状态是输出。</li>
+    <li>useReducer 集中管理「事件 → 迁移」，拒绝散落的 setState 互相踩脚；switch 不写 default，让 TS 盯着穷举。</li>
+    <li>工具步骤渲染成可折叠时间线卡片：running 转圈、ok 打勾、fail 重试，黑盒过程全程可见。</li>
+    <li>危险操作建模成 awaiting_confirmation 一等状态而非弹窗——「人在回路」要可恢复、可超时、可测试。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇把第 45、46 篇的「单条消息流式」升级成了「多步执行的编排」：Agent 的内部过程被 SSE 事件流暴露出来，事件建模成可辨识联合，useReducer 驱动一台 idle → thinking → tool_running → streaming → done 的状态机，工具步骤摊开成时间线卡片，危险动作交还给人拍板。第 43 到 48 篇，AI 时代前端工程师的武器库到此配齐：转型路线、服务端组件、流式 UI、集成实践、结对提效、Agent 界面。技术主线只剩最后一站——把 React、后端、AI 全部串进一个真实项目。下一篇第 49 篇：从 React 到全栈·项目打通，全书压轴，正式开始。</p>
+</div>
+</section>
+
+</body>
+</html>

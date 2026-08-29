@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Java 后端全栈转型路线图</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：AI 时代，价值换了个位置 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>AI 都会写前端了，你的价值在哪</h2></div>
+
+<p>上一篇第 42 篇收官卷六：静态站推上 Nginx、CI 跑绿——「页面」这件事你已经能独立交付。卷七换一个视角：把你手里的 Java 后端和这 42 篇攒下的前端，<strong>缝成一个完整的产品</strong>。开篇先回答一个扎心的问题：AI 几秒钟能生成一个 React 组件，你花几十个小时学的这些东西，还值钱吗？</p>
+
+<p>值不值钱，取决于你看清一件事：<strong>瓶颈换位置了</strong>。以前「会不会写」是门槛，现在「能不能验收」是门槛。交付质量 = AI 的生成能力 × 人的验收能力——前一个变量这三年暴涨了几十倍，后一个变量原封不动。于是价值的分水岭从「会写代码的人」挪到了「能读懂、能验收的人」。</p>
+
+<p>空口无凭，来做个小实验。下面是 AI 三秒钟生成的「搜索过滤列表」，<strong>你能挑出几处毛病？</strong></p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserSearch.tsx</b> · AI 生成的代码，请验收</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+export default function UserSearch({ initial }: { initial: User[] }) {
+  const [keyword, setKeyword] = useState("");
+  const [list, setList] = useState(initial);
+
+  useEffect(() =&gt; {
+    const timer = setTimeout(() =&gt; {
+      fetch("/api/users?kw=" + keyword)
+        .then((r) =&gt; r.json())
+        .then((data) =&gt; setList(data));
+    }, 300);
+  }, []);   <span class="c">// 毛病一：依赖数组漏了 keyword——输入变了也不会重新请求（第 10 篇闭包陷阱）</span>
+
+  return (
+    &lt;ul&gt;
+      {list.map((u, i) =&gt; (
+        &lt;li key={i}&gt;{u.name}&lt;/li&gt;   <span class="c">// 毛病二：列表可能重排，key 不能用下标（第 7 篇）</span>
+      ))}
+    &lt;/ul&gt;
+  );
+}
+<span class="c">// 毛病三：连续输入时上一发请求可能后到，覆盖新结果——没有 abort，竞态（第 34 篇）</span>
+<span class="c">// 隐藏的第四处：timer 没有 cleanup，组件卸载后照样触发 setState（第 9 篇）</span></code></pre>
+</div>
+
+<p>四处毛病分别对应第 10、7、34、9 篇。全挑出来，说明你的验收能力配得上 AI 的生成能力；一处都挑不出来，AI 帮你写的前端就是线上事故的温床——<strong>AI 放大的恰恰是「能读懂 + 能验收」的人的价值</strong>。</p>
+
+<p>第二个理由更结构性的：<strong>前后端边界正在模糊</strong>。传统分工是「接口归后端、页面归前端」，两边隔着一层 REST API 玩传话游戏。而服务端组件（RSC）和 Server Actions 时代，取数和交互长在<strong>同一棵组件树</strong>里（下一篇第 44 篇细讲），前后端正在合并成「一个交付单元」。对个人开发者尤其如此：你一个人，就该是一个全栈团队。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：你是带 AI 外包团队的 tech lead</div>
+  <p>把 AI 想成一支随叫随到、敲码飞快的初级外包团队。带过外包的人都知道：产出上限从来不由外包的敲码速度决定，而由验收方的 review 能力决定。你在 Java 世界练了多年的 code review、验收测试、架构把关，正是这套能力让你在前端「验收」时占便宜——而本笔记前 42 篇，就是把这份 review 能力补齐到前端。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">自测一下：如果明天让你 review 一份前端 PR，你能给出几条有依据的意见？这个数字，就是本篇路线图要往上抬的数字。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：42 篇的知识地图 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>先看地图：42 篇攒下了什么</h2></div>
+
+<p>转型最忌「什么都学一点」。动手划路线之前，先把已完成的 42 篇盘成一张能力地图——后面三阶段，就是在这张地图上走出的三条路径：</p>
+
+<table>
+  <thead>
+    <tr><th>卷</th><th>篇目</th><th>核心内容</th><th>你获得的能力</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>卷一</td><td>01~08</td><td>声明式心智模型、JSX、组件与 Props、State、渲染模型、事件、key、Todo 实战</td><td>读懂任何 React 组件在「画什么」</td></tr>
+    <tr><td>卷二</td><td>09~16</td><td>useEffect 与生命周期、依赖数组与闭包、memo 系、useRef、自定义 Hook、状态提升、Context、陷阱清单</td><td>看懂副作用与数据流，识别 90% 的经典 bug</td></tr>
+    <tr><td>卷三</td><td>17~22</td><td>客户端/服务端状态、Zustand、Redux Toolkit、选型、表单、持久化</td><td>给应用设计状态结构，不把状态乱塞</td></tr>
+    <tr><td>卷四</td><td>23~29</td><td>组合优于继承、受控非受控、children、HOC、拆分、TypeScript、目录规范</td><td>把大页面拆成职责清晰的组件</td></tr>
+    <tr><td>卷五</td><td>30~36</td><td>Router、动态路由、fetch 取数、TanStack Query、竞态、认证守卫、分页</td><td>完成多页面、带登录、带列表的数据应用</td></tr>
+    <tr><td>卷六</td><td>37~42</td><td>重渲染与 memo、虚拟列表、代码分割、构建原理、Profiler、部署 CI</td><td>让产品跑得快、发得出去</td></tr>
+    <tr><td>卷七</td><td>43~50</td><td>本卷：RSC、流式 UI、LLM 集成、AI 结对、Agent、项目打通</td><td>与 AI 结对，交付前后端一体的产品</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>地图的读法：<strong>卷一二定心智模型（地基），卷三四五定工程能力（主体），卷六定交付质量（装修），卷七把前后端接通（封顶）</strong>。</li>
+    <li>地基不可跳过：第 44~50 篇的新范式全部建立在 01~16 篇的 Hooks 心智模型上——地基不牢，RSC 只会更懵。</li>
+    <li>能力写的是「能做什么」而不是「看过什么」——下一站的里程碑验收，就按这个口径来。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：三阶段路线图 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>三阶段路线：每一步都要可验收</h2></div>
+
+<p>转型失败的头号原因不是「学不会」，而是「学不完」——没有验收节点的学习永远停在半途。所以路线只分三段，<strong>每段一个里程碑项目，验收标准写死</strong>：</p>
+
+<table>
+  <thead>
+    <tr><th>阶段</th><th>吃掉哪些内容</th><th>里程碑项目</th><th>验收标准（可自测）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>阶段一 · 能读懂</strong></td><td>卷一 + 卷二</td><td>Todo 应用（第 8 篇）</td><td>不看教程从零写出增删改查；说得出「什么会触发重渲染」（第 37 篇）；解释得清 useEffect 依赖数组为什么这么填</td></tr>
+    <tr><td><strong>阶段二 · 能开发</strong></td><td>卷三 + 卷四 + 卷五</td><td>后台管理系统</td><td>列表页带分页筛选且处理竞态（第 34/36 篇）；表单校验（第 21 篇）；登录守卫（第 35 篇）；全局状态用 Zustand（第 18 篇）</td></tr>
+    <tr><td><strong>阶段三 · 能交付</strong></td><td>卷六 + 卷七（RSC 起步）</td><td>全栈小产品上线（推荐做个 AI 应用，第 46/49 篇）</td><td>域名可访问、CI 自动部署（第 42 篇）、Lighthouse 性能分达标、页面与接口同仓交付</td></tr>
+  </tbody>
+</table>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="三阶段路线图：阶段一能读懂对应卷一二和 Todo 应用，阶段二能开发对应卷三四五和后台管理系统，阶段三能交付对应卷六加 RSC 和上线全栈小产品，三级台阶逐级升高">
+  <defs>
+    <marker id="arr43a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <rect x="36" y="178" width="170" height="86" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="121" y="202" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">阶段一 · 能读懂</text>
+  <text x="121" y="222" text-anchor="middle" font-size="11" fill="#1C1C1C">卷一二 · 心智模型 + Hooks</text>
+  <text x="121" y="240" text-anchor="middle" font-size="11" fill="#C2410C">里程碑：Todo 应用</text>
+  <text x="121" y="257" text-anchor="middle" font-size="11" fill="#8C8676">约 2~4 周</text>
+  <line x1="208" y1="220" x2="226" y2="192" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr43a)"/>
+  <rect x="228" y="112" width="170" height="152" rx="8" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="313" y="136" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">阶段二 · 能开发</text>
+  <text x="313" y="156" text-anchor="middle" font-size="11" fill="#1C1C1C">卷三四五 · 状态/组件/路由</text>
+  <text x="313" y="174" text-anchor="middle" font-size="11" fill="#C2410C">里程碑：后台管理系统</text>
+  <text x="313" y="192" text-anchor="middle" font-size="11" fill="#1C1C1C">列表 · 表单 · 登录 · 全局状态</text>
+  <text x="313" y="210" text-anchor="middle" font-size="11" fill="#8C8676">约 4~8 周</text>
+  <line x1="400" y1="154" x2="418" y2="126" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr43a)"/>
+  <rect x="420" y="46" width="170" height="218" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="505" y="70" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">阶段三 · 能交付</text>
+  <text x="505" y="90" text-anchor="middle" font-size="11" fill="#1C1C1C">卷六 + RSC 全栈闭环</text>
+  <text x="505" y="108" text-anchor="middle" font-size="11" fill="#C2410C">里程碑：全栈小产品</text>
+  <text x="505" y="126" text-anchor="middle" font-size="11" fill="#1C1C1C">上线 · CI · 性能达标</text>
+  <text x="505" y="144" text-anchor="middle" font-size="11" fill="#1C1C1C">约 4~6 周</text>
+  <text x="310" y="284" text-anchor="middle" font-size="11" fill="#8C8676">验收看项目，不看刷教程的时长</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>三阶段路线图：每阶段以可验收的里程碑项目收口——项目跑不起来，就不算过。</figcaption>
+</figure>
+
+<p>估时按业余时间算，因人而异；但<strong>验收标准不因人而异</strong>。有 Java 功底的人，三段加起来大约 3~5 个月能做到「能交付」——比从零学前端的人快，快在哪，下一站拆给你看。</p>
+
+<div class="think">
+  <div class="think-q">把里程碑项目写进简历：「Todo」不值钱，但「一个上线了的、CI 部署的、带 AI 能力的全栈小产品」在面试里能讲 20 分钟——阶段三的选型（第 46/49 篇）就按「能讲出东西」来挑。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：Java 存量变现清单 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>你的 Java 存量，哪些能直接变现</h2></div>
+
+<p>转型不是清零重来。你多年 Java 攒下的「软资产」里，一大批可以原样迁移到 React 世界——这也是三阶段估时能压缩的根本原因：</p>
+
+<table>
+  <thead>
+    <tr><th>你已有的</th><th>迁移到前端</th><th>出处</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Maven/Gradle 依赖管理、多模块</td><td>npm/pnpm、package.json、monorepo 与目录规范</td><td>第 29 篇</td></tr>
+    <tr><td>强类型与泛型</td><td>TypeScript 接口、泛型组件</td><td>第 28 篇</td></tr>
+    <tr><td>Controller/Service/Repository 分层</td><td>页面/容器/展示组件分层，自定义 Hook 扮演「Service」</td><td>第 13/27 篇</td></tr>
+    <tr><td>面向接口与依赖注入</td><td>Props 注入、组合优于继承</td><td>第 23 篇</td></tr>
+    <tr><td>线程池、CompletableFuture 异步编排</td><td>Promise/async-await、竞态处理</td><td>第 32/34 篇</td></tr>
+    <tr><td>@Cacheable 缓存思维</td><td>memo/useMemo、TanStack Query 服务端缓存</td><td>第 33/37 篇</td></tr>
+    <tr><td>CI/CD 与多环境配置</td><td>Vite/Next 构建、Nginx、自动化部署</td><td>第 40/42 篇</td></tr>
+  </tbody>
+</table>
+
+<p>其中「类型思维」这条值得单独演一遍——TypeScript 几乎是给 Java 工程师量身定做的：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>PaginatedTable.tsx</b> · 泛型：和 Java 一个手感</span></div>
+  <pre><code><span class="c">// Java 里你写过的分页返回值：</span>
+<span class="c">// public record Page&lt;T&gt;(List&lt;T&gt; list, long total, int page, int size) {}</span>
+<span class="c">// TypeScript 里几乎是同一种东西：</span>
+interface PageResult&lt;T&gt; {
+  list: T[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+<span class="c">// 泛型组件：泛型约束的写法都和 Java 的 &lt;T extends Xxx&gt; 一个味道</span>
+function PaginatedTable&lt;T extends { id: number }&gt;({ data }: { data: PageResult&lt;T&gt; }) {
+  <span class="c">// 列表渲染：第 7 篇的 key、第 5 篇的 diff，都是老朋友了</span>
+  return (
+    &lt;ul&gt;
+      {data.list.map((item) =&gt; &lt;li key={item.id}&gt;{item.id}&lt;/li&gt;)}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：TS 之于 JS，约等于 Java 之于 JS</div>
+  <p>TypeScript 官方的定位一句话概括：JavaScript that scales——给 JS 补上你早就习惯的接口约束、编译期报错、IDE 跳转。你写 Java 时的类型直觉在这里基本原样生效，差别只在结构化类型（鸭子类型）替代了名义类型：形状对上就算匹配，不用显式 implements。</p>
+</div>
+
+<p>盘点下来，真正的增量只有三块：<strong>CSS 布局的手感、浏览器渲染的脾气、以及「组件即函数」的函数式口味</strong>——这三样都不是看会的，是项目喂出来的，所以又回到里程碑驱动。</p>
+</section>
+
+<!-- ═══════════════ 第5站：避坑与下一站 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>三个坑，和路线的下一站</h2></div>
+
+<p>最后把转型路上踩得最多的三个坑摆出来，对着自查：</p>
+
+<table>
+  <thead>
+    <tr><th>坑</th><th>典型症状</th><th>解法</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>从头学「CSS 美术」</td><td>在 flex 布局和像素级还原里耗两周，还没碰到 React</td><td>目标是<strong>可验收的界面</strong>，不是设计稿复刻：组件库 + 工具类起步，细节样式交给 AI 生成、你来验收——又回到第 1 站的「验收能力」</td></tr>
+    <tr><td>教程地狱</td><td>「再看完这套课就动手」，收藏夹里躺着 20 套教程</td><td>规则倒过来：<strong>先写里程碑项目，卡住了再回头查对应篇目，查完立刻回去写</strong>。教程的完成感是假的，项目跑起来才是真的</td></tr>
+    <tr><td>把「读过」当「会了」</td><td>篇篇都看过，面试答 useEffect 执行时机却只会背结论</td><td>每个概念在里程碑项目里亲手用过才算数——踩过闭包坑和背过闭包坑的人，讲出来是两种深度</td></tr>
+  </tbody>
+</table>
+
+<p>三条路线走完，你在阶段三会遇到本卷真正的主题：全栈闭环靠的不是把前端学得更深，而是<strong>换一种架构把前后端缝合</strong>——服务端组件。下一篇第 44 篇我们进入 Next.js 的 RSC：你会看到 Controller 的手感直接长在组件里，而那正是「前后端边界模糊」四个字的实物。</p>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>AI 把「写代码」的成本打到接近零，价值随之向「能读懂、能验收」的人集中，而 RSC/Server Actions 又在把前后端合并成同一个交付单元——两股力都把 Java 工程师往全栈推。你的存量足够：42 篇知识地图（心智模型 → 工程能力 → 交付质量 → 全栈封顶）加上 Java 的工程化、类型、架构素养，覆盖了前端能力的绝大部分。路线只有三段——能读懂（Todo）、能开发（后台管理）、能交付（上线的全栈小产品）——每段用可验收的里程碑收口，项目驱动而不是教程驱动，同时绕开 CSS 美术和教程地狱两个坑。从下一篇开始进入卷七主菜：用服务端组件，把你熟悉的 Controller 世界缝进 React 组件树。</p>
+</div>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>客户端状态 vs 服务端状态：先分清再谈方案</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：从一个烂摊子说起 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>从一个最常见的「烂摊子」说起</h2></div>
+
+<p>卷二收官时留了个问题：到底哪些东西值得放进 state？转型前端的 Java 后端工程师有个高频第一反应——<strong>接口返回什么，就往 state 或全局 store 里塞什么</strong>，把前端的全局状态当成数据库的一面镜子：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserList.tsx</b> · 把接口数据「搬」进本地状态——先别急着学它</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function UserList() {
+  const [users, setUsers] = useState&lt;User[]&gt;([]);
+
+  useEffect(() =&gt; {
+    fetch("/api/users")
+      .then(r =&gt; r.json())
+      .then(data =&gt; setUsers(data));   <span class="c">// 服务端数据 → 本地 state</span>
+  }, []);
+
+  return (
+    &lt;ul&gt;
+      {users.map(u =&gt; &lt;li key={u.id}&gt;{u.name}&lt;/li&gt;)}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>这段代码能跑，但往下写之前，先问自己一个问题：<strong><code>users</code> 这份数据，真源（source of truth）是谁？改它的权力在谁手上？</strong>——在数据库，在后端，在「另一个办公室里同样正在删用户的运营同事」手上。前端手里的 <code>users</code>，只是某一秒查询结果的一份拷贝。</p>
+
+<p>再看另一个状态：「列表顶部的筛选 Tab，当前选中『在职』」。这份数据的真源呢？就是浏览器里的这一次点击——前端说是什么，就是什么。</p>
+
+<p>这两种状态的性质天差地别，而 90% 的「状态管理痛苦」，都源于把它们混进了同一个口袋。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：你早就会区分「缓存」和「内存变量」</div>
+  <p>写后端时，你从来不会把一张表的数据整个搬进 JVM 内存、再手工维护它和 DAO 背后那份数据库的一致性——你知道那叫<strong>缓存</strong>，要设计失效策略、过期时间、写路径同步。缓存的本质是「<strong>不是真源的副本</strong>」。而 session 里的登录信息、方法里的临时对象，你叫它们<strong>状态</strong>：进程私有，随生随灭。到了前端，这两类东西却经常被一律塞进同一个 <code>useState</code>。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：客户端状态 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>客户端状态：浏览器内存里的「会话数据」</h2></div>
+
+<p><strong>客户端状态</strong>：真源在浏览器里、由用户交互产生的状态。你天天打交道的就是它们：</p>
+
+<ul>
+  <li>侧边栏折叠了没有、弹窗开没开；</li>
+  <li>当前选中的 Tab、列表的排序方式（纯 UI 层面）；</li>
+  <li>输入到一半的搜索关键词、表单草稿；</li>
+  <li>向导走到第几步、抽屉展开到哪一栏。</li>
+</ul>
+
+<p>它的四个特征：</p>
+
+<table>
+  <thead><tr><th>维度</th><th>客户端状态的表现</th></tr></thead>
+  <tbody>
+    <tr><td>所有权</td><td>浏览器——前端说了算，<code>setState</code> 是唯一合法变更途径</td></tr>
+    <tr><td>更新来源</td><td>用户交互（点击、输入、拖拽）</td></tr>
+    <tr><td>一致性要求</td><td>界面内部自洽即可，不存在「别人偷偷改数据」</td></tr>
+    <tr><td>缓存价值</td><td>几乎没有——刷新丢了就丢了，无伤大雅</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：内存里的会话对象</div>
+  <p>客户端状态像一个 Service 的私有字段、或 session 里的一个 POJO：<strong>进程私有、变更可预期、崩了也不影响别人</strong>。管理这类状态的核心诉求是「组织」——怎么让它跨组件共享得优雅。这正是卷二讲过的（第 14 篇状态提升、第 15 篇 Context），也是接下来第 18、19 篇（Zustand / Redux Toolkit）要继续回答的问题。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：服务端状态 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>服务端状态：一份带缓存的「读模型副本」</h2></div>
+
+<p><strong>服务端状态</strong>：真源在服务端（数据库或其他系统）、前端持有的只是某次查询结果快照的状态。用户列表、订单详情、商品库存、消息未读数……凡是「接口返回的」，都是这一类。</p>
+
+<p>把两类状态放进一张表，差异一目了然：</p>
+
+<table>
+  <thead><tr><th>维度</th><th>客户端状态</th><th>服务端状态</th></tr></thead>
+  <tbody>
+    <tr><td>真源（所有权）</td><td>浏览器</td><td>服务端数据库</td></tr>
+    <tr><td>更新来源</td><td>用户交互</td><td>后端写入——包括<strong>其他用户、其他端</strong>的修改</td></tr>
+    <tr><td>一致性要求</td><td>界面自洽即可</td><td>本地副本随时可能过期，需要<strong>失效与重取</strong></td></tr>
+    <tr><td>缓存价值</td><td>几乎没有</td><td>很高——重复请求浪费带宽，值得去重与缓存</td></tr>
+    <tr><td>固有复杂度</td><td>同步的，赋值即生效</td><td>异步的——天然伴随 loading / error / success 三态（第 34 篇）</td></tr>
+    <tr><td>典型例子</td><td>弹窗、Tab、草稿</td><td>用户列表、订单详情、库存数</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：带缓存的数据库读模型</div>
+  <p>服务端状态就像 MyBatis 二级缓存或 Redis 里缓存的那份查询结果：<strong>副本 ≠ 真源</strong>。缓存界的老三样问题它一个不少——过期（数据旧了怎么办）、失效（DB 改了缓存知道吗）、并发（两个请求同时打同一个 key）。后端工程师对这套再熟不过；而前端拿个 <code>useState</code> 一存，相当于用<strong>一个没有任何失效策略的 HashMap 当缓存</strong>。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">注意表格里「其他用户、其他端」那一行：你正看着的用户列表，可能此刻正被同事在后台删掉两个。客户端状态永远不会遇到「第三方悄悄改数据」，而服务端状态的每一秒都要面对它——这就是它需要一整套不同管理思路的原因。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：反模式 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>反模式现场：双份真相，手工同步</h2></div>
+
+<p>分清两类状态之后，就能精确描述那个最常见的反模式了——<strong>把服务端状态当客户端状态管理</strong>：接口数据搬进全局 store（Context、Zustand、还没讲到的 Redux 都一样，第 19 篇），再手写一堆同步逻辑，试图让它「看起来像真的」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ 反模式</b> · fetch 进 store + 手工维护一致性</span></div>
+  <pre><code><span class="c">// 假设 users 已存进全局 store</span>
+function UserAdmin() {
+  const users = useStore(s =&gt; s.users);        <span class="c">// 本地副本</span>
+  const refresh = useStore(s =&gt; s.setUsers);
+
+  useEffect(() =&gt; {
+    fetchUsers().then(refresh);                <span class="c">// 进页面拉一次</span>
+  }, [refresh]);
+
+  function handleDelete(id: number) {
+    deleteUser(id).then(() =&gt; {
+      <span class="c">// ❌ 手工同步：删除接口成功后，记得改本地那份</span>
+      useStore.setState(s =&gt; ({
+        users: s.users.filter(u =&gt; u.id !== id),
+      }));
+    });
+  }
+  <span class="c">// 还有编辑、新增、批量操作……每一处都要「记得同步」</span>
+}</code></pre>
+</div>
+
+<p>问题不在「写得糙」，而在结构上就错了——这是前端版的<strong>「缓存与 DB 双写不一致」</strong>：</p>
+
+<ol>
+  <li><strong>双份真相</strong>：DB 一份、store 一份。别的页面、别的用户、别的端改了 DB，你的 store 一无所知——用户切个 Tab 回来，看到的还是十分钟前的名单；</li>
+  <li><strong>同步逻辑野蛮生长</strong>：每个写操作都得记得更新 store 里的每一处相关副本，漏一处就是脏数据。写的人越多，烂得越快；</li>
+  <li><strong>缓存价值归零</strong>：没有去重（两个组件同时挂载就打两次接口）、没有过期策略、没有后台静默刷新——缓存的红利一点没吃到，它的坑倒是一个不落全接了。</li>
+</ol>
+
+<div class="crack">
+  <div class="crack-label">后端类比：手写 cache.put / cache.remove</div>
+  <p>这等于放弃 Redis 的 TTL 和失效机制，在每段业务代码里手写 <code>cache.put(...)</code>、<code>cache.remove(...)</code>，还得保证所有写路径一个不漏——你没这么写过后端，也知道这是灾难。正确思路是：<strong>声明「这段数据来自哪个查询」，缓存与失效交给基础设施</strong>。</p>
+</div>
+
+<p>前端对应的基础设施就是「服务端状态库」：TanStack Query、SWR。它们把「缓存 + 失效 + 重取 + 三态管理」打包成一行 <code>useQuery(["users"], fetchUsers)</code>——真源永远在服务端，本地只是可自动过期的缓存。这卷先不展开，第 33 篇专门讲它；在那之前，第 32 篇会先带你看裸写 <code>useEffect</code> 取数有多繁琐、有多少坑要自己填。</p>
+</section>
+
+<!-- ═══════════════ 第5站：决策清单与方案光谱 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>决策清单与方案光谱</h2></div>
+
+<p>拿到任何一份数据，先过一遍这份清单，方案基本就自己浮出来了：</p>
+
+<ol>
+  <li><strong>真源在哪？</strong>服务端 → 它是服务端状态，别塞进全局 store，交给取数库（第 33 篇）。</li>
+  <li><strong>只有一两个组件用？</strong>→ 组件内 <code>useState</code> / <code>useReducer</code> 就够（第 4 篇）。别为了「将来可能复用」提前上全局方案——和后端「不要过早微服务化」是同一条朴素道理。</li>
+  <li><strong>跨层级共享、但低频更新？</strong>→ Context（第 15 篇）：主题、语言、当前登录人。</li>
+  <li><strong>全局共享、更新频繁、组件树庞大？</strong>→ Zustand / Redux Toolkit（第 18、19 篇），享受切片订阅的细粒度更新。</li>
+  <li><strong>刷新页面后还要在？</strong>→ 加持久化（第 22 篇），注意区分「要持久化的客户端状态」和「本该每次重取的服务端状态」。</li>
+</ol>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="状态决策流程：先判断真源在哪，再选管理方案">
+  <defs>
+    <marker id="arr17a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"></path>
+    </marker>
+  </defs>
+  <rect x="200" y="16" width="220" height="40" rx="8" fill="#FAC94A" stroke="#1C1C1C"></rect>
+  <text x="310" y="41" text-anchor="middle" font-size="14" font-weight="bold" fill="#1C1C1C">这份数据的真源在哪？</text>
+  <line x1="270" y1="56" x2="150" y2="104" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr17a)"></line>
+  <line x1="350" y1="56" x2="470" y2="104" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr17a)"></line>
+  <rect x="70" y="110" width="160" height="34" rx="8" fill="#EDE3C4" stroke="#1C1C1C"></rect>
+  <text x="150" y="132" text-anchor="middle" font-size="12" fill="#1C1C1C">真源：服务端数据库</text>
+  <text x="150" y="170" text-anchor="middle" font-size="13" font-weight="bold" fill="#C2410C">服务端状态</text>
+  <text x="150" y="190" text-anchor="middle" font-size="11" fill="#8C8676">本地只是副本：要缓存 / 失效 / 重取</text>
+  <rect x="50" y="210" width="200" height="36" rx="8" fill="#177245" stroke="#1C1C1C"></rect>
+  <text x="150" y="233" text-anchor="middle" font-size="12" font-weight="bold" fill="#FFFFFF">TanStack Query / SWR</text>
+  <text x="150" y="268" text-anchor="middle" font-size="11" fill="#8C8676">第 33 篇展开</text>
+  <rect x="390" y="110" width="170" height="34" rx="8" fill="#EDE3C4" stroke="#1C1C1C"></rect>
+  <text x="475" y="132" text-anchor="middle" font-size="12" fill="#1C1C1C">真源：浏览器交互</text>
+  <text x="475" y="170" text-anchor="middle" font-size="13" font-weight="bold" fill="#C2410C">客户端状态</text>
+  <text x="475" y="190" text-anchor="middle" font-size="11" fill="#8C8676">按共享范围逐级升级</text>
+  <rect x="395" y="200" width="160" height="26" rx="6" fill="#FAC94A" stroke="#1C1C1C"></rect>
+  <text x="475" y="217" text-anchor="middle" font-size="11" fill="#1C1C1C">useState / useReducer</text>
+  <rect x="395" y="232" width="160" height="26" rx="6" fill="#FAC94A" stroke="#1C1C1C"></rect>
+  <text x="475" y="249" text-anchor="middle" font-size="11" fill="#1C1C1C">Context（低频跨层）</text>
+  <rect x="395" y="264" width="160" height="26" rx="6" fill="#FAC94A" stroke="#1C1C1C"></rect>
+  <text x="475" y="281" text-anchor="middle" font-size="11" fill="#1C1C1C">Zustand / Redux（高频）</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>先问真源在哪，再选方案：服务端状态走取数库，客户端状态按共享范围逐级升级。</figcaption>
+</figure>
+
+<p>把方案摆成一条光谱，本卷接下来的路线也就清晰了：</p>
+
+<table>
+  <thead><tr><th>阵营</th><th>方案（由轻到重）</th><th>适用</th><th>详见</th></tr></thead>
+  <tbody>
+    <tr><td>客户端状态</td><td><code>useState</code> / <code>useReducer</code> → Context → Zustand / Redux Toolkit</td><td>UI 状态、交互草稿、全局偏好</td><td>第 18、19 篇</td></tr>
+    <tr><td>服务端状态</td><td>TanStack Query / SWR（裸 <code>useEffect</code> 是它的「手写 JDBC」阶段）</td><td>接口数据、列表、详情</td><td>第 33 篇</td></tr>
+  </tbody>
+</table>
+
+<p>一句话记住选型哲学：<strong>客户端状态，选「谁组织得优雅」；服务端状态，选「谁缓存得专业」</strong>。两者之间没有竞争关系——成熟的项目里它们并存，各管各的口袋。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>先问真源：在服务端 → 服务端状态，交给取数库管缓存与失效；在浏览器 → 客户端状态，按共享范围选工具。</li>
+    <li>接口数据塞进全局 store 再手工同步，等于前端版「缓存与 DB 双写不一致」——结构上就错了，不是写得糙。</li>
+    <li>方案光谱：<code>useState</code>/<code>useReducer</code> → Context → Zustand（客户端阵营）；TanStack Query / SWR（服务端阵营）。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇没引入任何新 API，只立了一个判断标准：<strong>先问真源在哪，再谈方案</strong>。客户端状态是浏览器内存里的会话数据，求「组织得优雅」；服务端状态是带缓存的读模型副本，求「缓存得专业」。把接口数据搬进全局 store 手工同步，就是前端版的「缓存与 DB 双写不一致」——双份真相，迟早对不上。</p>
+</div>
+
+<p>下一篇正式请出客户端阵营的第一位主角——第 18 篇 Zustand：为什么在 Redux 统治多年之后，大家转头爱上了这个只有一 KB 出头的小库？你会发现它的心智模型，意外地接近你熟悉的「一个带订阅能力的全局 Map」。</p>
+</section>
+
+</body>
+</html>

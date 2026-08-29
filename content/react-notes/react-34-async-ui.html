@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>加载态 / 错误态 / 竞态处理</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：四态模型 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>先把「请求的状态」建模成类型</h2></div>
+
+<p>上一篇第 33 篇，TanStack Query 把数据稳稳送到组件手里，还附赠 isPending / isError 标志位。但很多人拿到后只写 <code>if (isPending) return 转圈</code>，界面依然事故频出：转圈盖住旧数据、空数据当成失败、慢请求反杀新请求——问题在<strong>「请求的状态」没被建模清楚</strong>。一次异步请求就四种状态：idle 还没发起；loading 进行中、没有数据；success 拿到数据（可能是空数组）；error 失败、带着原因。</p>
+
+<p>这个模型你其实在第 28 篇见过——discriminated union（可辨识联合类型）。翻成 TypeScript：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>types.ts</b> · 四态建模：状态和该状态下才有的数据绑在一起</span></div>
+  <pre><code>type RequestState&lt;T&gt; =
+  | { status: "idle" }                  <span class="c">// 还没发起</span>
+  | { status: "loading" }               <span class="c">// 进行中，没有数据</span>
+  | { status: "success"; data: T }      <span class="c">// 只有这个分支摸得到 data</span>
+  | { status: "error"; error: Error };  <span class="c">// 只有这个分支摸得到 error</span>
+
+<span class="c">// 不收窄就写 state.data？编译报错：Property 'data' does not exist</span>
+function render(state: RequestState&lt;string[]&gt;) {
+  if (state.status === "success") console.log(state.data); <span class="c">// 收窄后 data 一定存在</span>
+}</code></pre>
+</div>
+
+<p>这套类型的精髓是：<strong>状态和它拥有的数据绑定</strong>——loading 时根本没有 data，不收窄就访问，编译器直接拦下。JS 没这层保护，手写取数总能写出「loading 时渲染 undefined.map 炸了」的事故；类型把四态锁死，事故在编译期消失。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="请求四态状态机：idle 到 loading，成功到 success，失败到 error，error 可重试回 loading，success 可被失效重取再次回到 loading">
+  <defs>
+    <marker id="arr34a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+    <marker id="arr34r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/>
+    </marker>
+    <marker id="arr34g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#177245"/>
+    </marker>
+  </defs>
+  <rect x="30" y="60" width="110" height="46" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="85" y="88" text-anchor="middle" font-size="13" fill="#1C1C1C">idle 未开始</text>
+  <rect x="245" y="60" width="130" height="46" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="310" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">loading 请求中</text>
+  <rect x="460" y="60" width="130" height="46" rx="8" fill="#EDE3C4" stroke="#177245" stroke-width="1.5"/>
+  <text x="525" y="88" text-anchor="middle" font-size="13" fill="#177245">success 成功</text>
+  <rect x="245" y="200" width="130" height="46" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="310" y="228" text-anchor="middle" font-size="13" fill="#C2410C">error 失败</text>
+
+  <line x1="140" y1="83" x2="240" y2="83" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr34a)"/>
+  <text x="192" y="72" text-anchor="middle" font-size="11" fill="#1C1C1C">发起请求</text>
+  <line x1="375" y1="83" x2="455" y2="83" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr34a)"/>
+  <text x="417" y="72" text-anchor="middle" font-size="11" fill="#1C1C1C">2xx，有数据</text>
+  <line x1="310" y1="106" x2="310" y2="195" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr34a)"/>
+  <text x="322" y="150" text-anchor="start" font-size="11" fill="#1C1C1C">网络失败 / 4xx 5xx</text>
+
+  <path d="M 260 198 C 150 170, 150 105, 248 92" fill="none" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr34r)"/>
+  <text x="112" y="150" text-anchor="middle" font-size="11" fill="#C2410C">点重试 refetch()</text>
+
+  <path d="M 505 58 C 460 18, 360 18, 322 58" fill="none" stroke="#177245" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr34g)"/>
+  <text x="415" y="26" text-anchor="middle" font-size="11" fill="#177245">invalidate 后台重取</text>
+
+  <text x="310" y="278" text-anchor="middle" font-size="11" fill="#8C8676">queryKey 变化或缓存失效重取时，都会重新走一遍 loading</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>请求四态状态机：一切取数 UI 都在这四个分支里。success 与 error 都能回到 loading——重取不是首次加载，UI 要分别照顾。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：订单状态机</div>
+  <p>四态模型就是你后端的订单状态机：CREATED / PAID / SHIPPED，每个状态有自己的合法字段与允许操作，非法迁移直接拒绝。RequestState 同理——「成功才许有数据，失败才许有原因」，TypeScript 替你守住这份约束。带着状态图写 UI 和带着状态机写后端，是同一种职业素养。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：每一态的 UI 设计 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>每一态该长什么样</h2></div>
+
+<p>模型有了，第二个问题是每态的 UI 设计。新手只做「转圈」和「数据」两态，讲究的做法是四态各有其职：</p>
+
+<table>
+  <thead>
+    <tr><th>状态</th><th>用户看到什么</th><th>设计要点</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>loading</td><td>骨架屏或 spinner</td><td>位置可预估的主体用骨架屏，占住真实布局防加载完跳动；按钮等小区域用 spinner；短于 300ms 什么都不显示</td></tr>
+    <tr><td>success</td><td>真实内容，或空态引导</td><td>空数组要单独设计：「还没有任何数据，去创建第一个吧」——空态是成功，不是失败，更不是加载中</td></tr>
+    <tr><td>error</td><td>错误说明 + 重试按钮</td><td>信息说人话别甩状态码；必须给 refetch() 出口</td></tr>
+  </tbody>
+</table>
+
+<p>最常见的翻车是把「空数据」渲染成 loading 或报错：loading 是「还没回来」，空是「回来了但没有」，两码事。用 TanStack Query 的标志位把分支写全：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserList.tsx</b> · 四态分支渲染完整例子</span></div>
+  <pre><code>import { useQuery } from "@tanstack/react-query";
+import { fetchUsers } from "./api";
+
+function UserList() {
+  const { data, isPending, isError, error, refetch } = useQuery({
+    queryKey: ["users"],
+    queryFn: fetchUsers,
+  });
+
+  <span class="c">// 第一分支：加载态。列表位置可预估，用骨架占位防布局跳动</span>
+  if (isPending) {
+    return &lt;div className="skeleton" /&gt;;
+  }
+
+  <span class="c">// 第二分支：错误态。说人话 + 给重试出口</span>
+  if (isError) {
+    return (
+      &lt;div&gt;
+        &lt;p&gt;加载失败：{error.message}&lt;/p&gt;
+        &lt;button onClick={() =&gt; refetch()}&gt;重试&lt;/button&gt;
+      &lt;/div&gt;
+    );
+  }
+
+  <span class="c">// 第三分支：成功但空。空态是成功，单独设计</span>
+  if (data.length === 0) {
+    return &lt;p&gt;还没有任何用户，去创建第一个吧&lt;/p&gt;;
+  }
+
+  <span class="c">// 第四分支：成功有数据。到这里 data 一定不是 undefined</span>
+  return &lt;ul&gt;{data.map((u) =&gt; &lt;li key={u.id}&gt;{u.name}&lt;/li&gt;)}&lt;/ul&gt;;
+}</code></pre>
+</div>
+
+<p>四个 <code>if</code> 的顺序也有讲究：先把「非成功」分支全挡掉，走到最后 TypeScript 已收窄出「data 一定存在」，<code>data.map</code> 不用加问号——<strong>分支写全，编译器保证不漏</strong>。顺带分清 v5 的两个布尔：isPending 是「首次还没数据」，isFetching 是「有请求在飞」（含后台重取）——整块占位用前者，角落小转圈用后者。</p>
+</section>
+
+<!-- ═══════════════ 第3站：竞态 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>竞态：慢请求的反杀与两种解法</h2></div>
+
+<p>竞态的经典现场：搜索框快速输入「re」再「react」，两个请求先后发出；「react」的先返回，「re」的后返回——<strong>后到的旧结果把新结果覆盖了</strong>。这不是玄学，是并发写共享变量：回调写同一个 state 的顺序没有保证。第 32 篇的手写解法是 ignore 标志加 AbortController，每个取数组件都得带一份：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useSearchUsers.ts</b> · 第 32 篇的手写版：样板随组件复制</span></div>
+  <pre><code>useEffect(() =&gt; {
+  const controller = new AbortController();
+  let ignore = false;
+
+  fetch(`/api/users?keyword=${keyword}`, { signal: controller.signal })
+    .then((res) =&gt; res.json())
+    .then((data) =&gt; { if (!ignore) setUsers(data); })
+    .catch((err) =&gt; { if (err.name !== "AbortError") setError(err); });
+
+  return () =&gt; {
+    ignore = true;        <span class="c">// 过期响应不许写 state</span>
+    controller.abort();   <span class="c">// 真取消请求，省流量</span>
+  };
+}, [keyword]);</code></pre>
+</div>
+
+<p>TanStack Query 里这段样板整个消失，竞态在源头被拆掉：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>SearchResults.tsx</b> · queryKey 隔离 + signal 取消</span></div>
+  <pre><code>import { useQuery } from "@tanstack/react-query";
+
+function SearchResults({ keyword }: { keyword: string }) {
+  const { data, isPending } = useQuery({
+    queryKey: ["users", "search", keyword],  <span class="c">// 每个关键词一条独立缓存</span>
+    <span class="c">// signal 接进 fetch：key 变化或卸载时，请求真被取消</span>
+    queryFn: ({ signal }) =&gt;
+      fetch(`/api/users?keyword=${encodeURIComponent(keyword)}`, { signal })
+        .then((res) =&gt;
+          res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))
+        ),
+  });
+
+  return isPending
+    ? &lt;p&gt;搜索中…&lt;/p&gt;
+    : &lt;p&gt;共 {data?.length ?? 0} 条结果&lt;/p&gt;;
+}</code></pre>
+</div>
+
+<p>两层防线，各自堵的是不同的洞：</p>
+
+<ol>
+  <li><strong>queryKey 隔离</strong>：「re」和「react」是两条不同缓存，慢的旧请求返回了也只写进它自己 key 的缓存，当前界面读当前 key——<strong>谁也污染不了谁</strong>。这防「数据串台」，保证正确性。</li>
+  <li><strong>signal 取消</strong>：key 变化或卸载时，Query 自动触发你接进 fetch 的 AbortSignal，请求真被掐断。这省流量省算力，就算不接 signal，第一层也已保证正确性。</li>
+</ol>
+
+<div class="crack">
+  <div class="crack-label">后端类比：按 key 分桶，而不是加锁</div>
+  <p>手写 ignore 标志本质是「加锁」：所有请求抢同一个 state 变量，靠标志位仲裁谁有资格写。Query 的做法是「按 key 分桶」——每个 key 一份存储，天然隔离，像按订单号分片的写路径互不干扰，根本不需要锁。signal 取消则像 Future.cancel(true)：调用方不要了，底层任务尽早中断。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：防抖+取消组合 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>防抖 + 取消：搜索框的组合拳</h2></div>
+
+<p>竞态解决「正确性」，防抖解决「别发这么多请求」：用户打一个词要敲七八下键盘，没必要敲一下发一次。第 13 篇写过 useDebounce 自定义 Hook，直接拿来用：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useDebounce.ts</b> · 第 13 篇的定制逻辑，原样复用</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+export function useDebounce&lt;T&gt;(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() =&gt; {
+    const timer = setTimeout(() =&gt; setDebounced(value), delay);
+    return () =&gt; clearTimeout(timer);  <span class="c">// 值再变就重置计时器</span>
+  }, [value, delay]);
+
+  return debounced;
+}</code></pre>
+</div>
+
+<p>然后把防抖值、enabled、key 隔离组装成一个生产级搜索框：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>SearchBox.tsx</b> · 防抖 + enabled + 自动取消三重保险</span></div>
+  <pre><code>import { useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useDebounce } from "../hooks/useDebounce";
+import { searchUsers, type User } from "./api";
+
+function SearchBox() {
+  const [keyword, setKeyword] = useState("");
+  const debounced = useDebounce(keyword, 300);  <span class="c">// 停止输入 300ms 才生效</span>
+
+  const { data, isPending } = useQuery({
+    <span class="c">// 防抖值进 key：每个关键词一条缓存，竞态天然消失</span>
+    queryKey: ["users", "search", debounced],
+    queryFn: ({ signal }) =&gt; searchUsers(debounced, signal),
+    <span class="c">// 空白搜索不发请求：没输入就别惊动后端</span>
+    enabled: debounced.trim().length &gt; 0,
+    <span class="c">// 换关键词重取时先显示上一次结果，列表不闪烁</span>
+    placeholderData: keepPreviousData,
+  });
+
+  return (
+    &lt;div&gt;
+      &lt;input value={keyword} onChange={(e) =&gt; setKeyword(e.target.value)} /&gt;
+      {isPending ? &lt;p&gt;搜索中…&lt;/p&gt; : data?.map((u: User) =&gt; &lt;p key={u.id}&gt;{u.name}&lt;/p&gt;)}
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>拆解分工：<strong>防抖</strong>砍掉 80% 的请求；<strong>enabled</strong> 挡住空查询；<strong>key 隔离 + signal</strong> 兜住极端情况；<strong>keepPreviousData</strong> 管体验，新结果没回来时旧列表还在、页面不闪。四招各管一层，这就是「讲究」和「能跑」的差距。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：入口限流 + 客户端断连</div>
+  <p>防抖像网关层合并限流：突发流量攒一攒，只放最后一个；enabled 像条件路由，前置条件不满足就不进处理链；signal 取消像客户端主动断连，服务端及时止损。后端的流量治理，这套组合拳一个不少，只是挪到了浏览器。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：分层兜底 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>分层兜底，把失败当常态</h2></div>
+
+<p>四态分支管住了「请求失败」，但<strong>渲染期意外</strong>它管不到——数据形状不对、代码 bug，默认把整棵组件树打白屏。对策是错误边界（ErrorBoundary）：捕获子树渲染错误的容器，通常用 <code>react-error-boundary</code> 库包在最外层，一句话带过：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>main.tsx</b> · 全局兜底：渲染期意外别打成白屏</span></div>
+  <pre><code>import { ErrorBoundary } from "react-error-boundary";
+
+&lt;ErrorBoundary fallback={&lt;p&gt;页面开小差了，请刷新重试&lt;/p&gt;}&gt;
+  &lt;App /&gt;
+&lt;/ErrorBoundary&gt;</code></pre>
+</div>
+
+<p>于是前端错误处理有了三层，分层的思路你在后端天天见：</p>
+
+<table>
+  <thead>
+    <tr><th>层</th><th>机制</th><th>管什么</th><th>后端对应物</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>组件内四态分支</td><td>isPending / isError 分支渲染</td><td>可预期的失败：超时、404、业务报错</td><td>局部 try-catch</td></tr>
+    <tr><td>ErrorBoundary</td><td>子树错误捕获 + fallback</td><td>渲染期意外：bug、数据形状不符</td><td>@ExceptionHandler 兜底</td></tr>
+    <tr><td>监控上报</td><td>全局错误监听 + 上报</td><td>谁都没接住的错误</td><td>日志聚合 + 告警（第 41 篇）</td></tr>
+  </tbody>
+</table>
+
+<p>最后是态度。新手默认「请求都会成功」，错误处理是补丁；成熟工程师默认<strong>失败是常态</strong>：网络会断、接口会超时、用户会手滑连点。四态模型不是教科书装饰，而是每个取数组件的默认蓝图——先写四个分支，再考虑数据怎么展示。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>请求四态用 discriminated union 建模（呼应第 28 篇）：不收窄状态就摸不到 data。</li>
+    <li>loading：位置可预估用骨架屏，短暂用 spinner；success 要区分空态；error 必须给 refetch() 重试出口。</li>
+    <li>竞态两层解：queryKey 隔离保正确性（旧响应污染不了新界面），signal 取消省流量——Query 都自动做了。</li>
+    <li>搜索框组合拳：useDebounce（第 13 篇）砍请求量 + enabled 挡空查询 + keepPreviousData 稳体验 + 取消兜底。</li>
+    <li>错误分三层：组件内分支、ErrorBoundary 全局兜底、监控上报——后端分层处理的思想原样平移。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇把第 33 篇交给你的标志位升级成 UI 建模方法：四态是类型、分支是骨架、竞态靠 key 隔离加取消、防抖靠自定义 Hook、意外靠 ErrorBoundary 兜底。把失败当常态设计，取数组件从此像后端接口一样可预期。数据稳了、界面稳了，还差最后一环：游客和登录用户看到的世界不该一样——登录态存哪、路由怎么守、token 怎么带？下一篇第 35 篇，用 Spring Security 的思路把认证流程走通。</p>
+</div>
+</section>
+
+</body>
+</html>

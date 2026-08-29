@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>与 AI 结对编程：V0 / Cursor 提效</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：工具全景 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>AI 编程工具全景：先分清它们各管什么</h2></div>
+
+<p>上一篇第 46 篇，你把 LLM 装进了<strong>产品</strong>；这一篇换个方向，让 LLM 走进你的<strong>工位</strong>——用它生成组件骨架、审阅代码、做重构。先把工具地图铺开，因为「用 AI 提效」第一步不是学提示词技巧，而是分清每个工具的粒度和自主度：</p>
+
+<table>
+  <thead>
+    <tr><th>工具</th><th>形态</th><th>最擅长</th><th>后端世界的类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>GitHub Copilot</strong></td><td>IDE 插件，行级 / 函数级补全</td><td>你起头它续写，样板代码、单测骨架</td><td>输入法联想：快，但每次只管一小段</td></tr>
+    <tr><td><strong>Cursor</strong></td><td>AI 原生 IDE，对话改码</td><td>跨文件重构、全库问答、「把这几处都改掉」</td><td>坐你旁边的同事：说需求，它动整个代码库</td></tr>
+    <tr><td><strong>V0</strong></td><td>网页工具，一句话 / 截图生成 UI</td><td>React + Tailwind 组件的「出图」</td><td>前端外包：交付组件壳，接后端靠你自己</td></tr>
+    <tr><td><strong>bolt.new</strong></td><td>网页工具，对话生成可运行全栈项目</td><td>从零起一个能跑的原型站</td><td>脚手架增强版：五分钟有个毛坯房</td></tr>
+  </tbody>
+</table>
+
+<p>四者的共同点比差异更重要：<strong>产出物都是代码文本，最终都要过你这道 review</strong>。差异只在粒度（一行、一个组件、一整个站）和自主度（续写你的思路、还是自作主张铺摊子）。选型不纠结：日常补全用 Copilot 或 Cursor 内置，组件壳找 V0，整站原型试 bolt.new，深度重构留在 Cursor 里慢慢聊。</p>
+
+<div class="think">
+  <div class="think-q">这四个工具都不会替你做真正的决策：状态放哪（第 17 篇）、组件拆多细（第 27 篇）、这个抽象值不值（第 23 篇）。决策的质量，决定了 AI 生成的五千行是资产还是负债——这就是为什么先读完这本笔记，再谈提效。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：给足上下文 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>姿势一：给足上下文——你会写接口文档，就会写提示词</h2></div>
+
+<p>AI 最大的短板不是笨，是<strong>不了解你的项目</strong>。想想你自己：入职第一周写代码错漏百出，不是能力问题，是上下文问题。AI 每次对话都是「入职第一周」——所以喂什么，生成什么。最好的喂料你早就写过了：第 21 篇用 Zod 写的表单校验 schema、第 28 篇的 Props 接口，它们就是现成的「契约」。契约一给，生成质量立上一个台阶：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>prompt.md</b> · 一次结构化的提问：三层上下文</span></div>
+  <pre><code><span class="c">// ── ① 契约层：第 21 篇的 Zod schema，字段、校验规则、错误文案全在里面 ──</span>
+const orderSchema = z.object({
+  orderId: z.string().regex(/^ORD-\d+$/, "订单号形如 ORD-1001"),
+  amount: z.number().positive("金额必须大于 0"),
+  status: z.enum(["PENDING", "PAID", "CLOSED"]),
+});
+type OrderInput = z.infer&lt;typeof orderSchema&gt;;
+
+<span class="c">// ── ② 边界层：第 28 篇的 Props 接口，组件对外长什么样 ──</span>
+interface OrderFormProps {
+  initial?: OrderInput;
+  onSubmit: (data: OrderInput) =&gt; Promise&lt;void&gt;;
+  onCancel?: () =&gt; void;
+}
+
+<span class="c">// ── ③ 需求层：技术栈、禁止项、验收标准，像验收清单一样写 ──</span>
+// 用 React 18 + TS 函数组件 + react-hook-form + zodResolver 实现 OrderForm；
+// 不引入 UI 库；提交中按钮 loading 且禁用；错误文案展示在对应字段下方；
+// 表单用受控方式管理（第 24 篇），不要用 ref 裸取值。</code></pre>
+</div>
+
+<p>三层结构记一下：<strong>契约层</strong>说清数据长什么样，<strong>边界层</strong>说清组件接口长什么样，<strong>需求层</strong>说清要它做什么、不要做什么。你会发现这跟给外包公司写的接口文档一模一样——字段、类型、校验、错误码、验收标准写全，交付物才对得上。<strong>你会写接口文档，就会写 AI 提示词</strong>：同一门手艺，都是把模糊需求翻译成可执行的约束。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：AI 是一个零上下文的外包团队</div>
+  <p>给外包只甩一句「做个订单表单」，对方只能自由发挥，返工三次；把接口文档、字段字典、页面原型给齐，一次交付八成合格。AI 就是那个编码速度极快、但对你项目零了解的外包——它不缺手艺，缺文档。你花在「文档」上的十分钟，会在 review 和返工上省回两个小时。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：小步验证 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>姿势二：小步验证——生成、跑起来、读懂、再提交</h2></div>
+
+<p>新手最常见的翻车姿势：一句「帮我写个完整的订单管理页面」，收下 500 行，贴进项目，跑不起来，也不会改。正确姿势正好相反——<strong>把大需求拆小，一次只要一个组件、一个 Hook、一个函数</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>prompt.md</b> · 同一个需求的两种问法</span></div>
+  <pre><code><span class="c">// 反例：一次梭哈，生成 500 行黑盒——跑不起来就废，跑起来了也不敢改</span>
+// 「帮我写一个完整的订单管理页面，带列表、筛选、分页、详情。」
+
+<span class="c">// 正例：拆成小步，每步一个可验证的交付物</span>
+// 第 1 步：「只写 OrderTable 组件，props 收 orders 数组，按第 28 篇的接口定义来。」
+// 第 2 步：「加筛选：关键词由父组件传下来（第 14 篇状态提升），别让表格自己管状态。」
+// 第 3 步：「分页抽成 useOrderPagination 自定义 Hook（第 13 篇），UI 只管渲染。」</code></pre>
+</div>
+
+<p>每一步走完，执行一个五拍子的闭环：</p>
+
+<ol>
+  <li><strong>生成</strong>：上下文按第 2 站的三层给足，一次只要一个交付物；</li>
+  <li><strong>跑起来</strong>：先让它动，编译错和运行时错当场暴露，绝不攒批；</li>
+  <li><strong>读懂</strong>：逐行过一遍，说不清用途的行就是雷——读不懂的代码不敢改，不敢改的代码迟早变祖传；</li>
+  <li><strong>改造</strong>：命名、目录、写法对齐项目规范（第 29 篇），别让 AI 风格污染代码库；</li>
+  <li><strong>提交</strong>：一笔小 commit，等于通过了一次 code review。</li>
+</ol>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="小步验证循环：生成、跑起来、读懂、改造、提交五步首尾相接，任何一步跑不通或看不懂，就带着报错回到生成重新再来">
+  <defs>
+    <marker id="arr47a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <rect x="20" y="110" width="92" height="64" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="66" y="136" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">生成</text>
+  <text x="66" y="156" text-anchor="middle" font-size="11" fill="#1C1C1C">一个小组件</text>
+  <line x1="112" y1="142" x2="136" y2="142" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr47a)"/>
+  <rect x="140" y="110" width="92" height="64" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="186" y="136" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">跑起来</text>
+  <text x="186" y="156" text-anchor="middle" font-size="11" fill="#1C1C1C">先让它能动</text>
+  <line x1="232" y1="142" x2="256" y2="142" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr47a)"/>
+  <rect x="260" y="110" width="92" height="64" rx="8" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="306" y="136" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">读懂</text>
+  <text x="306" y="156" text-anchor="middle" font-size="11" fill="#1C1C1C">说不清的就是雷</text>
+  <line x1="352" y1="142" x2="376" y2="142" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr47a)"/>
+  <rect x="380" y="110" width="92" height="64" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="426" y="136" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">改造</text>
+  <text x="426" y="156" text-anchor="middle" font-size="11" fill="#1C1C1C">对齐项目规范</text>
+  <line x1="472" y1="142" x2="496" y2="142" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr47a)"/>
+  <rect x="500" y="110" width="100" height="64" rx="8" fill="#FFFFFF" stroke="#177245" stroke-width="1.5"/>
+  <text x="550" y="136" text-anchor="middle" font-size="13" font-weight="bold" fill="#177245">提交</text>
+  <text x="550" y="156" text-anchor="middle" font-size="11" fill="#1C1C1C">一笔小 commit</text>
+  <path d="M306,174 L306,230 L66,230 L66,178" fill="none" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr47a)"/>
+  <text x="186" y="252" text-anchor="middle" font-size="11" fill="#C2410C">跑不通 / 看不懂？带着报错再问一轮，别硬咽下去</text>
+  <text x="310" y="282" text-anchor="middle" font-size="11" fill="#8C8676">每圈只消化一个小交付物——500 行黑盒不在这个循环里</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>小步验证闭环：每一圈只生成一个可验证的小交付物，报错和疑点当场消化，读不懂就回去重问。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：AI 的产出就当同事的 PR 审</div>
+  <p>小 PR 三分钟能审明白，500 行的 PR 你只会回一个 LGTM——其实没看。AI 写得越快，你的 review 就越是瓶颈。这不是坏事，它只是把行业真相摆上了台面：<strong>判断力才是团队真正的吞吐上限</strong>。以前这个上限靠同事的水平的平均值撑着，现在靠你一个人撑着。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">做个对照实验：同一个需求，「一次生成 500 行」和「拆五步各生成 100 行」各做一遍，记录总耗时（含读代码和修错）。多数人会发现总耗时接近，但后者你全程知道代码在干什么——差别不在速度，在「你敢不敢改它」。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：必查清单 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>姿势三：AI 生成代码必查清单</h2></div>
+
+<p>AI 的错误分布很「偏科」：语法几乎不粘锅，翻车集中在生命周期、类型边界这些需要理解运行时的地方。四项必查，全部是你在这本笔记里学过的：</p>
+
+<table>
+  <thead>
+    <tr><th>查什么</th><th>AI 的典型症状</th><th>出处</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Hooks 依赖数组</strong></td><td>漏依赖读到旧值（闭包陷阱）；或把对象 / 函数塞进依赖，一渲染就重跑 effect，无限请求</td><td>第 10 篇</td></tr>
+    <tr><td><strong>列表 key</strong></td><td>顺手用 index 当 key，排序、删除后界面错位、输入框状态乱窜</td><td>第 7 篇</td></tr>
+    <tr><td><strong>副作用清理</strong></td><td>定时器、事件订阅、AbortController 不 return 清理函数，切页后还在跑、竞态回填旧数据</td><td>第 9 篇</td></tr>
+    <tr><td><strong>类型偷懒</strong></td><td>满屏 any 和 as 断言，TypeScript 被用成 AnyScript，契约层形同虚设</td><td>第 28 篇</td></tr>
+  </tbody>
+</table>
+
+<p>光背清单没用，得练眼力。下面是 AI 真实风格的「带病代码」——能跑，语法漂亮，但四处带病。先自己找，再看注释：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderList.tsx</b> · 考考你能否找全四处病灶</span></div>
+  <pre><code>function OrderList({ keyword }: { keyword: string }) {
+  const [orders, setOrders] = useState&lt;any[]&gt;([]); <span class="c">// 病灶①：any，字段契约全丢（第 28 篇）</span>
+
+  useEffect(() =&gt; {
+    fetch(`/api/orders?kw=${keyword}`)
+      .then((r) =&gt; r.json())
+      .then(setOrders);
+    <span class="c">// 病灶②：没有清理函数，快速切关键词会竞态回填（第 9 / 34 篇）</span>
+  }); <span class="c">// 病灶③：依赖数组没写，每次渲染后都重新请求</span>
+
+  return (
+    &lt;ul&gt;
+      {orders.map((o, i) =&gt; (
+        &lt;li key={i}&gt;{o.id}&lt;/li&gt; <span class="c">// 病灶④：index 当 key（第 7 篇）</span>
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>发现没有，找茬用的全是前几卷的知识——<strong>这就是「判断力」的具象化</strong>。这份清单也不是 AI 专属：人写的代码一样要查。区别在于 AI 的错误有固定「偏科」方向，把这几项变成肌肉记忆，AI 生成物的合格率立刻上一个台阶。</p>
+</section>
+
+<!-- ═══════════════ 第5站：V0 实战与判断力 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>V0 实战：从一句话到可运行组件，再手工接后端</h2></div>
+
+<p>用 V0 走一遍完整流程，拿「订单列表页」举例：</p>
+
+<ol>
+  <li><strong>一句话描述</strong> + 可选截图或草图：「深色订单列表卡片，顶部关键词筛选，状态用彩色徽章」；</li>
+  <li>V0 生成 React + Tailwind 组件，数据全是写死的 mock；</li>
+  <li>对话式微调视觉细节，满意后 Copy Code；</li>
+  <li><strong>贴进项目</strong>：改文件名、对齐目录规范（第 29 篇），先让它在工程里编译通过；</li>
+  <li><strong>手工接后端</strong>：删 mock，换成你自己的取数与状态管理——这一步 AI 替不了，因为它不知道你的接口契约和状态选型。</li>
+</ol>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderPage.tsx</b> · 只换数据层，UI 骨架原样保留</span></div>
+  <pre><code><span class="c">// V0 交付物里的数据层：写死的 mock，UI 已经七成像</span>
+const orders = [
+  { id: "ORD-1001", amount: 199, status: "PAID" },
+  { id: "ORD-1002", amount: 59, status: "PENDING" },
+];
+
+<span class="c">// 手工替换：UI 结构一行不动，只换数据来源</span>
+const [orders, setOrders] = useState&lt;Order[]&gt;([]);
+const [error, setError] = useState(false);
+
+useEffect(() =&gt; {
+  const controller = new AbortController();
+  fetch("/api/orders", { signal: controller.signal })
+    .then((r) =&gt; r.json())
+    .then((data) =&gt; setOrders(data.items))
+    .catch(() =&gt; setError(true)); <span class="c">// 加载态 / 错误态：第 34 篇的功课这时派上用场</span>
+  return () =&gt; controller.abort(); <span class="c">// 清理函数——第 9 篇的习惯，此刻最值钱</span>
+}, []);</code></pre>
+</div>
+
+<p>这个流程的分工很清楚：<strong>AI 管「形」，你管「骨」</strong>。视觉骨架、Tailwind 类名、布局细节，AI 出图的效率是人工的十倍；数据契约、状态归属、副作用纪律，必须你亲手接——因为接错了不会立刻报错，只会在三个月后变成灵异 bug。</p>
+
+<p>所以回到开头那句话：<strong>读代码的能力决定你用 AI 的上限</strong>。AI 一分钟能产出你一天手写的量，瓶颈整体迁移到「你能多快确认它是对的」。这个能力没有捷径：第 1 到 46 篇的每一篇，都是在给你攒「一眼看出不对劲」的直觉——状态建模（第 4、17 篇）、Hooks 陷阱（第 16 篇）、组件边界（第 27 篇）、TS 约定（第 28 篇）。会用 AI 和不会用的人，差距不在提示词技巧，而在：后者生成十行能改十行，前者生成十行只能全收。</p>
+
+<p>最后列三个风险，都是真实发生过的事故：</p>
+
+<ul>
+  <li><strong>幻觉 API</strong>：一本正经地调用不存在的函数、不存在的 props。TS 编译器是最好的安全网——这也是本笔记坚持「代码默认 TypeScript」的又一个理由；</li>
+  <li><strong>过时写法</strong>：训练数据有滞后，它会给你 class 组件、已废弃的生命周期、老版路由。你得能识别「这个写法是哪个年代的」——这正是每篇都讲「为什么」的原因；</li>
+  <li><strong>许可证与保密</strong>：生成代码的出处混杂，商业项目留意合规；更重要的是保密纪律——密钥、内网地址、真实用户数据，别贴进任何对话框。</li>
+</ul>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>工具按粒度选：行级补全（Copilot）、对话改码（Cursor）、UI 生成（V0）、全栈原型（bolt.new），产出物一律当 PR 审。</li>
+    <li>提示词 = 接口文档：契约层（Zod schema）+ 边界层（Props 接口）+ 需求层（栈 / 禁止项 / 验收标准），三层给足。</li>
+    <li>小步闭环：生成 → 跑起来 → 读懂 → 改造 → 提交，拒绝一次 500 行的黑盒。</li>
+    <li>必查四件：依赖数组、key、副作用清理、any 滥用——全是你前几卷攒下的判断力。</li>
+    <li>AI 是放大器不是替代品：它会放大你的能力，也会放大你的混乱——读代码的能力决定上限。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇你把 AI 请进了开发流程：会用四类工具、会按「接口文档」的思路喂上下文、会拆小步逐个验证、会按四项清单找茬，也知道了幻觉、过时写法、保密这三颗雷。至此，你和 AI 的关系还是「你一句它一句」的结对模式——它等你发号施令，才敢动一步。但如果它学会自己拆任务、自己调用工具、自己看结果再决定下一步呢？那就是 Agent，一个需要全新界面范式的前端命题。下一站，第 48 篇：Agent 前端——工具调用与状态机。</p>
+</div>
+</section>
+
+</body>
+</html>

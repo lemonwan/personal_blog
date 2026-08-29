@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>状态提升与单向数据流</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：兄弟组件各说各话 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>两个兄弟组件，各说各话</h2></div>
+
+<p>第 13 篇末尾留了个尖锐的问题：自定义 Hook 复用的是「逻辑」，状态各自隔离——那如果两个组件需要的就是<strong>同一份状态</strong>呢？看个具体场景：温度换算器，左边输摄氏、右边输华氏，两边要实时联动。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Broken.tsx</b> · ❌ 各持一份 state，无法联动</span></div>
+  <pre><code>import { useState } from "react";
+
+function CelsiusInput() {
+  const [celsius, setCelsius] = useState("");
+  return (
+    &lt;fieldset&gt;
+      &lt;legend&gt;摄氏度&lt;/legend&gt;
+      &lt;input value={celsius} onChange={e =&gt; setCelsius(e.target.value)} /&gt;
+    &lt;/fieldset&gt;
+  );
+}
+
+function FahrenheitInput() {
+  const [fahrenheit, setFahrenheit] = useState("");
+  return (
+    &lt;fieldset&gt;
+      &lt;legend&gt;华氏度&lt;/legend&gt;
+      &lt;input value={fahrenheit} onChange={e =&gt; setFahrenheit(e.target.value)} /&gt;
+    &lt;/fieldset&gt;
+  );
+}</code></pre>
+</div>
+
+<p>两份 state 各自为政：左边输入 100，右边纹丝不动。列表页的「筛选条件」和「列表」、导航上的「购物车角标」和「购物车详情」——本质都是同一道题：<strong>兄弟组件要共享数据</strong>。</p>
+
+<p>第 3 篇立过规矩：单向数据流，props 只能父传子。兄弟之间没有直达通道，谁也不该偷改谁的 state。出路不是开通道，而是<strong>把状态挪到它该在的地方</strong>——两个组件的最近公共父组件。</p>
+
+<div class="think">
+  <div class="think-q">想想后端里同类的事故：订单页和购物车页各自维护一份「商品数量」副本，改了这边忘了那边，最后你把两边都改成读同一份 Session/服务层数据才消停。前端的答案同款：数据只留一份，存在公共上级那里。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：状态提升三步走 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>状态提升三步走</h2></div>
+
+<p>所谓<strong>状态提升（Lifting State Up）</strong>，就是把子组件私有的 state，挪到需要它的组件们的最近公共父组件，子组件降级为「受控的视图」。固定三步：</p>
+
+<ol>
+  <li><strong>提升 state</strong>：把温度数据挪进公共父组件（只存一份「用户正在编辑的值 + 温标」，别存两份换算结果互相追）；</li>
+  <li><strong>父传 props</strong>：父组件把当前值通过 props 下发给每个子组件——<strong>数据向下</strong>；</li>
+  <li><strong>子传回调</strong>：子组件不再自己 setState，改用 props 里的回调函数向父组件「申报修改」——<strong>改动请求向上</strong>。</li>
+</ol>
+
+<p>按这个配方改造后的子组件长这样——注意它内部已经没有任何 state 了：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TemperatureInput.tsx</b> · 纯受控子组件</span></div>
+  <pre><code>function TemperatureInput({
+  scale,
+  temperature,
+  onTemperatureChange,
+}: {
+  scale: "C" | "F";
+  temperature: string;
+  onTemperatureChange: (t: string) =&gt; void;
+}) {
+  return (
+    &lt;fieldset&gt;
+      &lt;legend&gt;{scale === "C" ? "摄氏度(℃)" : "华氏度(℉)"}&lt;/legend&gt;
+      &lt;input
+        value={temperature}
+        onChange={e =&gt; onTemperatureChange(e.target.value)}
+      /&gt;
+    &lt;/fieldset&gt;
+  );
+}</code></pre>
+</div>
+
+<p><code>value</code> 完全由 props 决定，子组件自己「说了不算」——这就是<strong>受控组件</strong>（第 24 篇专题）。它仅剩的自由，是把用户输入通过 <code>onTemperatureChange</code> 上报。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="状态提升后的单向数据流：props 向下、回调向上">
+  <defs>
+    <marker id="arr-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <rect x="180" y="36" width="260" height="44" rx="4" fill="#FAC94A"/>
+  <text x="310" y="63" text-anchor="middle" font-size="13" fill="#1C1C1C">Calculator（持有 state）</text>
+  <line x1="190" y1="80" x2="190" y2="144" stroke="#177245" stroke-width="2" marker-end="url(#arr-flow)"/>
+  <text x="182" y="118" text-anchor="end" font-size="11" fill="#177245">props：值</text>
+  <line x1="230" y1="144" x2="230" y2="84" stroke="#C2410C" stroke-width="2" marker-end="url(#arr-flow)"/>
+  <text x="238" y="118" text-anchor="start" font-size="11" fill="#C2410C">回调：改值</text>
+  <line x1="390" y1="80" x2="390" y2="144" stroke="#177245" stroke-width="2" marker-end="url(#arr-flow)"/>
+  <text x="382" y="118" text-anchor="end" font-size="11" fill="#177245">props：值</text>
+  <line x1="430" y1="144" x2="430" y2="84" stroke="#C2410C" stroke-width="2" marker-end="url(#arr-flow)"/>
+  <text x="438" y="118" text-anchor="start" font-size="11" fill="#C2410C">回调：改值</text>
+  <rect x="130" y="148" width="160" height="40" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="210" y="172" text-anchor="middle" font-size="12" fill="#1C1C1C">温度输入 · ℃</text>
+  <rect x="330" y="148" width="160" height="40" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="410" y="172" text-anchor="middle" font-size="12" fill="#1C1C1C">温度输入 · ℉</text>
+  <text x="310" y="228" text-anchor="middle" font-size="12" fill="#8C8676">数据只能向下（props），改动请求只能向上（回调）——兄弟之间没有直达通道</text>
+  <text x="310" y="254" text-anchor="middle" font-size="12" fill="#8C8676">状态源头唯一：任何时刻两个输入框读的都是同一份数据，界面天然一致</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>状态提升后的单向数据流：props 向下、回调向上，兄弟组件经父组件中转</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第3站：完整可运行例子 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>完整可运行：父组件统一持有，换算只算一份</h2></div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Calculator.tsx</b> · 父组件持有唯一 state</span></div>
+  <pre><code>import { useState } from "react";
+
+function toFahrenheit(celsius: number) { return (celsius * 9) / 5 + 32; }
+function toCelsius(fahrenheit: number) { return ((fahrenheit - 32) * 5) / 9; }
+
+<span class="c">// 尽力解析：输入非法就返回空串，别让 NaN 渲染到界面上</span>
+function tryConvert(temperature: string, convert: (t: number) =&gt; number): string {
+  const num = Number(temperature);
+  if (temperature.trim() === "" || Number.isNaN(num)) return "";
+  return String(Math.round(convert(num) * 1000) / 1000);
+}
+
+function Calculator() {
+  <span class="c">// 状态唯一：原始字符串 + 它属于哪个温标</span>
+  const [temperature, setTemperature] = useState("");
+  const [scale, setScale] = useState&lt;"C" | "F"&gt;("C");
+
+  function handleCelsiusChange(t: string) { setScale("C"); setTemperature(t); }
+  function handleFahrenheitChange(t: string) { setScale("F"); setTemperature(t); }
+
+  <span class="c">// 另一个框的值是「派生」的：渲染时现算，不进 state（第 9 篇的教训）</span>
+  const celsius = scale === "F" ? tryConvert(temperature, toCelsius) : temperature;
+  const fahrenheit = scale === "C" ? tryConvert(temperature, toFahrenheit) : temperature;
+
+  return (
+    &lt;&gt;
+      &lt;TemperatureInput scale="C" temperature={celsius}
+        onTemperatureChange={handleCelsiusChange} /&gt;
+      &lt;TemperatureInput scale="F" temperature={fahrenheit}
+        onTemperatureChange={handleFahrenheitChange} /&gt;
+      &lt;p&gt;{celsius === "" ? "请输入温度" : `${celsius}℃ = ${fahrenheit}℉`}&lt;/p&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>拆三个设计决策。其一，<strong>状态只存一份</strong>：只存「用户正在编辑的那个框」的原始字符串和它的温标，另一个框渲染时现算。如果摄氏和华氏各存一份 state，你就得写「改 A 时顺手同步 B」的双向同步逻辑——第 9 篇刚批过的「用 effect 复制状态」会借尸还魂。<strong>凡能推导出来的值，绝不提升成第二份 state。</strong></p>
+
+<p>其二，<strong>连「非法输入」也在状态里</strong>：空串、半个数字都原样上收，两个框显示什么完全由同一份数据推导，天然不会打架。</p>
+
+<p>其三，<strong>子组件纯受控</strong>：内部零 state，只剩「显示 props + 上报输入」，随便测试随便复用——扔进任何页面，给值和回调就能跑。这正呼应了第 3 篇的公式 <code>UI = f(state)</code>：现在 f 的输入只有一处来源，整个换算器变成一台可预测的纯函数机器。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：会话状态上收到服务层</div>
+  <p>你会让两个 Controller 各自维护一份购物车副本吗？不会——购物车状态收归 Session/服务层统一持有，Controller 只做两件事：读出来返回（对应 props 下发）、接请求转调服务层修改（对应回调上呈）。状态提升就是前端版的状态上收：<strong>state 的归属权跟着「共享范围」走，视图层不私藏数据</strong>。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：状态该放哪 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>状态到底该放哪：一张决策清单</h2></div>
+
+<p>提升是手段，不是信仰。给 state 选家的原则一句话：<strong>放在「需要读写它的所有组件」的最小公共处，就低不就高</strong>：</p>
+
+<table>
+  <thead>
+    <tr><th>谁要用这份数据</th><th>放哪</th><th>典型例子</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>只有当前组件</td><td>组件局部 <code>useState</code></td><td>输入框草稿、开关、悬浮高亮</td></tr>
+    <tr><td>几个相邻组件（父子/兄弟）</td><td><strong>提升到最近公共父组件</strong>（本篇）</td><td>温度联动、筛选条件 + 列表</td></tr>
+    <tr><td>组件树深处大量组件</td><td>Context（第 15 篇）</td><td>主题色、当前登录用户、语言偏好</td></tr>
+    <tr><td>全应用共享，且多来自服务端</td><td>全局 store / 服务端状态库（第 17、18 篇）</td><td>订单列表、用户资料、购物车</td></tr>
+  </tbody>
+</table>
+
+<p>这张表是<strong>逐级升级</strong>的关系：默认放局部；共享诉求出现了，提一层；提了两三层还嫌不够高，才轮到 Context 和全局 store。反过来，「一上来就把所有状态塞进全局 store」是后端同学最容易犯的过激反应——就像什么数据都往应用级缓存里放，看着省事，实际把所有模块糊死在一起。客户端状态和服务端状态为什么是两回事、要不要分库管理，第 17 篇专门掰扯。</p>
+
+<div class="think">
+  <div class="think-q">自测一下：第 13 篇的 useLocalStorage 抽出来的是「逻辑」，本篇提升起来的是「数据」。抽 Hook 复用行为，提升 state 归并数据——两件事方向相反，别混。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：别提过头 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>别提过头：props drilling 的苗头</h2></div>
+
+<p>提升也有副作用：state 一层层往下传，中间组件可能沦为「快递中转站」——自己不用，只为搬运：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>App.tsx</b> · ❌ user 一路被无关组件搬运</span></div>
+  <pre><code>&lt;Layout user={user}&gt;
+  &lt;Sidebar user={user}&gt;      <span class="c">// Sidebar 自己不用 user，纯搬运</span>
+    &lt;UserCard user={user} /&gt; <span class="c">// 真正用它的在第三层</span>
+  &lt;/Sidebar&gt;
+&lt;/Layout&gt;</code></pre>
+</div>
+
+<p>这叫 <strong>props drilling（属性钻探）</strong>。两个苗头信号：中间组件的 props 里出现「自己根本不读、只为往下传」的字段；改一处状态，要动一串无关节点。偶尔两层无伤大雅——显式透传其实可读性很好——但钻到三层以上就该换工具了：Context 给组件树开「广播频道」，跳过中间层直达（第 15 篇）；更重的共享走状态库（第 18 篇）。别提前优化，苗头出现再动手。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>兄弟共享状态 = <strong>提升到最近公共父组件</strong>：父管 state，props 下发值，回调上报改动。</li>
+    <li>单向数据流的纪律：数据只能向下（props）、改动请求只能向上（回调），状态源头唯一 → 界面可预测。</li>
+    <li>能推导出来的值不要提升成第二份 state——另一个输入框的值，渲染时现算。</li>
+    <li>状态放哪逐级升级：局部 → 提升到父 → Context → 全局 store，就低不就高，别一上来就全局。</li>
+    <li>props drilling 三层以上是换 Context 的信号；但先透传，苗头出现再优化。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>本篇把第 3 篇的单向数据流落成了可操作的工程手法：<strong>状态上收到最近公共父组件，props 携值下行，回调携请求上行</strong>——一份温度数据、两个受控输入框，联动却不打架。后端视角记一句话：这就是会话状态上收到服务层，视图层只读和提交。但「提升」提得越高，透传链条越长，钻探到第三层就该换官方通道了。下一篇第 15 篇：<strong>useContext</strong>，让深层组件不必层层签收快递。见。</p>
+</div>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>目录结构与代码规范</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：两种组织法 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>两种组织法：按类型切，还是按功能切</h2></div>
+
+<p>上一篇（第 28 篇）用类型系统把契约焊死了，这一篇回答「东西往哪儿放」。别小看目录结构——目录是给三个月后的你和新同事看的第一份文档，也是第 27 篇架构意图的物理体现：<strong>好的目录，看一眼就知道分层。</strong></p>
+
+<p>前端目录有两种主流组织法，恰好对应后端的两种分包风格：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>组织法 A</b> · 按类型：像后端的 controller/service/mapper 分层包</span></div>
+  <pre><code>src/
+├─ components/          <span class="c">// 所有组件挤一起，超过 50 个就只能靠搜索</span>
+│  ├─ UserList.tsx
+│  ├─ ArticleCard.tsx
+│  └─ CommentForm.tsx
+├─ hooks/
+│  ├─ useUsers.ts
+│  └─ useComments.ts
+└─ pages/
+   ├─ UserPage.tsx
+   └─ ArticlePage.tsx</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>组织法 B</b> · 按功能：像后端的 com.blog.user / com.blog.article 领域包</span></div>
+  <pre><code>src/
+├─ features/
+│  ├─ user/
+│  │  ├─ components/UserList.tsx
+│  │  ├─ hooks/useUsers.ts
+│  │  └─ api.ts
+│  └─ article/
+│     ├─ components/ArticleCard.tsx
+│     └─ hooks/useArticles.ts
+└─ pages/</code></pre>
+</div>
+
+<table>
+  <thead>
+    <tr><th></th><th>按类型（分层包）</th><th>按功能（领域包）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>后端对应</strong></td><td>controller / service / mapper 各一摊</td><td>按领域模块分包（DDD 风格）</td></tr>
+    <tr><td><strong>优点</strong></td><td>新人一眼看清「技术分类」</td><td>改一个需求只动一个目录；删功能 = 删一个文件夹</td></tr>
+    <tr><td><strong>缺点</strong></td><td>小需求要跨四五个远房目录</td><td>顶层缺少「全局技术视图」</td></tr>
+    <tr><td><strong>适合</strong></td><td>组件一二十个的 demo、原型</td><td>多人协作的中大型项目</td></tr>
+  </tbody>
+</table>
+
+<p>大型项目选「按功能」的核心理由是<strong>高内聚</strong>：翻一翻真实项目的 commit 就知道，绝大多数改动只落在一个功能域里。按类型组织时，「给评论加点赞」要同时打开 components、hooks、pages 三个目录；按功能组织时，所有改动集中在 features/comment 里，review 范围一目了然。这和后端从「按层分包」演进到「按领域分包」是同一股力量：<strong>让一起变化的代码住在一起。</strong></p>
+
+<div class="think">
+  <div class="think-q">回想你们的 Java 单体：是不是也经历过「controller/service/mapper 按层分包」，后来才拆出 user-center、order-center 这样的模块甚至微服务？前端从按类型到按功能，走的是同一条演进路——区别只是，这次你可以在项目第二天就做对。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：推荐目录树与命名约定 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>推荐目录树与命名约定</h2></div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>my-app/src</b> · 按功能组织 + 薄共享层（可直接当脚手架用）</span></div>
+  <pre><code>src/
+├─ app/                  <span class="c">// 应用骨架：路由表、全局布局、Provider 挂载</span>
+├─ pages/                <span class="c">// 路由级页面：很薄，基本只组装 features</span>
+├─ features/             <span class="c">// 业务功能域——第 27 篇的三层住在这里</span>
+│  └─ user/
+│     ├─ components/     <span class="c">// UserList.tsx 等展示组件（View）</span>
+│     ├─ hooks/          <span class="c">// useUsers.ts 等逻辑 Hook（Service）</span>
+│     └─ api.ts          <span class="c">// 该域的接口封装（Mapper）</span>
+├─ components/ui/        <span class="c">// 设计系统：Button、Input、Modal（公共 jar）</span>
+├─ lib/                  <span class="c">// 与业务无关的工具：formatDate、debounce</span>
+├─ api/                  <span class="c">// 跨域共享：axios 实例、拦截器、统一错误处理</span>
+└─ types/                <span class="c">// 全局类型（能用工具类型派生的别堆这里）</span></code></pre>
+</div>
+
+<p>对着第 27 篇看：每个 feature 内部就是一套微缩三层——hooks 是 Service，api 是 Mapper，components 是 View；页面容器组件放在 feature 顶层或 pages。共享层（ui / lib / api）就是你熟悉的 common 包。铁律一条：<strong>feature 之间不许互相伸手，要复用就下沉到共享层。</strong></p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="功能域依赖共享层的单向结构">
+  <defs>
+    <marker id="m29" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="620" height="300" fill="#FFFFFF"/>
+
+  <rect x="60" y="36" width="160" height="164" rx="8" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="140" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">features/user</text>
+  <text x="140" y="88" text-anchor="middle" font-size="12" fill="#1C1C1C">components/</text>
+  <text x="140" y="110" text-anchor="middle" font-size="12" fill="#1C1C1C">hooks/</text>
+  <text x="140" y="132" text-anchor="middle" font-size="12" fill="#1C1C1C">api.ts</text>
+  <text x="140" y="166" text-anchor="middle" font-size="11" fill="#8C8676">微缩三层（第 27 篇）</text>
+
+  <rect x="250" y="36" width="160" height="164" rx="8" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="330" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">features/article</text>
+  <text x="330" y="88" text-anchor="middle" font-size="12" fill="#1C1C1C">components/</text>
+  <text x="330" y="110" text-anchor="middle" font-size="12" fill="#1C1C1C">hooks/</text>
+  <text x="330" y="132" text-anchor="middle" font-size="12" fill="#1C1C1C">api.ts</text>
+  <text x="330" y="166" text-anchor="middle" font-size="11" fill="#8C8676">互不伸手</text>
+
+  <rect x="440" y="36" width="160" height="164" rx="8" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="520" y="60" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">features/comment</text>
+  <text x="520" y="88" text-anchor="middle" font-size="12" fill="#1C1C1C">components/</text>
+  <text x="520" y="110" text-anchor="middle" font-size="12" fill="#1C1C1C">hooks/</text>
+  <text x="520" y="132" text-anchor="middle" font-size="12" fill="#1C1C1C">api.ts</text>
+  <text x="520" y="166" text-anchor="middle" font-size="11" fill="#8C8676">要复用就下沉</text>
+
+  <line x1="140" y1="200" x2="140" y2="226" stroke="#8C8676" stroke-width="1.5" marker-end="url(#m29)"/>
+  <line x1="330" y1="200" x2="330" y2="226" stroke="#8C8676" stroke-width="1.5" marker-end="url(#m29)"/>
+  <line x1="520" y1="200" x2="520" y2="226" stroke="#8C8676" stroke-width="1.5" marker-end="url(#m29)"/>
+
+  <rect x="60" y="232" width="540" height="40" rx="8" fill="#1C1C1C"/>
+  <text x="330" y="257" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">共享层：components/ui · lib · api</text>
+
+  <text x="330" y="292" text-anchor="middle" font-size="11" fill="#C2410C">依赖永远向下：feature → 共享层，单向、无环</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>功能优先的目录像「竖着切」的模块：feature 之间互不依赖，只向共享层伸手</figcaption>
+</figure>
+
+<h3>命名约定</h3>
+
+<table>
+  <thead>
+    <tr><th>对象</th><th>约定</th><th>示例</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>组件</td><td>PascalCase，<strong>文件与组件同名</strong></td><td>UserList.tsx 里 export function UserList</td></tr>
+    <tr><td>Hook</td><td>use 前缀 + camelCase，文件同名</td><td>useUsers.ts → useUsers()</td></tr>
+    <tr><td>工具函数 / 变量</td><td>camelCase</td><td>formatDate、handleSubmit</td></tr>
+    <tr><td>常量</td><td>UPPER_SNAKE_CASE</td><td>MAX_RETRY_COUNT</td></tr>
+    <tr><td>类型 / 接口</td><td>PascalCase</td><td>interface UserProps</td></tr>
+  </tbody>
+</table>
+
+<p>两条最值钱的：「文件与组件同名」——打开 UserList.tsx 必然导出 UserList，找代码靠直觉而不是靠全局搜索；Hook 的 <code>use</code> 前缀不只是装饰，它是给 ESLint 和编译器看的标记（第 16 篇会细讲）——只有 use 开头的函数才允许调用 <code>useState</code> 这些 Hook，命名错了工具当场拦你。</p>
+</section>
+
+<!-- ═══════════════ 第3站：路径别名 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>路径别名 @/：别再数 ../../..</h2></div>
+
+<p>目录一深，相对路径就变成了猜谜：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ 相对路径</b> · 来自 features/user/components/UserList.tsx</span></div>
+  <pre><code>import { Button } from "../../../components/ui/Button";
+import { formatDate } from "../../../lib/date";
+<span class="c">// 目录一挪，全项目 import 集体阵亡；review 时也看不出引的是谁</span></code></pre>
+</div>
+
+<p>解法是配置<strong>路径别名</strong>：用 <code>@/</code> 指向 <code>src/</code>。注意要说服两处——TS（否则编辑器报红线）和打包器（否则构建报错）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>tsconfig.json</b> · 让 TS 认识 @</span></div>
+  <pre><code>{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>vite.config.ts</b> · 让构建器也认识 @（两边都要配）</span></div>
+  <pre><code>import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { fileURLToPath, URL } from "node:url";
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
+});</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>✅ 配置后</b> · 语义清晰，搬运不坏</span></div>
+  <pre><code>import { Button } from "@/components/ui/Button";
+import { formatDate } from "@/lib/date";</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：全限定名与包结构</div>
+  <p>Java 从不为 import 路径纠结：全限定名 <code>com.blog.user.UserService</code> 由包结构唯一决定，import 只是缩写。<code>@/</code> 别名就是给前端补上「包根」——<code>@</code> 相当于 <code>com.blog</code>，src 内所有路径从它出发写全。区别只是 Java 编译器天然认包，前端要同时说服 TS 和打包器两边。</p>
+</div>
+
+<p>配一条纪律压住它：<strong>跨 feature 引用一律走共享层</strong>——features/user 不许直接 import features/article 的内部文件，要复用就下沉到 components/ui 或 lib。否则功能域之间又会缠成一团。这也是 Java 里「模块间只依赖 API 包，不依赖实现」的翻版。</p>
+</section>
+
+<!-- ═══════════════ 第4站：ESLint + Prettier ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>ESLint + Prettier：一个管对错，一个管好看</h2></div>
+
+<p>两个工具经常被混为一谈，分工其实泾渭分明：</p>
+
+<table>
+  <thead>
+    <tr><th>工具</th><th>管什么</th><th>典型规则</th><th>Java 类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>ESLint</strong></td><td>代码质量与正确性</td><td>未使用变量、误用 Hook、漏依赖数组</td><td>CheckStyle / SpotBugs</td></tr>
+    <tr><td><strong>Prettier</strong></td><td>纯格式（缩进、引号、换行）</td><td>统一 2 空格、双引号、行宽 100</td><td>Spotless / google-java-format</td></tr>
+  </tbody>
+</table>
+
+<p>边界要分清：能交给 Prettier 的格式问题，不要用 ESLint 规则去管，否则两个工具互相打架。而且格式交给机器之后，code review 的评论里终于只剩设计讨论——「这里缩进错了」这种评论一个都不要有。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>eslint.config.js</b> · 平面配置（ESLint 9+），react-hooks 插件必须装</span></div>
+  <pre><code>import js from "@eslint/js";
+import reactHooks from "eslint-plugin-react-hooks";
+
+export default [
+  js.configs.recommended,
+  {
+    files: ["**/*.{ts,tsx}"],
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      "react-hooks/rules-of-hooks": "error",
+      <span class="c">// 呼应第 16 篇：依赖数组漏写是闭包陷阱的头号来源，建议直接设为 error</span>
+      "react-hooks/exhaustive-deps": "error",
+    },
+  },
+];</code></pre>
+</div>
+
+<p>单说一条：<code>react-hooks/exhaustive-deps</code> <strong>必开</strong>。第 16 篇盘点的十大陷阱里，一多半（闭包旧值、依赖漏写导致的「界面不更新」）都能被它在提交前拦下——这是前端最接近「编译器检查」的一道闸。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>.prettierrc</b> · 格式之争写进配置，别写进评审意见</span></div>
+  <pre><code>{
+  "printWidth": 100,
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all"
+}</code></pre>
+</div>
+
+<p>提交环节一句带过：<code>husky + lint-staged</code> 让 <code>git commit</code> 前只对暂存文件自动跑一遍 ESLint + Prettier——相当于给前端装上 git hooks 版的 Maven enforcer；再在 CI（第 42 篇）里放一道全量检查，双保险。本地快、线上严，这套组合你们早就玩熟了。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>目录按功能组织（features/user/{components, hooks, api}），共享层只留 ui / lib / api。</li>
+    <li>命名从 Java 直译：组件 PascalCase 且文件同名，Hook 带 use 前缀，常量 UPPER_SNAKE_CASE。</li>
+    <li>路径别名 @/ = 前端的「包根」，TS 和打包器两边都要配；跨 feature 只走共享层。</li>
+    <li>ESLint 管对错（exhaustive-deps 必开），Prettier 管格式；husky 把检查前移到 commit。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：卷四收官 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>规范服务于协作：卷四收官</h2></div>
+
+<p>到这里，卷四「组件设计与工程化」的七篇连起来看，其实是一句话：<strong>把 Java 工程师的组织能力平移到组件世界。</strong></p>
+
+<table>
+  <thead>
+    <tr><th>篇</th><th>主题</th><th>一句话带走</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>23</td><td>组合优于继承</td><td>用 children 和组件嵌套表达扩展点，别找「继承」</td></tr>
+    <tr><td>24</td><td>受控与非受控</td><td>表单数据谁持有：value + onChange，或 defaultValue</td></tr>
+    <tr><td>25</td><td>children 与复合组件</td><td>把 JSX 当参数传——组件版的构造器模式</td></tr>
+    <tr><td>26</td><td>HOC 与 render props</td><td>逻辑复用的两件老兵器，如今多让位给 Hook</td></tr>
+    <tr><td>27</td><td>组件拆分与职责边界</td><td>展示 / 容器 / 逻辑 Hook ≈ View / Controller / Service</td></tr>
+    <tr><td>28</td><td>TypeScript 与 React</td><td>让 Props 契约变成编译期红线</td></tr>
+    <tr><td>29</td><td>目录结构与代码规范</td><td>让目录讲架构，让机器盯格式</td></tr>
+  </tbody>
+</table>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>目录与规范不是洁癖，而是把「架构意图 + 团队约定」固化成机器可检查、新人可读懂的东西：目录树讲清分层（第 27 篇），命名约定降低检索成本，路径别名理清依赖方向，ESLint / Prettier 把风格之争踢出 code review。<strong>规范多不多不重要，团队能不能不假思索地保持一致才重要</strong>——这正是你从 Java 工程带来的最值钱的习惯，也是「规范服务于协作」的全部含义。</p>
+</div>
+
+<p>卷四收官，静态的组件世界你已经拿下：会拆、会复用、有类型、有规范。接下来进入卷五「路由与数据获取」，让页面真正<strong>动起来</strong>：多页面、跳转、URL 参数、路由守卫——第 30 篇《React Router 与嵌套路由》，把你在 Spring MVC 里最熟的「路由 + 控制器」完整映射到前端。</p>
+</section>
+
+</body>
+</html>

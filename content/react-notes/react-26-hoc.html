@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高阶组件与 render props：历史与现状</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：HOC 定义 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>HOC：接一个组件，还你一个「强化版」</h2></div>
+
+<p>第 13 篇之后，自定义 Hook 你已用得像呼吸一样自然：<code>useLoading()</code> 一调，加载态逻辑收入囊中。但注意——这套玩法 2019 年（Hooks 诞生）前根本不存在。Class 组件时代，跨组件复用逻辑靠两个「化石模式」：<strong>高阶组件（HOC）</strong>与 <strong>render props</strong>。新代码基本不写它们了，可老代码、老库里遍地都是，读不懂就改不动——这一篇是你的「考古指南」。</p>
+
+<p>先看高阶组件。<strong>定义一句话：接收一个组件、返回一个新组件的函数。</strong>它就是个普通函数，没有关键字、没有 API，名字抄自「高阶函数」（接收函数、返回函数）。看经典款 withLoading——给任意组件加上「取数 + 加载态」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>withLoading.tsx</b> · 经典 HOC：逻辑住包装层，渲染权归你</span></div>
+  <pre><code>import { useEffect, useState, type ComponentType } from "react";
+
+<span class="c">// HOC 注入给被包装组件的额外 props</span>
+interface LoadingProps {
+  loading: boolean;
+  data: unknown;
+  reload: () =&gt; void;
+}
+
+<span class="c">// 泛型 P：保留原组件自己的 props，包装不弄丢它们</span>
+<span class="c">// fetchUsers 是项目里已封装好的请求函数（略）</span>
+function withLoading&lt;P extends object&gt;(
+  Wrapped: ComponentType&lt;P &amp; LoadingProps&gt;
+) {
+  <span class="c">// 返回的新组件：先干「重复的逻辑」，再把 props 原样转发</span>
+  return function WithLoading(props: P) {
+    const [loading, setLoading] = useState(true);
+    const [data, setData] = useState&lt;unknown&gt;(null);
+    const reload = () =&gt;
+      fetchUsers().then((d) =&gt; { setData(d); setLoading(false); });
+
+    useEffect(() =&gt; { reload(); }, []);
+
+    if (loading) return &lt;div&gt;加载中…&lt;/div&gt;;  <span class="c">// 逻辑：包装层接管</span>
+    return &lt;Wrapped {...props} loading={false} data={data} reload={reload} /&gt;;
+  };
+}
+
+<span class="c">// 使用：一行包装，UserPage 就「多」了取数与加载态</span>
+const UserPageWithLoading = withLoading(UserPage);</code></pre>
+</div>
+
+<p>结构拆开看：<strong>重复的逻辑（取数、loading 状态、加载页）住在包装层，被包装组件只管「有数据之后怎么渲染」</strong>。任何页面组件塞进 withLoading，立刻获得同款能力——复用发生了，而且对 Wrapped 零侵入。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：AOP 代理 / 装饰器</div>
+  <p><code>withLoading(UserPage)</code> 干的事，和 Spring 给 Bean 织入切面后返回动态代理一模一样：调用方拿到的「还是一个 UserPage」，但真正先干活的是代理——前置逻辑（取数）、条件短路（loading 时不渲染 Wrapped）织入在转发之前，像 @Transactional 在方法外围开事务、提交、回滚。JDK 动态代理、装饰器模式，同一个脑回路的三种实现。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：包装地狱 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>包装地狱：HOC 的四宗罪</h2></div>
+
+<p>包一个 HOC，岁月静好；真实老项目往往是这样：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserPage.tsx</b> · 老项目里的「三明治」</span></div>
+  <pre><code>export default withTheme(
+  withAuth(
+    withLoading(UserPage)
+  )
+);
+
+<span class="c">// DevTools 里的组件树，同样一层套一层：</span>
+<span class="c">// &lt;WithTheme&gt; → &lt;WithAuth&gt; → &lt;WithLoading&gt; → &lt;UserPage&gt;</span>
+<span class="c">// 想看 UserPage 的真实 props？逐层点进去对账</span></code></pre>
+</div>
+
+<p>问题从「能用」变成「难养」，集中在四点：</p>
+
+<ol>
+  <li><strong>包装地狱</strong>：N 个复用 = 组件树里多 N 层壳。调试时展开一串 With 开头的同名组件，props 穿层透传，谁注入了什么得逐层对账。</li>
+  <li><strong>props 命名冲突、来源不透明</strong>：两个 HOC 都注入 <code>data</code>，后包的静默覆盖前包的；更普遍的是「静态看 JSX 根本看不出会收到哪些 props」——全靠运行时揭晓。下面这行放真实代码里，你几乎不可能一眼看出问题：</li>
+</ol>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>conflict.tsx</b> · 静默覆盖：后包的赢</span></div>
+  <pre><code><span class="c">// withUserBrief 和 withUserDetail 都往里注入 user……</span>
+const Enhanced = withUserBrief(withUserDetail(UserPage));
+<span class="c">// UserPage 拿到的是哪一个？编译器不报错，测试不一定踩到，线上见真章</span></code></pre>
+</div>
+
+<ol start="3">
+  <li><strong>TypeScript 类型难写</strong>：<code>P &amp; LoadingProps</code> 这类交叉类型层层叠加，套到三层泛型推断常失效，大家默默 <code>as any</code>——类型系统形同虚设。</li>
+  <li><strong>ref 转发要额外手续</strong>：ref 不是普通 prop，包装层会拦下它，必须用 <code>forwardRef</code> 显式转发，每个 HOC 都得补这一课（React 19 起 ref 可当普通 prop 直传，但老代码里到处是 forwardRef 补丁）。</li>
+</ol>
+
+<div class="crack">
+  <div class="crack-label">后端类比：五层过滤器链</div>
+  <p>一个请求穿过五层 Filter/拦截器，排错时堆栈半屏都是代理类名；两个切面往同一个 request attribute 里塞同名值，只有运行时才发现。HOC 的痛点与之同源：<strong>包装是运行时才展开的黑盒</strong>，编译期几乎不提供信息。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">平心而论，HOC 并非一无是处——React Redux 的 connect、React Router v5 的 withRouter 靠它服务了一整个时代。它的错不在模式本身，而在「为复用一段逻辑，不惜改变组件树结构」：逻辑是垂直切片，包装是水平叠加，维度对不上。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：render props ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>render props：把「渲染什么」也参数化</h2></div>
+
+<p>HOC 是「从外面包」，同时代的另一条路是「从里面回调」：组件不替你决定 UI，而是把<strong>状态当参数，交给你传进来的函数</strong>去渲染。最常见的形式是 children 传函数——children 本就可以是任何可渲染的东西，函数返回值当然也行：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>MouseTracker.tsx</b> · render props 经典款：children as function</span></div>
+  <pre><code>import { useState, type ReactNode } from "react";
+
+interface MousePos {
+  x: number;
+  y: number;
+}
+
+<span class="c">// children 的类型是函数：接收状态，返回要渲染的 UI</span>
+function MouseTracker({
+  children,
+}: {
+  children: (pos: MousePos) =&gt; ReactNode;
+}) {
+  const [pos, setPos] = useState&lt;MousePos&gt;({ x: 0, y: 0 });
+  return (
+    &lt;div onMouseMove={(e) =&gt; setPos({ x: e.clientX, y: e.clientY })}&gt;
+      {children(pos)}  <span class="c">// 渲染时调用你，把状态递出来</span>
+    &lt;/div&gt;
+  );
+}
+
+<span class="c">// 使用：状态怎么变成 UI，由你说了算</span>
+&lt;MouseTracker&gt;
+  {({ x, y }) =&gt; &lt;h1&gt;鼠标位置：{x}, {y}&lt;/h1&gt;}
+&lt;/MouseTracker&gt;</code></pre>
+</div>
+
+<p>分工一目了然：<strong>MouseTracker 管「状态从哪来」（监听鼠标），你管「状态变成什么 UI」</strong>。逻辑被复用，UI 完全开放——「逻辑与视图分离」的另一种刀法。React Router v5 的 <code>&lt;Route render={...}&gt;</code>、一些 headless 组件库都是这个模式。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：JdbcTemplate 的 RowMapper</div>
+  <p><code>jdbcTemplate.query(sql, rs -&gt; mapToUser(rs))</code>——连接获取、异常翻译、资源释放是 JdbcTemplate 的固定骨架，你只注入「一行结果怎么变成对象」的回调。render props 同构：组件持骨架（状态怎么获取），你注入「状态 → UI」的映射函数。就是你写熟的「模板方法 + 回调」，只是回调返回值是 UI。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">render props 解决了 HOC 的命名冲突与包装层（不再多套组件），但自己也有雷：传入的函数每次渲染都是新引用，子组件一套 memo 就被击穿优化（第 37 篇）；多个 render props 嵌套时 JSX 缩进层层右移——前端版回调地狱。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：Hook 登场 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>Hook 登场：把「包一层」拆成「调一次」</h2></div>
+
+<p>2019 年 Hooks 发布，问题被釜底抽薪。复盘一下：HOC 和 render props 之所以要动组件树（包一层 / 回调一层），是因为当时 state 只能住在组件实例里——想共享逻辑，就得先造一个「装它的组件」。Hook 取消了这个前提：<strong>逻辑以函数调用长进组件体内，state 直接 return 出来</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useLoading.ts</b> · withLoading 的等价 Hook 迁移</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function useLoading&lt;T&gt;(fetcher: () =&gt; Promise&lt;T&gt;) {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState&lt;T | null&gt;(null);
+  const [tick, setTick] = useState(0);  <span class="c">// reload 的计数器：+1 触发重取</span>
+
+  useEffect(() =&gt; {
+    let alive = true;  <span class="c">// 防竞态：卸载后不再 setData（第 34 篇细讲）</span>
+    setLoading(true);
+    fetcher().then((d) =&gt; {
+      if (alive) { setData(d); setLoading(false); }
+    });
+    return () =&gt; { alive = false; };
+    <span class="c">// fetcher 不进依赖：约定由调用方保证稳定（第 11 篇 useCallback）</span>
+  }, [tick]);
+
+  return { loading, data, reload: () =&gt; setTick((t) =&gt; t + 1) };
+}
+
+<span class="c">// 使用：不包一层，DevTools 里干干净净（UserList 组件略）</span>
+function UserPage() {
+  const { loading, data, reload } = useLoading(fetchUsers);
+  if (loading) return &lt;div&gt;加载中…&lt;/div&gt;;
+  return &lt;UserList data={data} onRefresh={reload} /&gt;;
+}</code></pre>
+</div>
+
+<p>与 HOC 版逐项对账，四宗罪全部销案：</p>
+
+<ul>
+  <li><strong>组件树零污染</strong>：没有 WithLoading 壳，DevTools 里只有 UserPage。</li>
+  <li><strong>命名自己做主</strong>：返回值解构，叫 <code>data</code> 还是 <code>users</code> 随你，冲突无从谈起。</li>
+  <li><strong>类型自然成立</strong>：普通函数调用，泛型 <code>&lt;T&gt;</code> 顺着参数推断，不用手写交叉类型。</li>
+  <li><strong>ref 无需转发</strong>：Hook 就跑在组件体内，没有「层」，也就没有「转发」。</li>
+</ul>
+
+<p>还有个不太显眼但本质的差别——<strong>状态的归属</strong>。HOC 的 loading 住在包装组件实例里，调用方看不见也够不着，想手动干预就得让 HOC 再开 props 接口，接口一多又回到命名冲突。Hook 的状态 return 到你的组件里，<strong>来源、去向、干预入口都摆在明面上</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="HOC 包装地狱与自定义 Hook 的组件树对比">
+  <rect x="0" y="0" width="620" height="300" fill="#FFFFFF"/>
+  <text x="160" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#1C1C1C">HOC：复用一次，包一层</text>
+  <text x="460" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#1C1C1C">自定义 Hook：复用即调用</text>
+  <rect x="30" y="50" width="260" height="200" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="42" y="68" font-size="12" fill="#1C1C1C">WithTheme</text>
+  <rect x="48" y="78" width="224" height="164" rx="6" fill="#FFFFFF" stroke="#8C8676"/>
+  <text x="60" y="96" font-size="12" fill="#1C1C1C">WithAuth</text>
+  <rect x="66" y="106" width="188" height="128" rx="6" fill="#FFFFFF" stroke="#8C8676"/>
+  <text x="78" y="124" font-size="12" fill="#1C1C1C">WithLoading</text>
+  <rect x="84" y="134" width="152" height="92" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="160" y="184" text-anchor="middle" font-size="13" fill="#1C1C1C">UserPage</text>
+  <text x="160" y="270" text-anchor="middle" font-size="11" fill="#8C8676">DevTools 里四层壳，props 穿层对账</text>
+  <line x1="310" y1="16" x2="310" y2="284" stroke="#8C8676" stroke-width="1" stroke-dasharray="4 4"/>
+  <rect x="350" y="50" width="220" height="176" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="460" y="72" text-anchor="middle" font-size="13" fill="#1C1C1C">UserPage</text>
+  <rect x="370" y="88" width="180" height="38" rx="4" fill="#FFFFFF" stroke="#177245" stroke-width="2"/>
+  <text x="460" y="112" text-anchor="middle" font-size="12" fill="#177245">useLoading()</text>
+  <rect x="370" y="136" width="180" height="38" rx="4" fill="#FFFFFF" stroke="#177245" stroke-width="2"/>
+  <text x="460" y="160" text-anchor="middle" font-size="12" fill="#177245">useAuth()</text>
+  <text x="460" y="252" text-anchor="middle" font-size="11" fill="#8C8676">树里只有一层，逻辑平铺进组件体，来源去向都在明面上</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>HOC 每复用一次就多一层壳；自定义 Hook 把逻辑平铺进组件体内，组件树纹丝不动。</figcaption>
+</figure>
+
+<p>把「取数 + 缓存 + 失效重试」做成 Hook 的集大成者，是第 33 篇的 TanStack Query——<code>useQuery</code> 本质就是一台 withLoading 增强机；老项目里把 <code>connect</code>（第 19 篇 Redux）当 HOC 用的存量代码，也在本篇考古范围内。</p>
+</section>
+
+<!-- ═══════════════ 第5站：三者对账 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>三者对账：读懂老代码，新代码用 Hook</h2></div>
+
+<p>最后把三个模式放进同一张表：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>HOC</th><th>render props</th><th>自定义 Hook</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>复用形式</td><td>包一层组件</td><td>传一个函数 prop</td><td>函数调用</td></tr>
+    <tr><td>组件树代价</td><td>+N 层包装壳</td><td>不加壳，但 JSX 嵌套加深</td><td>零</td></tr>
+    <tr><td>状态归属</td><td>包装层实例里</td><td>数据源组件里</td><td>调用方组件自己</td></tr>
+    <tr><td>命名冲突</td><td>有（props 注入撞名）</td><td>无</td><td>无（解构随意命名）</td></tr>
+    <tr><td>TS 类型</td><td>难（泛型交叉层层叠）</td><td>中等</td><td>易（普通函数推断）</td></tr>
+    <tr><td>ref</td><td>需 forwardRef 转发</td><td>正常</td><td>不涉及</td></tr>
+    <tr><td>今天的定位</td><td>读老代码（connect 时代）</td><td>少量 headless 组件仍在用</td><td>默认答案</td></tr>
+  </tbody>
+</table>
+
+<p>「读懂老代码要会，新代码用 Hook」之外，补两个现实注脚：其一，HOC 没死绝——React Redux 的 <code>connect</code> 至今仍是 HOC，存量 Redux 项目（第 19 篇）绕不开；其二，render props 在 headless 组件（只给逻辑不给 UI）里仍有市场，遇到「children 是函数」的库，知道是模式而非炫技就行。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>HOC = 接收组件、返回新组件的函数：逻辑住包装层，渲染权留给被包装组件——AOP 代理的 React 版。</li>
+    <li>HOC 四宗罪：包装地狱、props 撞名且来源不透明、TS 类型难写、ref 要转发。</li>
+    <li>render props：把「状态 → UI」的映射函数传进组件，JdbcTemplate 回调的 React 版；代价是 memo 击穿与嵌套缩进。</li>
+    <li>Hook 釜底抽薪：state 不必再住在组件实例里，函数调用即复用；组件树零污染、命名自主、类型自然。</li>
+    <li>结论：老代码里的 HOC / render props 要读得懂，新代码的逻辑复用一律先想自定义 Hook。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>从 HOC 的「包一层」、render props 的「回调一层」，到 Hook 的「调一次」，三次进化回答的是同一个问题：<strong>复用的单位到底是组件还是函数</strong>。Hooks 用「函数」终结了争论，也让组件重新纯粹——每个组件只负责一件事。可页面越写越大，「一件事」的边界在哪？哪些该合、哪些该拆、状态和逻辑安放在哪一层？下一篇第 27 篇，组件拆分与职责边界，给组件做一次「架构设计」。</p>
+</div>
+</section>
+
+</body>
+</html>

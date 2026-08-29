@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>children 与复合组件模式</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：children 的本质 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>children 的本质：JSX 是对象，包裹内容就是传参</h2></div>
+
+<p>第 23 篇说「组合优于继承」，其最基本的形态你天天在用——组件包裹内容：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Card.tsx</b> · 最常见的包裹写法</span></div>
+  <pre><code>import { type ReactNode } from "react";
+
+<span class="c">// 使用方：标签体里塞了两个元素</span>
+&lt;Card&gt;
+  &lt;h3&gt;月度账单&lt;/h3&gt;
+  &lt;p&gt;共 42 笔支出&lt;/p&gt;
+&lt;/Card&gt;
+
+<span class="c">// Card 内部：children 就是个普通 prop，类型 ReactNode</span>
+function Card({ children }: { children: ReactNode }) {
+  return &lt;div className="card"&gt;{children}&lt;/div&gt;;
+}</code></pre>
+</div>
+
+<p>看起来像「HTML 标签体」，其实是彻头彻尾的传参。回忆第 2 篇的结论：<strong>JSX 只是函数调用的语法糖，编译产物是普通 JS 对象</strong>。把上面那段 JSX 编译开，一切豁然开朗：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>编译产物.js</b> · 标签体 = 从第三个参数起的位置参数</span></div>
+  <pre><code>createElement(Card, null,
+  createElement("h3", null, "月度账单"),
+  createElement("p", null, "共 42 笔支出")
+);
+<span class="c">// 这两个「元素对象」被打包，塞进 props.children 传给 Card</span></code></pre>
+</div>
+
+<p>所以 <code>props.children</code> 没有魔法：<strong>它就是调用组件函数时多传的一个参数，值是「元素对象」（或字符串、数组等可渲染物）</strong>。Card 拿到对象后决定它渲染在哪——放哪、渲染几次、要不要渲染，全由 Card 说了算。类型 <code>ReactNode</code> 涵盖 children 的全部合法形态：元素、字符串、数字、数组、<code>undefined</code>、布尔表达式 <code>{count &gt; 0 &amp;&amp; ...}</code>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：布局模板的内容占位</div>
+  <p>你用 Thymeleaf 做后台页时写过 layout.html：页头页脚固定，中间留一个 <code>th:replace</code> 占位，各页面把自己的内容片段「填」进去。Card 的 children 就是这个占位——区别只在填充物不是 HTML 字符串，而是一棵随 state 自主更新的组件树。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：多插槽 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>多插槽：children 只有一个，多的就用 props 传 JSX</h2></div>
+
+<p>children 只有一份。卡片还想自定义标题区、底部操作区，就多开几个「插槽」——用 props 传 JSX：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ArticleCard.tsx</b> · 三个插槽：title / children / footer</span></div>
+  <pre><code>import { type ReactNode } from "react";
+
+interface ArticleCardProps {
+  title: ReactNode;    <span class="c">// 头部插槽：注意类型是 ReactNode，不是 string</span>
+  footer?: ReactNode;  <span class="c">// 底部插槽：可选</span>
+  children: ReactNode; <span class="c">// 正文插槽：约定俗成的名字</span>
+}
+
+function ArticleCard({ title, footer, children }: ArticleCardProps) {
+  return (
+    &lt;article className="card"&gt;
+      &lt;header&gt;{title}&lt;/header&gt;
+      &lt;div className="body"&gt;{children}&lt;/div&gt;
+      {footer &amp;&amp; &lt;footer&gt;{footer}&lt;/footer&gt;}
+    &lt;/article&gt;
+  );
+}
+
+<span class="c">// 使用方：传进去的是 JSX 对象，不是字符串——插槽是「活的」</span>
+&lt;ArticleCard
+  title={&lt;h3&gt;{post.title}&lt;/h3&gt;}
+  footer={&lt;button onClick={like}&gt;点赞&lt;/button&gt;}
+&gt;
+  &lt;p&gt;{post.body}&lt;/p&gt;
+&lt;/ArticleCard&gt;</code></pre>
+</div>
+
+<p>两个容易忽略的点：</p>
+
+<ul>
+  <li><strong>插槽类型必须写 <code>ReactNode</code>，别写 <code>string</code></strong>。写成 string，调用方只能传文字；ReactNode 才允许塞按钮、嵌套组件——插槽的价值全在这。这也是第 28 篇 TypeScript 与 React 的日常配合。</li>
+  <li><strong>JSX 能出现在属性值里和标签体里，是同一个原因</strong>：都是「往函数参数里放对象」。传参没有禁区。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比：位置参数与命名参数</div>
+  <p>children 相当于方法的「主参数」，title/footer 相当于命名参数——Java Builder 里 <code>.title(...).footer(...)</code> 那串链式调用。页面布局里 header / content / footer 三个 fragment 占位，映射到组件上就是这三个插槽：Sitemesh 装饰器、Spring 的 layout decorate，思路同构。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">传「JSX 对象」和传「函数」是两个次元的插槽：传 JSX，内容在调用方渲染时就定稿成对象；传函数，内容延迟到子组件调用时才生成，还能拿到子组件递来的状态。后者叫 render props，第 26 篇的主角——先把对象版插槽用扎实。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：复合组件 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>复合组件：Tabs.Item 为什么一个 prop 都不用传</h2></div>
+
+<p>插槽解决「往组件里塞内容」，复合组件（Compound Components）解决另一个问题：<strong>一组子组件如何共享父组件的状态，而使用方浑然不觉</strong>。先看想要的使用姿势——Ant Design、Element UI 这类组件库的标准长相：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>用法.tsx</b> · 目标 API：Item 不带任何状态 props</span></div>
+  <pre><code>const [tab, setTab] = useState("orders");
+
+&lt;Tabs active={tab} onChange={setTab}&gt;
+  &lt;Tabs.Item label="订单"&gt;订单列表……&lt;/Tabs.Item&gt;
+  &lt;Tabs.Item label="商品"&gt;商品列表……&lt;/Tabs.Item&gt;
+&lt;/Tabs&gt;</code></pre>
+</div>
+
+<p>盯着 <code>Tabs.Item</code> 看一会儿，会发现两件「不可能」的事：</p>
+
+<ul>
+  <li>Item 没传 index，它怎么知道自己排第几、该不该高亮？</li>
+  <li>Item 没传 active、没传 onClick，点它一下整个 Tabs 怎么切页？</li>
+</ul>
+
+<p>答案是：这些信息由 Tabs 通过 <strong>Context（第 15 篇）</strong>悄悄下发——Tabs 是 Provider，持有激活态；Item 是消费者，<code>useContext</code> 一拿。使用方感知不到这条内部通道，这就是「隐式注册」：Item 只要出现在 Tabs 里，身份和依赖自动就位。Select/Select.Option、Accordion/Accordion.Item 全是同一套路。对比不这么做的写法：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>显式版.tsx</b> · 反例：每个使用处都得自己接线</span></div>
+  <pre><code>&lt;TabItem label="订单" index={0}
+  active={tab === "orders"} onClick={() =&gt; setTab("orders")}&gt;
+  订单列表……
+&lt;/TabItem&gt;
+<span class="c">// 每个 Item 都要重复这一整套；插一个新 Tab，后面的 index 全要手改</span></code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：@Component 组件扫描</div>
+  <p>Item 不需要手动去 registry 登记——「出现在 Tabs 标签体内」这个动作本身就是注册，像 @Component 类只要落在扫描路径下就进了 ApplicationContext，激活态这类依赖由容器注入，类本身零感知。巧的是，React 的 Context 和 Spring 的 Context 连名字都一样：都是「依赖的来源」。组件树就是前端版的应用上下文。</p>
+</div>
+
+<p>顺带交代一个更老的做法：Hooks 普及前，组件库常用 <code>React.Children.map</code> 遍历 children，再用 <code>cloneElement</code> 克隆子元素、强行注入 active 等 props。能跑，但有个致命局限：<strong>Item 必须是 children 的直接子节点</strong>——中间包一层 <code>&lt;div&gt;</code> 或加个条件渲染，props 就注不进去了，还逼着使用方给每个 Item 配 key（第 7 篇）。Context 天然穿透任意嵌套，现代组件库基本都改用了它；这两个 API 认识即可，不必再写。</p>
+
+<div class="think">
+  <div class="think-q">拆开看，复合组件没有发明任何新东西：状态提升（第 14 篇）让 Tabs 持有激活态，Context（第 15 篇）让激活态跨层可达，children 传参让 Item 进得了门。所谓模式，就是三件旧武器的固定连招。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：实战迷你 Tabs ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>实战：手写一个迷你 Tabs</h2></div>
+
+<p>轮到你了。下面这个迷你 Tabs 可以直接抄进项目跑，重点看三处：Context 只在文件内流转、Item 激活态来自 <code>useContext</code>、最后用 <code>Object.assign</code> 静态挂载：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Tabs.tsx</b> · 复合组件三件套：Context + Item + 静态挂载</span></div>
+  <pre><code>import {
+  createContext, useContext, useState,
+  type ReactNode,
+} from "react";
+
+<span class="c">// 1. 内部通道：不导出，是 Tabs 和 Item 的「私房话」</span>
+interface TabsContextValue {
+  active: string;
+  setActive: (key: string) =&gt; void;
+}
+const TabsContext = createContext&lt;TabsContextValue | null&gt;(null);
+
+<span class="c">// 2. Item：不接收任何状态 props，激活态从 Context 拿</span>
+function TabItem({ label, children }: { label: string; children: ReactNode }) {
+  const ctx = useContext(TabsContext);
+  <span class="c">// 没包在 Tabs 里就明确报错——兜住使用方的误用</span>
+  if (!ctx) throw new Error("Tabs.Item 必须用在 Tabs 内部");
+
+  const isActive = ctx.active === label;
+  return (
+    &lt;&gt;
+      &lt;button
+        className={isActive ? "tab active" : "tab"}
+        onClick={() =&gt; ctx.setActive(label)}
+      &gt;
+        {label}
+      &lt;/button&gt;
+      {isActive &amp;&amp; &lt;div className="panel"&gt;{children}&lt;/div&gt;}
+    &lt;/&gt;
+  );
+}
+
+<span class="c">// 3. Tabs：唯一持状态的人，通过 Provider 下发</span>
+<span class="c">// （初始为空 = 都不选；想默认选中，加 defaultActive prop 即可）</span>
+function Tabs({ children }: { children: ReactNode }) {
+  const [active, setActive] = useState("");
+  return (
+    &lt;TabsContext.Provider value={{ active, setActive }}&gt;
+      &lt;div className="tabs"&gt;{children}&lt;/div&gt;
+    &lt;/TabsContext.Provider&gt;
+  );
+}
+
+<span class="c">// 4. 静态挂载：让 &lt;Tabs.Item /&gt; 成立，TS 自动推断出完整类型</span>
+export default Object.assign(Tabs, { Item: TabItem });</code></pre>
+</div>
+
+<p>用起来就是第 3 站的目标 API：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>App.tsx</b> · 调用方视角：干净得像在写配置</span></div>
+  <pre><code>&lt;Tabs&gt;
+  &lt;Tabs.Item label="订单"&gt;订单列表&lt;/Tabs.Item&gt;
+  &lt;Tabs.Item label="商品"&gt;商品列表&lt;/Tabs.Item&gt;
+&lt;/Tabs&gt;</code></pre>
+</div>
+
+<p>三个实现细节值得停留：</p>
+
+<ul>
+  <li><strong>激活判据为什么用 <code>label</code> 不用 index？</strong>label 天然唯一且稳定，增删 Tab 不会错位；用 index 则每次增删都可能改变语义——和第 7 篇「列表 key 不用 index」同一个道理。</li>
+  <li><strong>TS 静态挂载还有种手动写法</strong>，老项目里更常见——先声明交叉类型再赋值：</li>
+</ul>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Tabs.tsx</b> · 静态挂载的手动写法</span></div>
+  <pre><code>type TabsComponent = typeof Tabs &amp; { Item: typeof TabItem };
+const TabsWithItem = Tabs as TabsComponent;
+TabsWithItem.Item = TabItem;
+export default TabsWithItem;</code></pre>
+</div>
+
+<ul>
+  <li><strong>Provider 的 value 每次渲染都是新对象</strong>，Item 会跟着重渲染——不过 Tabs 本来就只在 active 变化时才渲染，量级可接受；真要较真，等第 37 篇 memo 上场。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Builder 与模板方法</div>
+  <p>复合组件的使用体验像 Builder：Tabs 定骨架，Tabs.Item 链式往里填内容。运行时的分工像模板方法：父组件（抽象类）定死「状态与调度」的骨架流程，子组件（实现类）只填「自己那块长什么样」的空。区别是 Java 靠继承建立这层关系，React 靠「包裹 + Context」，没有继承的耦合——正是第 23 篇「组合优于继承」的组件库实践版。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：何时别用 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>何时别用：模式是给高频复用准备的</h2></div>
+
+<p>复合组件不是越多越好。收益 = 「子项数量 × 使用次数」——Tabs、Select、Accordion、Menu 这类全站复用、内部又共享状态的组件群才赚得回成本。对着下表自查：</p>
+
+<table>
+  <thead>
+    <tr><th>场景</th><th>建议</th><th>理由</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Card、Modal 等简单包裹</td><td>直接 children，顶多加一两个 JSX 插槽</td><td>没有共享状态，模式是杀鸡牛刀</td></tr>
+    <tr><td>Tabs / Select / Accordion / Radio.Group</td><td>复合组件 + Context</td><td>子项共享父状态，且全站高频复用</td></tr>
+    <tr><td>一次性的页面区块</td><td>普通组件 + props</td><td>读代码要跳文件，抽象成本不划算</td></tr>
+    <tr><td>对外发布的组件库</td><td>复合组件 + Context（补齐无障碍属性）</td><td>API 面子稳定、里子自由，行业标准答案</td></tr>
+  </tbody>
+</table>
+
+<p>判断标准与第 23 篇一脉相承：<strong>抽象是要还的债</strong>。小组件硬上复合组件，读一个功能得在三个定义之间来回跳——为「看起来像个组件库」付出理解成本，不值。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="复合组件：Tabs 通过 Context 向 Tabs.Item 下发激活态">
+  <rect x="0" y="0" width="620" height="300" fill="#FFFFFF"/>
+  <text x="310" y="28" text-anchor="middle" font-size="15" font-weight="bold" fill="#1C1C1C">隐式注册：状态在父，子组件从 Context 领</text>
+  <rect x="210" y="50" width="200" height="52" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="310" y="72" text-anchor="middle" font-size="13" fill="#1C1C1C">Tabs（Provider）</text>
+  <text x="310" y="90" text-anchor="middle" font-size="11" fill="#1C1C1C">useState: active = "orders"</text>
+  <path d="M 270 102 L 210 150" stroke="#C2410C" stroke-width="2" stroke-dasharray="6 4" fill="none"/>
+  <path d="M 350 102 L 420 150" stroke="#C2410C" stroke-width="2" stroke-dasharray="6 4" fill="none"/>
+  <text x="330" y="132" font-size="12" fill="#C2410C">Context 下发 {active, setActive}</text>
+  <rect x="120" y="150" width="180" height="52" rx="6" fill="#FFFFFF" stroke="#177245" stroke-width="2"/>
+  <text x="210" y="172" text-anchor="middle" font-size="13" fill="#177245">Tabs.Item 订单</text>
+  <text x="210" y="190" text-anchor="middle" font-size="11" fill="#8C8676">useContext → 激活，高亮</text>
+  <rect x="330" y="150" width="180" height="52" rx="6" fill="#FFFFFF" stroke="#8C8676" stroke-width="2"/>
+  <text x="420" y="172" text-anchor="middle" font-size="13" fill="#1C1C1C">Tabs.Item 商品</text>
+  <text x="420" y="190" text-anchor="middle" font-size="11" fill="#8C8676">useContext → 未激活</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>复合组件的隐式注册：Tabs 经 Context 下发激活态，Tabs.Item 零 props 接线。</figcaption>
+</figure>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>children 就是 <code>props.children</code>：JSX 是对象，包裹内容 = 多传一个参数，类型 ReactNode。</li>
+    <li>多插槽用 JSX props（title/footer），插槽类型写 ReactNode 才「活」。</li>
+    <li>复合组件 = 父组件 Context 下发状态 + 子组件 useContext 隐式消费，使用方零感知。</li>
+    <li>静态挂载 <code>Object.assign(Tabs, { Item: TabItem })</code> 让 <code>Tabs.Item</code> 成立。</li>
+    <li>React.Children.map + cloneElement 是老方案：怕嵌套、要 key，认识即可。</li>
+    <li>模式为高频复用服务，一次性的小组件别硬上。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇把「组合」推到了组件库级别：children 是传参，插槽是多传几个参数，复合组件是让子组件们经 Context 隐式共享父状态。至此你见过的都是把<strong>对象</strong>传进组件。Hooks 出现之前，人们还发明过把<strong>函数</strong>乃至整个组件当参数传的复用方式：render props 与高阶组件——它们今天大多退居二线，但老项目里遍地都是。下一篇第 26 篇，带你读懂这些「化石」。</p>
+</div>
+</section>
+
+</body>
+</html>

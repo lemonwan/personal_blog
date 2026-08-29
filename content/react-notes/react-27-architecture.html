@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>组件拆分与职责边界（对比三层架构）</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：一个 300 行的「上帝组件」 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>一个 300 行的「上帝组件」</h2></div>
+
+<p>上一篇（第 26 篇）用 HOC 和 render props 解决了「横切逻辑怎么复用」，但还有一个更致命的坏味道没治：<strong>一个组件从请求、业务到渲染什么都干</strong>——前端的「上帝组件」。你几乎一定见过它：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserPage.tsx</b> · 一个真实的「上帝组件」（节选，全文件约 300 行）</span></div>
+  <pre><code>import { useState, useEffect } from "react";
+
+export default function UserPage() {
+  <span class="c">// ── 第 1 坨：数据请求 ──────────────────────</span>
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [keyword, setKeyword] = useState("");
+
+  useEffect(() =&gt; {
+    setLoading(true);
+    fetch(`/api/users?keyword=${keyword}`)
+      .then(res =&gt; res.json())
+      .then(data =&gt; {
+        <span class="c">// ── 第 2 坨：业务规则 ──────────────────</span>
+        const adults = data.filter(u =&gt; u.age &gt;= 18);
+        adults.sort((a, b) =&gt; b.createdAt - a.createdAt);
+        setUsers(adults);
+      })
+      .catch(e =&gt; setError(e.message))
+      .finally(() =&gt; setLoading(false));
+  }, [keyword]);
+
+  <span class="c">// ── 中间还有 100 多行：选中态、删除、批量操作、防抖……</span>
+
+  <span class="c">// ── 最后 150 行：内联样式、布局、渲染 ────</span>
+  return (
+    &lt;div className="user-page"&gt;
+      &lt;input value={keyword} onChange={e =&gt; setKeyword(e.target.value)} /&gt;
+      {loading ? (
+        &lt;p&gt;加载中…&lt;/p&gt;
+      ) : (
+        users.map(u =&gt; (
+          &lt;div key={u.id}&gt;
+            &lt;span&gt;{u.name}&lt;/span&gt;
+            &lt;span&gt;{u.status === "ACTIVE" ? "在职" : "离职"}&lt;/span&gt;
+          &lt;/div&gt;
+        ))
+      )}
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Controller 里写 SQL</div>
+  <p>这个组件等于一个 800 行的 Controller：方法里开 JDBC 连接、写 SQL、做业务校验，最后手工拼 HTML 返回。code review 里看到你会直接打回——翻译成 React，很多人却觉得「前端都这样」。<strong>不是的，前端同样需要分层。</strong></p>
+</div>
+
+<div class="think">
+  <div class="think-q">上帝组件的问题不只是「长」，而是三种<strong>变化节奏完全不同</strong>的东西被焊死在一起：接口字段（高频）、业务规则（中频）、设计稿（最高频）——谁变，你都得打开这同一个 300 行的文件。「改一处、崩三处」就是这么来的。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：前端的三层架构 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>前端的三层架构：展示、容器、逻辑 Hook</h2></div>
+
+<p>治法你在后端天天用：<strong>按职责分层</strong>。React 生态里对应的分法是展示组件、容器组件、逻辑 Hook 三层：</p>
+
+<table>
+  <thead>
+    <tr><th>层（前端形态）</th><th>只负责什么</th><th>Java 类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>展示组件</strong><br>UserList、Avatar</td><td>拿到 props 就画出界面，交互通过回调上报；不发请求、不写业务规则</td><td>View / Thymeleaf 模板 / DTO 渲染</td></tr>
+    <tr><td><strong>容器组件</strong><br>UserListPage</td><td>接线：调 Hook 拿数据、持有页面级状态、组装 UI；不写规则不写样式</td><td>Controller</td></tr>
+    <tr><td><strong>逻辑 Hook</strong><br>useUsers</td><td>封装业务规则与数据访问，返回「数据 + 操作」；不 import 组件、不碰 DOM</td><td>Service + Mapper</td></tr>
+  </tbody>
+</table>
+
+<p>判断一个函数属于哪层，看<strong>输入输出</strong>就够了：展示组件是「props 进、UI 出」的纯函数；逻辑 Hook 是「参数进、数据出」的函数；容器组件只做搬运和编排。展示组件不知道数据来自 REST 还是 mock，就像 Thymeleaf 模板不知道数据来自 Oracle 还是 MySQL。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 260" role="img" aria-label="React 三层与 Spring 三层的对应关系">
+  <defs>
+    <marker id="m27" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="620" height="260" fill="#FFFFFF"/>
+  <text x="170" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#C2410C">React 项目</text>
+  <text x="450" y="28" text-anchor="middle" font-size="14" font-weight="bold" fill="#177245">Spring Boot</text>
+
+  <rect x="60" y="44" width="220" height="48" rx="8" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="170" y="73" text-anchor="middle" font-size="13" fill="#1C1C1C">容器组件 UserListPage</text>
+  <rect x="340" y="44" width="220" height="48" rx="8" fill="#177245" stroke="#1C1C1C"/>
+  <text x="450" y="73" text-anchor="middle" font-size="13" fill="#FFFFFF">Controller</text>
+  <line x1="284" y1="68" x2="332" y2="68" stroke="#8C8676" stroke-width="2" marker-end="url(#m27)"/>
+
+  <rect x="60" y="116" width="220" height="48" rx="8" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="170" y="145" text-anchor="middle" font-size="13" fill="#1C1C1C">逻辑 Hook useUsers</text>
+  <rect x="340" y="116" width="220" height="48" rx="8" fill="#177245" stroke="#1C1C1C"/>
+  <text x="450" y="145" text-anchor="middle" font-size="13" fill="#FFFFFF">Service</text>
+  <line x1="284" y1="140" x2="332" y2="140" stroke="#8C8676" stroke-width="2" marker-end="url(#m27)"/>
+
+  <rect x="60" y="188" width="220" height="48" rx="8" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="170" y="217" text-anchor="middle" font-size="13" fill="#1C1C1C">展示组件 UserList</text>
+  <rect x="340" y="188" width="220" height="48" rx="8" fill="#177245" stroke="#1C1C1C"/>
+  <text x="450" y="217" text-anchor="middle" font-size="13" fill="#FFFFFF">View / DTO 渲染</text>
+  <line x1="284" y1="212" x2="332" y2="212" stroke="#8C8676" stroke-width="2" marker-end="url(#m27)"/>
+
+  <text x="310" y="252" text-anchor="middle" font-size="11" fill="#8C8676">左：React 项目的三件套 · 右：你熟悉的 Spring 三层</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>React 三层与 Spring 三层的职责对应：把熟悉的架构直觉平移到组件里</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第3站：动手重构：一拆三 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>动手重构：一拆三</h2></div>
+
+<p>拆法直接给结论：把 UserPage 拆成 <code>useUsers</code>（逻辑 Hook）+ <code>UserList</code>（展示组件）+ <code>UserListPage</code>（容器组件），各回各家。</p>
+
+<h3>第一块：useUsers —— 业务规则与数据访问（Service）</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useUsers.ts</b> · 逻辑层：只关心「用户数据」这条业务线，不认识任何组件</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+import { fetchUsers } from "../api/user";
+import type { User } from "./types";
+
+export function useUsers(keyword: string) {
+  const [users, setUsers] = useState&lt;User[]&gt;([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState&lt;string | null&gt;(null);
+
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    setLoading(true);
+
+    fetchUsers(keyword, controller.signal)
+      .then(data =&gt; {
+        <span class="c">// 业务规则：只看已成年用户，按创建时间倒序（改规则只改这里）</span>
+        const visible = data
+          .filter(u =&gt; u.age &gt;= 18)
+          .sort((a, b) =&gt; b.createdAt - a.createdAt);
+        setUsers(visible);
+        setError(null);
+      })
+      .catch((e: Error) =&gt; {
+        if (e.name !== "AbortError") setError(e.message);
+      })
+      .finally(() =&gt; setLoading(false));
+
+    <span class="c">// 清理函数：卸载或 keyword 变化时取消上一次请求（第 9 篇讲过）</span>
+    return () =&gt; controller.abort();
+  }, [keyword]);
+
+  return { users, loading, error };
+}</code></pre>
+</div>
+
+<p>这就是第 13 篇「自定义 Hook」的标准形态：use 开头的函数，内部用 <code>useState</code>/<code>useEffect</code>，对外返回数据与操作。它<strong>和 UI 零耦合</strong>——可以像测 Service 一样单测它，换三套 UI 都不用动一行。</p>
+
+<h3>第二块：UserList —— 纯展示（View）</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserList.tsx</b> · 展示层：props 进、界面出；不发请求、不写规则</span></div>
+  <pre><code>import type { User } from "./types";
+
+interface UserListProps {
+  users: User[];
+  loading: boolean;
+  selectedId: number | null;
+  onSelect: (id: number) =&gt; void;
+}
+
+export function UserList({ users, loading, selectedId, onSelect }: UserListProps) {
+  if (loading) return &lt;p&gt;加载中…&lt;/p&gt;;
+  if (users.length === 0) return &lt;p&gt;没有符合条件的用户&lt;/p&gt;;
+
+  return (
+    &lt;ul className="user-list"&gt;
+      {users.map(u =&gt; (
+        &lt;li
+          key={u.id}
+          className={u.id === selectedId ? "active" : ""}
+          onClick={() =&gt; onSelect(u.id)}
+        &gt;
+          &lt;span&gt;{u.name}&lt;/span&gt;
+          &lt;span&gt;{u.status === "ACTIVE" ? "在职" : "离职"}&lt;/span&gt;
+        &lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>它的 <code>import</code> 里没有任何 fetch、api、业务字眼。换数据源（mock、GraphQL、另一个后端）它<strong>一字不改</strong>；单测只需「造 props → 断言渲染结果」，和用 DTO 测模板渲染一个套路。</p>
+
+<h3>第三块：UserListPage —— 接线（Controller）</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserListPage.tsx</b> · 容器层：不生产数据，只负责编排和传递</span></div>
+  <pre><code>import { useState } from "react";
+import { useUsers } from "./useUsers";
+import { UserList } from "./UserList";
+import { SearchInput } from "../../components/ui";
+
+export default function UserListPage() {
+  const [keyword, setKeyword] = useState("");
+  const [selectedId, setSelectedId] = useState&lt;number | null&gt;(null);
+
+  <span class="c">// 接线 1：页面状态 keyword 驱动 Hook 重新取数</span>
+  const { users, loading, error } = useUsers(keyword);
+
+  if (error) return &lt;p role="alert"&gt;加载失败：{error}&lt;/p&gt;;
+
+  return (
+    &lt;div className="user-page"&gt;
+      &lt;SearchInput value={keyword} onChange={setKeyword} placeholder="搜索用户" /&gt;
+      <span class="c">// 接线 2：Hook 的数据 + 页面状态，通过 props 交给展示组件</span>
+      &lt;UserList
+        users={users}
+        loading={loading}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      /&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>拆完每个文件都能一眼读完，三条变化曲线解耦：接口重构只动 <code>useUsers</code>，设计改版只动 <code>UserList</code>，页面交互只动 <code>UserListPage</code>。将来用上第 33 篇的 TanStack Query，<code>useUsers</code> 还能再瘦一圈——三层职责不变。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li><strong>展示组件</strong>：props 进 UI 出，无副作用，像 View，最好测也最可复用。</li>
+    <li><strong>容器组件</strong>：调 Hook、持有页面级状态、组装 UI，像 Controller，应该薄。</li>
+    <li><strong>逻辑 Hook</strong>：业务规则 + 数据访问，像 Service，可脱离 UI 独立测试与复用。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：判别清单与组件库思维 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>判别清单：这段代码该放哪一层</h2></div>
+
+<p>分层最难的不是「拆」，是「判断」。给你两个问题，按顺序问，答案自然浮现：</p>
+
+<ol>
+  <li><strong>换 UI 会变吗？</strong>设计稿改版、出移动端——要重写吗？要，它属于<strong>展示层</strong>（样式、布局、文案格式化、交互反馈）。</li>
+  <li><strong>换数据源会变吗？</strong>REST 换 GraphQL、mock 换真接口、加缓存——要重写吗？要，它属于<strong>逻辑 Hook</strong>（请求、缓存、轮询、数据整形）。</li>
+  <li>两个都答「不会」——要么是容器组件的编排逻辑，要么沉成共享层的通用工具。</li>
+</ol>
+
+<table>
+  <thead>
+    <tr><th>这段逻辑</th><th>该放哪</th><th>两个问题怎么答</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>金额分转元、保留两位小数</td><td><code>src/lib</code> 工具函数</td><td>换 UI 不变；换数据源也不变——通用规则</td></tr>
+    <tr><td>「只看已成年用户，按时间倒序」</td><td><code>useUsers</code>（Hook）</td><td>换 UI 不变；换数据源要变——规则贴着数据走</td></tr>
+    <tr><td>列表隔行变色、空态插画</td><td><code>UserList</code>（展示）</td><td>换 UI 必变；换数据源不变——纯展示</td></tr>
+    <tr><td>「先搜用户，再拿他的订单」</td><td>容器组件（编排）</td><td>两头都不沾，纯粹是「接线的先后顺序」</td></tr>
+  </tbody>
+</table>
+
+<h3>再往上抽一层：UI 组件库思维</h3>
+
+<p>第 1 问里「换 UI 不变」的通用积木——Button、Input、Modal、Table——值得单独一层（<code>src/components/ui</code>）。它们比展示组件更纯：<strong>连业务词汇都没有</strong>，只认 variant、size 这类设计语言。类比公司的 common 包 / 公共 jar：一次打磨、处处复用，里面不该出现 <code>if (userType === "VIP")</code>。攒着攒着，你就长出了自己的「设计系统」——第 25 篇的 children 与复合组件，正是把这些积木拼好用的粘合剂。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Button.tsx</b> · 设计系统的最小单元：只懂「按钮」，不懂业务</span></div>
+  <pre><code>import type { ReactNode } from "react";
+
+interface ButtonProps {
+  variant?: "primary" | "ghost" | "danger";   <span class="c">// 只认设计语言，不认业务</span>
+  onClick?: () =&gt; void;
+  children: ReactNode;
+}
+
+export function Button({ variant = "primary", children, onClick }: ButtonProps) {
+  return &lt;button className={`btn btn--${variant}`} onClick={onClick}&gt;{children}&lt;/button&gt;;
+}
+<span class="c">// 这套 interface 写法，下一篇第 28 篇细讲</span></code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：别教条 + 回顾 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>别教条：三层是拐杖，不是镣铐</h2></div>
+
+<p>最后泼一盆冷水：<strong>不是每个组件都值得拆三层</strong>。一个 40 行的标签选择器，硬拆成 useTags + TagList + TagPage，是自找麻烦——文件数翻三倍，读代码的人跳来跳去，困惑比清晰多。这和第 20 篇讲状态管理选型是同一个精神：<strong>架构是演进出来的，不是开局颁发的。</strong></p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TagBadge.tsx</b> · 40 行的小组件：一气呵成就好，别硬拆三层</span></div>
+  <pre><code>import { useState } from "react";
+
+export function TagBadge({ initialTags }: { initialTags: string[] }) {
+  const [tags, setTags] = useState(initialTags);
+
+  function remove(tag: string) {
+    setTags(tags.filter(t =&gt; t !== tag));
+  }
+
+  return (
+    &lt;span className="tag-badge"&gt;
+      {tags.map(t =&gt; (
+        &lt;em key={t}&gt;
+          {t}
+          &lt;button onClick={() =&gt; remove(t)}&gt;×&lt;/button&gt;
+        &lt;/em&gt;
+      ))}
+    &lt;/span&gt;
+  );
+}</code></pre>
+</div>
+
+<p>什么时候才值得动手拆？出现这些信号再说：</p>
+
+<ul>
+  <li>同一份 UI 要出现在第二个地方——复用需求真实出现了；</li>
+  <li>想给业务规则写测试，却发现它焊死在 JSX 里；</li>
+  <li>后端改一个字段名，你要在一堆样式代码里大海捞针；</li>
+  <li>「改样式的人」和「改逻辑的人」开始频繁冲突同一个文件。</li>
+</ul>
+
+<p>另外，真实项目未必「一个页面恰好三层」：有的容器薄到只剩一行，直接在路由文件里调 Hook 渲染展示组件；有的 Hook 就是第 33 篇的一行 <code>useQuery</code>。<strong>分层是职责的划分，不是文件数的指标。</strong></p>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>我们把一个 300 行的上帝组件拆成了三层：<code>useUsers</code>（逻辑 Hook，≈ Service）、<code>UserList</code>（展示组件，≈ View）、<code>UserListPage</code>（容器组件，≈ Controller）。归属判断只记两问：<strong>换 UI 会变吗？换数据源会变吗？</strong>但别教条——架构服务于变化，拆分跟着复用与测试的真实需求走。</p>
+</div>
+
+<p>三层拆完，新问题来了：层与层之间靠什么连接？靠 Props。而 Props 的形状、哪些可选、回调参数是什么类型，靠什么保证不出错？下一篇第 28 篇，我们把 TypeScript 请进来，让「契约」从口头约定变成编译期红线。</p>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>部署：静态站 / Nginx / CI 流水线</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：SPA 部署的本质 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>SPA 部署的本质：静态文件，加一条回退路由</h2></div>
+
+<p>第 40 篇你敲下 <code>npm run build</code> 得到 <code>dist</code> 目录，当时说「这是要发上服务器的东西」。部署前，先把产物看清楚：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>dist/</b> · 构建产物的全部家当</span></div>
+  <pre><code>dist/
+├── index.html                <span class="c"># 唯一 HTML 入口，引用下面带 hash 的资源</span>
+├── assets/
+│   ├── index-Bq3f9x2a.js     <span class="c"># 带 hash 的 JS（hash 规则第 40 篇讲过）</span>
+│   ├── index-Ck8d1p4m.css    <span class="c"># 带 hash 的 CSS</span>
+│   └── vendor-Dx2e8f7b.js    <span class="c"># 拆出来的第三方库包</span>
+└── favicon.ico</code></pre>
+</div>
+
+<p>看明白了吗？<strong>SPA 部署的本质，就是把这堆静态文件放到一个 HTTP 服务器上</strong>——没有常驻进程、没有内存状态，逻辑全在浏览器里。这和部署 war 完全不同：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>后端：war 丢进 Tomcat</th><th>前端：dist 丢给 Nginx</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>产物形态</td><td>有状态进程，JVM 常驻跑你的代码</td><td>无状态文件，逻辑在浏览器执行</td></tr>
+    <tr><td>部署动作</td><td>放 webapps、重启</td><td>替换目录里的文件，即时生效</td></tr>
+    <tr><td>路由由谁决定</td><td>Controller 注解说了算</td><td>文件路径 + 回退规则</td></tr>
+    <tr><td>典型故障</td><td>500、OOM、连接池打满</td><td>404、白屏、缓存不一致</td></tr>
+  </tbody>
+</table>
+
+<p>SPA 部署最经典的坑就藏在「路由」这一行：应用里有 <code>/bookmarks/3</code> 这个页面，站内点击跳转一切正常——但用户<strong>按 F5 刷新，Nginx 直接给 404</strong>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：war 丢进 Tomcat</div>
+  <p>你部署后端时从不担心「Tomcat 怎么知道该响应 /bookmarks/3」，路由定义在代码里。前端反过来：路由只活在浏览器加载的 JS 中，服务器上根本不存在 <code>/bookmarks/3</code> 这个文件——站内跳转是 JS 拦截的，刷新才是真请求。所以必须有一条规则告诉 Nginx：<strong>文件找不到，就把 index.html 给它</strong>。这条回退路由（fallback），就是 SPA 部署的全部秘密。</p>
+</div>
+
+</section>
+
+<!-- ═══════════════ 第2站：Nginx 三件套 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>Nginx 三件套：回退路由、差异化缓存、压缩</h2></div>
+
+<p>一份能扛生产的 Nginx 配置，浓缩下来就三件事，一次配齐：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>bookmark.conf</b> · /etc/nginx/conf.d/ 下的站点配置</span></div>
+  <pre><code>server {
+    listen 80;
+    server_name bookmark.example.com;
+
+    root /var/www/bookmark/dist;    <span class="c"># 指向第 40 篇的构建产物</span>
+    index index.html;
+
+    gzip on;                        <span class="c"># 文本压缩：JS/CSS/HTML 体积约砍到 1/3</span>
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1k;
+
+    <span class="c"># 1) 带 hash 的静态资源：内容不变文件名就不变，放心缓存一年</span>
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    <span class="c"># 2) 入口 HTML：绝不能长缓存，否则发布后用户拿不到新版本</span>
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    <span class="c"># 3) 回退路由：SPA 部署的灵魂</span>
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}</code></pre>
+</div>
+
+<p>第 1、2 条是<strong>一对组合拳</strong>，呼应第 40 篇的 hash 文件名：发新版后 <code>assets</code> 文件名全变（新 hash），旧 URL 缓存再久也不会错；而引用它们的 <code>index.html</code> 路径没变、内容变了——必须每次回源验证（<code>no-cache</code> 是「可缓存但先用前问 304」，不是禁止缓存），一验证就拿到引用新 hash 的 HTML，用户立刻见到新版。<strong>配反了会怎样？</strong>HTML 长缓存、资源短缓存——发布了用户看到的还是旧页面，这是前端事故榜第一名「缓存不一致」。</p>
+
+<p><code>immutable</code> 是给浏览器的承诺：「一年内不会变，连协商请求都别发」，每次访问省掉一次 RTT。第 3 条 <code>try_files $uri $uri/ /index.html</code> 读作：先找文件，再找目录，都没有——回退 index.html，剩下交给 JS 路由。</p>
+
+<p>压缩再补一句：<strong>gzip 必开</strong>；<strong>Brotli</strong> 压缩率再好 15~20%，但 Nginx 要额外装 <code>ngx_brotli</code> 模块（发行版常不带），常见折中是 CDN 层做 Brotli、源站只管 gzip。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>SPA 部署三件套：<code>root</code> 指向 dist、<code>try_files</code> 回退到 index.html、HTML 与带 hash 资源差异化缓存。</li>
+    <li>缓存铁律：index.html 用 <code>no-cache</code>（协商缓存），<code>/assets/</code> 用一年 <code>immutable</code>——配反了就是「发布后用户看不到新版」。</li>
+    <li>hash 文件名（第 40 篇）+ immutable 是天生一对；gzip 必开，Brotli 更优但依赖模块。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：反代与环境配置 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>反代 /api 与环境差异化配置</h2></div>
+
+<p>真实项目里前端不会单独活着——身后还有你的 Spring Boot。往 <code>server</code> 块里补一段：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>bookmark.conf</b> · 追加 API 反向代理</span></div>
+  <pre><code>    <span class="c"># 浏览器只见同源的 /api，跨域问题在这套架构里根本不会发生</span>
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080/;    <span class="c"># 末尾带斜杠：/api/xxx 转成 /xxx</span>
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }</code></pre>
+</div>
+
+<p>后端 <code>server.servlet.context-path</code> 照旧，CORS 注解一行不用写——浏览器只认识一个域名，同源策略没机会触发。要拿真实客户端 IP？看 <code>X-Forwarded-For</code>，你在线上排查「日志里全是 Nginx 的 IP」时一定打过交道。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：这就是一个迷你网关</div>
+  <p>同域转发、隐藏真实后端、透传真实 IP——这段 location 就是 Spring Cloud Gateway 路由规则的最小集，只是载体从 YAML 换成了 nginx.conf。CORS 也顺带消失：跨域是浏览器的同源策略，服务器对服务器的调用从来不存在这个问题。</p>
+</div>
+
+<p>接着解决「环境」。后端你有 profile：三份配置，同一份 jar 启动时切换。前端有个关键差异——<strong>前端没有运行时配置，变量在构建时就被「烧」进产物里了</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>.env.production / .env.staging</b> · Vite 约定的环境文件</span></div>
+  <pre><code><span class="c"># .env.production —— npm run build 时读取</span>
+VITE_API_BASE=/api
+
+<span class="c"># .env.staging —— npm run build -- --mode staging 时读取</span>
+VITE_API_BASE=https://staging-api.example.com/api</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>src/config.ts</b> · 全项目唯一的 API 地址来源</span></div>
+  <pre><code>export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";</code></pre>
+</div>
+
+<p><code>import.meta.env.VITE_*</code> 在 build 时被直接替换成字符串常量。规则变成：<strong>一次构建对应一个环境，三个环境就是三次构建</strong>——这正是下文 CI 里 build 要显式注入环境变量的原因。</p>
+
+<table>
+  <thead>
+    <tr><th></th><th>Spring Profile（运行时切换）</th><th>前端构建注入（构建时烧死）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>配置生效时机</td><td>启动时读配置，包是通用的</td><td>build 时字符串替换，产物是定制的</td></tr>
+    <tr><td>切环境</td><td>重启进程，加启动参数</td><td>重新 build</td></tr>
+    <tr><td>一份产物多环境</td><td>可以</td><td>不行</td></tr>
+    <tr><td>改配置要不要重发</td><td>改配置文件重启即可</td><td>必须重新构建发布</td></tr>
+  </tbody>
+</table>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="Nginx 请求分发示意：浏览器同源请求到 Nginx，assets 走长缓存静态资源，其余路径回退 index.html，/api 反代到 Spring Boot">
+  <defs>
+    <marker id="arrowA42" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#C2410C"/>
+    </marker>
+  </defs>
+  <rect x="25" y="122" width="120" height="56" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="85" y="146" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">浏览器</text>
+  <text x="85" y="164" text-anchor="middle" font-size="11" fill="#8C8676">只认一个域名</text>
+
+  <rect x="225" y="122" width="140" height="56" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="295" y="146" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">Nginx :80</text>
+  <text x="295" y="164" text-anchor="middle" font-size="11" fill="#1C1C1C">静态 + 回退 + 反代</text>
+
+  <line x1="145" y1="150" x2="225" y2="150" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arrowA42)"/>
+  <text x="185" y="142" text-anchor="middle" font-size="11" fill="#8C8676">同源请求</text>
+
+  <line x1="365" y1="136" x2="440" y2="56" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arrowA42)"/>
+  <rect x="440" y="30" width="155" height="48" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="517" y="50" text-anchor="middle" font-size="12" fill="#1C1C1C">/assets/*</text>
+  <text x="517" y="68" text-anchor="middle" font-size="11" fill="#8C8676">hash 文件 · immutable</text>
+
+  <line x1="365" y1="150" x2="440" y2="136" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arrowA42)"/>
+  <rect x="440" y="112" width="155" height="48" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="517" y="132" text-anchor="middle" font-size="12" fill="#1C1C1C">其余路径</text>
+  <text x="517" y="150" text-anchor="middle" font-size="11" fill="#8C8676">回退 index.html</text>
+
+  <line x1="365" y1="166" x2="440" y2="222" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arrowA42)"/>
+  <rect x="440" y="200" width="155" height="48" fill="#177245" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="517" y="220" text-anchor="middle" font-size="12" fill="#FFFFFF">/api/*</text>
+  <text x="517" y="238" text-anchor="middle" font-size="11" fill="#FFFFFF">Spring Boot :8080</text>
+
+  <text x="310" y="286" text-anchor="middle" font-size="12" fill="#8C8676">浏览器只见一个域名，CORS 在这套架构里无处发生</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>Nginx 是 SPA 的「三合一」入口：静态资源、回退路由、API 反代。</figcaption>
+</figure>
+
+<div class="think">
+  <div class="think-q">环境变量为什么必须以 <code>VITE_</code> 开头才会被注入？Vite 只暴露显式声明前缀的变量——这些值会被原样发给每一个用户浏览器，所以前端的环境配置里永远不该出现秘密。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：GitHub Actions ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>GitHub Actions：push 即发布</h2></div>
+
+<p>手工部署流程你都熟了，现在交给流水线。一份完整可用的 GitHub Actions 配置：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>.github/workflows/deploy.yml</b> · push 到 main 自动构建发布</span></div>
+  <pre><code>name: deploy
+
+on:
+  push:
+    branches: [main]            <span class="c"># 合进主干即触发，≈ 你配的 webhook</span>
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20      <span class="c"># 锁 Node 大版本，≈ 锁 JDK</span>
+          cache: npm
+
+      - run: npm ci             <span class="c"># 严格按 package-lock.json 安装</span>
+
+      - run: npm run lint
+      - run: npm test           <span class="c"># 测试不过不许上线——铁律通用</span>
+
+      - name: 构建（注入目标环境）
+        run: npm run build
+        env:
+          VITE_API_BASE: /api
+
+      - name: 同步产物到服务器
+        uses: easingthemes/ssh-deploy@v5
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_KEY }}
+          SOURCE: dist/
+          TARGET: /var/www/bookmark/dist/
+          ARGS: "-avz --delete"</code></pre>
+</div>
+
+<p>三个后端工程师一眼就会点头的细节：</p>
+
+<ul>
+  <li><strong>npm ci 而不是 npm install</strong>：完全按 lockfile 安装，不一致直接报错——对应你「依赖版本必须锁死」的洁癖；install 可能悄悄更新小版本，CI 里是隐患。</li>
+  <li><strong>secrets 管理密钥</strong>：私钥配在仓库 Settings → Secrets，永不进代码库——等价于 Jenkins 的 credentials 绑定。</li>
+  <li><strong>--delete 全量替换</strong>：rsync 删掉产物里已不存在的旧 hash 文件，发布目录永远与当前构建一一对应，不留孤儿。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Jenkins/Maven 流水线逐段对应</div>
+  <p>checkout → compile → test → package → deploy，这个阶段划分你闭着眼能画，只是 compile/build 换成了 vite。GitHub Actions 就是免运维的 Jenkins：workflow YAML 就是 Jenkinsfile，runner 就是 agent，secrets 就是 credentials，<code>uses:</code> 就是共享库插件。「质量门禁不过不发包」的纪律原样适用。</p>
+</div>
+
+</section>
+
+<!-- ═══════════════ 第5站：Docker 与卷六收官 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>Docker 多阶段构建，与卷六收官</h2></div>
+
+<p>最后把产物装进镜像——你最熟悉的形状。前端版多阶段构建：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Dockerfile</b> · 构建层 + 运行层，最终镜像只有几十 MB</span></div>
+  <pre><code><span class="c"># ── 阶段一：构建层（node_modules 有几百 MB，不进最终镜像） ──</span>
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+<span class="c"># ── 阶段二：运行层（Nginx + 静态文件，完事） ──</span>
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80</code></pre>
+</div>
+
+<p><code>COPY --from=build</code> 只把 dist 拷进运行层：node_modules、devDependencies、Node 本体全部留在构建层。最终镜像 = Nginx + 静态文件，几十 MB、攻击面小、CI 拉取飞快——和你 Java 的两段式 Dockerfile（Maven 层 → JRE 层）同一个模式，连「先 COPY 依赖清单再装依赖」的层缓存技巧都一样。</p>
+
+<p>再往上一层是 <strong>CDN</strong>：把 dist 整体托管到 OSS + CDN / Cloudflare Pages / Vercel 这类边缘网络，源站只留 API——「静态上边缘、动态回源」，前面配的缓存头原样适用。展开属于另一门课，这句就够。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点 · 卷六总结</div>
+  <ul>
+    <li>卷六六篇的完整链路：第 37 篇重渲染与 memo → 第 38 篇虚拟列表 → 第 39 篇代码分割 → 第 40 篇构建与 hash → 第 41 篇 Profiler 与 Web Vitals → 本篇部署与 CI。</li>
+    <li>SPA 上线三件事配齐才算上线：回退路由、差异化缓存、API 反代；环境差异在构建时注入，一次构建一环境。</li>
+    <li>流水线、多阶段镜像、密钥管理、质量门禁——全是后端知识平移。<strong>前端部署只是你后端部署知识的一半新东西，另一半你早就会了。</strong></li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>本篇为第六卷收官。回望这一卷：测量（第 41 篇）、优化（37~39 篇）、构建（第 40 篇），今天又把 dist 送到用户手上——回退路由让刷新不再 404，差异化缓存让发布即时生效，反代让跨域消失，CI 让 push 即发布，多阶段镜像让交付物只剩几十 MB。「测量 → 优化 → 构建 → 部署 → 自动化」在你手里完整闭环。但「会前端」和「全栈」之间还差一张地图：先学什么、后学什么、学到什么程度算够。下一篇进入卷七，第 43 篇「Java 后端全栈转型路线图」，把这张图画给你。</p>
+</div>
+</section>
+
+</body>
+</html>

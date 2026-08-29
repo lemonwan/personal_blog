@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流式 UI 与 LLM 响应</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：为什么必须流式 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>为什么 LLM 必须流式</h2></div>
+
+<p>上一篇第 44 篇结尾留了个钩子：streaming SSR 和 LLM 响应是同一件事——服务端不断产生，前端不断接收。先把「为什么必须流式」钉死。LLM 推理是<strong>自回归</strong>的：一个 token 接一个 token 往外吐，后一个依赖前一个，<strong>没法提前算完</strong>。500 token 的回答，按每 token 30~80ms 算，要 15~40 秒。</p>
+
+<p>非流式的姿势是：请求挂着，全部生成完一次性返回 JSON——用户盯着白屏 30 秒，AI 产品的死穴。流式则是首个 token 一两秒就到（≈ prefill 时间），之后边生成边显示：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>非流式</th><th>流式</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>首字延迟</td><td>= 全部生成时间（15~40s）</td><td>1~2s（prefill 完就出）</td></tr>
+    <tr><td>感知等待</td><td>全程空白，像挂了</td><td>打字机持续反馈，「AI 在思考」</td></tr>
+    <tr><td>中途取消</td><td>只能干等或刷新</td><td>随时 abort，已生成的保留</td></tr>
+    <tr><td>总耗时</td><td>15~40s</td><td><strong>几乎相同</strong>——流式不省时间，省的是「感觉」</td></tr>
+  </tbody>
+</table>
+
+<p>最后一行是本站的灵魂：<strong>流式不改变总时长，改变的是可感知的等待与可控性</strong>。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="非流式与流式的体验时间线对比：非流式在 0 到 27 秒之间白屏等待，27 秒时整段答案一次性返回；流式在 1.2 秒出首字后，内容随 token 到达持续追加">
+  <defs>
+    <marker id="arr45a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <text x="60" y="56" font-size="13" font-weight="bold" fill="#C2410C">非流式</text>
+  <rect x="60" y="66" width="459" height="34" rx="4" fill="#FFFFFF" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="289" y="87" text-anchor="middle" font-size="11" fill="#C2410C">白屏等待 · 一个 token 都看不到</text>
+  <rect x="519" y="66" width="51" height="34" rx="4" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="544" y="118" text-anchor="middle" font-size="11" fill="#C2410C">27s 全量返回</text>
+  <text x="60" y="152" font-size="13" font-weight="bold" fill="#177245">流式</text>
+  <text x="118" y="173" font-size="11" fill="#177245">1.2s 首字就到</text>
+  <rect x="60" y="178" width="510" height="34" rx="4" fill="#FFFFFF" stroke="#177245" stroke-width="1.5"/>
+  <rect x="60" y="178" width="430" height="34" rx="4" fill="#FAC94A" stroke="#177245" stroke-width="1.5"/>
+  <text x="264" y="199" text-anchor="middle" font-size="11" fill="#1C1C1C">已到达的内容持续追加</text>
+  <text x="315" y="234" text-anchor="middle" font-size="11" fill="#177245">边生成边显示 · 随时可以取消</text>
+  <line x1="60" y1="254" x2="578" y2="254" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr45a)"/>
+  <text x="60" y="272" text-anchor="middle" font-size="11" fill="#8C8676">0s</text>
+  <text x="230" y="272" text-anchor="middle" font-size="11" fill="#8C8676">10s</text>
+  <text x="400" y="272" text-anchor="middle" font-size="11" fill="#8C8676">20s</text>
+  <text x="570" y="272" text-anchor="middle" font-size="11" fill="#8C8676">30s</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>同一道题两种体验：总时长一样，流式把 30 秒空白换成 1 秒出首字加持续反馈。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：全量 List 还是流式游标</div>
+  <p>非流式像把整个 ResultSet 读成 List 再返回；流式像 JDBC 流式游标（fetchSize）逐行推送。你早懂的道理——大结果集没人全量读——放到 LLM 上同理：「结果集」是 token，「消费方」是 UI。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：SSE 协议与选型 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>SSE：单向就别上双工</h2></div>
+
+<p>承载「服务端单方面唠叨」的协议叫 <strong>SSE（Server-Sent Events）</strong>：一条普通的 HTTP 长连接，响应头是 <code>Content-Type: text/event-stream</code>，报文就是一行行 <code>data:</code> 开头的文本，<strong>事件之间用空行分隔</strong>。先看生肉：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>SSE 原始报文</b> · 浏览器里收到的就是这些字节</span></div>
+  <pre><code>HTTP/1.1 200 OK
+Content-Type: text/event-stream
+
+data: {"delta":{"content":"你"}}
+
+data: {"delta":{"content":"好"}}
+
+data: [DONE]</code></pre>
+</div>
+
+<p>三行规则：<code>data:</code> 是载荷行；空行表示一个事件结束；<code>[DONE]</code> 是 OpenAI 兼容接口的约定终止哨兵——不是协议的一部分，是各家 LLM 接口的行规。协议还有 <code>event:</code>、<code>id:</code>、<code>retry:</code> 字段，做 AI 聊天用不上。</p>
+
+<p>和 WebSocket 怎么选？一张表：</p>
+
+<table>
+  <thead>
+    <tr><th>方案</th><th>方向</th><th>底层</th><th>断线重连</th><th>适用场景</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>SSE</strong></td><td>服务端 → 客户端，单向</td><td>普通 HTTP 响应</td><td>简单（协议自带约定）</td><td>LLM 回复、进度推送、通知</td></tr>
+    <tr><td><strong>WebSocket</strong></td><td>双向</td><td>独立协议（升级握手）</td><td>自己实现心跳与重连</td><td>协同编辑、双向聊天室、游戏</td></tr>
+    <tr><td><strong>轮询</strong></td><td>客户端拉</td><td>普通 HTTP</td><td>无</td><td>低频更新、兼容性兜底</td></tr>
+  </tbody>
+</table>
+
+<p>决策句：<strong>聊天场景里「用户发消息」是普通 POST，「AI 回复」才是流——只有响应需要流，单向足够就别上双工。</strong>OpenAI、Anthropic 的官方接口清一色 SSE，不是偶然。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：ResponseBodyEmitter 一直不 close</div>
+  <p>SSE 在 Spring 里对应 SseEmitter 或 Flux&lt;ServerSentEvent&gt;——一个「迟迟不结束的 HTTP 响应」，反复 flush。WebSocket 则是绕开 HTTP 的独立双工通道：能力更强，但连接管理、代理穿透、鉴权全要自己扛。单向场景上双工，纯属给自己加运维。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：后端把 token 灌进 SSE ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>后端：把 token 灌进 SSE</h2></div>
+
+<p>轮到你的主场。最常见架构是 Java 服务做 LLM 代理：收到请求 → 调 OpenAI 兼容接口（<code>stream: true</code>）→ 逐 chunk 转发。先写服务端：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatController.java</b> · SseEmitter：一个「迟迟不结束」的 HTTP 响应</span></div>
+  <pre><code>@GetMapping(value = "/api/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+public SseEmitter chat(@RequestParam String prompt) {
+    SseEmitter emitter = new SseEmitter(60_000L);
+
+    llmClient.stream(prompt)                <span class="c">// Flux&lt;String&gt;：逐 token 的冷流</span>
+        .doOnNext(token -&gt; {
+            try {
+                emitter.send(token);        <span class="c">// 每到一段，立即 flush 给浏览器</span>
+            } catch (IOException e) {
+                emitter.completeWithError(e); <span class="c">// 客户端断开 / 写失败</span>
+            }
+        })
+        .doOnComplete(emitter::complete)    <span class="c">// 对应 [DONE] 之后关闭响应</span>
+        .subscribe();
+
+    return emitter;  <span class="c">// Controller 方法已返回，HTTP 响应还开着——这就是流式</span>
+}</code></pre>
+</div>
+
+<p>上游给你的 chunk 长这样（字段精简过，真实报文还有 id、model）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>chunk 结构</b> · OpenAI 兼容 stream:true 的增量报文</span></div>
+  <pre><code>data: {"choices":[{"delta":{"content":"你"}}]}
+
+data: {"choices":[{"delta":{"content":"好"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]</code></pre>
+</div>
+
+<p>三个读点：<strong>增量藏在 <code>choices[0].delta.content</code></strong>——注意不是 <code>message</code>，那是非流式的全量字段；<code>delta</code> 变空对象、<code>finish_reason</code> 变 <code>"stop"</code>，正文结束；<code>data: [DONE]</code> 流终止。前端的全部工作就一件：剥壳，拼纯文本。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Flux 与 reader 是同构的 Reactive 流</div>
+  <p>服务端 doOnNext = 前端 reader.read() 循环，doOnComplete = done 信号，completeWithError = catch。整套你在 Reactor 里全写过，只是消费端换成了浏览器。前端不用担心背压——拼字符串永远快过 LLM 生成 token。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：前端读流三件套 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>前端读流三件套与 useChatStream</h2></div>
+
+<p>先回答一个常见疑问：浏览器不是有现成的 <code>EventSource</code> 吗？——它只支持 GET、不能带 body 和自定义请求头（鉴权没地方放），所以标准姿势是 <code>fetch</code> POST + 手动读流。三件套：</p>
+
+<ol>
+  <li><code>response.body.getReader()</code>：拿 ReadableStream 的读取器；</li>
+  <li><code>reader.read()</code> 循环：每次返回 <code>{ done, value }</code>，value 是一段 Uint8Array 字节；</li>
+  <li><code>TextDecoder</code>：字节转字符串，必须传 <code>{ stream: true }</code>——一个汉字 3 字节，可能被切开在两个 chunk 里，不开流式解码就会出现乱码。</li>
+</ol>
+
+<p>还有个坑：<strong>chunk 边界 ≠ 事件边界</strong>——一个 chunk 可能装着半个事件，也可能装着两个半。所以要自管 buffer，按行切、残留半行留给下一轮。全部装进一个自定义 Hook（第 13 篇的手艺）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useChatStream.ts</b> · 状态机：idle → loading → streaming → done / error</span></div>
+  <pre><code>import { useCallback, useRef, useState } from "react";
+
+type Status = "idle" | "loading" | "streaming" | "done" | "error";
+
+export function useChatStream() {
+  const [status, setStatus] = useState&lt;Status&gt;("idle");
+  const [text, setText] = useState("");
+  const abortRef = useRef&lt;AbortController | null&gt;(null);  <span class="c">// 第 12 篇：ref 存跨渲染的实例</span>
+
+  const stop = useCallback(() =&gt; abortRef.current?.abort(), []);
+
+  const start = useCallback(async (prompt: string) =&gt; {
+    abortRef.current?.abort();  <span class="c">// 上一轮没结束？先掐掉（第 34 篇的竞态处理）</span>
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setStatus("loading");
+    setText("");
+    try {
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        signal: controller.signal,  <span class="c">// 取消的绳子拴在这</span>
+      });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      setStatus("streaming");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";  <span class="c">// chunk 边界 ≠ 事件边界，攒着按行切</span>
+
+      while (true) {
+        const { done, value } = await reader.read();  <span class="c">// 等下一段字节</span>
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });  <span class="c">// 多字节字符跨 chunk 不乱码</span>
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";  <span class="c">// 最后半行可能没到全，留到下一轮</span>
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (payload === "[DONE]") continue;  <span class="c">// 终止哨兵，done 分支兜底</span>
+          const delta = JSON.parse(payload).choices?.[0]?.delta?.content;
+          if (delta) setText((prev) =&gt; prev + delta);  <span class="c">// 函数式更新，防闭包旧值（第 10 篇）</span>
+        }
+      }
+      setStatus("done");
+    } catch (e) {
+      if ((e as Error).name === "AbortError") setStatus("done");  <span class="c">// 主动取消不算失败</span>
+      else setStatus("error");
+    }
+  }, []);
+
+  return { status, text, start, stop };
+}</code></pre>
+</div>
+
+<p>几处设计意图：五个状态各驱动一种 UI（idle 输入框、loading 思考中、streaming 打字机、done 定稿、error 重试）；<code>abortRef</code> 而非 state 存 controller——它不参与渲染；<code>setText((prev) =&gt; prev + delta)</code> 是函数式更新，避免闭包旧 <code>text</code>（第 10 篇的坑在这里会真的出现）。生产上再给 <code>JSON.parse</code> 单条 try/catch、加多轮消息列表，第 46 篇展开。</p>
+
+<div class="think">
+  <div class="think-q">reader.read() 的 while 循环，就是你在 Reactor 里写的 subscribe + onNext；done: true 就是 onComplete。fetch 的 ReadableStream 是个「冷」流——你不 read，它不塞数据给你，天然背压。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：打字机渲染与取消 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>打字机、自动滚动与取消生成</h2></div>
+
+<p>Hook 已把流拼成 <code>text</code>，渲染层只做三件事：打字机光标、自动滚动、停止按钮：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatPanel.tsx</b> · 渲染层：光标、自动滚动、停止按钮</span></div>
+  <pre><code>"use client";
+
+import { useEffect, useRef } from "react";
+import { useChatStream } from "./useChatStream";
+
+export default function ChatPanel() {
+  const { status, text, start, stop } = useChatStream();
+  const boxRef = useRef&lt;HTMLDivElement&gt;(null);  <span class="c">// 第 12 篇：DOM 引用，不触发重渲染</span>
+
+  useEffect(() =&gt; {
+    <span class="c">// text 每变一次，把滚动条压到底部——流式场景的刚需</span>
+    boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight });
+  }, [text]);
+
+  const busy = status === "loading" || status === "streaming";
+
+  return (
+    &lt;div&gt;
+      &lt;div ref={boxRef} className="chat-box"&gt;
+        {text}
+        {busy &amp;&amp; &lt;span className="cursor"&gt;▌&lt;/span&gt;}  <span class="c">// 光标闪烁交给 CSS 动画</span>
+      &lt;/div&gt;
+      {busy
+        ? &lt;button onClick={stop}&gt;停止生成&lt;/button&gt;
+        : &lt;button onClick={() =&gt; start("用一句话解释 RSC")}&gt;提问&lt;/button&gt;}
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>体验细节：<code>text</code> 一变就把 <code>scrollTop</code> 压到底，用户永远看着最新字（用 ref 拿 DOM，不经过 state，第 12 篇）；停止按钮调 <code>stop()</code> → abort → fetch 抛 AbortError → 状态落回 done，<strong>已生成的文本原样保留</strong>——「说到一半停下」远好于整段丢弃。光标闪烁是 CSS 的事，给 <code>.cursor</code> 配个 keyframes 即可。</p>
+
+<p>补一句框架级的流划清边界：React 19 的 <code>use()</code> 能在组件里直接消费 Promise，RSC 的 <code>&lt;Suspense&gt;</code> streaming 让服务端把 UI 分块流下来（第 44 篇）——那是<strong>框架替你读流</strong>，流的是「UI 块」；本篇的 fetch + reader 是<strong>你自己读流</strong>，流的是「数据」。做 AI 聊天，后者绕不开。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>LLM 逐 token 生成：流式不缩短总耗时，但把 30 秒空白变成 1 秒出首字加持续反馈，还支持中途取消。</li>
+    <li>单向推送选 SSE：HTTP 长连接 + <code>data:</code> 行 + 空行分事件；只有双工需求才上 WebSocket。</li>
+    <li>OpenAI 兼容流的增量在 <code>choices[0].delta.content</code>，<code>[DONE]</code> 是终止哨兵。</li>
+    <li>前端读流三件套：fetch POST + <code>body.getReader()</code> 的 read() 循环 + <code>TextDecoder(stream: true)</code>。</li>
+    <li>chunk 边界 ≠ 事件边界：自管 buffer 按 <code>\n</code> 切行防撕裂；AbortController 管取消，取消不是错误。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>把 LLM 的分词响应接到界面上，全链路是：后端一条「不结束的 HTTP 响应」（SseEmitter / Flux），中间隔一条 SSE（<code>data:</code> 行、空行分事件、<code>[DONE]</code> 收尾），前端一个「不结束的读取循环」（read + decode + 切行拼接），渲染层配上光标、自动滚动和停止键。整套东西你在 Java 里全见过——就是 Reactive 流，从服务端一路搬到浏览器。管道已经通了，下一篇第 46 篇把它装进真实产品：多轮对话的上下文管理、消息列表的状态设计、错误重试与成本控制。</p>
+</div>
+</section>
+
+</body>
+</html>

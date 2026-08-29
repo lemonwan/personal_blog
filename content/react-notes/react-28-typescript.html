@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TypeScript 与 React：类型安全的组件</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：给 Java 程序员的 TS 速通表 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>给 Java 程序员的 TS 速通表</h2></div>
+
+<p>上一篇（第 27 篇）我们把组件拆成了展示 / 容器 / 逻辑 Hook 三层，层与层的连接点是 Props。问题在于：JavaScript 的 Props 是个运行时对象，字段拼错、漏传、多传，默认<strong>没人拦你</strong>——直到页面上出现 <code>undefined</code>。所以从这一篇起，我们的代码全面切到 TypeScript。好消息是：对你来说这不算学新语言，更像「类型推断更聪明的 Java 脚本版」。先把心智映射建立起来：</p>
+
+<table>
+  <thead>
+    <tr><th>TypeScript</th><th>你脑中的 Java</th><th>一句话解释</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>interface</code> / <code>type</code></td><td><code>interface</code></td><td>最大差异：TS 是<strong>结构化类型</strong>——形状对上就兼容，不需要 <code>implements</code> 声明</td></tr>
+    <tr><td><code>&lt;T&gt;</code> 泛型</td><td><code>&lt;T&gt;</code> 泛型</td><td>写法几乎一样，推断更聪明，多数场合不用手写</td></tr>
+    <tr><td><code>"idle" | "loading"</code></td><td>sealed 接口 + 有限子类</td><td>联合类型：值只能取列出的几种（受控多态）</td></tr>
+    <tr><td><code>type Role = "admin"</code></td><td><code>enum Role</code></td><td>字面量类型当枚举用，编译后零运行时开销</td></tr>
+    <tr><td><code>email?: string</code></td><td><code>@Nullable String</code></td><td>可能有（string）、可能没有（undefined）</td></tr>
+    <tr><td><code>unknown</code></td><td><code>Object</code></td><td>什么都收，但用之前必须收窄——严谨版</td></tr>
+    <tr><td><code>any</code></td><td>（没有对应物）</td><td>放弃类型检查，等于把编译器关了——评审见一次骂一次</td></tr>
+  </tbody>
+</table>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>types.ts</b> · 左边 TS，右边你的 Java 直觉</span></div>
+  <pre><code>interface User {                  <span class="c">// ≈ record User(...)：形状即类型</span>
+  id: number;
+  name: string;
+  email?: string;                 <span class="c">// ≈ @Nullable String email</span>
+  role: Role;
+}
+
+type Role = "admin" | "editor" | "viewer";   <span class="c">// ≈ enum Role { ADMIN, EDITOR, VIEWER }</span>
+
+function firstOrNull&lt;T&gt;(items: T[]): T | undefined {
+  <span class="c">// ≈ static &lt;T&gt; T firstOrNull(List&lt;T&gt; list)，没找到就返回 undefined</span>
+  return items.length &gt; 0 ? items[0] : undefined;
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">一句话点破</div>
+  <p>TS 的 interface 是<strong>编译期的验收标准</strong>，不参与运行时——编译成 JS 后彻底消失，比 Java 的泛型擦除还彻底。所以别在 interface 里找逻辑，它只是「形状契约」。而结构化类型意味着：一个恰好有 <code>id/name/email/role</code> 的对象，<strong>不用声明</strong>「我实现了 User」，它就是 User——鸭子类型，你的 DTO 复用会轻很多。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：给 Props 和事件建模 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>给 Props 和事件建模：契约写进代码</h2></div>
+
+<p>回到第 3 篇的 Props。没有 TS 时，props 是个「来什么收什么」的袋子；有了 TS，Props 变成了<strong>方法签名</strong>——组件的使用说明书直接由编译器执行。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Avatar.tsx</b> · 必填、可选、默认值、children 一网打尽</span></div>
+  <pre><code>import type { ReactNode } from "react";
+
+interface AvatarProps {
+  name: string;                 <span class="c">// 必填：漏传直接编译报错</span>
+  size?: "sm" | "md" | "lg";    <span class="c">// 可选 + 字面量联合：写 "big" 当场红线</span>
+  showName?: boolean;           <span class="c">// 可选布尔</span>
+  children?: ReactNode;         <span class="c">// 子元素：ReactNode ≈ 「任何能渲染的东西」</span>
+}
+
+export function Avatar({ name, size = "md", showName = true, children }: AvatarProps) {
+  return (
+    &lt;span className={`avatar avatar--${size}`}&gt;
+      {name.slice(0, 1)}
+      {showName &amp;&amp; &lt;b&gt;{name}&lt;/b&gt;}
+      {children}
+    &lt;/span&gt;
+  );
+}</code></pre>
+</div>
+
+<p>三个要点：解构时直接给默认值（<code>size = "md"</code>），比 Java 的「重载两个构造器」轻得多；<code>children: ReactNode</code> 表示调用者可以塞任何可渲染内容（第 25 篇的主题）；可选 props 别滥用——<strong>契约从严，默认从宽</strong>，必填的就老老实实必填。</p>
+
+<h3>事件类型：别再写 e: any</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>SearchBox.tsx</b> · 给事件对象一个精确类型</span></div>
+  <pre><code>import { useState } from "react";
+import type { ChangeEvent } from "react";
+
+export function SearchBox() {
+  const [value, setValue] = useState("");
+
+  function handleChange(e: ChangeEvent&lt;HTMLInputElement&gt;) {
+    setValue(e.target.value);   <span class="c">// e.target 精确是 input，.value 有补全</span>
+  }
+
+  return &lt;input value={value} onChange={handleChange} /&gt;;
+}</code></pre>
+</div>
+
+<table>
+  <thead>
+    <tr><th>场景</th><th>事件类型</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>输入框 / textarea / select 变化</td><td><code>React.ChangeEvent&lt;HTMLInputElement&gt;</code></td></tr>
+    <tr><td>点击</td><td><code>React.MouseEvent&lt;HTMLButtonElement&gt;</code></td></tr>
+    <tr><td>表单提交</td><td><code>React.FormEvent&lt;HTMLFormElement&gt;</code></td></tr>
+    <tr><td>键盘按键</td><td><code>React.KeyboardEvent&lt;HTMLInputElement&gt;</code></td></tr>
+  </tbody>
+</table>
+
+<p>记不住？偷懒法：先写 <code>(e) =&gt; ...</code> 让编辑器推断，鼠标悬停看一眼类型，再补上显式标注。唯一禁止的是 <code>e: any</code>——<code>e.target</code> 会退化成 any，一行代码废掉整条类型链。</p>
+
+<div class="think">
+  <div class="think-q">你在 Java 里用 <code>@Nullable</code> 注解时，大概体会过那种「能不能查出来要看工具配置」的无力感。TS 的可选 <code>?</code> 不是注解，是类型系统本身——「空值检查」默认开启，不用装插件。你幻想过的 NullSafe 编译期检查，前端这边直接送。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：state 建模与泛型组件 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>state 建模与泛型组件</h2></div>
+
+<h3>useState 也有泛型参数</h3>
+
+<p>第 4 篇说过 state 是组件的「实例字段」——字段也需要类型。大多数时候推断够用，但有两种情况必须显式给：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoBoard.tsx</b> · useState 的泛型写法</span></div>
+  <pre><code>import { useState } from "react";
+import type { Todo } from "./types";
+
+<span class="c">// ① 初始值是 null，推断不出完整形状——显式给「联合类型」</span>
+const [todos, setTodos] = useState&lt;Todo[] | null&gt;(null);
+<span class="c">// null 表示「还没加载」，Todo[] 表示「已加载」，类型系统分得清清楚楚</span>
+
+<span class="c">// ② 空数组初始化：被推断成 never[]，后面 push 什么都报错</span>
+const [tags, setTags] = useState([]);                <span class="c">// ❌ never[]</span>
+const [tags2, setTags2] = useState&lt;string[]&gt;([]);    <span class="c">// ✅ 显式给泛型</span></code></pre>
+</div>
+
+<h3>泛型组件：React 版的 List&lt;T&gt; 工具类</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>List.tsx</b> · 可复用列表：数据类型和渲染方式都参数化</span></div>
+  <pre><code>import type { ReactNode } from "react";
+
+interface ListProps&lt;T&gt; {
+  items: T[];                          <span class="c">// 数据</span>
+  keyOf: (item: T) =&gt; string;          <span class="c">// 怎么取 key（呼应第 7 篇）</span>
+  renderItem: (item: T) =&gt; ReactNode;  <span class="c">// 怎么画每一项</span>
+}
+
+export function List&lt;T&gt;({ items, keyOf, renderItem }: ListProps&lt;T&gt;) {
+  return (
+    &lt;ul&gt;
+      {items.map(item =&gt; (
+        &lt;li key={keyOf(item)}&gt;{renderItem(item)}&lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>使用处</b> · T 自动推断为 User</span></div>
+  <pre><code>&lt;List
+  items={users}
+  keyOf={u =&gt; String(u.id)}
+  renderItem={user =&gt; &lt;b&gt;{user.name}&lt;/b&gt;}
+/&gt;
+<span class="c">// user.name 有补全；写成 user.nmae 当场红线。换传 articles，T 又变成 Article</span></code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Java 泛型类</div>
+  <p><code>class List&lt;T&gt;</code> 把「元素的类型」参数化；泛型组件把「数据的类型 + 怎么渲染」一起参数化，写法几乎是直译。唯一的深层差异：TS 泛型擦除得更彻底——运行时不存在任何类型信息，所有检查都在编译期完成，零性能开销。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：可辨识联合建模请求状态 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>可辨识联合：把非法状态挡在编译期</h2></div>
+
+<p>后端封装接口返回时，你写过无数个 <code>Result&lt;T&gt;</code>（code + message + data）。前端管理「一次请求」的状态时，新手最常见的写法是三个平铺字段——这是 TS 里最值得纠正的反模式：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ 平铺三字段</b> · 非法组合全靠自觉</span></div>
+  <pre><code>interface UserState {
+  loading: boolean;      <span class="c">// loading 时 data 是什么？</span>
+  data: User[] | null;   <span class="c">// data 和 error 能同时有值吗？没有理论禁止</span>
+  error: string | null;  <span class="c">// 三个字段组合出 8 种状态，合法的只有 4 种</span>
+}</code></pre>
+</div>
+
+<p>三个可空字段拼出 8 种组合，其中一半是「不可能出现、但编译器不管」的鬼态。解法叫<strong>可辨识联合（discriminated union）</strong>：用公共的判别字段把所有合法状态逐一列出来，追求「非法状态不可表示」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>requestState.ts</b> · ✅ 四态互斥，一眼看全</span></div>
+  <pre><code>type RequestState&lt;T&gt; =
+  | { status: "idle" }                     <span class="c">// 还没开始</span>
+  | { status: "loading" }                  <span class="c">// 请求中</span>
+  | { status: "success"; data: T }         <span class="c">// 成功：才有 data</span>
+  | { status: "error"; message: string };  <span class="c">// 失败：才有 message</span></code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserSection.tsx</b> · switch 判别字段，每个分支自动收窄</span></div>
+  <pre><code>function UserSection({ state }: { state: RequestState&lt;User[]&gt; }) {
+  switch (state.status) {
+    case "idle":    return &lt;p&gt;输入关键字开始搜索&lt;/p&gt;;
+    case "loading": return &lt;p&gt;加载中…&lt;/p&gt;;
+    case "success": return &lt;UserList users={state.data} /&gt;;   <span class="c">// 只有这里才有 state.data</span>
+    case "error":   return &lt;p role="alert"&gt;出错了：{state.message}&lt;/p&gt;;
+  }
+}
+<span class="c">// 漏写一个分支？编译报错。在 error 分支访问 state.data？编译报错。</span></code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Java 17 sealed + record</div>
+  <p>这招你们后端其实已经在用了——sealed interface + record 就是可辨识联合的 Java 版，switch 模式匹配就是上面的自动收窄，编译器同样逼你处理完每一种情况。</p>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>RequestState.java</b> · 同款思想，直译过去</span></div>
+  <pre><code>sealed interface RequestState&lt;T&gt; permits Idle, Loading, Success, Failure {}
+record Success&lt;T&gt;(List&lt;T&gt; data) implements RequestState&lt;T&gt; {}
+record Failure&lt;T&gt;(String message) implements RequestState&lt;T&gt; {}
+<span class="c">// switch 模式匹配 + 穷尽性检查：漏一种状态编译不过</span></code></pre>
+</div>
+
+<p>这套建模是第 34 篇「加载态·错误态·竞态」的主旋律；第 33 篇的 TanStack Query 则在内部替你造好了这台状态机——先懂原理，再用工具，心里才有底。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 230" role="img" aria-label="请求状态的四种取值与流转">
+  <defs>
+    <marker id="m28" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="620" height="230" fill="#FFFFFF"/>
+
+  <rect x="40" y="89" width="120" height="52" rx="8" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="100" y="111" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">idle</text>
+  <text x="100" y="129" text-anchor="middle" font-size="11" fill="#8C8676">等待发起</text>
+
+  <rect x="240" y="89" width="130" height="52" rx="8" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="305" y="111" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">loading</text>
+  <text x="305" y="129" text-anchor="middle" font-size="11" fill="#1C1C1C">请求进行中</text>
+
+  <rect x="460" y="30" width="130" height="52" rx="8" fill="#177245" stroke="#1C1C1C"/>
+  <text x="525" y="52" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">success</text>
+  <text x="525" y="70" text-anchor="middle" font-size="11" fill="#FFFFFF">data: T</text>
+
+  <rect x="460" y="148" width="130" height="52" rx="8" fill="#C2410C" stroke="#1C1C1C"/>
+  <text x="525" y="170" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">error</text>
+  <text x="525" y="188" text-anchor="middle" font-size="11" fill="#FFFFFF">message</text>
+
+  <line x1="160" y1="115" x2="232" y2="115" stroke="#8C8676" stroke-width="2" marker-end="url(#m28)"/>
+  <text x="196" y="105" text-anchor="middle" font-size="11" fill="#8C8676">发起请求</text>
+
+  <line x1="370" y1="100" x2="452" y2="66" stroke="#8C8676" stroke-width="2" marker-end="url(#m28)"/>
+  <text x="404" y="70" text-anchor="middle" font-size="11" fill="#8C8676">2xx</text>
+
+  <line x1="370" y1="130" x2="452" y2="164" stroke="#8C8676" stroke-width="2" marker-end="url(#m28)"/>
+  <text x="404" y="162" text-anchor="middle" font-size="11" fill="#8C8676">抛异常</text>
+
+  <text x="310" y="222" text-anchor="middle" font-size="11" fill="#C2410C">四态互斥：不存在「既 success 又 error」的取值</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>可辨识联合建模的请求状态机：同一时刻只处于一种状态，所有切换路径显式可见</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第5站：工具类型与类型收窄 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>工具类型与类型收窄：省一半的类型代码</h2></div>
+
+<h3>工具类型：从源类型派生 DTO</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>user.types.ts</b> · 同一份 User，派生出表单、补丁、选项</span></div>
+  <pre><code>interface User {
+  id: number;
+  name: string;
+  email: string;
+  createdAt: string;
+}
+
+type UserCreateForm = Omit&lt;User, "id" | "createdAt"&gt;;  <span class="c">// 创建表单：去掉服务端生成的字段</span>
+type UserPatch      = Partial&lt;User&gt;;                   <span class="c">// 局部更新：全字段可选，PATCH 语义</span>
+type UserOption     = Pick&lt;User, "id" | "name"&gt;;       <span class="c">// 下拉选项：只要两个字段</span></code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：DTO 漂移问题</div>
+  <p>Java 里你为 UserVO、UserCreateDTO、UserUpdateDTO 手工复制三份类，字段一改就漂移，靠 MapStruct 兜底。TS 的工具类型在<strong>编译期</strong>从同一源类型派生出所有变体——改一处、处处同步，零运行时成本。表单场景（第 21 篇）尤其好用。</p>
+</div>
+
+<h3>类型收窄：和 Optional 判空一个直觉</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>narrowing.tsx</b> · if 一下，类型就精确了</span></div>
+  <pre><code>const [user, setUser] = useState&lt;User | null&gt;(null);
+
+if (user) {                        <span class="c">// 收窄：这个块里 user 一定是 User</span>
+  console.log(user.email);         <span class="c">// 不用写 user!.email，也不会报「可能为 null」</span>
+}
+
+<span class="c">// 提前返回同样触发收窄——React 组件里最常见的姿势</span>
+if (!user) return &lt;p&gt;请先登录&lt;/p&gt;;
+return &lt;Profile user={user} /&gt;;    <span class="c">// 这里 user 已收窄为 User</span></code></pre>
+</div>
+
+<p>收窄的手段不止 <code>if</code>：<code>switch</code> 判别字段（上一站）、<code>typeof</code>、<code>in</code> 运算符，都能让编译器把联合类型「切」到你正在用的那个分支。配合可辨识联合，绝大多数判空和状态判断都变成了<strong>编译期检查</strong>，而不是线上事故。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>TS 对 Java 程序员近乎母语：interface、泛型、联合类型一一对应；记住「结构化类型」这个最大差异。</li>
+    <li>Props 用 interface 建模 + <code>children: ReactNode</code>；事件用 <code>React.ChangeEvent&lt;HTMLInputElement&gt;</code> 这类精确类型，拒绝 any。</li>
+    <li>请求状态用可辨识联合建模（idle / loading / success / error），让非法状态无法通过编译。</li>
+    <li>Partial / Pick / Omit 从源类型派生表单与 DTO，告别三份定义漂移。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>把 TypeScript 接入 React，只需抓住三个位置：<strong>Props 契约</strong>（组件的接口签名）、<strong>state 形状</strong>（useState 的泛型参数）、<strong>状态机建模</strong>（可辨识联合）。类型不能让程序没有 bug，但能拦住一大半「拼错字段、漏判空值、非法状态」这类低级事故——而这恰恰是协作与重构中最贵的那类 bug。</p>
+</div>
+
+<p>类型问题解决了，还剩最后一问：这些 .tsx 文件往哪个目录放？components、hooks、pages 平铺，还是按功能分域？组件文件叫 <code>UserList.tsx</code> 还是 <code>user-list.tsx</code>？下一篇第 29 篇——目录结构与代码规范，把你带 Java 项目的规范意识完整平移到前端，也为卷四收官。</p>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>受控组件与非受控组件</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：值到底归谁管 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>值到底归谁管：一个 input 的两种命运</h2></div>
+
+<p>第 23 篇把组合玩熟了，第 8 篇写 Todo 时你也照着写过受控 input：<code>&lt;input value={text} onChange={...} /&gt;</code>。当时多半没多想。现在回答一个面试高频问题：<strong>用户敲进输入框的每一个字，到底存在哪？</strong>两种答案，对应两种模式：</p>
+
+<ul>
+  <li><strong>受控组件（Controlled）</strong>：值存在 React state 里，DOM 只是「显示器」，不给 <code>value</code> + <code>onChange</code> 就不听你的。</li>
+  <li><strong>非受控组件（Uncontrolled）</strong>：值存在 DOM 自己肚子里，React 不插手，要用时再去拿。</li>
+</ul>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>对比片段.tsx</b> · 两种管法</span></div>
+  <pre><code><span class="c">// 受控：值在 state 里，每键都流经 React</span>
+const [name, setName] = useState("");
+&lt;input value={name} onChange={(e) =&gt; setName(e.target.value)} /&gt;
+
+<span class="c">// 非受控：值在 DOM 里，React 只留一张「取件码」（第 12 篇）</span>
+const nameRef = useRef&lt;HTMLInputElement&gt;(null);
+&lt;input defaultValue="" ref={nameRef} /&gt;</code></pre>
+</div>
+
+<p>判别一句话：<strong>看「当前值」是不是 React 说了算</strong>——<code>value</code> 由 state 提供、变化经 <code>onChange</code> 回 state 是受控；React 只给初始值、之后不闻不问是非受控。两条数据流画在一张图里：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="受控与非受控组件的数据流对比">
+  <rect x="0" y="0" width="620" height="300" fill="#FFFFFF"/>
+  <line x1="310" y1="16" x2="310" y2="284" stroke="#8C8676" stroke-width="1" stroke-dasharray="4 4"/>
+  <text x="155" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#1C1C1C">受控：值在 state 里</text>
+  <text x="465" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#1C1C1C">非受控：值在 DOM 里</text>
+  <rect x="45" y="60" width="110" height="32" rx="4" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="100" y="81" text-anchor="middle" font-size="12" fill="#1C1C1C">用户敲字</text>
+  <rect x="45" y="150" width="110" height="32" rx="4" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="100" y="171" text-anchor="middle" font-size="12" fill="#1C1C1C">&lt;input&gt;</text>
+  <rect x="205" y="150" width="80" height="32" rx="4" fill="#FFFFFF" stroke="#C2410C" stroke-width="2"/>
+  <text x="245" y="171" text-anchor="middle" font-size="12" fill="#C2410C">state</text>
+  <line x1="100" y1="92" x2="100" y2="150" stroke="#1C1C1C"/>
+  <text x="108" y="126" font-size="11" fill="#8C8676">onChange</text>
+  <line x1="155" y1="166" x2="205" y2="166" stroke="#C2410C" stroke-width="2"/>
+  <text x="180" y="158" text-anchor="middle" font-size="11" fill="#C2410C">setState</text>
+  <path d="M 245 150 C 245 112, 168 108, 122 148" fill="none" stroke="#C2410C" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="210" y="102" font-size="11" fill="#C2410C">重渲染，下发 value</text>
+  <text x="155" y="235" text-anchor="middle" font-size="12" fill="#8C8676">每敲一键走一圈，DOM 只是 state 的投影</text>
+  <rect x="395" y="60" width="140" height="32" rx="4" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="465" y="81" text-anchor="middle" font-size="12" fill="#1C1C1C">用户敲字</text>
+  <rect x="385" y="120" width="160" height="48" rx="4" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/>
+  <text x="465" y="141" text-anchor="middle" font-size="12" fill="#1C1C1C">&lt;input&gt; 自己持有值</text>
+  <text x="465" y="158" text-anchor="middle" font-size="11" fill="#8C8676">React 全程不知情</text>
+  <rect x="395" y="205" width="140" height="32" rx="4" fill="#177245"/>
+  <text x="465" y="226" text-anchor="middle" font-size="12" fill="#FFFFFF">提交时 ref 取值</text>
+  <line x1="465" y1="92" x2="465" y2="120" stroke="#1C1C1C"/>
+  <line x1="465" y1="168" x2="465" y2="205" stroke="#177245" stroke-width="2"/>
+  <text x="478" y="192" font-size="11" fill="#177245">ref.current.value</text>
+  <text x="465" y="262" text-anchor="middle" font-size="12" fill="#8C8676">敲字过程零重渲染</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>受控：每次输入都流经 state；非受控：值待在 DOM 里，提交时才取。</figcaption>
+</figure>
+
+</section>
+
+<!-- ═══════════════ 第2站：受控组件 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>受控组件：value 与 onChange，一步都不能少</h2></div>
+
+<p>先看受控的完整样子——一个带即时校验和联动的登录表单，注意校验写在哪、按钮禁用条件在哪：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>LoginForm.tsx</b> · 校验、联动、提交全覆盖</span></div>
+  <pre><code>import { useState } from "react";
+
+function LoginForm() {
+  <span class="c">// 表单即 state：唯一数据源</span>
+  const [form, setForm] = useState({ email: "", password: "" });
+
+  <span class="c">// 校验是 state 的派生值：state 一变自动重算，无需单独存储</span>
+  const emailInvalid = form.email !== "" &amp;&amp; !form.email.includes("@");
+
+  return (
+    &lt;form onSubmit={(e) =&gt; {
+      e.preventDefault();
+      if (emailInvalid) return;
+      console.log("提交", form);  <span class="c">// 直接拿 state，全程不碰 DOM</span>
+    }}&gt;
+      &lt;input
+        value={form.email}
+        onChange={(e) =&gt; setForm({ ...form, email: e.target.value })}
+      /&gt;
+      {emailInvalid &amp;&amp; &lt;p&gt;邮箱格式不对&lt;/p&gt;}  <span class="c">// 即时反馈</span>
+      &lt;input
+        type="password"
+        value={form.password}
+        onChange={(e) =&gt; setForm({ ...form, password: e.target.value })}
+      /&gt;
+      &lt;button disabled={!form.email || !form.password}&gt;登录&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>三个关键认知：</p>
+
+<ol>
+  <li><strong>为什么必须有 onChange？</strong><code>value</code> 一旦设置，React 每次渲染都把 DOM 的值强制刷成 state 的值；没有 onChange，state 永远不变，输入框「打不进字」。这不是 bug，是「受控」的字面意思——<strong>DOM 被 React 掐着</strong>。真想只读就明说：<code>readOnly</code>。</li>
+  <li><strong>每敲一键重渲染一次。</strong>onChange → setState → 重渲染（第 5 篇）→ input 拿到新 value。diff 后实际只更新文本这一个节点，普通表单毫无感知。</li>
+  <li><strong>校验和联动是「免费」的。</strong>校验是派生值、按钮禁用是表达式——任何时刻你手里都有全量表单数据，「勾选协议才能提交」「选了上海才显示区县」一行条件就够。</li>
+</ol>
+
+<p>其余控件的受控写法速览——规律一致：值用对应属性管、变化走 onChange：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>controls.tsx</b> · checkbox / radio / select 受控速览</span></div>
+  <pre><code><span class="c">// checkbox：用 checked 管（不是 value），取 e.target.checked</span>
+&lt;input type="checkbox" checked={agree}
+  onChange={(e) =&gt; setAgree(e.target.checked)} /&gt;
+
+<span class="c">// radio：一组框共享一份 state，靠各自 value 判断谁被选中</span>
+&lt;input type="radio" checked={pay === "wechat"} onChange={() =&gt; setPay("wechat")} /&gt;
+&lt;input type="radio" checked={pay === "alipay"} onChange={() =&gt; setPay("alipay")} /&gt;
+
+<span class="c">// select：value 挂在 &lt;select&gt; 标签上，不是 &lt;option&gt; 上</span>
+&lt;select value={city} onChange={(e) =&gt; setCity(e.target.value)}&gt;
+  &lt;option value="bj"&gt;北京&lt;/option&gt;
+  &lt;option value="sh"&gt;上海&lt;/option&gt;
+&lt;/select&gt;</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：每次变更都过一遍 Controller</div>
+  <p>受控表单像「每次变更都实时过一遍 Controller」：onChange 是请求入口（参数绑定），form state 是绑定后的 DTO，每敲一键都跑一遍校验并回显错误。全量、实时、强一致，代价是「请求频率」高（每键一次重渲染）。第 32 篇的搜索框场景里受控 input 仍是标配——配防抖即可。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">受控的隐藏福利：清空表单、回显编辑数据，都是一行 state 操作——<strong>改数据的语言永远比改 DOM 的语言好写</strong>，第 1 篇的承诺在表单上兑现了。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：非受控组件 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>非受控组件：defaultValue 存进去，提交时再取出来</h2></div>
+
+<p>把 value 换成 <code>defaultValue</code>、加上 ref，就切到非受控模式：初始值只给一次，之后值在 DOM 里自生自灭，React 不参与、也不重渲染。读值用 ref——第 12 篇说过，useRef 是不触发重渲染的「便签」，正配「只要结果」的场景：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>RegisterForm.tsx</b> · 提交时才读取</span></div>
+  <pre><code>import { useRef, type FormEvent } from "react";
+
+function RegisterForm() {
+  const emailRef = useRef&lt;HTMLInputElement&gt;(null);
+  const fileRef = useRef&lt;HTMLInputElement&gt;(null);
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    <span class="c">// 此刻才伸手拿值——此前敲了什么，React 全程不知情</span>
+    const email = emailRef.current?.value ?? "";
+    const file = fileRef.current?.files?.[0] ?? null;
+    console.log("提交", { email, file });
+  }
+
+  return (
+    &lt;form onSubmit={handleSubmit}&gt;
+      &lt;input ref={emailRef} defaultValue="me@example.com" /&gt;
+      &lt;input ref={fileRef} type="file" /&gt;
+      &lt;button&gt;注册&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>注意 <code>type="file"</code>：文件输入<strong>只能</strong>非受控——值是用户本地选的文件，React 无法用 state 赋值，也没理由在选文件时重渲染。这是非受控「天生合法」的场景。</p>
+
+<h3>经典坑：defaultValue 只在首次挂载生效</h3>
+
+<p>「非受控 + 想重置」是新手重灾区。看这个错误示范：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ResetBug.tsx</b> · 这么写一动不动</span></div>
+  <pre><code>function ResetBug() {
+  const [draft, setDraft] = useState("初始草稿");
+  return (
+    &lt;&gt;
+      &lt;input defaultValue={draft} /&gt;  <span class="c">// draft 变了，输入框却纹丝不动</span>
+      &lt;button onClick={() =&gt; setDraft("")}&gt;重置&lt;/button&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>原因：<code>defaultValue</code> 的语义是「<strong>出厂设置</strong>」——只在 DOM 节点首次创建时用一次，之后 React 认为「这框归 DOM 管」，重渲染一百次也不碰它的 value。这反向印证了第 1 站的判别：非受控 = React 不掌值。两条出路：</p>
+
+<ol>
+  <li><strong>受控化</strong>：真的需要随时改值，说明它就该受控——老老实实 <code>value + onChange</code>。</li>
+  <li><strong>换 key 强制重建</strong>：<code>&lt;input key={version} defaultValue={draft} /&gt;</code>。key 一变（第 7 篇）=「另一个元素」，卸载旧的、按新 defaultValue 重建——出厂设置重新生效。</li>
+</ol>
+
+<div class="crack">
+  <div class="crack-label">后端类比：提交时一次性绑定 @ModelAttribute</div>
+  <p>非受控表单正是 Spring MVC 的经典姿势：字段值住在浏览器 DOM 里，后端不参与敲字过程，直到 form submit，<code>@ModelAttribute</code> 才把表单键值对<strong>一次性</strong>绑定成 Java 对象交给 Controller；校验也只能提交时做（<code>@Valid + BindingResult</code>），做不到「敲一个字就报错」。受控相当于把绑定和校验前移到每次按键。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">在非受控表单里写 <code>emailRef.current.value = ""</code> 清空输入框？停一下——你在手写 DOM 操作，这正是切回受控的信号。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：对比与选择 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>对比与选择：什么时候用哪种</h2></div>
+
+<p>两条路放在一起，差异一目了然：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>受控组件</th><th>非受控组件</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>值存在哪</td><td>React state</td><td>DOM 内部</td></tr>
+    <tr><td>取值时机</td><td>随时——state 就是最新值</td><td>提交时读 ref</td></tr>
+    <tr><td>即时校验 / 字段联动</td><td>天然支持（派生值 + 条件渲染）</td><td>做不到；监听 onChange 即变相受控</td></tr>
+    <tr><td>输入时的重渲染</td><td>每键 1 次</td><td>0 次</td></tr>
+    <tr><td>每字段代码量</td><td>value + onChange 成对出现</td><td>一个 ref，多数时候连 ref 都省</td></tr>
+    <tr><td>典型场景</td><td>搜索框、联动表单、登录框</td><td>超大表单、文件上传、只要提交值</td></tr>
+  </tbody>
+</table>
+
+<p>选择准则浓缩成三句：</p>
+
+<ol>
+  <li><strong>要「过程」就受控</strong>：即时校验、字段联动、随时取值、错误提示跟手——本质是「值一变我就要参与」，受控是唯一解。</li>
+  <li><strong>只要「结果」可非受控</strong>：几十个字段的登记表单，敲字过程无人关心，每键重渲染纯属浪费——defaultValue + 提交读 ref，代码量还省一半；文件输入更是只能非受控。</li>
+</ol>
+
+<p>真实项目里的大表单，行业默认答案是 <strong>React Hook Form</strong>（第 21 篇）——底层恰恰是非受控：DOM 持有值，库替你把 ref 记账、校验、错误收集全包了。</p>
+
+<div class="think">
+  <div class="think-q">面试答「受控和非受控的区别」，最忌背「一个有 onChange 一个没有」。答到点子上的是：<strong>表单值的真相源（source of truth）在谁手里</strong>——state 还是 DOM。顺手还展示了对单向数据流（第 14 篇）的理解。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：RHF 与收尾 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>React Hook Form：让库替你记账</h2></div>
+
+<p>感受一下 RHF 的写法——input 上没有任何 value/onChange：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>LoginForm.tsx</b> · 非受控打底</span></div>
+  <pre><code>import { useForm } from "react-hook-form";
+
+interface LoginForm { email: string; password: string; }
+
+function LoginForm() {
+  const { register, handleSubmit, formState: { errors } } = useForm&lt;LoginForm&gt;();
+
+  return (
+    &lt;form onSubmit={handleSubmit((values) =&gt; console.log(values))}&gt;
+      &lt;input {...register("email", {
+        required: "邮箱必填",
+        pattern: { value: /@/, message: "格式不对" },
+      })} /&gt;
+      {errors.email &amp;&amp; &lt;p&gt;{errors.email.message}&lt;/p&gt;}
+      &lt;input type="password" {...register("password", { required: true })} /&gt;
+      &lt;button&gt;登录&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p><code>register("email")</code> 返回一组 props（onChange、ref 等），展开到 input 上：值仍由 DOM 持有，敲字零重渲染，RHF 在这些事件里<strong>偷偷记账</strong>；提交时 <code>handleSubmit</code> 递给你干净的 <code>{ email, password }</code>，校验错误从 <code>errors</code> 拿——受控的体验、非受控的性能，细节留给第 21 篇。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>判别标准：<strong>表单值的真相源在谁手里</strong>——state 手里是受控（value + onChange），DOM 手里是非受控（defaultValue + ref）。</li>
+    <li>受控：随时有全量数据，即时校验、联动、清空、回显都是一行 state 操作；代价是每键一次重渲染。</li>
+    <li>非受控：敲字零重渲染、代码量小，适合「只要提交结果」的大表单；文件输入只能非受控。</li>
+    <li>defaultValue 只在首次挂载生效——要重置就受控化，或换 key 强制重建。</li>
+    <li>生产级大表单交给 React Hook Form（第 21 篇）：非受控打底，库替你记账。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>受控与非受控之争，本质是<strong>「值的管理权」之争</strong>：要参与每次变化就交给 state（受控），只要结果就留给 DOM（非受控）。加上第 23 篇的组合，搭表单页已不成问题。组合还有更漂亮的一招——把整段 JSX 当参数传进组件，让子组件隐式共享父状态：下一篇第 25 篇，children 与复合组件模式。</p>
+</div>
+</section>
+
+</body>
+</html>

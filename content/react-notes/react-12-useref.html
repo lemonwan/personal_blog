@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>useRef：访问 DOM 与「可变而不可渲染」的值</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：存个值的困境 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>存个值而已，为什么还需要 useRef？</h2></div>
+
+<p>第 11 篇解决了「算得贵」（<code>useMemo</code>）和「函数建得勤」（<code>useCallback</code>）两个渲染优化问题。这一篇的需求更朴素：<strong>有些值你只想默默存着，既不想让它驱动界面，也不能让它被渲染冲掉。</strong></p>
+
+<p>举个最典型的场景：输入框渲染出来后自动聚焦。想在组件里拿到 <code>&lt;input&gt;</code> 的 DOM 节点，凭直觉有两条路，都走不通：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>SearchBox.tsx</b> · ❌ 两条想当然的路</span></div>
+  <pre><code>function SearchBox() {
+  <span class="c">// ❌ 路线一：普通变量——组件函数每次渲染都从头执行（第 5 篇），</span>
+  <span class="c">// 随渲染生、随渲染死，存不住任何东西</span>
+  let inputEl: HTMLInputElement | null = null;
+
+  <span class="c">// ❌ 路线二：useState 存 DOM 节点——能跨渲染，但 DOM 不是</span>
+  <span class="c">// 驱动界面的数据，塞进 state 白白多一次重渲染</span>
+  const [inputEl, setInputEl] = useState&lt;HTMLInputElement | null&gt;(null);
+}</code></pre>
+</div>
+
+<p>React 给的正解是 <code>useRef</code>。一句话定位：<strong>它返回一个跨渲染恒定的可变盒子</strong>——形如 <code>{ current: 初值 }</code>，从挂载到卸载始终是同一个对象；改盒子里的东西，React 全然不知，界面纹丝不动。</p>
+
+<p>于是它只有两个用途，本篇各花几站讲透：</p>
+
+<ul>
+  <li><strong>DOM 句柄</strong>：把盒子拴在 JSX 上，React 画完屏幕把真实节点塞进 <code>current</code>；</li>
+  <li><strong>可变容器</strong>：存定时器 id、上一次的值、最新值镜像——各种「不参与渲染」的幕后数据。</li>
+</ul>
+</section>
+
+<!-- ═══════════════ 第2站：用途一 DOM 句柄 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>用途一：DOM 句柄——拿到节点，随叫随到</h2></div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>SearchBox.tsx</b> · ✅ 自动聚焦的正确姿势</span></div>
+  <pre><code>import { useEffect, useRef } from "react";
+
+function SearchBox() {
+  <span class="c">// 1. 造一个盒子，初值 null（泛型标注的是 current 的类型）</span>
+  const inputRef = useRef&lt;HTMLInputElement&gt;(null);
+
+  useEffect(() =&gt; {
+    <span class="c">// 3. 渲染完成后，盒子里已经是真实 DOM 节点，调它的命令式 API</span>
+    inputRef.current?.focus();
+  }, []);
+
+  <span class="c">// 2. 把盒子拴到 JSX 上：React 提交 DOM 时把节点塞进 ref.current</span>
+  return &lt;input ref={inputRef} placeholder="搜索文章…" /&gt;;
+}</code></pre>
+</div>
+
+<p>其一，<strong>渲染期间 <code>ref.current</code> 还是 <code>null</code></strong>——节点要到提交阶段才存在，所以「动 DOM」必须放进 <code>useEffect</code>（第 9 篇：摸 DOM 是副作用，画完屏幕再干）。</p>
+
+<p>其二，<strong>什么时候需要摸 DOM</strong>：聚焦、滚动定位、测量尺寸、播放/暂停视频——都是声明式模型覆盖不到的命令式 API 边角。表单取值仍用受控 state（第 21 篇专题）：<strong>ref 是逃生舱，不是日常通道</strong>。</p>
+
+<p>其三，盒子恒定。组件函数换了一茬又一茬局部变量，但 <code>inputRef</code> 始终是同一个对象——这正是它和普通变量的分水岭。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：ref 之于 DOM，像 @Autowired 之于 Bean</div>
+  <p>Spring 容器启动时把 Bean 的<strong>引用</strong>注入到你的字段上——你拿到的是对象本体，不是快照、不是拷贝，调它任何方法都是直接操作。React 把 DOM 节点「注入」到 <code>ref.current</code>，一模一样。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：用途二 可变容器 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>用途二：可变容器——useState 的沉默孪生兄弟</h2></div>
+
+<p>第二个用途更能体现 useRef 的独特价值。做个秒表：「开始」开定时器，「暂停」关掉它。定时器 id 不是界面数据、要被两个事件处理器共享、还得跨渲染存活——三重约束把 useState 和局部变量全筛掉了：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Stopwatch.tsx</b> · 定时器 id 存进 ref</span></div>
+  <pre><code>import { useRef, useState } from "react";
+
+function Stopwatch() {
+  const [elapsed, setElapsed] = useState(0);      <span class="c">// 驱动界面：state</span>
+  const timerRef = useRef&lt;number | null&gt;(null);   <span class="c">// 幕后数据：ref</span>
+
+  function start() {
+    if (timerRef.current !== null) return;  <span class="c">// 已在计时，别重复开</span>
+    timerRef.current = setInterval(() =&gt; setElapsed(e =&gt; e + 1), 1000);
+  }
+
+  function stop() {
+    if (timerRef.current === null) return;
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+  }
+
+  return (
+    &lt;&gt;
+      &lt;p&gt;已计时 {elapsed} 秒&lt;/p&gt;
+      &lt;button onClick={start}&gt;开始&lt;/button&gt;
+      &lt;button onClick={stop}&gt;暂停&lt;/button&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>为什么 id 不放 state？三宗罪：<strong>不必要</strong>——id 变化不该引起重渲染；<strong>不及时</strong>——<code>setState</code> 要到下一轮渲染才生效，<code>stop()</code> 里读到的可能还是旧值；<strong>不语义</strong>——state 是「驱动界面的数据」，id 显然不是。放局部变量则每次渲染重置，<code>start</code> 后第一次 <code>stop</code> 时 id 已经丢了。ref 恰好卡在中间：<strong>跨渲染存活，又完全绕开渲染流水线</strong>。</p>
+
+<p>把这对孪生兄弟放一张表里看，区别一目了然：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>useState</th><th>useRef</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>改值方式</td><td>必须走 setter，<strong>触发重渲染</strong></td><td>直接改 <code>.current</code>，<strong>不触发渲染</strong></td></tr>
+    <tr><td>渲染时读到的</td><td>本次渲染的<strong>快照</strong>（闭包捕获，永不变）</td><td><code>.current</code>，永远是<strong>最新值</strong></td></tr>
+    <tr><td>跨渲染身份</td><td>每轮渲染一份新快照</td><td>同一个对象，贯穿组件一生</td></tr>
+    <tr><td>变化是否反映到 UI</td><td>自动反映</td><td>不会——所以叫「可变而不可渲染」</td></tr>
+    <tr><td>该装什么</td><td>驱动界面的数据</td><td>DOM 句柄、定时器 id、幕后标记</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：实例字段 vs 每次请求新 new 的 DTO</div>
+  <p>把组件实例想成一个单例 Bean：<code>ref.current</code> 就是它的<strong>实例字段</strong>——谁改都生效，但框架不会因为你改了字段就重发一次请求；而 state 是被框架「审计」的属性，每次渲染像一次新的请求，你拿到的是一份<strong>不可变 DTO 快照</strong>（第 10 篇闭包陷阱的根源），想变就得走 setter。</p>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="useState 快照与 useRef 恒定引用的对比">
+  <defs>
+    <marker id="arr-ref" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <text x="80" y="38" font-size="13" font-weight="bold" fill="#1C1C1C">useState：每次渲染，一份新的不可变快照</text>
+  <rect x="80" y="50" width="130" height="30" rx="4" fill="#FAC94A"/>
+  <text x="145" y="69" text-anchor="middle" font-size="12" fill="#1C1C1C">渲染 1</text>
+  <rect x="245" y="50" width="130" height="30" rx="4" fill="#FAC94A"/>
+  <text x="310" y="69" text-anchor="middle" font-size="12" fill="#1C1C1C">渲染 2</text>
+  <rect x="410" y="50" width="130" height="30" rx="4" fill="#FAC94A"/>
+  <text x="475" y="69" text-anchor="middle" font-size="12" fill="#1C1C1C">渲染 3</text>
+  <line x1="145" y1="80" x2="145" y2="96" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-ref)"/>
+  <line x1="310" y1="80" x2="310" y2="96" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-ref)"/>
+  <line x1="475" y1="80" x2="475" y2="96" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-ref)"/>
+  <rect x="80" y="100" width="130" height="30" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="145" y="119" text-anchor="middle" font-size="12" fill="#1C1C1C">快照 count = 0</text>
+  <rect x="245" y="100" width="130" height="30" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="310" y="119" text-anchor="middle" font-size="12" fill="#1C1C1C">快照 count = 3</text>
+  <rect x="410" y="100" width="130" height="30" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="475" y="119" text-anchor="middle" font-size="12" fill="#1C1C1C">快照 count = 7</text>
+  <text x="80" y="152" font-size="11" fill="#8C8676">旧快照原封不动——闭包捕获的正是「当时那一份」（第 10 篇的病根）</text>
+  <text x="80" y="190" font-size="13" font-weight="bold" fill="#1C1C1C">useRef：同一个盒子，贯穿组件一生</text>
+  <rect x="80" y="202" width="130" height="30" rx="4" fill="#FAC94A"/>
+  <text x="145" y="221" text-anchor="middle" font-size="12" fill="#1C1C1C">渲染 1</text>
+  <rect x="245" y="202" width="130" height="30" rx="4" fill="#FAC94A"/>
+  <text x="310" y="221" text-anchor="middle" font-size="12" fill="#1C1C1C">渲染 2</text>
+  <rect x="410" y="202" width="130" height="30" rx="4" fill="#FAC94A"/>
+  <text x="475" y="221" text-anchor="middle" font-size="12" fill="#1C1C1C">渲染 3</text>
+  <line x1="145" y1="232" x2="145" y2="250" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-ref)"/>
+  <line x1="310" y1="232" x2="310" y2="250" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-ref)"/>
+  <line x1="475" y1="232" x2="475" y2="250" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-ref)"/>
+  <rect x="80" y="254" width="460" height="34" rx="4" fill="#C2410C"/>
+  <text x="310" y="275" text-anchor="middle" font-size="13" fill="#FFFFFF">ref.current · 同一个对象，改它不触发渲染</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>useState 快照 vs useRef 恒定引用：快照随渲染更替，ref 盒子贯穿一生</figcaption>
+</figure>
+</section>
+
+<!-- ═══════════════ 第4站：高频场景 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>三个高频场景：上一次的值、闭包陷阱第二处方、幕后数据</h2></div>
+
+<h3>场景一：usePrevious——记录上一次渲染的值</h3>
+
+<p>想显示「本次比上次多了几条」？在渲染里顺手存「上次」是不行的：渲染期间改任何东西都犯规（下一站细说）。正确姿势是<strong>渲染后写入</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>usePrevious.ts</b> · 下一篇教你把它抽成正式的自定义 Hook</span></div>
+  <pre><code>import { useEffect, useRef } from "react";
+
+function usePrevious&lt;T&gt;(value: T): T | undefined {
+  const ref = useRef&lt;T | undefined&gt;(undefined);
+
+  useEffect(() =&gt; {
+    ref.current = value; <span class="c">// 渲染之后才写；本轮渲染读到的，正是上一轮的值</span>
+  }, [value]);
+
+  return ref.current;
+}
+
+<span class="c">// 用法：const prev = usePrevious(count);「比上次多了 {count - prev} 条」</span></code></pre>
+</div>
+
+<p>时序想清楚就不玄了：第 N 轮渲染时 effect 还没跑，<code>ref.current</code> 里躺着第 N-1 轮 effect 写入的值——「上一次」就是这么来的。</p>
+
+<h3>场景二：给第 10 篇的闭包陷阱开第二处方</h3>
+
+<p>第 10 篇的病根：定时器闭包捕获的是那一轮的快照。当时的处方是把 count 放进依赖数组，变了就重建定时器。ref 提供另一条路——<strong>定时器只建一次，通过恒定引用总能读到最新值</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Poller.tsx</b> · ref 镜像最新值</span></div>
+  <pre><code>import { useEffect, useRef, useState } from "react";
+
+function Poller() {
+  const [count, setCount] = useState(0);
+  const countRef = useRef(count);
+
+  useEffect(() =&gt; {
+    countRef.current = count; <span class="c">// 每次渲染后，把最新值写进镜像</span>
+  }, [count]);
+
+  useEffect(() =&gt; {
+    <span class="c">// 闭包捕获的是 countRef——恒定引用，不随渲染更替</span>
+    const id = setInterval(() =&gt; {
+      console.log("最新 count：", countRef.current); <span class="c">// ✅ 永远最新</span>
+    }, 1000);
+    return () =&gt; clearInterval(id);
+  }, []);
+
+  return &lt;button onClick={() =&gt; setCount(c =&gt; c + 1)}&gt;{count}&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>两种处方的取舍：依赖数组版更「React 味」，但定时器反复拆建；ref 版只建一次、多养一个镜像。没有绝对优劣，看重建代价。</p>
+
+<h3>场景三：卸载标记等幕后数据</h3>
+
+<p>「不参与渲染的数据」也都归 ref 管。最典型的是卸载标记：<code>const aliveRef = useRef(true)</code>，挂载 effect 里置 true、cleanup 里翻成 false，异步回调回来先看这面旗子再决定要不要 <code>setOrders</code>——cleanup 负责关资源（第 9 篇），<code>aliveRef</code> 负责拦「迟到的更新」。防抖句柄、最近一次请求序号，同理。</p>
+</section>
+
+<!-- ═══════════════ 第5站：铁律与 React 19 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>一条铁律：渲染期间别碰 ref.current</h2></div>
+
+<p>ref 的自由是「渲染之外」的自由。一旦在渲染函数体里读写 <code>ref.current</code>，就会捅穿第 9 篇立的规矩——<strong>渲染必须是纯函数</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Badge.tsx</b> · ❌ 渲染期间读写 ref</span></div>
+  <pre><code>import { useRef } from "react";
+
+function Badge({ items }: { items: string[] }) {
+  const lastLenRef = useRef(0);
+
+  <span class="c">// ❌ 渲染期间改 ref：渲染结果取决于「之前发生过什么」</span>
+  if (items.length !== lastLenRef.current) {
+    lastLenRef.current = items.length;
+    return &lt;b&gt;{items.length} 项（有更新）&lt;/b&gt;;
+  }
+  return &lt;span&gt;{items.length} 项&lt;/span&gt;;
+}</code></pre>
+</div>
+
+<p>三重罪状：其一，<strong>纯度破产</strong>——渲染结果不再只由 props 和 state 决定，还掺进了「上次渲染留下的 ref」，<code>UI = f(state)</code> 变成了 <code>UI = f(state + 历史)</code>；其二，<strong>StrictMode 双调用翻车</strong>（第 9 篇末站）——第一遍渲染把 ref 改了，第二遍读到的就是被污染的值，同样的输入渲染出不同结果；其三，<strong>改了也白改</strong>——ref 变化不通知 React，渲染期写的值不会引发重渲染，数据和界面从此失同步。</p>
+
+<p>正确位置只有两个：<strong>事件处理器</strong>（秒表的 <code>start/stop</code>）和 <code>useEffect</code>（<code>usePrevious</code> 的写入）；渲染函数体里只许出现初始化那一行 <code>useRef(初值)</code>。</p>
+
+<p>顺带一段历史：React 18 及之前，想把 ref 传进<strong>自定义函数组件</strong>，必须用 <code>forwardRef</code> 包一层才收得到；<strong>React 19 起 ref 就是普通 prop</strong>，直接写进 props 类型即可，<code>forwardRef</code> 光荣退休。你在旧代码里见到它，知道是时代产物就好。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li><code>useRef(初值)</code> 返回 <code>{ current }</code> 恒定盒子：用途一是 <strong>DOM 句柄</strong>（<code>ref={inputRef}</code>），用途二是<strong>跨渲染可变容器</strong>。</li>
+    <li>与 useState 的分水岭：改 ref <strong>不触发渲染</strong>；渲染读到的 state 是快照，读到的 <code>ref.current</code> 永远是最新值。</li>
+    <li>高频场景：定时器/订阅句柄、<code>usePrevious</code>、ref 镜像修第 10 篇闭包陷阱、卸载标记等幕后数据。</li>
+    <li>铁律：渲染期间不读写 <code>ref.current</code>，读写放事件处理器或 effect。</li>
+    <li>React 19 起 ref 是普通 prop，<code>forwardRef</code> 成为历史名词。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>第 11 篇管「渲染之内」的优化，本篇管「渲染之外」的持久：<code>useRef</code> 是组件的实例字段，装 DOM 句柄、装定时器 id、装最新值镜像，改它不惊动渲染。至此 Hooks 的三块地基——state 快照、effect 同步、ref 盒子——都已齐备。你也该发现了：ref 和 effect 总是成对出现（写镜像、清定时器、翻卸载标记），每用一次就复制粘贴一遍。下一篇第 13 篇，把它们抽成<strong>自定义 Hook</strong>——React 里最重要的复用手段。见。</p>
+</div>
+</section>
+
+</body>
+</html>

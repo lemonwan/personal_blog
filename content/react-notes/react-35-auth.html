@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>认证与路由守卫（对比拦截器）</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：认证全景 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>一次登录的完整旅程</h2></div>
+
+<p>第 30/31 篇会配路由了，第 22 篇会做持久化了——现在把它们串成绕不开的一条链路：<strong>认证</strong>。前端认证就六步：登录提交账密 → 服务端校验、签发 token → 存起来（刷新还在）→ 之后每个请求自动带上 <code>Authorization: Bearer xxx</code> → token 失效收到 401，清登录态送回登录页 → 登出，回到游客世界。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="前端认证流程：登录表单提交账密，服务端签发 token 存入 authStore，之后每次请求由 axios 拦截器注入 Authorization，后端校验通过返回数据，失败返回 401 清登录态跳回登录页">
+  <defs>
+    <marker id="arr35a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+    <marker id="arr35r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/>
+    </marker>
+  </defs>
+  <rect x="20" y="34" width="115" height="50" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="77" y="64" text-anchor="middle" font-size="13" fill="#1C1C1C">登录表单</text>
+  <rect x="235" y="34" width="175" height="50" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="322" y="55" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">认证服务</text>
+  <text x="322" y="73" text-anchor="middle" font-size="11" fill="#1C1C1C">校验密码 · 签发 token</text>
+  <rect x="480" y="34" width="120" height="50" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="540" y="55" text-anchor="middle" font-size="12" fill="#1C1C1C">存入 authStore</text>
+  <text x="540" y="73" text-anchor="middle" font-size="11" fill="#8C8676">localStorage</text>
+
+  <rect x="480" y="206" width="120" height="50" rx="8" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="540" y="227" text-anchor="middle" font-size="12" fill="#1C1C1C">axios 拦截器</text>
+  <text x="540" y="245" text-anchor="middle" font-size="11" fill="#1C1C1C">注入 Authorization</text>
+  <rect x="245" y="206" width="170" height="50" rx="8" fill="#EDE3C4" stroke="#177245" stroke-width="1.5"/>
+  <text x="330" y="227" text-anchor="middle" font-size="12" fill="#177245">后端校验 token</text>
+  <text x="330" y="245" text-anchor="middle" font-size="11" fill="#177245">通过 → 返回数据</text>
+  <rect x="25" y="206" width="140" height="50" rx="8" fill="#FFFFFF" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="95" y="227" text-anchor="middle" font-size="12" fill="#C2410C">401</text>
+  <text x="95" y="245" text-anchor="middle" font-size="11" fill="#C2410C">清登录态 · 跳登录</text>
+
+  <line x1="135" y1="59" x2="230" y2="59" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr35a)"/>
+  <text x="182" y="76" text-anchor="middle" font-size="11" fill="#1C1C1C">① 提交账密</text>
+  <line x1="410" y1="59" x2="475" y2="59" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr35a)"/>
+  <text x="443" y="76" text-anchor="middle" font-size="11" fill="#1C1C1C">② 下发token</text>
+
+  <line x1="540" y1="84" x2="540" y2="201" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr35a)"/>
+  <text x="550" y="145" text-anchor="start" font-size="11" fill="#1C1C1C">③ 每次请求</text>
+  <line x1="478" y1="231" x2="420" y2="231" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr35a)"/>
+  <text x="449" y="222" text-anchor="middle" font-size="11" fill="#1C1C1C">④ 自动带上</text>
+  <line x1="243" y1="231" x2="170" y2="231" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr35a)"/>
+  <text x="206" y="222" text-anchor="middle" font-size="11" fill="#1C1C1C">⑤ 校验失败</text>
+
+  <path d="M 95 204 C 95 160, 95 130, 95 89" fill="none" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr35r)"/>
+  <text x="105" y="150" text-anchor="start" font-size="11" fill="#C2410C">⑥ 回到登录页</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>前端认证全景：token 存好之后每次请求由拦截器自动带上，校验失败就清登录态送回登录页，形成闭环。</figcaption>
+</figure>
+
+<p>链路上每个环节都能在后端找到对应物——这正是本篇的讲法：</p>
+
+<table>
+  <thead>
+    <tr><th>前端环节</th><th>本篇落点</th><th>后端对应物</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>token 存哪</td><td>第 2 站</td><td>Session 放内存还是 Redis</td></tr>
+    <tr><td>带 token / 401 跳转</td><td>第 3 站拦截器</td><td>Feign 拦截器 / AuthenticationEntryPoint</td></tr>
+    <tr><td>受保护路由</td><td>第 4 站 RequireAuth</td><td>authorizeRequests / preHandle</td></tr>
+    <tr><td>接口真鉴权</td><td>第 5 站双保险</td><td>Spring Security 过滤器链</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：前后端各有一道关卡</div>
+  <p>你熟悉的链路是「请求先过过滤器链，JwtFilter 校验 token，不过直接 401」。前端把同一件事镜像了一遍：请求发出前先过 axios 拦截器戴 token，路由进入前先过守卫组件验登录态。前后端各设一道关卡，思路同构——Spring Security 里练过的直觉全部平移有效。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：token 存哪 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>token 存哪：一场 XSS 与 CSRF 的权衡</h2></div>
+
+<p>token 拿到手，第一个决策是放哪。主流候选两个：<strong>localStorage</strong>（前端完全掌控）和 <strong>httpOnly Cookie</strong>（服务端 Set-Cookie，JS 读不到）。第 22 篇讲过存储层级，这里只算安全账本：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>localStorage</th><th>httpOnly Cookie</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>谁能读</td><td>页面里任何 JS 随手可读</td><td>只有浏览器自动携带，JS 读不到</td></tr>
+    <tr><td>XSS 风险</td><td><strong>高</strong>：注入一段脚本就能偷走 token</td><td>低：脚本偷不走 token（但请求仍可能被伪造）</td></tr>
+    <tr><td>CSRF 风险</td><td>天然免疫：靠手动加 Authorization 头，跨站表单不会自动带上</td><td><strong>有</strong>：浏览器对同域自动带 Cookie，需 SameSite / CSRF Token 防御</td></tr>
+    <tr><td>前后端分离友好度</td><td>好：跨域只需带头</td><td>需配 SameSite、withCredentials 等凭据策略</td></tr>
+  </tbody>
+</table>
+
+<p>看明白了吗？这是<strong>安全权衡而非对错题</strong>：localStorage 把 token 暴露给 JS，XSS 得手就全丢；httpOnly cookie 挡住了偷，却把 CSRF 的攻击面迎进来。业界常见落地是组合拳：<strong>短命的 access token 放内存或 localStorage（丢了影响小），长命的 refresh token 放 httpOnly cookie（JS 摸不到，专用来续签）</strong>——两害相权，各取其短。</p>
+
+<p>登录态是跨路由、跨组件共享的全局状态——第 15 篇的 Context 和第 18 篇的 Zustand 都能干。这里选 Zustand：登录页、路由守卫、axios 拦截器都要读写它，而拦截器在组件树之外，Context 够不着；store 是普通模块对象，谁都能用。完整实现：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>stores/authStore.ts</b> · 登录态 store：persist 自动恢复</span></div>
+  <pre><code>import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+interface User { id: number; name: string; roles: string[]; }
+
+interface AuthState {
+  token: string | null;
+  user: User | null;
+  login: (token: string, user: User) =&gt; void;
+  logout: () =&gt; void;
+}
+
+export const useAuthStore = create&lt;AuthState&gt;()(
+  persist(
+    (set) =&gt; ({
+      token: null,
+      user: null,
+      <span class="c">// 登录成功：token 和用户信息一次写入，自动同步到 localStorage</span>
+      login: (token, user) =&gt; set({ token, user }),
+      <span class="c">// 登出：一次清空，存储同步清掉</span>
+      logout: () =&gt; set({ token: null, user: null }),
+    }),
+    {
+      name: "auth-storage",
+      <span class="c">// 只持久化数据字段，action 不落盘（第 22 篇的 partialize）</span>
+      partialize: (s) =&gt; ({ token: s.token, user: s.user }),
+    }
+  )
+);</code></pre>
+</div>
+
+<p>组件里照常 <code>useAuthStore((s) =&gt; s.user)</code> 订阅；组件外（马上要写的拦截器）用 <code>useAuthStore.getState()</code> 直接读——一个 store 两套用法，刷新页面后 persist 自动恢复登录态。</p>
+</section>
+
+<!-- ═══════════════ 第3站：axios 拦截器 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>axios 拦截器：发请求前统一戴帽</h2></div>
+
+<p>如果每个组件发请求前都手写一遍 <code>headers.Authorization = ...</code>，那就是把同一个横切逻辑复制五十遍。axios 的<strong>拦截器</strong>就是为这个准备的：请求发出前统一加工，响应回来后统一善后。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>lib/api.ts</b> · 请求拦截器戴 token，响应拦截器接 401</span></div>
+  <pre><code>import axios from "axios";
+import { useAuthStore } from "../stores/authStore";
+
+export const api = axios.create({ baseURL: "/api" });
+
+<span class="c">// 请求拦截器：每个请求发出前，自动带上 token</span>
+api.interceptors.request.use((config) =&gt; {
+  <span class="c">// 组件外读 store：getState() 拿当前快照，不需要 Hook</span>
+  const token = useAuthStore.getState().token;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+<span class="c">// 响应拦截器：401 统一处理，别让每个组件自己兜底</span>
+api.interceptors.response.use(
+  (res) =&gt; res,
+  (error) =&gt; {
+    if (error.response?.status === 401) {
+      <span class="c">// token 过期或无效：清登录态，送回登录页</span>
+      useAuthStore.getState().logout();
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);</code></pre>
+</div>
+
+<p>二十行，覆盖了全景图的 ③④⑤ 三步，之后所有组件只管 <code>api.get("/todos")</code>。两个细节：读 token 用 <code>getState()</code> 而不是 Hook——拦截器不是组件，用不了 Hook，Zustand 的模块级 store 恰好补位；401 跳转用 <code>window.location.href</code> 而不是 navigate——拦截器在 Router 上下文之外拿不到路由 API，用整页刷新换简单可靠，这笔账划算。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Feign 拦截器 + AuthenticationEntryPoint</div>
+  <p>请求拦截器 = Feign 的 RequestInterceptor：微服务间调用前统一往请求头塞 token，你在 Spring Cloud 里写过一模一样的东西。响应拦截器接 401 = Spring Security 的 AuthenticationEntryPoint：认证失败不撒手给各 Controller，统一入口处理、统一重定向。axios 拦截器就是前端的 ClientHttpRequestInterceptor——横切关注点收进切面，换请求库也不用动业务。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：受保护路由 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>RequireAuth：路由级的 preHandle</h2></div>
+
+<p>token 能带上接口了，但还有 UX 问题：未登录用户直接在地址栏敲 <code>/dashboard</code>，页面加载了、接口全 401、满屏报错——难看。我们要的是<strong>还没进门就拦下</strong>：给第 30 篇的路由加一层守卫组件：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>router/RequireAuth.tsx</b> · 受保护路由：没登录就重定向</span></div>
+  <pre><code>import { type ReactNode } from "react";
+import { Navigate, useLocation } from "react-router-dom";
+import { useAuthStore } from "../stores/authStore";
+
+export function RequireAuth({ children }: { children: ReactNode }) {
+  const token = useAuthStore((s) =&gt; s.token);
+  const location = useLocation();
+
+  if (!token) {
+    <span class="c">// 记下「想来而没来成」的页面，登录后原路送回</span>
+    return (
+      &lt;Navigate to="/login" state={{ from: location.pathname }} replace /&gt;
+    );
+  }
+  return &lt;&gt;{children}&lt;/&gt;;
+}
+
+<span class="c">// 用法：路由表里包一层即生效（对照 authorizeRequests 按路径配置）</span>
+<span class="c">// &lt;Route path="/dashboard" element={&lt;RequireAuth&gt;&lt;Dashboard /&gt;&lt;/RequireAuth&gt;} /&gt;</span></code></pre>
+</div>
+
+<p>对照后端，这就是拦截器的 <code>preHandle</code> 返回 false 直接拦截，或 Spring Security 的 <code>requestMatchers("/dashboard/**").authenticated()</code>——声明「这条路径需要登录」，校验逻辑集中在包装组件里，路由表保持声明式。而 <code>state={{ from: location.pathname }}</code> 是「登录后回到原页面」的关键：重定向时把原目的地塞进 location state，登录页取出来接着用：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>pages/LoginPage.tsx</b> · 登录成功，原路送回</span></div>
+  <pre><code>import { useLocation, useNavigate } from "react-router-dom";
+import { useAuthStore } from "../stores/authStore";
+import { api } from "../lib/api";
+import { AuthForm } from "../components/AuthForm"; <span class="c">// 表单 UI 略，第 21 篇专讲</span>
+
+function LoginPage() {
+  const login = useAuthStore((s) =&gt; s.login);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  <span class="c">// RequireAuth 重定向时塞进来的原目的地；直接来登录页则去首页</span>
+  const from = (location.state as { from?: string } | null)?.from ?? "/dashboard";
+
+  async function handleSubmit(username: string, password: string) {
+    <span class="c">// 后端校验账密并签发 token（全景图的第①②步）</span>
+    const res = await api.post("/auth/login", { username, password });
+    login(res.data.token, res.data.user);
+    <span class="c">// replace：登录页不该留在历史记录里，回退键跳过它</span>
+    navigate(from, { replace: true });
+  }
+
+  return &lt;AuthForm onSubmit={handleSubmit} /&gt;;
+}</code></pre>
+</div>
+
+<div class="think">
+  <div class="think-q">为什么用包装组件而不是在 Layout 里写 if？一是声明式——路由表一眼看出哪些路径受保护；二是可组合——RequireAuth 里再包 RequireAdmin 就是角色守卫，这正是第 23 篇「组合优于继承」的又一次应用。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：双保险 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>双保险：前端守卫是 UX，后端鉴权才是安全</h2></div>
+
+<p>最重要的话放在开头：<strong>前端守卫挡不住任何攻击者</strong>。RequireAuth 运行在用户浏览器里，JS 源码人人可见、人人可改——手改 localStorage 塞个 token，守卫立刻形同虚设；更直接地，curl 一行就能带 token 打你的接口，根本不经过任何路由。所以安全红线只有一条：<strong>后端每个接口都必须自己鉴权</strong>，Security 过滤器链、拦截器、@PreAuthorize 一道都不能少。</p>
+
+<table>
+  <thead>
+    <tr><th></th><th>前端路由守卫（RequireAuth）</th><th>后端接口鉴权（Security / 拦截器）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>住在哪</td><td>用户浏览器里的 JS</td><td>你的服务器</td></tr>
+    <tr><td>防谁</td><td>正常用户误入受限页面（体验）</td><td>一切未授权请求（安全）</td></tr>
+    <tr><td>失败表现</td><td>重定向到登录页</td><td>401 / 403</td></tr>
+    <tr><td>能否绕过</td><td>能：改代码或直接发请求</td><td>不能：这是最终裁判</td></tr>
+  </tbody>
+</table>
+
+<p>正确姿势是<strong>双保险</strong>：前端守卫负责 UX——不让用户看到注定失败的页面，把 401 消化成优雅的跳转；后端鉴权负责安全——守卫被绕过时，每个接口照样拒绝，401/403 是最后一道墙。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：别把校验写在 Swagger 文档里</div>
+  <p>这道理后端你也天天讲：参数校验不能只靠前端表单，DTO 的 @NotNull @Size 必须服务端再验一遍——因为绕过页面直接打接口的人永远存在。前端守卫与后端鉴权的关系，就是「表单校验」与「@Valid 校验」的关系：前者是体验，后者是契约。记住这句，你就永远不会天真地问「前端已经挡了，后端还要鉴权吗」。</p>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>认证全景六步：登录 → 拿 token → 存储 → 请求带 token → 401 处理 → 登出，每步都有后端对应物。</li>
+    <li>token 存储是 XSS 与 CSRF 的权衡：localStorage 怕 XSS、天然抗 CSRF，httpOnly cookie 反之；常见组合是短命 access token + httpOnly refresh token。</li>
+    <li>axios 请求拦截器统一注入 Authorization（对照 Feign RequestInterceptor），响应拦截器统一接 401；getState() 让组件外也能读写登录态。</li>
+    <li>RequireAuth 包装组件 = 路由级 preHandle：没 token 就 Navigate 重定向，state.from 记住原页面，登录后原路送回。</li>
+    <li>双保险铁律：前端守卫只是 UX、可被绕过；真正的安全在后端每个接口的鉴权，缺一不可。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇把前面攒的零件拼成认证闭环：Zustand（第 18 篇）+ persist（第 22 篇）管登录态，axios 拦截器管 token 注入与 401 兜底，RequireAuth 守在路由入口（第 30 篇），登录后凭 location.state 原路返回。同样重要的是态度：前端守卫是体验层，接口级鉴权才是安全层，双保险缺一不可。至此取数、三态、竞态、认证全部就位，只差最后一个高频场景：数据量大时列表怎么翻——分页与无限滚动，下一篇第 36 篇见。</p>
+</div>
+</section>
+
+</body>
+</html>

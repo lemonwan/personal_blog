@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>React Router 与嵌套路由（对比 @RequestMapping）</title>
+</head>
+<body>
+
+<!-- ═══ 第1站：为什么 SPA 需要前端路由 ═══ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>为什么 URL 变了，页面却不刷新</h2></div>
+
+<p>卷四到第 29 篇正式收官：目录结构定了、代码规范立了，一个干净的 React 工程骨架已经搭好。卷五「路由与数据获取」开篇，先解决单页应用（SPA）绕不开的问题——<strong>用户怎么在「页面之间」跳转</strong>。</p>
+
+<p>先回忆你在 Spring MVC 里写过的老三样。用户访问 <code>/user/list</code>，发生了什么：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserController.java</b> · 传统 MVC：一个路径一次整页请求</span></div>
+  <pre><code>@Controller
+public class UserController {
+
+    @GetMapping("/user/list")
+    public String list(Model model) {
+        model.addAttribute("users", userService.findAll());
+        return "user/list";     <span class="c">// 渲染一整页 Thymeleaf 模板</span>
+    }
+
+    @GetMapping("/user/detail/{id}")
+    public String detail(@PathVariable Long id, Model model) {
+        model.addAttribute("user", userService.findById(id));
+        return "user/detail";   <span class="c">// 又一整页，浏览器丢掉旧的重新画</span>
+    }
+}</code></pre>
+</div>
+
+<p>从列表跳详情，浏览器要干三件事：<strong>丢弃当前整个页面 → 发起新请求 → 从头渲染全新 HTML</strong>。顶栏、侧边栏这些根本没变的部分，也被推倒重来。用户看到的就是一次白屏闪烁。</p>
+
+<p>SPA 的思路完全不同：浏览器只从服务器拿一次 <code>index.html</code>（外加 JS 包），之后<strong>路由这件事由前端 JavaScript 接管</strong>——URL 变了，JS 在内存里把对应的组件换上去，顶栏侧边栏原封不动。和后端的通信退化成纯粹的数据接口（JSON），服务器不再吐页面。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：路由从服务端搬进了浏览器</div>
+  <p>传统 MVC 里，DispatcherServlet 在服务器端把 URL 分发给 Controller；SPA 里，这张「URL → 处理器」的映射表整个搬进了浏览器，处理器从 Controller 方法换成了 React 组件。你不再是「每条路径一次页面请求」，而是「每条路径一个组件」。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">有人会问：URL 干脆不变行不行？不行。刷新、收藏夹、分享链接、浏览器前进后退，全都依赖 URL。前端路由要保证的正是：URL 照常变化、照常能被收藏，但<strong>跳转过程不再整页刷新</strong>。</div>
+</div>
+</section>
+
+<!-- ═══ 第2站：路由表 ═══ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>路由表：createBrowserRouter 与 RouterProvider</h2></div>
+
+<p>React Router 6.4 之后的推荐写法是<strong>先声明一张路由表，再交给 RouterProvider 挂载</strong>——先集中注册，再启动分发，是不是很有 DispatcherServlet 装配 HandlerMapping 的味道：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>main.tsx</b> · 路由表：URL 到组件的映射</span></div>
+  <pre><code>import { createRoot } from "react-dom/client";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import App from "./App";
+import Home from "./pages/Home";
+import UserList from "./pages/UserList";
+import UserDetail from "./pages/UserDetail";
+import NotFound from "./pages/NotFound";
+
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: &lt;App /&gt;,                              <span class="c">// 根布局：顶栏 + 页脚</span>
+    children: [
+      { index: true, element: &lt;Home /&gt; },          <span class="c">// 访问 / 时显示</span>
+      { path: "users", element: &lt;UserList /&gt; },    <span class="c">// 访问 /users</span>
+      { path: "users/:id", element: &lt;UserDetail /&gt; }, <span class="c">// 动态段，第 31 篇展开</span>
+      { path: "*", element: &lt;NotFound /&gt; },        <span class="c">// 兜底 404</span>
+    ],
+  },
+]);
+
+createRoot(document.getElementById("root")!).render(
+  &lt;RouterProvider router={router} /&gt;
+);</code></pre>
+</div>
+
+<p>（备注：v6 的包名是 <code>react-router-dom</code>，v7 统一为 <code>react-router</code>，改个 import 就能迁移，写法不变。）</p>
+
+<p>这张表里的三条路径规则值得单独记住：</p>
+
+<table>
+  <thead>
+    <tr><th>写法</th><th>含义</th><th>你在 Spring 里的对应</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>users/:id</code></td><td>动态段：匹配 <code>/users/42</code>，参数名是 <code>id</code></td><td><code>@GetMapping("/users/{id}")</code></td></tr>
+    <tr><td><code>index: true</code></td><td>索引路由：父路径本身被访问时的默认子页面</td><td>访问 <code>/</code> 时命中的首页方法</td></tr>
+    <tr><td><code>path: "*"</code></td><td>通配：谁都没匹配上时兜底</td><td>自定义 ErrorController 处理 404</td></tr>
+  </tbody>
+</table>
+
+<p>匹配顺序也和 Spring 一样：<strong>精确优先、通配兜底</strong>，所以 <code>*</code> 永远放最后。注意动态段以 <code>:</code> 开头——参数怎么取出来、怎么校验，下一篇第 31 篇专门讲。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li><code>createBrowserRouter</code> 声明路由表，<code>RouterProvider</code> 挂载分发——对应 DispatcherServlet 加 HandlerMapping 的分工。</li>
+    <li>三条基本规则：<code>:param</code> 动态段、<code>index</code> 默认子页、<code>*</code> 404 兜底；精确优先，通配殿后。</li>
+    <li>每个路由的 <code>element</code> 是组件，不是一次页面请求；跳转全程由 JS 在浏览器里完成。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══ 第3站：嵌套路由与 Outlet ═══ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>嵌套路由与 Outlet：布局只写一次</h2></div>
+
+<p>回看上一站的路由表，根路由有个 <code>children</code> 字段——这就是<strong>嵌套路由</strong>。它解决的，正是你在后端用「类级 <code>@RequestMapping</code> + 布局模板」解决过的老问题：<strong>公共部分只写一次</strong>。</p>
+
+<p>需求长这样：后台页面共享同一个侧边栏，右侧内容区随 URL 变。不用嵌套的话，每个页面组件都得手动包一层 <code>&lt;AdminLayout&gt;</code>——十个页面写十遍，谁忘了一处哪页就「秃」了。这和 Thymeleaf 没上 layout decorator 时、每个页面手动 include 头尾片段的惨状一模一样。</p>
+
+<p>嵌套的写法：父路由的组件里挖一个「坑」，子路由的渲染结果填进坑里。挖坑的标签就是 <code>&lt;Outlet /&gt;</code>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>AdminLayout.tsx</b> · 布局路由：侧边栏常驻，Outlet 是坑位</span></div>
+  <pre><code>import { Outlet, NavLink } from "react-router-dom";
+
+function AdminLayout() {
+  return (
+    &lt;div className="admin"&gt;
+      &lt;aside&gt;
+        {/* NavLink 命中当前路径时会自动加 active 类，高亮菜单 */}
+        &lt;NavLink to="/admin/dashboard"&gt;仪表盘&lt;/NavLink&gt;
+        &lt;NavLink to="/admin/users"&gt;用户管理&lt;/NavLink&gt;
+        &lt;NavLink to="/admin/settings"&gt;系统设置&lt;/NavLink&gt;
+      &lt;/aside&gt;
+      &lt;main&gt;
+        &lt;Outlet /&gt;  <span class="c">// 子路由渲染在这里；切菜单时只有这里变</span>
+      &lt;/main&gt;
+    &lt;/div&gt;
+  );
+}
+
+<span class="c">// 路由表：父路径 + children，路径自动拼接</span>
+{
+  path: "/admin",
+  element: &lt;AdminLayout /&gt;,   <span class="c">// 切子页面时它不会重建</span>
+  children: [
+    { index: true, element: &lt;Dashboard /&gt; },   <span class="c">// /admin</span>
+    { path: "users", element: &lt;UserManage /&gt; },    <span class="c">// /admin/users</span>
+    { path: "settings", element: &lt;Settings /&gt; },   <span class="c">// /admin/settings</span>
+  ],
+}</code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="嵌套路由布局示意：侧边栏常驻，Outlet 区域随 URL 变化">
+  <defs>
+    <marker id="arr30" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/>
+    </marker>
+  </defs>
+
+  <text x="155" y="40" text-anchor="middle" font-size="12" fill="#8C8676">切换前</text>
+  <rect x="30" y="55" width="250" height="205" rx="8" fill="#FFFFFF" stroke="#1C1C1C"/>
+  <rect x="42" y="66" width="226" height="24" rx="4" fill="#1C1C1C"/>
+  <text x="155" y="82" text-anchor="middle" font-size="12" fill="#FFFFFF">/admin/users</text>
+
+  <rect x="42" y="98" width="68" height="150" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="76" y="120" text-anchor="middle" font-size="11" fill="#1C1C1C">仪表盘</text>
+  <rect x="46" y="130" width="60" height="20" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="76" y="144" text-anchor="middle" font-size="11" fill="#1C1C1C">用户管理</text>
+  <text x="76" y="172" text-anchor="middle" font-size="11" fill="#1C1C1C">系统设置</text>
+
+  <rect x="118" y="98" width="154" height="150" fill="#FFFFFF" stroke="#C2410C" stroke-width="2"/>
+  <text x="195" y="116" text-anchor="middle" font-size="11" fill="#C2410C">Outlet</text>
+  <text x="195" y="180" text-anchor="middle" font-size="12" fill="#1C1C1C">UserManage</text>
+
+  <text x="310" y="140" text-anchor="middle" font-size="11" fill="#8C8676">点击菜单</text>
+  <text x="310" y="156" text-anchor="middle" font-size="11" fill="#8C8676">URL 变了</text>
+  <line x1="288" y1="168" x2="332" y2="168" stroke="#C2410C" stroke-width="2" marker-end="url(#arr30)"/>
+
+  <text x="465" y="40" text-anchor="middle" font-size="12" fill="#8C8676">切换后</text>
+  <rect x="340" y="55" width="250" height="205" rx="8" fill="#FFFFFF" stroke="#1C1C1C"/>
+  <rect x="352" y="66" width="226" height="24" rx="4" fill="#1C1C1C"/>
+  <text x="465" y="82" text-anchor="middle" font-size="12" fill="#FFFFFF">/admin/settings</text>
+
+  <rect x="352" y="98" width="68" height="150" fill="#EDE3C4" stroke="#1C1C1C"/>
+  <text x="386" y="120" text-anchor="middle" font-size="11" fill="#1C1C1C">仪表盘</text>
+  <text x="386" y="144" text-anchor="middle" font-size="11" fill="#1C1C1C">用户管理</text>
+  <rect x="356" y="160" width="60" height="20" fill="#FAC94A" stroke="#1C1C1C"/>
+  <text x="386" y="174" text-anchor="middle" font-size="11" fill="#1C1C1C">系统设置</text>
+
+  <rect x="428" y="98" width="154" height="150" fill="#FFFFFF" stroke="#C2410C" stroke-width="2"/>
+  <text x="505" y="116" text-anchor="middle" font-size="11" fill="#C2410C">Outlet</text>
+  <text x="505" y="180" text-anchor="middle" font-size="12" fill="#1C1C1C">Settings</text>
+
+  <text x="310" y="286" text-anchor="middle" font-size="12" fill="#8C8676">侧边栏（AdminLayout）常驻，换的只是 Outlet 区域的组件</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>嵌套路由：URL 从 /admin/users 变到 /admin/settings，AdminLayout 不重建，只有 Outlet 换了组件</figcaption>
+</figure>
+
+<p>这套结构你在后端全见过对应零件：<strong>类级 <code>@RequestMapping("/admin")</code> 拼接方法级路径</strong>，对应父子 path 自动拼接；<strong>HandlerInterceptor 统一做登录校验</strong>，对应把拦截逻辑集中在 AdminLayout（或路由 loader）里——守卫的完整玩法第 35 篇展开；<strong>Thymeleaf 的 layout decorate</strong>，对应 <code>&lt;Outlet /&gt;</code> 这个坑位。区别只有一个：这一切发生在浏览器里，切换时连一个 HTML 请求都不发。</p>
+</section>
+
+<!-- ═══ 第4站：Link 与 useNavigate ═══ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>Link 与 useNavigate：导航的两种姿势</h2></div>
+
+<p>先说一个反直觉的坑：<strong>站内跳转别用 <code>&lt;a href&gt;</code></strong>。<code>&lt;a&gt;</code> 触发的是浏览器默认行为——向服务器要一个新页面，整个 SPA 被推倒重建：JS 重新下载执行，内存里的 state 全部清零。等于你精心维护的内存应用，用户每点一次菜单就重启一次。React Router 的 <code>&lt;Link&gt;</code> 渲染出来也是 <code>&lt;a&gt;</code> 标签（收藏、中键新开标签页都正常），但它拦截了默认事件，改用 History API 改 URL，再由路由表换组件——<strong>URL 照变，页面不刷新</strong>。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserList.tsx</b> · 声明式跳转用 Link</span></div>
+  <pre><code>import { Link } from "react-router-dom";
+
+function UserList({ users }: { users: User[] }) {
+  return (
+    &lt;ul&gt;
+      {users.map(u =&gt; (
+        &lt;li key={u.id}&gt;
+          &lt;Link to={`/users/${u.id}`}&gt;{u.name}&lt;/Link&gt;
+        &lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>第二种姿势是<strong>编程式跳转</strong>：跳转由逻辑触发，而不是用户点链接——登录成功后进首页、校验失败踢回登录页。这时用 <code>useNavigate</code>，对应你在 Controller 里写的 <code>"redirect:/xxx"</code>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>LoginForm.tsx</b> · 逻辑驱动的跳转用 useNavigate</span></div>
+  <pre><code>import { useNavigate } from "react-router-dom";
+
+function LoginForm() {
+  const navigate = useNavigate();
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const ok = await login(formData);
+    if (ok) {
+      navigate("/dashboard", { replace: true });
+      <span class="c">// replace：替换当前历史记录，用户按「后退」回不到登录页</span>
+    } else {
+      navigate(-1);  <span class="c">// 负数是在历史里后退，等价于浏览器的返回</span>
+    }
+  }
+  <span class="c">// ……表单渲染省略</span>
+}</code></pre>
+</div>
+
+<p><code>replace: true</code> 值得单独说：默认跳转会往浏览器历史栈里压一条记录（可后退）；<code>replace</code> 则是<strong>替换</strong>当前记录。登录成功这种「过程页」就该 replace——别让用户后退回登录页，和后端 PRG 模式斩断「刷新重复提交」链路是同一个心思。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：forward、redirect 和 navigate</div>
+  <p>&lt;Link&gt; 像服务器内部 forward——同一份运行上下文里换视图，用户无感；navigate("/x") 像 redirect——发起一次新导航，历史栈可追溯；navigate("...", { replace: true }) 像 redirect 后清掉请求域——历史里不留痕。经验法则：用户能点的东西用 Link，逻辑驱动的跳转用 navigate。</p>
+</div>
+</section>
+
+<!-- ═══ 第5站：对照表与回顾 ═══ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>一张表把两套路由焊在一起</h2></div>
+
+<p>学到这，把 Spring MVC 和 React Router 的概念摆在一起对一遍，后面几篇会反复用到这张表：</p>
+
+<table>
+  <thead>
+    <tr><th>你在 Spring MVC 里的</th><th>React Router 里的</th><th>一句话对应</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>DispatcherServlet + HandlerMapping</td><td><code>RouterProvider</code> + 路由表</td><td>集中注册，按 URL 分发</td></tr>
+    <tr><td>类级 + 方法级 <code>@RequestMapping</code></td><td>父路由 <code>path</code> + <code>children</code></td><td>路径分层自动拼接</td></tr>
+    <tr><td>Thymeleaf layout decorator</td><td>布局组件 + <code>&lt;Outlet /&gt;</code></td><td>公共壳子只写一次</td></tr>
+    <tr><td>HandlerInterceptor（登录校验）</td><td>loader / 守卫（第 35 篇）</td><td>进页面之前先拦一道</td></tr>
+    <tr><td><code>@PathVariable</code> / <code>@RequestParam</code></td><td><code>useParams</code> / <code>useSearchParams</code></td><td>下一篇的主角</td></tr>
+    <tr><td><code>redirect:/xxx</code></td><td><code>navigate("/xxx")</code></td><td>逻辑驱动的跳转</td></tr>
+    <tr><td>404 兜底页</td><td><code>path: "*"</code></td><td>谁都没匹配上时接住</td></tr>
+    <tr><td>整页跳转（传统 MVC）</td><td><code>&lt;Link&gt;</code> 客户端跳转</td><td>URL 变了，应用不重启</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>SPA 的路由在浏览器端：<code>createBrowserRouter</code> 注册「URL → 组件」，<code>RouterProvider</code> 负责分发；服务器只发一次 HTML。</li>
+    <li>嵌套路由 + <code>&lt;Outlet /&gt;</code> 让布局只写一次——相当于类级 <code>@RequestMapping</code>、layout 模板、拦截器三件套的合体。</li>
+    <li>站内跳转用 <code>&lt;Link&gt;</code>（拦下整页刷新），逻辑跳转用 <code>navigate</code>（对应 redirect）；「过程页」记得 <code>replace: true</code>。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>卷五开篇，你把后端最熟的「URL 分发」心智整体平移进了浏览器：路由表就是前端的 HandlerMapping，嵌套路由就是父 <code>@RequestMapping</code> 加布局模板，Outlet 就是模板里挖好的那个坑。但眼下的路由表只会匹配「死」路径——用户详情页总要面对 <code>/users/42</code>、<code>/users/10086</code> 这种千变万化的 URL。参数怎么取出来、怎么校验、跳转时怎么夹带数据，下一篇第 31 篇「动态路由与参数解析」见。</p>
+</div>
+</section>
+
+</body>
+</html>

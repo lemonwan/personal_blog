@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>表单状态管理（对比 Spring 表单绑定）</title>
+</head>
+<body>
+
+<!-- ═══ 第1站：表单是哪类状态 ═══ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>表单，是一类最难伺候的客户端状态</h2></div>
+
+<p>第 20 篇给全局状态做完选型时留了个尾巴：表单输入这类高频临时值，连状态提升都要慎重，更别提塞进 Zustand。这一篇专门把尾巴收掉。</p>
+
+<p>先给表单状态画个像，它同时踩中三个特征：</p>
+
+<ul>
+  <li><strong>高频</strong>：每敲一个字符就变一次，变更频率比购物车点击高一个量级；</li>
+  <li><strong>局部</strong>：email、密码这些值出了表单没人关心，放进全局 store 纯属污染；</li>
+  <li><strong>带校验</strong>：必填、格式、长度、两次密码一致……规则成打，还会互相联动。</li>
+</ul>
+
+<p>按第 17 篇的分类它是纯客户端状态，但裸 <code>useState</code> 很快撞墙：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>RegisterForm.tsx</b> · 裸 useState 受控表单：能跑，但在腐烂</span></div>
+  <pre><code>import { useState } from "react";
+import type { FormEvent } from "react";
+
+function RegisterForm() {
+  <span class="c">// 痛点一：每个字段一份 state，十个字段十份样板</span>
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [errors, setErrors] = useState&lt;Record&lt;string, string&gt;&gt;({});
+
+  <span class="c">// 痛点三：校验散落在组件里，改规则得回这里翻</span>
+  const validate = () =&gt; {
+    const next: Record&lt;string, string&gt; = {};
+    if (!email.includes("@")) next.email = "邮箱格式不正确";
+    if (password.length &lt; 8) next.password = "密码至少 8 位";
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const handleSubmit = (e: FormEvent) =&gt; {
+    e.preventDefault();
+    if (!validate()) return;
+    <span class="c">// 痛点一的余波：提交前还得手动把散件拼回 DTO</span>
+    submitToApi({ email, password, nickname });
+  };
+
+  return (
+    &lt;form onSubmit={handleSubmit}&gt;
+      &lt;input value={email} onChange={(e) =&gt; setEmail(e.target.value)} /&gt;
+      <span class="c">// 每个字段都要亲手接线：value + onChange 成对出现</span>
+      &lt;button&gt;注册&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>三宗罪数完：</p>
+
+<ol>
+  <li><strong>每字段一个 state</strong>：声明一份、接线一份、提交时再拼一份，全是样板；</li>
+  <li><strong>每键一次重渲染</strong>：setEmail 触发整个 RegisterForm 重渲染，字段一多打字都卡（怎么量化留给第 37 篇）；</li>
+  <li><strong>校验散落</strong>：onChange 里查一次、提交前查一次；「两次密码一致」这种跨字段规则更是没地方放。</li>
+</ol>
+
+<div class="think">
+  <div class="think-q">想象这个组件长到 15 个字段、20 条规则的样子——大多数人「React 表单代码很丑」的印象由此而来。不是 React 丑，是裸写的姿势不对。</div>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：手写 getParameter vs @ModelAttribute</div>
+  <p>Spring MVC 里你从不 <code>request.getParameter("email")</code> 一个个取参、手动转类型、手动判空——<code>@ModelAttribute</code> 负责绑定对象、<code>@Valid</code> 负责触发校验，全是框架的事。裸 useState 表单恰恰是前端版的手写 getParameter：绑定靠手、校验靠记、拼 DTO 靠加班。</p>
+</div>
+</section>
+
+<!-- ═══ 第2站：React Hook Form ═══ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>React Hook Form：值住 DOM 里，登记一下就行</h2></div>
+
+<p>破局思路是把方向调头。裸 useState 是<strong>受控</strong>：值存在 React state 里，每敲一键都通知 React 重算。另一条路是<strong>非受控</strong>：值就住在 input 的 DOM 里，提交时统一收集——浏览器原生 form 提交本来就是这么干的。React Hook Form（<code>npm install react-hook-form</code>）把这条路工程化：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>RegisterForm.tsx</b> · RHF 版：没有一份字段级 useState</span></div>
+  <pre><code>import { useForm } from "react-hook-form";
+
+interface RegisterValues {
+  email: string;
+  password: string;
+  nickname: string;
+}
+
+function RegisterForm() {
+  const { register, handleSubmit, formState: { errors } } =
+    useForm&lt;RegisterValues&gt;();
+
+  <span class="c">// 只有校验通过，onSubmit 才会被调用；values 已是拼好的对象</span>
+  const onSubmit = (values: RegisterValues) =&gt; {
+    submitToApi(values); <span class="c">// { email, password, nickname }</span>
+  };
+
+  return (
+    &lt;form onSubmit={handleSubmit(onSubmit)} noValidate&gt;
+      &lt;input {...register("email", { required: "邮箱必填" })} placeholder="邮箱" /&gt;
+      {errors.email &amp;&amp; &lt;p className="error"&gt;{errors.email.message}&lt;/p&gt;}
+
+      &lt;input {...register("password", { minLength: { value: 8, message: "至少 8 位" } })} type="password" /&gt;
+      &lt;input {...register("nickname")} placeholder="昵称" /&gt;
+      &lt;button type="submit"&gt;注册&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>三个关键角色：</p>
+
+<ol>
+  <li><strong>register("email")</strong>：返回 <code>{ name, ref, onChange, onBlur }</code> 展开到 input 上，本质是把 input 的 DOM ref「登记」进 RHF 的内部仓库——机制上就是第 12 篇 useRef 那套 ref + 事件转发。值从此不经过 React state。</li>
+  <li><strong>非受控 = 值住 DOM</strong>：打字时只有 DOM 自己在变，React 全程不参与，<strong>每键零重渲染</strong>。唯一被订阅的是 errors——它真的变了，组件才重渲染。</li>
+  <li><strong>handleSubmit(onSubmit)</strong>：提交拦截器——先跑校验，通过才把拼好的 values 交给 onSubmit；不通过根本进不了业务函数。连 <code>e.preventDefault()</code> 都替你调了。</li>
+</ol>
+
+<p>受控与非受控的完整对决留给第 24 篇，这里先记结论：<strong>信息收集型表单，非受控收集是性能与简洁的默认解</strong>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：register + handleSubmit = @ModelAttribute + @Valid</div>
+  <p>register 的参数就是绑定字段名（相当于请求参数名），handleSubmit 是校验闸门，onSubmit(values) 才是真正进业务逻辑的 Controller 方法体——DTO 绑定、校验拦截这两步，和 Spring 干的是同一件事，只是发生在浏览器里。</p>
+</div>
+</section>
+
+<!-- ═══ 第3站：Zod schema ═══ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>Zod schema：把 Bean Validation 搬进前端</h2></div>
+
+<p>上一站留了个疙瘩：校验规则写在 <code>register</code> 的参数里，又跟着组件散落了，跨字段规则依然没地方放。解法和后端一模一样——把校验从组件里抽出来，<strong>声明式集中成一份 schema</strong>。装依赖：<code>npm install zod @hookform/resolvers</code>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>registerSchema.ts</b> · 校验规则的唯一来源</span></div>
+  <pre><code>import { z } from "zod";
+
+export const registerSchema = z.object({
+  email: z.string().min(1, "邮箱必填").email("邮箱格式不正确"),
+  password: z.string().min(8, "密码至少 8 位").regex(/[A-Z]/, "必须包含大写字母"),
+  nickname: z.string().min(2, "昵称至少 2 个字符").max(20, "最多 20 个字符"),
+  confirmPassword: z.string(),
+  <span class="c">// input 收上来的都是 string，coerce 先转数字再校验</span>
+  age: z.coerce.number().int("年龄必须是整数").min(18, "未满 18 岁不能注册"),
+}).refine((d) =&gt; d.password === d.confirmPassword, {
+  message: "两次输入的密码不一致",
+  path: ["confirmPassword"], <span class="c">// 错误挂在哪个字段上</span>
+});
+
+<span class="c">// 类型从 schema 反推，DTO 类型不用手写两遍（第 28 篇展开）</span>
+export type RegisterValues = z.infer&lt;typeof registerSchema&gt;;</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>RegisterForm.tsx</b> · 组件里只剩一行接线</span></div>
+  <pre><code>const form = useForm&lt;RegisterValues&gt;({
+  resolver: zodResolver(registerSchema),
+  defaultValues: { email: "", password: "", nickname: "", confirmPassword: "", age: 0 },
+});</code></pre>
+</div>
+
+<p>看懂三件事：</p>
+
+<ul>
+  <li><strong>声明式</strong>：数据形状和校验规则写在同一处，register 退回「绑定字段」的本职，校验时机统一交给 RHF 调度。</li>
+  <li><strong>z.coerce.number()</strong>：register 收上来的值永远是字符串，用户敲 <code>25</code> 你拿到的是 <code>"25"</code>——先强转再校验，前端表单最经典的暗坑之一。</li>
+  <li><strong>refine</strong>：「两次密码一致」这类跨字段规则终于有家了，还能用 path 把错误精确指到字段。</li>
+</ul>
+
+<p>和后端的对应关系几乎是逐条映射的：</p>
+
+<table>
+  <thead>
+    <tr><th>后端注解（Bean Validation）</th><th>Zod 等价写法</th><th>备注</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>@NotBlank</code> / <code>@NotNull</code></td><td><code>z.string().min(1, "...")</code></td><td>前端没有 null 输入，「空」就是空串</td></tr>
+    <tr><td><code>@Email</code></td><td><code>z.string().email()</code></td><td>格式类规则一一对应</td></tr>
+    <tr><td><code>@Size(min=8, max=20)</code></td><td><code>z.string().min(8).max(20)</code></td><td></td></tr>
+    <tr><td><code>@Pattern(regexp=...)</code></td><td><code>z.string().regex(/.../)</code></td><td></td></tr>
+    <tr><td><code>@Min(18)</code> / <code>@Max(99)</code></td><td><code>z.number().min(18).max(99)</code></td><td>先 <code>z.coerce.number()</code> 转型</td></tr>
+    <tr><td><code>@AssertTrue</code>（类级跨字段）</td><td><code>.refine(...)</code></td><td>两次密码一致就靠它</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：registerSchema = DTO + 一摞校验注解</div>
+  <p>z.object 的 shape 是字段，链式调用是注解，refine 是类级别的 <code>@AssertTrue</code>——registerSchema 的角色就是 RegisterRequest DTO 加上 Bean Validation。再往前想一步：同一套规则前后端各写一遍是浪费，monorepo 共享 schema、或按 OpenAPI 文档双端生成，就能让「一份规则两处执行」变成「一份代码两处执行」。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">就算后端已经用 Bean Validation 全量校验过，前端这份 schema 也不能省——省掉的不是代码，是用户的等待：本地毫秒级反馈，和一次几百毫秒的网络往返，是两种体验。</div>
+</div>
+</section>
+
+<!-- ═══ 第4站：提交后端 ═══ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>提交后端：loading、服务端错误与重置</h2></div>
+
+<p>前端校验是第一道闸，终点是发请求（fetch 的细节第 32 篇展开，这里只看表单侧的配合）。完整注册表单如下：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>RegisterForm.tsx</b> · 完整闭环：提交、错误、loading、重置</span></div>
+  <pre><code>import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { registerSchema, type RegisterValues } from "./registerSchema";
+
+function RegisterForm() {
+  const {
+    register, handleSubmit, setError, reset,
+    formState: { errors, isSubmitting },
+  } = useForm&lt;RegisterValues&gt;({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { email: "", password: "", nickname: "", confirmPassword: "", age: 0 },
+  });
+
+  const onSubmit = async (values: RegisterValues) =&gt; {
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        if (body.field === "email") {
+          <span class="c">// 服务端说邮箱被占用：精确回流到对应字段</span>
+          setError("email", { message: "该邮箱已被注册" });
+        } else {
+          <span class="c">// 整表级错误放 root 槽位，不挂到任何 input 上</span>
+          setError("root", { message: body.message ?? "注册失败，请稍后再试" });
+        }
+        return;
+      }
+      reset(); <span class="c">// 成功：清空表单，回到 defaultValues</span>
+    } catch {
+      setError("root", { message: "网络异常，请检查连接后重试" });
+    }
+  };
+
+  return (
+    &lt;form onSubmit={handleSubmit(onSubmit)} noValidate&gt;
+      &lt;input {...register("email")} placeholder="邮箱" /&gt;
+      {errors.email &amp;&amp; &lt;p className="error"&gt;{errors.email.message}&lt;/p&gt;}
+      <span class="c">// password / nickname / confirmPassword / age 同款写法，略</span>
+
+      {errors.root &amp;&amp; &lt;p className="error"&gt;{errors.root.message}&lt;/p&gt;}
+      &lt;button type="submit" disabled={isSubmitting}&gt;
+        {isSubmitting ? "注册中…" : "注册"}
+      &lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>四个值得停的点：</p>
+
+<ol>
+  <li><strong>onSubmit 是 async，handleSubmit 会等它落定</strong>：期间 <code>isSubmitting</code> 为 true，按钮禁用防重复提交——又一个你不用自己维护的 useState。</li>
+  <li><strong>setError("email")</strong>：邮箱唯一性这类校验只有服务端能做，返回后精确挂回对应输入框——前端、后端两道校验，汇进同一套 errors 管道。</li>
+  <li><strong>setError("root")</strong>：RHF 约定的整表级错误槽位——验证码错误、风控提示这类「不属于任何字段」的信息放这里。</li>
+  <li><strong>reset()</strong>：成功后回到 defaultValues；配合 <code>isSubmitSuccessful</code> 可以顺手做成功提示。</li>
+</ol>
+
+<div class="think">
+  <div class="think-q">警惕「前端校验过了就安全」的错觉：浏览器里的任何校验都能被 F12 或 curl 绕过。前端校验管体验（快），服务端校验管底线（对）——就像 @Valid 拦不住直接调用 service 的代码，该有的防线一层不能少。</div>
+</div>
+</section>
+
+<!-- ═══ 第5站：触发时机 + 收官 ═══ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>错误什么时候冒出来：校验触发时机</h2></div>
+
+<p>最后一块拼图是体验细节：校验几时跑？默认 <code>mode="onSubmit"</code>——点提交才校验，第一次提交前用户得不到任何反馈；提交过后进入 <code>reValidateMode</code>（默认 onChange），改一个字验一次。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>RegisterForm.tsx</b> · 推荐配置：失焦即验，改后即验</span></div>
+  <pre><code>useForm&lt;RegisterValues&gt;({
+  resolver: zodResolver(registerSchema),
+  mode: "onBlur",             <span class="c">// 离开输入框就校验</span>
+  reValidateMode: "onChange", <span class="c">// 提交过后，边改边校验</span>
+});</code></pre>
+</div>
+
+<table>
+  <thead>
+    <tr><th>mode</th><th>校验时机</th><th>适用</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>onSubmit</code>（默认）</td><td>点提交才校验</td><td>最省性能，但反馈最晚</td></tr>
+    <tr><td><code>onBlur</code></td><td>字段失焦时</td><td>推荐：打字不被打扰，离开就知对错</td></tr>
+    <tr><td><code>onChange</code></td><td>每敲一键就校验</td><td>即时但吵，重校验会卡打字</td></tr>
+    <tr><td><code>onTouched</code></td><td>首次失焦后转 onChange</td><td>折中方案，体验最佳</td></tr>
+  </tbody>
+</table>
+
+<p>另有 <code>trigger()</code> 可以不等提交主动触发校验（单字段或全表），是「下一步」式分步表单的标配。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>表单 = 高频、局部、带校验的复杂客户端状态；裸 useState 三宗罪：每字段一个 state、每键一次重渲染、校验散落。</li>
+    <li>React Hook Form 用 register 登记非受控 input：值住 DOM、每键零重渲染；handleSubmit 校验通过才放行业务函数。</li>
+    <li>Zod schema 是前端版 Bean Validation：规则唯一来源、z.infer 反推类型、refine 收留跨字段规则、coerce 处理字符串转型。</li>
+    <li>提交闭环：isSubmitting 防重复、setError 把服务端错误精确回流字段（整表错误放 root）、reset 复位；服务端校验永远不能省。</li>
+    <li>mode 控制校验触发时机，onBlur / onTouched 是体验优选。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇把第 17 篇分类里最闹腾的客户端状态收服了：RHF 负责收集（非受控、零重渲染），Zod 负责规则（声明式、可复用），两者合体就是 @ModelAttribute + Bean Validation 的前端镜像。但注册成功那一刻的登录态、填了一半的表单草稿，都指向同一个诉求——<strong>刷新页面别丢</strong>。卷三的最后一站，我们把状态「落盘」并连进多端：下一篇第 22 篇，状态持久化与多端同步。</p>
+</div>
+</section>
+
+</body>
+</html>

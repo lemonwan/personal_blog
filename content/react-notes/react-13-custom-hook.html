@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自定义 Hook：复用的正确姿势</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：三段式样板代码 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>三段式样板代码，是时候抽了</h2></div>
+
+<p>第 12 篇的结尾留了个尾巴：ref 和 effect 总是成对出现，复制粘贴了一遍又一遍。今天正面解决「Hooks 怎么复用」这件事。先看一段你这几天一定写腻了的代码——「初始值从 localStorage 读，变化时写回去」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>FontSizeSetting.tsx</b> · 手写 localStorage 同步</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function FontSizeSetting() {
+  <span class="c">// 初始化：惰性函数读一次 localStorage（第 4 篇的惰性初始化）</span>
+  const [size, setSize] = useState(() =&gt; {
+    const saved = localStorage.getItem("font-size");
+    return saved ? Number(saved) : 14;
+  });
+
+  useEffect(() =&gt; {
+    localStorage.setItem("font-size", String(size));
+  }, [size]);
+
+  return (
+    &lt;input type="range" value={size}
+      onChange={e =&gt; setSize(Number(e.target.value))} /&gt;
+  );
+}</code></pre>
+</div>
+
+<p>明天做主题色设置、后天做侧边栏折叠开关——同样的「读初始值 + 变化时写回」套路再来两遍。抽！把「state + 成对的 effect」整体搬进一个普通函数，名字以 <code>use</code> 开头：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useLocalStorage.ts</b> · 第一个自定义 Hook</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function useLocalStorage&lt;T&gt;(key: string, initialValue: T) {
+  const [value, setValue] = useState&lt;T&gt;(() =&gt; {
+    const saved = localStorage.getItem(key);
+    return saved !== null ? (JSON.parse(saved) as T) : initialValue;
+  });
+
+  useEffect(() =&gt; {
+    localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+
+  return [value, setValue] as const; <span class="c">// as const：推断成元组，第 4 站细说</span>
+}
+
+<span class="c">// 用起来和 useState 一个手感</span>
+const [size, setSize] = useLocalStorage("font-size", 14);</code></pre>
+</div>
+
+<p>这就是自定义 Hook 的全部定义：<strong>一个名字以 <code>use</code> 开头、内部调用了其他 Hook 的普通函数</strong>。没有注册、没有装饰器、没有基类——它就是函数，React 靠名字认它。而且名字不是风格建议，是硬规则：<code>eslint-plugin-react-hooks</code> 会强制检查 use 前缀，并据此判断「这个函数里能不能调 Hook」（规则全貌第 16 篇系统讲）。</p>
+</section>
+
+<!-- ═══════════════ 第2站：复用逻辑而非状态 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>本质：复用「逻辑」，不复用「状态」</h2></div>
+
+<p>最容易误解的一点：两个组件调用同一个 <code>useLocalStorage</code>，它们共享状态吗？<strong>不。</strong>Hook 不是被共享的仓库，而是被执行的代码——每次调用，内部的 <code>useState</code>/<code>useEffect</code> 都会为<strong>当前这个组件</strong>新开一套独立状态：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TwoPanels.tsx</b> · 同一个 Hook 的两次调用</span></div>
+  <pre><code>function FontSizePanel() {
+  <span class="c">// 状态 #1：只属于 FontSizePanel</span>
+  const [size, setSize] = useLocalStorage("font-size", 14);
+  return &lt;input value={size} onChange={e =&gt; setSize(Number(e.target.value))} /&gt;;
+}
+
+function ThemePanel() {
+  <span class="c">// 状态 #2：只属于 ThemePanel，和上面的 size 毫无关系</span>
+  const [theme, setTheme] = useLocalStorage("theme", "light");
+  return (
+    &lt;button onClick={() =&gt; setTheme(theme === "light" ? "dark" : "light")}&gt;
+      {theme}
+    &lt;/button&gt;
+  );
+}</code></pre>
+</div>
+
+<p>逻辑模板只有一份，状态副本一人一份——这才是「复用」的准确含义：<strong>复用的是「有状态的逻辑」，而不是状态本身</strong>。想让多个组件读写「同一份」状态，抽 Hook 解决不了，那是状态提升（第 14 篇）和 Context（第 15 篇）的课题。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="两个组件调用同一个自定义 Hook，状态各自隔离">
+  <defs>
+    <marker id="arr-hook" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <rect x="60" y="36" width="180" height="36" rx="4" fill="#FAC94A"/>
+  <text x="150" y="58" text-anchor="middle" font-size="13" fill="#1C1C1C">FontSizePanel</text>
+  <rect x="380" y="36" width="180" height="36" rx="4" fill="#FAC94A"/>
+  <text x="470" y="58" text-anchor="middle" font-size="13" fill="#1C1C1C">ThemePanel</text>
+  <line x1="150" y1="74" x2="250" y2="112" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-hook)"/>
+  <line x1="470" y1="74" x2="370" y2="112" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-hook)"/>
+  <rect x="190" y="118" width="240" height="40" rx="4" fill="#C2410C"/>
+  <text x="310" y="142" text-anchor="middle" font-size="13" fill="#FFFFFF">useLocalStorage(key, init)</text>
+  <line x1="250" y1="162" x2="165" y2="204" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-hook)"/>
+  <line x1="370" y1="162" x2="455" y2="204" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-hook)"/>
+  <rect x="80" y="208" width="170" height="44" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="165" y="229" text-anchor="middle" font-size="12" fill="#1C1C1C">状态 #1</text>
+  <text x="165" y="245" text-anchor="middle" font-size="11" fill="#8C8676">size = 14</text>
+  <rect x="370" y="208" width="170" height="44" rx="4" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="455" y="229" text-anchor="middle" font-size="12" fill="#1C1C1C">状态 #2</text>
+  <text x="455" y="245" text-anchor="middle" font-size="11" fill="#8C8676">theme = dark</text>
+  <text x="80" y="284" font-size="12" fill="#8C8676">同一个 Hook，两次调用：逻辑是同一份模板，状态是两份独立副本</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>两个组件调用同一个自定义 Hook：逻辑复用，状态隔离</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：单例 Bean vs new 实例</div>
+  <p>调用自定义 Hook，不是去单例注册表里拿共享 Bean，而是执行一个工厂方法 <strong>new 出一个新对象</strong>——逻辑（类的方法）一模一样，状态（实例字段）各异。这也解释了为什么 Java 的 static 工具方法装不下「有状态的逻辑」：工具类没有实例，而 Hook 每次调用都现场造一个。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：实战再抽两个 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>实战再抽两个：useDebounce 与 useFetch</h2></div>
+
+<p>第二个高频样板：<strong>防抖</strong>。搜索框每敲一个字符就发一次请求，后端同学会来找你喝茶。标准解法是「值停稳 300ms 再放行」——又是「state + effect + 清理」的固定搭配，抽：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useDebounce.ts</b> · 值停稳了才往下传</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function useDebounce&lt;T&gt;(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() =&gt; {
+    const id = setTimeout(() =&gt; setDebounced(value), delay);
+    return () =&gt; clearTimeout(id); <span class="c">// value 又变了：拆掉旧闹钟，重新计时</span>
+  }, [value, delay]);
+
+  return debounced;
+}
+
+<span class="c">// 用法：输入随便抖，只有停稳的值会往下游走</span>
+const debouncedKeyword = useDebounce(keyword);
+
+useEffect(() =&gt; {
+  search(debouncedKeyword);
+}, [debouncedKeyword]);</code></pre>
+</div>
+
+<p>注意这枚 Hook 的工作方式：<code>keyword</code> 本身还是调用方的 state，<code>useDebounce</code> 只是在旁边养了一个「慢半拍的影子」。清理函数（第 9 篇）在这里是主角——每次 value 变化先拆旧闹钟，防抖的正确性全靠它。</p>
+
+<p>第三个：<strong>取数</strong>。state 管结果、effect 管同步、cleanup 管善后，全套本卷零件：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useFetch.ts</b> · 简版取数 Hook</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function useFetch&lt;T&gt;(url: string) {
+  const [data, setData] = useState&lt;T | null&gt;(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState&lt;Error | null&gt;(null);
+
+  useEffect(() =&gt; {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    fetch(url, { signal: controller.signal })
+      .then(r =&gt; {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise&lt;T&gt;;
+      })
+      .then(setData)
+      .catch((e: Error) =&gt; {
+        if (e.name !== "AbortError") setError(e); <span class="c">// 主动取消不算错误</span>
+      });
+
+    <span class="c">// cleanup：url 变了 / 组件卸载了，掐断旧请求（第 9 篇）</span>
+    return () =&gt; controller.abort();
+  }, [url]);
+
+  return { data, loading, error };
+}</code></pre>
+</div>
+
+<p>声明：这是教学简版——没有缓存、没有重试、没有竞态序号守卫（AbortController 挡掉了大半）。取数的完整坑位与正规军 TanStack Query，第 32、33 篇专门展开。此处你只需要看懂：<strong>所谓取数 Hook，就是 useState 管结果 + useEffect 管同步 + cleanup 管善后</strong>，没有任何新知识。</p>
+</section>
+
+<!-- ═══════════════ 第4站：Java 对照与返回值设计 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>它像 Java 里的什么？返回值怎么设计？</h2></div>
+
+<p>对照你最熟悉的几种 Java 复用手段，给自定义 Hook 定个位：</p>
+
+<table>
+  <thead>
+    <tr><th>Java 复用手段</th><th>像在哪 / 差在哪</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>工具类 static 方法</td><td>同样「抽出去复用」，但 static 方法<strong>没有状态</strong>，装不下 useState/useEffect——工具类复用不了「有状态的逻辑」，Hook 补的正是这块</td></tr>
+    <tr><td>模板方法模式</td><td>都是「骨架固定、细节填充」，但模板方法靠<strong>继承</strong>耦合，Hook 靠<strong>函数调用</strong>组合，更轻、更扁</td></tr>
+    <tr><td>AOP 切面</td><td>都是「横切逻辑与业务分离」，但 AOP 把逻辑<strong>织入</strong>到你看不见的地方，Hook 的调用<strong>显式写在代码里</strong>——看得见，才好调试</td></tr>
+    <tr><td>策略模式</td><td>都靠传参定制行为，但 Hook 自带状态与生命周期，相当于「策略 + 自带状态机」的合体</td></tr>
+  </tbody>
+</table>
+
+<p>一句话定位：<strong>自定义 Hook 是 React 里的「逻辑组合单元」</strong>——比工具类多状态，比模板方法少继承，比 AOP 更显式。</p>
+
+<h3>Hook 可以组合 Hook</h3>
+
+<p>自定义 Hook 内部调用其他 Hook（内置的或自定义的）完全合法，规则与在组件里用一模一样：最顶层调用、不塞进条件与循环（为什么，第 16 篇）。于是 Hook 之间可以像积木一样搭：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useDebouncedFetch.ts</b> · 三行，白拿一层防抖</span></div>
+  <pre><code><span class="c">// useDebouncedFetch = useDebounce ⊕ useFetch，Hook 组合 Hook，规则不变</span>
+function useDebouncedFetch&lt;T&gt;(url: string, delay = 300) {
+  const debouncedUrl = useDebounce(url, delay);
+  return useFetch&lt;T&gt;(debouncedUrl);
+}</code></pre>
+</div>
+
+<h3>返回值：元组还是对象？</h3>
+
+<ul>
+  <li><strong>两个以内、顺序稳定</strong>（尤其想保持 useState 手感时）→ 元组 + <code>as const</code>：解构随意改名，<code>const [size, setSize] = ...</code>；</li>
+  <li><strong>三项以上、或日后可能扩展</strong> → 对象：按名取用 <code>const { data, loading, error } = ...</code>，加字段不会破坏调用方的解构顺序（useFetch 选它就是这个原因）。</li>
+</ul>
+
+<p>经验值：一个「值 + 设置器」就学 useState 用元组；一旦有「返回包」的味道就学 useFetch 用对象。拿不准就对象，最不容易坏。</p>
+</section>
+
+<!-- ═══════════════ 第5站：何时抽与回顾 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>什么时候该抽？一张自检清单</h2></div>
+
+<p>最后回答「什么时候动手」。抽 Hook 成本极低，但也不是万物皆 Hook：</p>
+
+<table>
+  <thead>
+    <tr><th>信号</th><th>判断</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>同一套 state + effect 组合出现在第 2 个组件里</td><td>立刻抽——不用等第三次（Hook 抽取成本远低于类继承重构）</td></tr>
+    <tr><td>多个组件要读写「同一份」数据</td><td>抽 Hook 没用：它复用逻辑不共享状态，走状态提升 / Context（第 14、15 篇）</td></tr>
+    <tr><td>一段纯计算，无状态无副作用</td><td>别抽 Hook，抽普通函数就够了</td></tr>
+    <tr><td>只是渲染期算得贵</td><td>那是 <code>useMemo</code> 的活（第 11 篇），不是新 Hook 的活</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>自定义 Hook = <strong>use 开头 + 内部调用其他 Hook 的普通函数</strong>；命名是 lint 强制的硬规则。</li>
+    <li>它复用的是「有状态的逻辑」，<strong>不是状态本身</strong>——每次调用状态各自隔离（new 实例，不是单例）。</li>
+    <li>三个模板在手：<code>useLocalStorage</code>（读写同步）、<code>useDebounce</code>（值停稳再传）、<code>useFetch</code>（state 管结果 + effect 管同步 + cleanup 善后）。</li>
+    <li>Hook 可组合 Hook，规则与内置 Hook 一致；返回值双值用元组 <code>as const</code>、多值用对象。</li>
+    <li><strong>自定义 Hook 是 Hook 规则约束下的最小复用单元</strong>——再往下的复用诉求，就该想想是不是「共享状态」而非「复用逻辑」了。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>把重复的「state + effect」固定搭配抽成 use 开头的函数，你就拥有了 React 最重要的复用手段：useLocalStorage、useDebounce、useFetch 三个模板背后是同一条公式——<strong>状态是每次调用独立的一份，逻辑是所有人共享的一份模板</strong>。但这条公式也划出了边界：当两个组件需要的恰恰是「同一份状态」时，抽一百个 Hook 也无济于事，状态得挪窝——挪到它们最近的公共父组件。下一篇第 14 篇：<strong>状态提升与单向数据流</strong>，React 可预测性的基石。见。</p>
+</div>
+</section>
+
+</body>
+</html>

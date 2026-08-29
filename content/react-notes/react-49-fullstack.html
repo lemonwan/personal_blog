@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从 React 到全栈：一个项目打通</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：选品与架构 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>选品与架构：一个书签管理器</h2></div>
+
+<p>四十八篇下来，知识在专栏里是分章的，但真实项目是「一次性」的：一个需求砸过来，路由、状态、取数、表单、部署同时到场。本篇就用一个小而完整的产品，把这六章串成一次真实交付。</p>
+
+<p>选品定为<strong>书签管理器（Bookmark）</strong>，理由很工程化：</p>
+
+<ul>
+  <li>登录、增删改查、分页、关键字搜索——麻雀虽小五脏俱全，全书的知识点几乎都有落点；</li>
+  <li>数据模型简单（一张 bookmark 表 + tags 字段），后端是你的老本行，注意力可以全部留给前端；</li>
+  <li>业余时间两周能做完——学游泳先下浅水区，做产品先做能做完的。</li>
+</ul>
+
+<p>架构一句话：<strong>Next.js（App Router）做前端 + 你熟悉的 Spring Boot 做 REST + JWT 后端</strong>。分工如下：</p>
+
+<table>
+  <thead>
+    <tr><th>模块</th><th>技术选型</th><th>知识出处</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>数据建模与接口</td><td>Spring Boot + MySQL + OpenAPI</td><td>老本行</td></tr>
+    <tr><td>页面与路由</td><td>Next.js App Router、动态路由</td><td>第 30/31 篇、第 44 篇</td></tr>
+    <tr><td>登录守卫</td><td>JWT + middleware</td><td>第 35 篇</td></tr>
+    <tr><td>服务端数据</td><td>TanStack Query</td><td>第 17/33 篇</td></tr>
+    <tr><td>UI 状态</td><td>Zustand</td><td>第 18 篇</td></tr>
+    <tr><td>表单</td><td>React Hook Form + Zod</td><td>第 21 篇</td></tr>
+    <tr><td>类型体系</td><td>TS interface 对齐后端 DTO</td><td>第 28 篇</td></tr>
+    <tr><td>部署</td><td>Nginx + jar + CI</td><td>第 42 篇</td></tr>
+  </tbody>
+</table>
+
+<p>请求有两条路：首屏由 Next.js 服务端组件直接 fetch Spring Boot（服务器对服务器）；交互由客户端组件走 /api 反代——浏览器只见一个域名，跨域不存在，JWT 由后端签发与校验。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Next.js 扮演 BFF</div>
+  <p>这套结构你在微服务里见过：Next.js 不只是「画页面的」，它同时是 SSR 引擎和前端的门面——转发请求（/api 反代）、拦截未登录（middleware）、聚合首屏数据（服务端组件 fetch）。角色约等于 BFF/gateway：对外统一入口，对内才是真正的服务。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：第一步 契约先行 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>第一步：契约先行——OpenAPI 就是前端的「建表 SQL」</h2></div>
+
+<p>后端做需求，你从来不先写 Controller：先评审表结构，再定 DTO，最后才是接口实现。全栈项目同样倒着来——<strong>先把 API 契约钉死，前后端才能并行开工</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>openapi.yaml</b> · 书签模块核心接口（片段）</span></div>
+  <pre><code>paths:
+  /api/bookmarks:
+    get:                          <span class="c"># 列表：分页 + 关键字</span>
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 0 } }
+        - { name: q,    in: query, schema: { type: string } }
+      responses:
+        "200": { description: 分页书签列表 }
+    post:                         <span class="c"># 新建：需要登录</span>
+      security: [ { bearerAuth: [] } ]
+      responses:
+        "201": { description: 创建成功 }
+  /api/bookmarks/{id}:
+    get:
+      responses:
+        "200": { description: 书签详情 }
+        "404": { description: 不存在 }</code></pre>
+</div>
+
+<p>契约定了，前端的「表结构」就是 TS 类型——和后端 DTO 逐字段对齐（第 28 篇说的「类型即文档」）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>types/api.ts</b> · 前端侧的契约落地</span></div>
+  <pre><code><span class="c">// 与后端的 PageResp&lt;Bookmark&gt; 一一对应</span>
+export interface PageResp&lt;T&gt; {
+  content: T[];
+  totalElements: number;
+  page: number;
+  size: number;
+}
+
+export interface Bookmark {
+  id: number;
+  title: string;
+  url: string;
+  tags: string[];
+  createdAt: string;   <span class="c">// ISO 字符串——和后端 LocalDateTime 的序列化格式要提前对齐</span>
+}
+
+export interface NewBookmark {
+  title: string;
+  url: string;
+  tags: string[];
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：先建表，再写应用</div>
+  <p>OpenAPI 之于前后端，约等于 DDL 之于应用代码：两边共同认可的源头事实。更进一步可以全自动化——springdoc 从 Controller 导出 openapi.json，openapi-typescript 生成 TS 类型，契约漂移在 CI 直接编译报错，相当于契约测试，只是「测试」变成了「编译」。</p>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>契约先行：OpenAPI 定接口形状，TS interface 定前端类型，两边对齐后再写页面。</li>
+    <li>类型对齐可以自动化：springdoc 导出 → openapi-typescript 生成，漂移在 CI 就死掉，不用人肉对字段。</li>
+    <li>提前对齐序列化细节（日期格式、分页结构、错误码），这些坑比字段改名深得多。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：第二步 页面与路由 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>第二步：页面与路由——服务端出骨架，客户端出交互</h2></div>
+
+<p>路由结构五分钟定完（App Router 目录即路由，第 30 篇）：<code>layout.tsx</code> 全局布局与 Providers、<code>login</code> 登录页、<code>bookmarks</code> 列表页、<code>bookmarks/[id]</code> 详情页（第 31 篇动态路由）、<code>middleware.ts</code> 登录守卫（第 35 篇）。</p>
+
+<p>列表页用服务端组件写——取数和渲染一气呵成，首屏数据在服务器上就变成了 HTML（第 44 篇 RSC）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/bookmarks/page.tsx</b> · 服务端组件</span></div>
+  <pre><code>import { cookies } from "next/headers";
+
+export default async function BookmarksPage() {
+  const token = (await cookies()).get("bk_token")?.value;
+
+  const res = await fetch("http://api:8080/api/bookmarks?page=0", {
+    headers: { Authorization: `Bearer ${token ?? ""}` },
+  });
+  const data: PageResp&lt;Bookmark&gt; = await res.json();
+
+  return (
+    &lt;main&gt;
+      &lt;h1&gt;我的书签（{data.totalElements}）&lt;/h1&gt;
+      &lt;BookmarkExplorer initial={data} /&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+</div>
+
+<p>首屏之后的搜索、翻页交互交给客户端组件，服务端组件把数据作为 props 递下去：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/bookmarks/BookmarkExplorer.tsx</b> · 客户端组件</span></div>
+  <pre><code>"use client";
+
+import { useBookmarks } from "@/hooks/useBookmarks";
+import { useUiStore } from "@/stores/uiStore";
+
+export function BookmarkExplorer({ initial }: { initial: PageResp&lt;Bookmark&gt; }) {
+  const keyword = useUiStore((s) =&gt; s.keyword);
+  const page = useUiStore((s) =&gt; s.page);
+  const { data, isFetching } = useBookmarks(keyword, page, initial);
+
+  <span class="c">// 搜索框、分页器、书签卡片……（骨架从略）</span>
+  return &lt;BookmarkList items={data?.content ?? []} loading={isFetching} /&gt;;
+}</code></pre>
+</div>
+
+<p>最后补守卫：未登录访问 /bookmarks，middleware 在请求进页面前就拦下（第 35 篇）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>middleware.ts</b> · 受保护路由</span></div>
+  <pre><code>import { NextRequest, NextResponse } from "next/server";
+
+export function middleware(req: NextRequest) {
+  const token = req.cookies.get("bk_token");
+  if (!token) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+  return NextResponse.next();
+}
+
+export const config = { matcher: ["/bookmarks/:path*"] };</code></pre>
+</div>
+
+<p>注意边界：middleware 只判断「有没有 token」，<strong>JWT 签名校验永远在后端</strong>——前端守卫只是体验优化，不是安全边界。和你写后端时「不能只靠网关鉴权」是同一条军规。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Filter 拦截器跑在了边缘</div>
+  <p>middleware 就是 Servlet Filter / Spring Interceptor 的位置：请求进页面之前先过闸。区别是它默认跑在轻量沙箱里，快但能力有限——只做「查 cookie、重定向」这类轻活，重鉴权交给后端（下一篇第 50 篇讲这个「边缘」是什么）。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：第三步 状态与数据层 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>第三步：状态与数据层——两本账分开管</h2></div>
+
+<p>第 17 篇的核心判断在这里兑现：服务端数据是数据库的缓存副本，UI 状态是用户此刻的操作痕迹。<strong>两本账分开管，项目越大越显出对</strong>。第一本账交给 TanStack Query：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>hooks/useBookmarks.ts</b> · 服务端数据层</span></div>
+  <pre><code>import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import type { Bookmark, NewBookmark, PageResp } from "@/types/api";
+
+export function useBookmarks(q: string, page: number, initial: PageResp&lt;Bookmark&gt;) {
+  return useQuery({
+    queryKey: ["bookmarks", q, page],     <span class="c">// key 变了自动重新取数</span>
+    queryFn: () =&gt;
+      api.get&lt;PageResp&lt;Bookmark&gt;&gt;("/bookmarks", { params: { q, page } }),
+    initialData: initial,                 <span class="c">// 服务端组件给的首屏数据直接复用</span>
+  });
+}
+
+export function useAddBookmark() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: NewBookmark) =&gt; api.post&lt;Bookmark&gt;("/bookmarks", body),
+    onSuccess: () =&gt; qc.invalidateQueries({ queryKey: ["bookmarks"] }),
+    <span class="c">// 新增成功让列表缓存失效——界面自动回到「数据库的最新状态」</span>
+  });
+}</code></pre>
+</div>
+
+<p>第二本账交给 Zustand——搜索词、分页、视图模式这些「用户此刻的心思」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>stores/uiStore.ts</b> · UI 状态层</span></div>
+  <pre><code>import { create } from "zustand";
+
+interface UiState {
+  keyword: string;
+  page: number;
+  setKeyword: (k: string) =&gt; void;
+  setPage: (p: number) =&gt; void;
+}
+
+export const useUiStore = create&lt;UiState&gt;((set) =&gt; ({
+  keyword: "",
+  page: 0,
+  setKeyword: (k) =&gt; set({ keyword: k, page: 0 }),   <span class="c">// 换词回第一页，细节见真章</span>
+  setPage: (p) =&gt; set({ page: p }),
+}));</code></pre>
+</div>
+
+<p>新建书签的表单，RHF 管状态、Zod 管校验，类型直接从 schema 推导（第 21 篇）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>BookmarkForm.tsx</b> · 表单核心片段</span></div>
+  <pre><code>import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+
+const schema = z.object({
+  title: z.string().min(1, "标题必填"),
+  url: z.string().url("URL 不合法"),
+  tags: z.array(z.string()).max(5, "最多 5 个标签"),
+});
+type FormInput = z.infer&lt;typeof schema&gt;;   <span class="c">// 类型从 schema 推导，不用写两遍</span>
+
+const form = useForm&lt;FormInput&gt;({
+  resolver: zodResolver(schema),
+  defaultValues: { title: "", url: "", tags: [] },
+});</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：读模型缓存与会话草稿</div>
+  <p>TanStack Query 管的服务端数据，是你后端眼里的「读模型缓存」：源头在数据库，前端只做缓存与失效——invalidateQueries 就是失效策略，QueryClient 就是缓存容器。Zustand 管的是「会话内草稿」：不落库、可丢弃。最忌讳把接口数据再 useState 存一份副本——缓存上再套缓存，过期了都没人通知。</p>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>服务端数据 → TanStack Query：缓存、失效、重取全自动，<code>initialData</code> 无缝衔接服务端首屏。</li>
+    <li>UI 状态 → Zustand：小、快、无样板；联动规则写在 store 里最清晰。</li>
+    <li>表单 → RHF + Zod：类型从 schema 推导，校验规则一处定义、两端各认一半。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：第四步 部署与全书复盘 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>第四步：部署上线，与一次全书复盘</h2></div>
+
+<p>上线结构沿用第 42 篇的一切：Nginx 守 80，静态与回退路由照配，<code>/api</code> 反代进 Spring Boot（8080 不对公网暴露），JWT 后端签发与校验。最小拓扑用一个 compose 说清：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>docker-compose.yml</b> · 一台 2C4G 能跑的最小全栈</span></div>
+  <pre><code>services:
+  web:                      <span class="c"># 前端：第 42 篇的多阶段构建镜像（Nginx + dist）</span>
+    build: ./web
+    ports:
+      - "80:80"             <span class="c"># 静态资源、回退路由、/api 反代都在这</span>
+  api:                      <span class="c"># 后端：Spring Boot jar 的镜像</span>
+    build: ./api
+    expose:
+      - "8080"              <span class="c"># 不对公网暴露，只有 web 访得到</span>
+  db:
+    image: mysql:8.4
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  db_data:</code></pre>
+</div>
+
+<p>CI 沿用第 42 篇那套：前端 build/镜像，后端 <code>mvn verify</code>/镜像，合并后 <code>docker compose up -d</code> 拉起。到这里四步走完：<strong>契约 → 页面 → 状态 → 上线</strong>，一个产品活了。停下来复盘：哪一章的知识用在了哪一步？</p>
+
+<table>
+  <thead>
+    <tr><th>步骤</th><th>做了什么</th><th>知识点</th><th>出处</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>① 契约</td><td>OpenAPI 定接口，TS interface 定类型</td><td>类型即契约</td><td>第 28 篇</td></tr>
+    <tr><td>② 路由</td><td>App Router 布局、<code>[id]</code> 动态路由</td><td>嵌套与动态路由</td><td>第 30/31 篇</td></tr>
+    <tr><td>② 取数</td><td>服务端组件首屏直出 + 客户端交互</td><td>RSC 双组件模型</td><td>第 44 篇</td></tr>
+    <tr><td>② 守卫</td><td>middleware + JWT 分工</td><td>认证与路由守卫</td><td>第 35 篇</td></tr>
+    <tr><td>③ 服务端数据</td><td>TanStack Query 缓存与失效</td><td>服务端状态的概念与工具</td><td>第 17/33 篇</td></tr>
+    <tr><td>③ UI 状态</td><td>Zustand 管搜索词、分页</td><td>轻量客户端状态</td><td>第 18 篇</td></tr>
+    <tr><td>③ 表单</td><td>RHF + Zod，类型从 schema 推导</td><td>表单状态管理</td><td>第 21 篇</td></tr>
+    <tr><td>④ 部署</td><td>Nginx + 反代 + CI + compose</td><td>SPA 部署全套</td><td>第 42 篇</td></tr>
+  </tbody>
+</table>
+
+<div class="think">
+  <div class="think-q">复盘时最扎眼的发现：难的从来不是某个 API 的用法，而是「什么东西该放哪」——服务端/客户端组件的边界（第 27 篇）、两类状态的分类（第 17 篇）、工具选型（第 20 篇）。这些架构判断力你在后端早练成了，转型最占便宜的就是这块。</div>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>五十篇的旅程只剩最后一篇。从第 1 篇那个「点击加一」的计数器，到今天一个契约先行、类型安全、首屏直出、自动部署的全栈产品——你已经能独立交付一个全栈产品了。这不是客套：建模、契约、路由、状态、表单、部署，每一环都亲手打通，每一环背后都有专栏某篇的原理托底。下一篇第 50 篇是全系列收官「前沿展望」：Server Actions、Partial Prerendering、边缘计算——看看这套刚建好的体系，正被哪些力量推向下一个十年。</p>
+</div>
+</section>
+
+</body>
+</html>

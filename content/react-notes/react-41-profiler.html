@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>性能监控与 React Profiler</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：两套指标，两把尺子 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>两套指标，两把尺子</h2></div>
+
+<p>性能卷走到这里，你手里攒了一整套手段：第 37 篇的 memo、第 38 篇的虚拟列表、第 39 篇的拆包、第 40 篇的构建。但后端老兵都懂：<strong>不会测量就等于不会优化</strong>——没看监控就改代码，那叫玄学调优。</p>
+
+<p>动手之前先分清：前端性能其实是两套完全不同的指标，量的是两件事。</p>
+
+<table>
+  <thead>
+    <tr><th>指标体系</th><th>测什么</th><th>用户的抱怨</th><th>后端类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>运行时渲染性能</strong></td><td>交互之后界面多快更新：点击、输入、滚动</td><td>「点了没反应」「打字掉帧」</td><td>接口 RT（P99 尾延迟最要命）</td></tr>
+    <tr><td><strong>页面加载性能</strong></td><td>从输入 URL 到内容可用的全过程</td><td>「白屏好几秒」「一直转圈」</td><td>冷启动到可对外服务的时间</td></tr>
+  </tbody>
+</table>
+
+<p>两套指标用不同工具测：运行时找 <strong>React DevTools 的 Profiler</strong>，加载找 <strong>Lighthouse 和 Web Vitals</strong>。搞混的代价是真金白银：首屏慢的人拼命加 memo（方向错了），列表卡的人忙着拆包（白忙一场）。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：可观测性思维的平移</div>
+  <p>后端你不会「感觉接口慢」就动手——先看 APM 的 P95/P99、慢调用榜单，再 profile 到方法。前端同款：Profiler 是火焰图，Lighthouse 是压测报告，Web Vitals 是 SLA 指标。本篇把这套流程装进肌肉记忆。</p>
+</div>
+
+<p>顺便立个规矩：优化必须「一次只改一处，改完复测」。攒一堆优化一起上线，好了不知谢谁、坏了不知赖谁——和你不会把十个重构混进一个提交，是同一个道理。</p>
+</section>
+
+<!-- ═══════════════ 第2站：Profiler 火焰图 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>Profiler：前端版火焰图</h2></div>
+
+<p>装好 React Developer Tools 浏览器扩展后，DevTools 会多出 Profiler 标签。使用流程固定四步：</p>
+
+<ol>
+  <li><strong>录制</strong>：点 Profiler 左上角的圆点开始记录；</li>
+  <li><strong>操作</strong>：在页面上做一遍真实用户动作——输入搜索、勾选待办；</li>
+  <li><strong>停止</strong>：得到火焰图（Flamegraph）；</li>
+  <li><strong>归因</strong>：找两类异常——<strong>渲染次数多</strong>（不该重渲染的也渲染了）和<strong>单次耗时长</strong>（self time 高的组件）。</li>
+</ol>
+
+<p>用过 JProfiler 或 async-profiler 的话，这张图不用教：横向是时间，条越宽越耗时，嵌套对应组件树。差别只有一个维度：Profiler 还统计<strong>每个组件渲染了几次</strong>——「次数」是 React 特有的病灶。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="Profiler 火焰图示意：修复前每次按键三百个 TodoRow 全部重渲染，修复后 memo 命中全部跳过，只剩必要的 ListPage 渲染">
+  <text x="50" y="26" font-size="12" font-weight="bold" fill="#8C8676">修复前</text>
+  <rect x="50" y="34" width="520" height="22" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="60" y="50" font-size="11" fill="#1C1C1C">App</text>
+  <rect x="50" y="62" width="520" height="22" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="60" y="78" font-size="11" fill="#1C1C1C">ListPage —— keyword 状态在这里，重渲染是必要的</text>
+  <rect x="50" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="74" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="98" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="122" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="146" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="170" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="194" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="218" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="242" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="266" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="290" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="314" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="338" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="362" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="386" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="410" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="434" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="458" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="482" y="90" width="20" height="22" fill="#C2410C"/>
+  <rect x="506" y="90" width="20" height="22" fill="#C2410C"/>
+  <text x="534" y="105" font-size="11" fill="#C2410C">×300</text>
+  <text x="310" y="132" text-anchor="middle" font-size="11" fill="#C2410C">TodoRow × 300：每敲一个字，全部重渲染</text>
+
+  <line x1="30" y1="146" x2="590" y2="146" stroke="#8C8676" stroke-width="1" stroke-dasharray="5 4"/>
+
+  <text x="50" y="170" font-size="12" font-weight="bold" fill="#8C8676">修复后（memo + 稳定引用）</text>
+  <rect x="50" y="178" width="520" height="22" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="60" y="194" font-size="11" fill="#1C1C1C">App</text>
+  <rect x="50" y="206" width="520" height="22" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1"/>
+  <text x="60" y="222" font-size="11" fill="#1C1C1C">ListPage —— 自身状态变化，重渲染仍是必要的</text>
+  <rect x="50" y="234" width="40" height="22" fill="#177245"/>
+  <text x="100" y="250" font-size="11" fill="#177245">TodoRow：memo 命中，props 引用没变，全部跳过</text>
+  <text x="310" y="282" text-anchor="middle" font-size="11" fill="#8C8676">整次 commit 耗时：220ms → 12ms（示意）</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>Profiler 火焰图（示意）：条越宽越耗时。修复前 300 个 TodoRow 全量重渲染，修复后 memo 命中全部跳过。</figcaption>
+</figure>
+
+<p>准备一个「看起来人畜无害」的列表页当靶子：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ListPage.tsx</b> · 待会儿进 Profiler 的靶子</span></div>
+  <pre><code>import { useState } from "react";
+
+type Todo = { id: number; title: string; done: boolean };
+
+function buildSeed(): Todo[] {
+  return [];  <span class="c">// 造 300 条测试数据，从略</span>
+}
+
+export default function ListPage() {
+  const [todos, setTodos] = useState&lt;Todo[]&gt;(buildSeed);
+  const [keyword, setKeyword] = useState("");
+
+  const toggle = (id: number) =&gt;
+    setTodos((prev) =&gt;
+      prev.map((t) =&gt; (t.id === id ? { ...t, done: !t.done } : t))
+    );
+
+  const visible = todos.filter((t) =&gt; t.title.includes(keyword));
+
+  return (
+    &lt;&gt;
+      &lt;input value={keyword} onChange={(e) =&gt; setKeyword(e.target.value)} /&gt;
+      &lt;ul&gt;
+        {visible.map((t) =&gt; (
+          &lt;TodoRow key={t.id} todo={t} onToggle={() =&gt; toggle(t.id)} /&gt;
+        ))}
+      &lt;/ul&gt;
+    &lt;/&gt;
+  );
+}
+
+function TodoRow({ todo, onToggle }: { todo: Todo; onToggle: () =&gt; void }) {
+  console.log("render:", todo.id);  <span class="c">// 面板里刷屏的那行日志就是它</span>
+  return (
+    &lt;li onClick={onToggle}&gt;
+      {todo.title} {todo.done ? "✓" : ""}
+    &lt;/li&gt;
+  );
+}</code></pre>
+</div>
+
+<p>录制后在输入框里敲一个字：ListPage 重渲染是必要的（keyword 变了），但 300 个 TodoRow 的条全部亮起，console 刷屏 300 行 render 日志——<strong>输入一个字母，300 行重算</strong>，这就是 Profiler 给你的实锤。录制时一次只测一个场景，先关掉无关的轮询和动画，变量不隔离，火焰图就是一锅粥。</p>
+</section>
+
+<!-- ═══════════════ 第3站：三大来源与修复 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>定位到病灶：重渲染三大来源</h2></div>
+
+<p>火焰图只负责指认「谁在多余的渲染」，开药方要回到第 37 篇总结的三大来源，逐一比对靶子：</p>
+
+<ol>
+  <li><strong>父级连带</strong>：ListPage 因 keyword 重渲染，子组件默认跟随——React 不知道你会不会用到新的 props；</li>
+  <li><strong>props 引用不稳定</strong>：<code>() =&gt; toggle(t.id)</code> 每次渲染都生成新函数，对 TodoRow 来说 props 「变了」；</li>
+  <li><strong>Context 整包变化</strong>：本例没有，但 Provider 的 value 是大对象时，改一个字段全家遭殃（拆 Context 第 37 篇讲过）。</li>
+</ol>
+
+<p>对症下药，两个改动：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ListPage.tsx</b> · memo + 稳定引用，双剑合璧</span></div>
+  <pre><code>import { useState, useCallback, memo } from "react";
+
+<span class="c">// memo：props 浅比较全相等就跳过重渲染（第 37 篇）</span>
+interface RowProps { todo: Todo; onToggle: (id: number) =&gt; void; }
+
+const TodoRow = memo(function TodoRow({ todo, onToggle }: RowProps) {
+  return (
+    &lt;li onClick={() =&gt; onToggle(todo.id)}&gt;
+      {todo.title} {todo.done ? "✓" : ""}
+    &lt;/li&gt;
+  );
+});
+
+export default function ListPage() {
+  const [todos, setTodos] = useState&lt;Todo[]&gt;(buildSeed);
+  const [keyword, setKeyword] = useState("");
+
+  <span class="c">// useCallback：把回调引用钉住，memo 才有得比</span>
+  const toggle = useCallback((id: number) =&gt; {
+    setTodos((prev) =&gt;
+      prev.map((t) =&gt; (t.id === id ? { ...t, done: !t.done } : t))
+    );
+  }, []);
+
+  const visible = todos.filter((t) =&gt; t.title.includes(keyword));
+
+  return (
+    &lt;&gt;
+      &lt;input value={keyword} onChange={(e) =&gt; setKeyword(e.target.value)} /&gt;
+      &lt;ul&gt;
+        {visible.map((t) =&gt; (
+          &lt;TodoRow key={t.id} todo={t} onToggle={toggle} /&gt;
+        ))}
+      &lt;/ul&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>注意 onToggle 变了：不再是每行一个新闭包，而是把 id 当参数传出去，引用全局稳定。复测：再敲一个字，TodoRow 一条不亮——todo 引用没变（filter 返回原对象）、toggle 被 useCallback 钉住，memo 全部命中；ListPage 自身照旧重渲染，那是必要成本。两个补刀：</p>
+
+<ul>
+  <li><strong>memo 不是免费的</strong>：浅比较也花时间，十几行的小组件不值得包。顺序永远是 Profiler 实锤 → 再 memo，反过来就是第 37 篇批评过的「无脑全面 memo」；</li>
+  <li><strong>行数上千还卡</strong>：memo 挡得住「不该渲染的」，挡不住「必须渲染的 500 行 DOM」。这时换武器——第 38 篇的虚拟列表，只渲染可视区那 20 行。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比：缓存命中条件</div>
+  <p>memo 跳过重渲染的前提是 props 逐项「相等」。你每次传新 lambda 过去，等于每次都用新 key 查缓存——永远 miss。useCallback / useMemo（第 11 篇）的意义就是把「缓存 key」钉稳，函数组件优化的硬前提。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：加载性能 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>加载性能：Web Vitals 与 Lighthouse</h2></div>
+
+<p>运行时解决「卡」，加载要解决「白屏久」。测量必须对着生产包——第 40 篇说过 dev/build 是两条链路，dev 没有压缩分包，指标全偏悲观。正确姿势：<code>npm run build</code> 后 <code>vite preview</code> 起本地服务，Lighthouse 对产物测。</p>
+
+<p>加载性能的行业标准是 Google 的 Web Vitals 三件套：</p>
+
+<table>
+  <thead>
+    <tr><th>指标</th><th>达标线</th><th>测什么</th><th>后端可观测性类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>LCP</strong>（最大内容绘制）</td><td>≤ 2.5s</td><td>首屏最大元素渲染完成，≈「页面可看了」</td><td>冷启动到首响</td></tr>
+    <tr><td><strong>INP</strong>（交互到下一帧）</td><td>≤ 200ms</td><td>全程所有交互延迟的近最差值</td><td>P99 RT</td></tr>
+    <tr><td><strong>CLS</strong>（累积布局偏移）</td><td>≤ 0.1</td><td>元素突然跳动、「骗走」用户点击的程度</td><td>错误率 / 事故率</td></tr>
+  </tbody>
+</table>
+
+<p>三个数字都有官方达标线，过线即「良好」。它们来自真实用户：上线后用 <code>web-vitals</code> 库上报到监控后台，就是前端的埋点。顺带纠正：<strong>2024 年 3 月起 INP 已正式取代 FID</strong>，还在教 FID 的教程可以合上了。</p>
+
+<p>Lighthouse 用法：DevTools 的 Lighthouse 面板选 Performance、Mobile、模拟限速，一键出报告——分数、指标实测值，还会把「首屏加载 2.1 MB JS」这类问题列成改进项清单。最常见的就是包体积过大，用 bundle 分析定位：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>vite.config.ts</b> · 构建时生成体积矩形树图</span></div>
+  <pre><code>import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { visualizer } from "rollup-plugin-visualizer";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    visualizer({ filename: "stats.html", gzipSize: true }),
+  ],
+});</code></pre>
+</div>
+
+<p>build 后打开 stats.html：每个方块是一个模块，<strong>面积即体积占比</strong>。一眼看到 echarts 占 40%？第 39 篇的 lazy 和 manualChunks 就知道该切谁了。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：jar 体积分析</div>
+  <p>后端拿到 200 MB 的 fat jar，你会看依赖树找最重的传递依赖、查重复引入。stats.html 就是前端的「依赖体积树」——rollup-plugin-visualizer 之于 bundle，约等于 mvn dependency:tree 之于 jar，都是把「黑盒的胖」拆成「可归因的胖」。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">Lighthouse 分数是体检报告不是 KPI：同一份产物换台机器、换个网络就漂移。盯「指标是否过线」（LCP ≤ 2.5s）比盯「92 还是 95 分」有意义得多。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：案例走查与 SOP ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>案例走查与 SOP</h2></div>
+
+<p>把本卷工具串成两条案例主线，从症状到药方走一遍：</p>
+
+<table>
+  <thead>
+    <tr><th>案例</th><th>症状</th><th>测量结果</th><th>归因</th><th>药方</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>列表页卡</td><td>输入搜索词时掉帧</td><td>Profiler：每次按键 300 个 TodoRow 全重渲染</td><td>父级连带 + 内联回调引用不稳</td><td>memo + useCallback；上千行上虚拟列表（第 38 篇）</td></tr>
+    <tr><td>首屏慢</td><td>Lighthouse 报 LCP 4.8s</td><td>Network：首屏拉 2.1 MB JS，其中 echarts 占 1 MB</td><td>单 bundle 全量加载</td><td>路由级 lazy + 重库级拆分 + hover 预取（第 39 篇）</td></tr>
+  </tbody>
+</table>
+
+<p>两条案例走的是同一条路，值得固化成 SOP——<strong>先测量、再归因、后优化</strong>：</p>
+
+<ol>
+  <li><strong>先测量</strong>：拿数字。Profiler 录制、Lighthouse 报告、Network 面板截图，没有数字不动手；</li>
+  <li><strong>再归因</strong>：把数字落到具体对象——哪个组件渲染多了、哪个模块体积大了。归因不到组件 / 模块级别的优化，都是赌博；</li>
+  <li><strong>后优化</strong>：一处改动，复测确认收益，再进行下一处。药方永远从测量结果里开，不从经验直觉里开。</li>
+</ol>
+
+<div class="crack">
+  <div class="crack-label">后端类比：排查慢接口的 SOP 逐字对应</div>
+  <p>先看监控锁定慢接口，再用 arthas / JProfiler 定位到方法行，改完回归压测——和「先测量、再归因、后优化」一模一样。跳过前两步直接「我觉得加个缓存就好了」，在哪个技术栈里都是事故来源。</p>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>前端性能两套指标：运行时渲染（≈接口 RT）用 Profiler 测，页面加载（≈冷启动）用 Lighthouse + Web Vitals 测，先分清再动手。</li>
+    <li>Profiler 流程：录制 → 复现场景 → 火焰图 → 找「渲染次数多 / self time 高」的组件 → 修复 → 复测，前端版 JProfiler。</li>
+    <li>不必要重渲染三大来源：父级连带、props 引用不稳定、Context 整包变化；武器是 memo、useCallback / useMemo、拆 Context（第 37 篇）。</li>
+    <li>Web Vitals 达标线：LCP ≤ 2.5s、INP ≤ 200ms（已取代 FID）、CLS ≤ 0.1；Lighthouse 必须测生产包，stats.html 归因 bundle 体积。</li>
+    <li>固化 SOP：先测量、再归因、后优化，一次一处、改完复测。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>本篇为性能卷收口：memo、虚拟列表、拆包，全部装进「先测量、再归因、后优化」的流程里，像排查慢接口一样排查慢页面。至此开发、构建、优化都齐了，只差最后一公里——怎么把 dist 交到用户手上：Nginx 怎么配、CDN 怎么挂、CI 怎么跑。下一篇第 42 篇「部署」，为第六卷收官。</p>
+</div>
+</section>
+
+</body>
+</html>

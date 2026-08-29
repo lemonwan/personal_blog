@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hooks 规则与十大常见陷阱</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：两条规则与槽位机制 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>两条规则，与它们背后的「槽位」</h2></div>
+
+<p>卷二从第 9 篇到第 15 篇，把常用 Hook 挨个讲了一遍。用法之外，官方给 Hooks 立的规矩只有两条：</p>
+
+<ol>
+  <li><strong>只在最顶层调用</strong>——不要在条件判断、循环、嵌套函数里调用 Hook；</li>
+  <li><strong>只在 React 函数组件或自定义 Hook 里调用</strong>——普通 JS 函数、类组件、事件处理器都不行。</li>
+</ol>
+
+<p>先看反面教材，这段代码看起来无害，实则直接把组件搞坏：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ Chat.tsx</b> · 在条件里调 Hook</span></div>
+  <pre><code>function Chat({ userId }: { userId: number | null }) {
+  const [name, setName] = useState("");        <span class="c">// 第 1 个 Hook</span>
+  <span class="c">// ❌ 条件里调 Hook：userId 为空时，这个 useState 不执行</span>
+  if (userId !== null) {
+    const [online, setOnline] = useState(false);   <span class="c">// 第 2 个 Hook</span>
+  }
+  const [draft, setDraft] = useState("");      <span class="c">// 第 3 个 Hook</span>
+}</code></pre>
+</div>
+
+<p>为什么 React「管这么宽」？因为 <strong>React 不靠名字、不靠变量，只靠「调用顺序」区分同一组件里的多个 Hook</strong>。第一次渲染时，React 按调用顺序给每个 Hook 发一个「槽位」（内部是一条链表）：<code>useState("")</code> 占 slot[0]、<code>useState(false)</code> 占 slot[1]、第三个 <code>useState("")</code> 占 slot[2]。之后每次渲染都按同样的顺序「对号入座」——第 1 次调用读 slot[0]，第 2 次读 slot[1]，完全按位置匹配。</p>
+
+<p>现在看条件调用为什么是灾难。组件先在 <code>userId</code> 有值的渲染里登记满 3 个槽位；随后某次渲染 <code>userId</code> 为 <code>null</code>，第 2 个 <code>useState</code> 没执行——于是第 3 个 <code>useState</code>（draft）变成了「本次的第 2 次调用」：</p>
+
+<table>
+  <thead><tr><th>本次第 n 次调用</th><th>读到哪个槽位</th><th>结果</th></tr></thead>
+  <tbody>
+    <tr><td>第 1 次（name）</td><td><code>slot[0]</code></td><td>✅ 正好是 name</td></tr>
+    <tr><td>第 2 次（draft 的 useState）</td><td><code>slot[1]</code></td><td>❌ 读到了 <code>online</code> 的值——状态串台</td></tr>
+    <tr><td>（没有第 3 次调用）</td><td><code>slot[2]</code></td><td>本轮无人读取，draft 状态丢失</td></tr>
+  </tbody>
+</table>
+
+<p><strong>一次插队，全队错位</strong>。规则二是同一机制的推论：普通 JS 函数没有「组件渲染」这个上下文，槽位链表不存在，Hook 无处登记；自定义 Hook（第 13 篇）必须以 <code>use</code> 开头，正是为了让工具识别它。（React 19 的 <code>use(Context)</code> 是唯一允许在条件里调用的例外。）</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：MyBatis / JDBC 的 ? 占位符</div>
+  <p>参数绑定靠的是<strong>位置</strong>：<code>WHERE id = ? AND status = ?</code>，<code>setString(1, ...)</code>、<code>setString(2, ...)</code>。如果动态拼 SQL 时少拼了一个条件，后面的参数全部错位绑定——字符串绑到了日期列上。React 的 Hook 与槽位就是这组 <code>?</code>：<strong>第 n 次调用对第 n 个槽位，插队或缺席，后面全错</strong>。为什么不能按名字绑定？因为 <code>useState</code> 可能被调用多次，同一个「名字」出现多次时，顺序是唯一能依赖的标识。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：State 类陷阱 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>State 类陷阱：函数式更新、闭包旧值与「假更新」</h2></div>
+
+<p>规则理解了，接下来是实战盘点——后端转型最容易踩的十个坑，按 state 类、effect 类、列表与命名类分三组过。</p>
+
+<h3>陷阱 2：函数式更新遗漏（呼应第 4 篇）</h3>
+<p>连续多次 setState、或在定时器与异步回调里 setState，直接写「值」就会踩到闭包快照：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ Counter.tsx</b> · 基于「最新值」更新，一律用函数式写法</span></div>
+  <pre><code>setCount(count + 1);   <span class="c">// ❌ 两次都读到本次渲染的 count = 0</span>
+setCount(count + 1);   <span class="c">//    结果只 +1，不是 +2</span>
+
+setCount(c =&gt; c + 1);  <span class="c">// ✅ 更新函数排队依次执行</span>
+setCount(c =&gt; c + 1);  <span class="c">//    永远基于「最新值」，结果 +2</span></code></pre>
+</div>
+
+<h3>陷阱 3：闭包旧值（呼应第 10 篇）</h3>
+<p>effect 依赖写成 <code>[]</code>，闭包就把<strong>首次渲染</strong>的 state 永久锁死在里面：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ Timer.tsx</b> · 定时器里的 count 永远是 0</span></div>
+  <pre><code>useEffect(() =&gt; {
+  const timer = setInterval(() =&gt; setCount(count + 1), 1000);
+  return () =&gt; clearInterval(timer);
+}, []);   <span class="c">// ❌ 闭包锁死首帧的 count = 0 → 界面永远卡在 1</span>
+
+<span class="c">// ✅ 更新函数拿「最新值」，不经过闭包里的旧 count</span>
+useEffect(() =&gt; {
+  const timer = setInterval(() =&gt; setCount(c =&gt; c + 1), 1000);
+  return () =&gt; clearInterval(timer);
+}, []);</code></pre>
+</div>
+
+<h3>陷阱 4：对象 / 数组 state 直接 mutate（呼应第 4 篇）</h3>
+<p>React 靠 <code>Object.is</code>（引用相等）判断 state 变没变。原地改属性、往数组里 <code>push</code>，引用没变，React 判定「没变化」，跳过渲染——「改了却不刷新」的头号原因：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ Profile.tsx</b> · 不可变更新</span></div>
+  <pre><code><span class="c">// ❌ 引用没变 → React 认为 state 没变 → 界面不动</span>
+user.age = 26;
+setUser(user);
+todos.push(newTodo);
+setTodos(todos);
+
+<span class="c">// ✅ 造新对象 / 新数组，引用变了才触发渲染</span>
+setUser({ ...user, age: 26 });
+setTodos([...todos, newTodo]);</code></pre>
+</div>
+
+<h3>陷阱 5：把「能算出来的」塞进 state</h3>
+<p>后端思维里「先把数据算好存起来」很自然，但 React 里，<strong>渲染期间能算出来的值就不该占一个 state 槽位</strong>——存了就要回答「两份数据什么时候同步」，凭空多出一个 bug 面：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ Cart.tsx</b> · 派生值直接在渲染时算</span></div>
+  <pre><code><span class="c">// ❌ total 是 items 的派生值，却单独占一个 state，还要用 effect 同步</span>
+const [items, setItems] = useState&lt;Item[]&gt;([]);
+const [total, setTotal] = useState(0);
+useEffect(() =&gt; {
+  setTotal(items.reduce((sum, i) =&gt; sum + i.price, 0));
+}, [items]);       <span class="c">// items 变 → 先渲染旧 total，再 setState 再渲染一次</span>
+
+<span class="c">// ✅ 渲染时直接算：items 一变，total 天然就是新的</span>
+const total = items.reduce((sum, i) =&gt; sum + i.price, 0);</code></pre>
+</div>
+
+<p>这就像在订单表里冗余一个「合计金额」字段，每处插入明细都要记得手动加总——漏一处就对不上。能算的别存；计算成本真高，才轮到 <code>useMemo</code>（第 11 篇）。</p>
+</section>
+
+<!-- ═══════════════ 第3站：Effect 类陷阱 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>Effect 类陷阱：依赖撒谎、清理遗漏与无限循环</h2></div>
+
+<h3>陷阱 6：依赖数组「撒谎」</h3>
+<p>依赖数组的语义不是「我希望它什么时候执行」，而是「<strong>这个 effect 用到了哪些响应式值</strong>」的事实陈述。少写一个，React 就按你撒的谎执行：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ Connection.tsx</b> · 少依赖 = 用旧值</span></div>
+  <pre><code><span class="c">// ❌ 撒谎：effect 里用了 roomId，依赖却写 []</span>
+useEffect(() =&gt; {
+  const conn = createConnection(roomId);
+  conn.connect();
+  return () =&gt; conn.disconnect();
+}, []);
+<span class="c">// 症状：切换到别的房间，连上的还是旧房间</span>
+
+<span class="c">// ✅ 用了谁，就声明谁</span>
+useEffect(() =&gt; {
+  const conn = createConnection(roomId);
+  conn.connect();
+  return () =&gt; conn.disconnect();
+}, [roomId]);</code></pre>
+</div>
+
+<p>反过来「多写依赖」也有代价：依赖里若混入每渲染都变引用的对象 / 函数，effect 会反复重跑——引出陷阱 8 的第二种形态。</p>
+
+<h3>陷阱 7：effect 清理遗漏 → 订阅泄漏</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ useWindowWidth.ts</b> · 有订阅就要有退订</span></div>
+  <pre><code><span class="c">// ❌ 只订阅、不退订：组件卸载后监听器还挂在 window 上</span>
+<span class="c">//    轻则内存泄漏，重则对已卸载组件 setState 报错</span>
+useEffect(() =&gt; {
+  window.addEventListener("resize", onResize);
+}, []);
+
+<span class="c">// ✅ 成对出现：订阅/退订、连接/断开、起定时器/清定时器</span>
+useEffect(() =&gt; {
+  window.addEventListener("resize", onResize);
+  return () =&gt; window.removeEventListener("resize", onResize);
+}, []);</code></pre>
+</div>
+
+<p>后端视角太熟悉了：连接不还池、线程不 shutdown、<code>@PreDestroy</code> 忘了清理——同一类资源管理失职。把 effect 的 <code>return</code> 当成 <code>try-finally</code> 的 <code>finally</code> 来写就行。</p>
+
+<h3>陷阱 8：无限循环（两种形态）</h3>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ 无限循环.tsx</b> · 渲染期 setState / 依赖引用不稳</span></div>
+  <pre><code><span class="c">// 形态一：渲染期间 setState —— 渲染 → setState → 再渲染 → 直到报错</span>
+function OrderTotal({ price, count }: { price: number; count: number }) {
+  const [total, setTotal] = useState(0);
+  setTotal(price * count);   <span class="c">// ❌ 渲染函数体里直接 setState</span>
+  return &lt;p&gt;合计：{total}&lt;/p&gt;;
+}
+<span class="c">// ✅ 这本来就是派生值问题（陷阱 5）——渲染时直接算</span>
+const total = price * count;
+
+<span class="c">// 形态二：依赖「每渲染都新的引用」—— effect 狂跑，请求风暴</span>
+const params = { keyword };       <span class="c">// 每次渲染都是新对象</span>
+useEffect(() =&gt; {
+  search(params).then(setResult);
+}, [params]);                     <span class="c">// ❌ 依赖每次都「变了」</span>
+
+<span class="c">// ✅ 依赖原始值；确需传对象，用 useMemo 稳定引用（第 11 篇）</span>
+useEffect(() =&gt; {
+  search({ keyword }).then(setResult);
+}, [keyword]);</code></pre>
+</div>
+
+<p>形态一 React 会直接抛 <code>Too many re-renders</code> 帮你叫停；形态二更阴险——界面照常跑，只是网络面板里请求刷成瀑布。排查口诀：<strong>effect 反复执行时，先盯依赖数组里有没有「渲染期创建的对象 / 函数 / 数组」</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第4站：列表与命名 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>列表与命名：key 用 index、Hook 不叫 use</h2></div>
+
+<h3>陷阱 9：列表 key 用数组下标（呼应第 7 篇）</h3>
+<p><code>key</code> 是 React 识别「同一个元素」的身份证。用 index 作 key，删除或排序后，React 把「位置 0」仍当作原来那条数据，<strong>组件内部状态跟着错位</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ TodoList.tsx</b> · key 要用稳定唯一的 id</span></div>
+  <pre><code><span class="c">// ❌ key=index：删掉第一项后，李四「顶」到位置 0，</span>
+<span class="c">//    React 以为位置 0 还是张三那行 —— 行内状态全部错位</span>
+{todos.map((t, i) =&gt; (
+  &lt;TodoRow key={i} todo={t} /&gt;
+))}
+
+<span class="c">// ✅ key=稳定 id：无论怎么删 / 排 / 插，React 都认得「谁是谁」</span>
+{todos.map(t =&gt; (
+  &lt;TodoRow key={t.id} todo={t} /&gt;
+))}</code></pre>
+</div>
+
+<p>index 何时可接受：列表<strong>纯静态</strong>——不删除、不重排、行内无自身状态。只要有一丝「会变」可能，就用 id。</p>
+
+<h3>陷阱 10：自定义 Hook 不以 use 开头</h3>
+<p>这条看着像洁癖，实际致命：<code>eslint-plugin-react-hooks</code> 靠<strong>命名</strong>识别 Hook，才检查得上规则一。你的 <code>getData()</code> 里若偷偷藏了 <code>useEffect</code>，linter 根本不查它——等哪天在循环里调了 <code>getData()</code>，槽位错位，全线崩盘。约定：<strong>内部调用了 Hook 的函数，一律 <code>useXxx</code> 命名</strong>（见第 13 篇）。</p>
+
+<h3>十大陷阱速查表</h3>
+
+<table>
+  <thead><tr><th>#</th><th>陷阱</th><th>典型症状</th><th>一句话解法</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>条件 / 循环 / 嵌套里调 Hook</td><td>状态串台、诡异报错</td><td>提到顶层；条件写进 Hook 内部</td></tr>
+    <tr><td>2</td><td>函数式更新遗漏</td><td>连续 setState 只生效一次</td><td><code>setX(c =&gt; ...)</code></td></tr>
+    <tr><td>3</td><td>闭包旧值</td><td>定时器 / 订阅里读到过期 state</td><td>函数式更新或补依赖（第 10 篇）</td></tr>
+    <tr><td>4</td><td>直接 mutate state</td><td>改了就是不刷新</td><td>不可变更新（第 4 篇）</td></tr>
+    <tr><td>5</td><td>可派生值塞进 state</td><td>两份数据不同步</td><td>渲染时直接算</td></tr>
+    <tr><td>6</td><td>依赖数组撒谎</td><td>用旧值 / effect 狂跑</td><td>只声明真实用到的值</td></tr>
+    <tr><td>7</td><td>effect 清理遗漏</td><td>泄漏、重复订阅、报错</td><td>return 清理函数</td></tr>
+    <tr><td>8</td><td>无限循环</td><td>渲染期 setState / 依赖引用不稳</td><td>派生值 / <code>useMemo</code>（第 11 篇）</td></tr>
+    <tr><td>9</td><td>key 用 index</td><td>删改排序后状态错乱</td><td>稳定唯一 id（第 7 篇）</td></tr>
+    <tr><td>10</td><td>Hook 命名不带 use</td><td>lint 失效、坑队友</td><td>一律 <code>useXxx</code>（第 13 篇）</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>两条规则不是风格建议，而是<strong>机制约束</strong>：React 靠调用顺序绑定槽位，插队即错位。</li>
+    <li>十大陷阱的病根高度集中：引用相等 + 闭包快照 + 调用顺序，三件事想通了，坑就认得出来。</li>
+    <li>把 <code>eslint-plugin-react-hooks</code> 开成报错级别——机器盯得住的规则，别靠肉眼。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：内化 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>从「背规则」到「凭直觉」</h2></div>
+
+<p>把十个坑摆在一起看，会发现它们不是十个独立知识点，而是同一个底层模型的十种发作方式。模型只有三句话，每句对上一批陷阱：</p>
+
+<table>
+  <thead><tr><th>底层机制</th><th>一句话解释</th><th>发作成哪些陷阱</th></tr></thead>
+  <tbody>
+    <tr><td><strong>顺序即身份</strong></td><td>Hook 靠第几次调用来对号入座</td><td>陷阱 1（条件调用）、陷阱 10（命名）</td></tr>
+    <tr><td><strong>引用即相等</strong></td><td>一切都经 <code>Object.is</code> 引用比较</td><td>陷阱 4（mutate）、陷阱 6（依赖撒谎）、陷阱 8（循环）</td></tr>
+    <tr><td><strong>渲染即快照</strong></td><td>闭包抓的都是「那一帧」的值（第 10 篇）</td><td>陷阱 2（函数式更新）、陷阱 3（旧值）、陷阱 5（派生值）</td></tr>
+  </tbody>
+</table>
+
+<p>以后遇到 Hook 疑难杂症，拿这三句话过一遍，八成能自己推出来；剩下两成撞上了，再回头翻第 5 篇（渲染模型）和第 37 篇（重渲染剖析）。</p>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>卷二到此收官。从第 9 篇的 <code>useEffect</code> 到第 15 篇的 <code>useContext</code>，加上本篇的避坑手册，官方内置 Hook 工具箱你已经过了一遍。工具会用了、坑也认得了，但还有个更根本的问题悬而未决——<strong>到底哪些东西才值得放进 state？</strong></p>
+</div>
+
+<p>下一篇是卷三开篇「客户端状态 vs 服务端状态」。「弹窗开没开」和「数据库里有哪些用户」是两种性质完全不同的状态，混为一谈是绝大多数「状态管理难题」的病根。先分清，再谈方案——第 18 篇的 Zustand 和第 33 篇的 TanStack Query 正好各管一摊。</p>
+</section>
+
+</body>
+</html>

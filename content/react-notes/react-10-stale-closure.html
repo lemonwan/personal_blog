@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>依赖数组与闭包陷阱：stale closure</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：Bug 现场 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>Bug 现场：一个永远停在 1 的计数器</h2></div>
+
+<p>上一篇我们把副作用妥妥地安顿进了 <code>useEffect</code>，还学会了拿依赖数组当「阀门」。看起来岁月静好——直到你写出这个「每秒自增」计数器：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Counter.tsx</b> · ❌ 错误写法一：定时器里直接用 count</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() =&gt; {
+    const id = setInterval(() =&gt; {
+      setCount(count + 1);  <span class="c">// ❌ 这里的 count 永远是 0</span>
+    }, 1000);
+    return () =&gt; clearInterval(id);
+  }, []);  <span class="c">// 空依赖：effect 只在首次渲染时执行这一轮</span>
+
+  return &lt;p&gt;{count}&lt;/p&gt;;  <span class="c">// 界面永远显示 1</span>
+}</code></pre>
+</div>
+
+<p>界面永远显示 1。定时器每秒都在跑、<code>setCount</code> 每秒都在调，数字却纹丝不动。你可能会想：那把 <code>count</code> 加进依赖数组总行了吧？</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Counter.tsx</b> · ❌ 错误写法二：把 count 塞进依赖</span></div>
+  <pre><code>useEffect(() =&gt; {
+  const id = setInterval(() =&gt; {
+    setCount(count + 1);
+  }, 1000);
+  return () =&gt; clearInterval(id);
+}, [count]);
+<span class="c">// ❌ 依赖一变 → 清掉旧定时器 → 再建一个新定时器，每秒循环一次</span></code></pre>
+</div>
+
+<p>这一版数字确实动了，但代价是<strong>每一秒都销毁并重建一个定时器</strong>——功能「碰巧」对，本质上像后端里「每次调用都 new 一个线程池」：能跑，纯属事故预备役。</p>
+
+<div class="think">
+  <div class="think-q">先凭直觉回答：错误写法一里，定时器回调里的 <code>count</code> 为什么永远是 0？<code>state</code> 明明每秒都在变。——想不清楚很正常，这正是后端转前端的第一困惑点：闭包陷阱。往下看。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：闭包速成 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>三十秒补课：闭包到底「捕获」了什么</h2></div>
+
+<p>闭包的学术定义很长，本篇只需要一条：<strong>函数会记住它「定义时」所在作用域的变量绑定</strong>——哪怕那个作用域早已执行完毕。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>closure.js</b> · 最小闭包</span></div>
+  <pre><code>function makeCounter() {
+  let n = 0;
+  return () =&gt; {
+    n = n + 1;  <span class="c">// 这个箭头函数记住了 n——makeCounter 的局部变量</span>
+    return n;
+  };
+}
+
+const next = makeCounter();
+next();  <span class="c">// 1</span>
+next();  <span class="c">// 2 —— makeCounter 早已返回，n 却一直活着</span></code></pre>
+</div>
+
+<p>到这里都符合直觉。真正的转折在下一句：<strong>闭包记住的是「定义那一刻」的绑定</strong>。如果那个变量后来被替换成了「全新的一份」，旧闭包毫不知情，它还抱着原来那份。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Java lambda 只捕获 effectively final</div>
+  <p>Java 里你天天写 lambda，却没踩过这个坑——因为 Java 把坑封死了：<strong>lambda 只能捕获 effectively final 的局部变量</strong>，捕获后谁也不许重新赋值。这本质是「捕获一份不可变的值」，从根上杜绝了「读到旧值还是新值」的争议。JS 则允许外面的变量后来换新值——「值过没过期」就归你自己操心。而 React 恰好每次渲染都把 <code>count</code> 换成全新一份，坑就这么踩上了。</p>
+</div>
+
+<p>套回组件里：组件每次渲染都重新执行函数体，<strong>每次执行时的 <code>count</code> 都是「当次渲染」的全新常量</strong>。effect 在哪次渲染里执行，它的闭包就只认识那次的 <code>count</code>——后面再来多少个新的 <code>count</code>，都与它无关。</p>
+</section>
+
+<!-- ═══════════════ 第3站：快照心智模型 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>正确的心智模型：每次渲染都是一张快照</h2></div>
+
+<p>把第 4 篇的 state、第 5 篇的渲染模型、上一站的闭包规则串起来，就得到本篇最重要的一句话：</p>
+
+<div class="crack">
+  <div class="crack-label">一句话点破（请背下来）</div>
+  <p><strong>「每次渲染都有自己的 props、自己的 state、自己的事件处理器、自己的 effect。」</strong>一次渲染 = 一张不可变的快照。state 变化不是「改了快照里的值」，而是「拍了一张全新的快照」。</p>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>snapshots.tsx</b> · 把每次渲染想象成重新调用一次组件函数（伪代码）</span></div>
+  <pre><code><span class="c">// 第 1 次渲染：</span>
+const count = 0;                    <span class="c">// 全新常量，只属于这一次渲染</span>
+useEffect(() =&gt; {
+  <span class="c">// 定时器 A 在这里创建，闭包捕获的 count 就是上面那个 0</span>
+}, []);
+
+<span class="c">// 第 2 次渲染：count 是另一个全新常量，值为 1</span>
+<span class="c">// 但 deps=[] → effect 不再执行 → 定时器 A 还是第 1 次那个，它眼里的 count 永远是 0</span></code></pre>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="每次渲染都是一张快照：每张快照有自己的 state、JSX 与 effect，旧闭包只认识旧快照的值">
+  <defs>
+    <marker id="arr-stale" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <path d="M 100 50 C 100 22, 310 22, 310 50" fill="none" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-stale)"/>
+  <text x="205" y="20" text-anchor="middle" font-size="11" fill="#C2410C">setCount(0+1)</text>
+  <path d="M 310 50 C 310 22, 520 22, 520 50" fill="none" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-stale)"/>
+  <text x="415" y="20" text-anchor="middle" font-size="11" fill="#C2410C">setCount(0+1)</text>
+  <rect x="15" y="55" width="170" height="160" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <rect x="15" y="55" width="170" height="30" rx="6" fill="#1C1C1C"/>
+  <text x="100" y="75" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">第 1 次渲染</text>
+  <text x="31" y="112" font-size="12" fill="#1C1C1C">count = <tspan font-weight="bold" fill="#C2410C">0</tspan></text>
+  <text x="31" y="140" font-size="12" fill="#1C1C1C">JSX：购物车(0)</text>
+  <text x="31" y="168" font-size="12" fill="#1C1C1C">定时器 A 捕获 0</text>
+  <text x="31" y="196" font-size="11" fill="#177245">闭包作用域：第 1 次的</text>
+  <rect x="225" y="55" width="170" height="160" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <rect x="225" y="55" width="170" height="30" rx="6" fill="#1C1C1C"/>
+  <text x="310" y="75" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">第 2 次渲染</text>
+  <text x="241" y="112" font-size="12" fill="#1C1C1C">count = <tspan font-weight="bold" fill="#C2410C">1</tspan></text>
+  <text x="241" y="140" font-size="12" fill="#1C1C1C">JSX：购物车(1)</text>
+  <text x="241" y="168" font-size="12" fill="#1C1C1C">deps=[] → effect 跳过</text>
+  <text x="241" y="196" font-size="11" fill="#177245">定时器 A 仍活着</text>
+  <rect x="435" y="55" width="170" height="160" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <rect x="435" y="55" width="170" height="30" rx="6" fill="#1C1C1C"/>
+  <text x="520" y="75" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">第 3 次渲染</text>
+  <text x="451" y="112" font-size="12" fill="#1C1C1C">count = <tspan font-weight="bold" fill="#C2410C">1</tspan></text>
+  <text x="451" y="140" font-size="12" fill="#1C1C1C">JSX：购物车(1)</text>
+  <text x="451" y="168" font-size="12" fill="#1C1C1C">deps=[] → effect 跳过</text>
+  <text x="451" y="196" font-size="11" fill="#177245">定时器 A 还在跑</text>
+  <text x="310" y="250" text-anchor="middle" font-size="12" fill="#8C8676">每次渲染 = 一张新快照：有自己的 state、自己的 JSX、自己的 effect</text>
+  <text x="310" y="274" text-anchor="middle" font-size="12" fill="#8C8676">旧快照里的函数只能认识旧快照的值 —— 这就是 stale closure</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>空依赖的 effect：定时器 A 出生于第 1 次渲染，之后只拍新快照，它捕获的 count 永远停在 0</figcaption>
+</figure>
+
+<p>拿这个模型复盘错误写法一，每一步都清清楚楚：</p>
+
+<ol>
+  <li><strong>第 1 次渲染</strong>：<code>count = 0</code>，effect 执行，定时器 A 创建，闭包捕获 0；</li>
+  <li>1 秒后回调触发：<code>setCount(0 + 1)</code> → state 变 1 → <strong>第 2 次渲染</strong>发生；</li>
+  <li>deps 是 <code>[]</code>，第 2 次渲染<strong>不会重跑 effect</strong>——定时器 A 还是第 1 张快照创建的那个；</li>
+  <li>于是每秒都在执行 <code>setCount(0 + 1)</code>——界面永远停在 1。</li>
+</ol>
+
+<p>闭包本身没有 bug，它忠实地记住了「出生那次」的作用域。真正的问题是——<strong>我们让一张快照里的函数活得太久，还指望它知道后面快照的事</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第4站：修复三板斧 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>修复三板斧：函数式更新、补全依赖、useRef</h2></div>
+
+<h3>板斧一：函数式更新（首选）</h3>
+<p>既然闭包里的 <code>count</code> 过期了，那就干脆别用它——<code>setState</code> 支持传入更新函数，React 会在真正应用更新那一刻，把<strong>最新值</strong>喂给你：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Counter.tsx</b> · ✅ setCount(c =&gt; c + 1)</span></div>
+  <pre><code>useEffect(() =&gt; {
+  const id = setInterval(() =&gt; {
+    setCount(c =&gt; c + 1);  <span class="c">// ✅ 不读捕获的 count，由 React 提供「最新值」</span>
+  }, 1000);
+  return () =&gt; clearInterval(id);
+}, []);  <span class="c">// deps 保持 []：定时器真的只建一次</span></code></pre>
+</div>
+
+<p>第 4 篇里它是「连续 set 的正确姿势」，这一篇它升级成<strong>「跨时间读取最新 state」的手段</strong>：更新函数由 React 在应用更新那一刻调用，参数永远新鲜，天然绕开闭包陷阱。能用它，永远优先用它。</p>
+
+<h3>板斧二：诚实补全依赖数组</h3>
+
+<p>当 effect 确实需要用到某个会变的值（比如用它拼日志文案），别撒谎——把它写进 deps，让 React 在值变化时<strong>重建 effect 和它的闭包</strong>，每一轮闭包都拿到当次快照的新鲜值：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Greeting.tsx</b> · ✅ 值变了，就重建 effect</span></div>
+  <pre><code>useEffect(() =&gt; {
+  const id = setInterval(() =&gt; {
+    console.log(`当前次数：${count}`);  <span class="c">// 每一轮闭包里的 count 都是新鲜的</span>
+  }, 1000);
+  return () =&gt; clearInterval(id);
+}, [count]);  <span class="c">// ✅ 诚实声明：count 变了，就重建 effect 和它的闭包</span></code></pre>
+</div>
+
+<p>它和错误写法二的区别很微妙：写法二是 effect <strong>内部</strong>改自己依赖的 <code>count</code>，制造「改依赖 → 重建 effect → 再改依赖」的自我循环；这里则是<strong>外部状态</strong>变化 → 合理重建。同一个语法，两种意图：一种是 bug，一种是设计。</p>
+
+<h3>板斧三：useRef 存最新值（预告）</h3>
+
+<p>还有一类场景：定时器必须只建一次（deps 为 <code>[]</code>），回调里却要读「最新」的某个值。标准解法是用 <code>useRef</code> 开一个「跨渲染的可变盒子」，每次渲染把最新值放进去，回调里读盒子：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Counter.tsx</b> · 🧰 终极方案预告</span></div>
+  <pre><code>const countRef = useRef(count);  <span class="c">// 一个跨渲染的「可变盒子」</span>
+
+useEffect(() =&gt; {
+  countRef.current = count;      <span class="c">// 每次渲染，把最新值放进盒子</span>
+}, [count]);
+
+useEffect(() =&gt; {
+  const id = setInterval(() =&gt; {
+    setCount(c =&gt; c + 1);
+    console.log(countRef.current);  <span class="c">// 读到的永远是最新值</span>
+  }, 1000);
+  return () =&gt; clearInterval(id);
+}, []);  <span class="c">// 定时器仍然只建一次</span></code></pre>
+</div>
+
+<p>记得 <code>import { useEffect, useRef, useState } from "react"</code>。先混个脸熟即可，<code>useRef</code> 完整机制是第 12 篇主角。三板斧的选用顺序：<strong>能函数式更新就函数式更新</strong>；<strong>要用会变的值就诚实补全依赖</strong>；<strong>资源只能建一次又要读最新值，才用 useRef</strong>。</p>
+</section>
+
+<!-- ═══════════════ 第5站：exhaustive-deps ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>让 ESLint 替你盯着：exhaustive-deps 的意义与「撒谎」的代价</h2></div>
+
+<p>好消息是：「哪些值会过期」这套推理不必人肉做。<code>eslint-plugin-react-hooks</code> 的 <strong>react-hooks/exhaustive-deps</strong> 规则会静态分析每个 effect：凡是<strong>组件作用域里用到、又会随渲染变化的值</strong>（state、props、组件里定义的函数……）没进依赖数组，它就报警。主流脚手架默认带了它，你只需<strong>别关</strong>。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>eslint.config.js</b> · 确认两条 Hook 规则都开着</span></div>
+  <pre><code>{
+  "rules": {
+    "react-hooks/rules-of-hooks": "error",  <span class="c">// Hook 只在顶层调用等硬性规则</span>
+    "react-hooks/exhaustive-deps": "warn"   <span class="c">// 依赖补全检查：别关！</span>
+  }
+}</code></pre>
+</div>
+
+<p>报警多了难免心烦，于是有人加 <code>// eslint-disable-next-line react-hooks/exhaustive-deps</code> 压掉它。可以压，但要想清楚——那是在<strong>对 React「撒谎」</strong>：</p>
+
+<table>
+  <thead>
+    <tr><th>你的操作</th><th>表面效果</th><th>真实代价</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>诚实补全依赖</td><td>effect 在依赖变化时重建</td><td>几乎为零——这正是 React 期望的协作方式</td></tr>
+    <tr><td>disable 规则，deps 写 <code>[]</code></td><td>报警消失，effect 只跑一次</td><td>闭包冻结在首次渲染，之后读到的全是过期值，且再无提醒</td></tr>
+    <tr><td>disable 规则，deps 随手写</td><td>暂时不报错</td><td>该重建时不重建、不该重建时狂重建，bug 随机闪现，极难排查</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：依赖数组就是方法签名</div>
+  <p>把 effect 想象成一个方法，依赖数组就是<strong>参数列表</strong>：<code>useEffect(fn, [a, b])</code> 约等于声明「本方法依赖 a、b，任一变化请重新注入并重跑」。参数列表漏写一个、方法体却偷偷使用——编译期无察觉，运行期读旧值。这和「在 Spring 里自己 <code>new</code> 依赖而不交给容器注入」是同一种坏味道：绕过契约，框架就无法兜底。</p>
+</div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>心智模型一句话：<strong>每次渲染都有自己的 props、state、effect</strong>——effect 是被某次渲染创建、活到被清理为止的「快照函数」。</li>
+    <li>闭包陷阱的根源：effect 活了很久，却只认识「出生那次渲染」的变量绑定。</li>
+    <li>修复三板斧：<code>setX(c =&gt; …)</code> 函数式更新 → 诚实补全依赖 → <code>useRef</code> 存最新值（第 12 篇）。</li>
+    <li><code>react-hooks/exhaustive-deps</code> 是 React 生态最重要的 lint 规则：报警先修代码，disable 前想清楚代价。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>上一篇回答了「effect 何时执行」，这一篇回答了「effect 里读到的值是哪一版的」。你建立了「<strong>每次渲染都是一张快照</strong>」的心智模型和修复三板斧。但补全依赖只是第一步——把对象、数组、函数写进 deps，会发现它们<strong>每次渲染都是新引用</strong>，effect 又开始疯狂重建。怎么让引用稳定下来？下一篇第 11 篇，<code>useMemo</code> 与 <code>useCallback</code> 登场。见。</p>
+</div>
+</section>
+
+</body>
+</html>

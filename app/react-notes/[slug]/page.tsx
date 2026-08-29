@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getReactContent, getReactArticle, REACT_ARTICLES, REACT_VOLUMES, getReactArticlesByVolume } from "@/lib/content";
+import { getReactContent, getReactArticle, REACT_ARTICLES, REACT_VOLUMES, getReactArticlesByVolume, extractToc } from "@/lib/content";
 import type { ReactLevel } from "@/lib/content";
 import CommentSection from "../../CommentSection";
+import ArticleToc from "../../ArticleToc";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -43,6 +44,7 @@ export default async function ReactArticlePage({ params }: Props) {
 
   const content = getReactContent(decoded);
   const ready = content !== null;
+  const tocItems = content ? extractToc(content) : [];
 
   const vol = REACT_VOLUMES.find((v) => v.num === meta.volume);
   const idx = REACT_ARTICLES.findIndex((a) => a.slug === decoded);
@@ -260,6 +262,9 @@ export default async function ReactArticlePage({ params }: Props) {
             {/* 评论区（giscus → GitHub Discussions） */}
             <CommentSection />
           </article>
+
+          {/* 右侧：本文章节大纲（scroll-spy） */}
+          {ready && <ArticleToc items={tocItems} />}
 
         </div>
       </div>

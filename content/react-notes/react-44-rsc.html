@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Next.js 服务端组件：一次范式转移</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：SPA 取数的两笔账 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>先算两笔账：SPA 取数的成本</h2></div>
+
+<p>上一篇第 43 篇说，三阶段的终点是全栈闭环，缝合线叫服务端组件（RSC）。缝合之前，先看清它要治的病。第 32 篇的取数模式——页面挂载、useEffect 发请求、loading、渲染——是标准 SPA 姿势，把账摊开看有两笔。</p>
+
+<p><strong>第一笔：取数瀑布。</strong>用户看到的每个字节，都要走完「下载 HTML → 下载 JS → 执行 → 发请求 → 等响应」整条链；嵌套取数更糟——A 请求的结果决定 B 请求的参数，只能串行：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ProfilePage.tsx</b> · 第 32 篇的模式：两连跳，串行瀑布（类型定义从略）</span></div>
+  <pre><code>import { useEffect, useState } from "react";
+
+export default function ProfilePage() {
+  const [profile, setProfile] = useState&lt;Profile | null&gt;(null);
+  const [orders, setOrders] = useState&lt;Order[]&gt;([]);
+
+  useEffect(() =&gt; {
+    <span class="c">// 第一跳：拿用户</span>
+    fetch("/api/me").then((r) =&gt; r.json()).then(async (me) =&gt; {
+      setProfile(me);                <span class="c">// 第一次渲染：页面这时才「活」</span>
+      <span class="c">// 第二跳：拿 uid 再查订单——串行多等一个来回</span>
+      const res = await fetch(`/api/orders?uid=${me.id}`);
+      setOrders(await res.json());   <span class="c">// 第二次渲染</span>
+    });
+  }, []);
+
+  if (!profile) return &lt;p&gt;加载中……&lt;/p&gt;;
+  return (
+    &lt;div&gt;
+      &lt;h2&gt;{profile.name}&lt;/h2&gt;
+      &lt;ul&gt;{orders.map((o) =&gt; &lt;li key={o.id}&gt;{o.no}&lt;/li&gt;)}&lt;/ul&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>首屏 = 两次网络往返 + JS 执行 + 两个接口耗时。而接口就在你自己部署的服务器上——<strong>数据明明坐在服务端旁边，却要等浏览器跑来「领」</strong>。</p>
+
+<p><strong>第二笔：bundle 膨胀。</strong>SPA 把整棵组件树打包成 JS 发给浏览器，哪怕 90% 的组件是纯展示、一个事件都没有。第 39 篇的代码分割是「少发」，治标——纯展示的组件根本不需要发。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：让离数据最远的一端发起数据访问</div>
+  <p>SPA 的默认部署形状，相当于把整段 Service 层下发给浏览器，让它替服务端跑一遍取数流程——而连接池、内网带宽、密钥全在服务端手里。RSC 要做的，就是把取数这件事搬回数据旁边。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：默认服务端组件 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>App Router：组件默认在服务端执行</h2></div>
+
+<p>Next.js 14/15 的 App Router（<code>app/</code> 目录）里，<strong>组件默认是 Server Component</strong>：写成 async 函数，直接 await 取数，取完直接 return JSX。没有 useEffect，没有首屏 loading，没有跨域：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/posts/page.tsx</b> · 没写 'use client'，所以在服务端跑</span></div>
+  <pre><code>import Link from "next/link";
+
+export default async function PostsPage() {
+  <span class="c">// 这段 fetch 在服务器上执行——不是浏览器！</span>
+  const res = await fetch("https://api.example.com/posts");
+  const posts: Post[] = await res.json();
+
+  return (
+    &lt;ul&gt;
+      {posts.map((p) =&gt; (
+        &lt;li key={p.id}&gt;
+          &lt;Link href={`/posts/${p.id}`}&gt;{p.title}&lt;/Link&gt;
+        &lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+</div>
+
+<p>浏览器视角：发出去的请求，拿回来的 HTML <strong>已经带着完整内容</strong>——取数、渲染都在服务端完成后才发货。两笔账，一笔销掉（一次 await 搞定，没有瀑布），一笔大幅缓解（这个组件零 JS 发往浏览器）。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：async Controller 直接 return UI</div>
+  <p>Spring MVC 里你写 @GetMapping("/posts") 返回视图名 + Model，模板引擎在服务端填好 HTML 再发出去。Server Component 就是「async Controller 直接 return UI」——数据不出内网、密钥不进 bundle、省掉只为自家页面服务的转发层，SEO 也顺带变好（HTML 自带内容）。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：'use client' 客户端边界 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>'use client'：一条客户端边界</h2></div>
+
+<p>组件默认在服务端跑，那 useState、useEffect、onClick 这些浏览器专属的东西怎么办？在文件顶部写一行 <code>'use client'</code>，声明<strong>「从这里开始进入客户端」</strong>。这行声明叫<strong>客户端边界</strong>（client boundary）。</p>
+
+<p>两个语义钉准。其一，<code>'use client'</code> 标的是<strong>「边界的入口」</strong>，不是「在哪渲染」：从被声明的文件开始，它 import 进来的所有子组件<strong>整棵子树</strong>都进 bundle（第 39 篇的分包思维又用上了）。其二，边界内外能力互斥：边界<strong>内</strong>才有 Hooks、事件、浏览器 API（第 9 篇的生命周期全在里面）；边界<strong>外</strong>才有 async 取数、直连数据库、读密钥。看组合：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/posts/page.tsx</b> · 服务端：取数与布局</span></div>
+  <pre><code>import LikeButton from "./LikeButton";
+
+export default async function PostsPage() {
+  const posts = await db.post.findMany();  <span class="c">// 直连数据库（示意写法）</span>
+
+  return (
+    &lt;main&gt;
+      {posts.map((p) =&gt; (
+        &lt;article key={p.id}&gt;
+          &lt;h3&gt;{p.title}&lt;/h3&gt;
+          &lt;LikeButton initialCount={p.likes} /&gt;  <span class="c">// 跨边界：只能传可序列化数据</span>
+        &lt;/article&gt;
+      ))}
+    &lt;/main&gt;
+  );
+}</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/posts/LikeButton.tsx</b> · 客户端：交互与状态</span></div>
+  <pre><code>"use client";
+
+import { useState } from "react";
+
+export default function LikeButton({ initialCount }: { initialCount: number }) {
+  const [likes, setLikes] = useState(initialCount);  <span class="c">// Hooks 只在边界内合法（第 4 篇）</span>
+
+  return &lt;button onClick={() =&gt; setLikes(likes + 1)}&gt;赞 {likes}&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>能力边界一张表钉死：</p>
+
+<table>
+  <thead>
+    <tr><th>能力</th><th>Server 组件</th><th>Client 组件</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>async/await 直接取数</td><td>可以，默认姿势</td><td>不行，走 useEffect / 框架取数（第 32/33 篇）</td></tr>
+    <tr><td>直连数据库、读密钥</td><td>可以</td><td>不行（密钥想带也带不过去）</td></tr>
+    <tr><td>useState / useEffect / useRef</td><td>不行</td><td>可以（第 9/12 篇）</td></tr>
+    <tr><td>onClick / onChange 事件</td><td>不行（第 6 篇的事件没地方挂）</td><td>可以</td></tr>
+    <tr><td>发往浏览器的 JS</td><td>零</td><td>整棵边界子树</td></tr>
+  </tbody>
+</table>
+
+<p>接着是高频报错：<strong>跨边界的 props 必须可序列化</strong>——string、number、boolean、普通对象、数组、Date 可以；<strong>函数、class 实例传不过去</strong>，直接报 <code>Functions cannot be passed directly to Client Components</code>。想传「行为」？用第 25 篇的组合思想：把服务端渲染好的 JSX 作为 children 穿过边界，这是官方推荐解法。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：边界是一条 RPC 接口，只能传 DTO</div>
+  <p>跨边界传 props 本质是跨进程通信：能传 DTO（可序列化数据），传不了行为——你从没想把一个 lambda 序列化后发给远端服务。服务端组件像 Controller/Service，客户端组件是「送出去的富客户端部件」：部件里可以带数据，不能带服务端的方法。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">一句心法：「默认服务端，交互才上客户端」。写组件前先问——它需要 useState 或 onClick 吗？不需要，就让它留在服务端，少一份 bundle。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：直连 DB 与岛屿 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>直连数据库，与「岛」的组合套路</h2></div>
+
+<p>先做架构减法。传统 SPA 里页面要调接口，于是写一个只做转发的 BFF Controller：浏览器 → BFF → Service → DB。RSC 时代，Server Component 在服务端执行、直接查库（上一站 page.tsx 里的 <code>db.post.findMany()</code>），这层「为自家页面转发」的接口变薄甚至消失——对外 API（给 App、第三方用的）照旧存在，但不再为自家页面而写。交互区域则拆成小客户端组件——「岛」：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>app/posts/FavoriteButton.tsx</b> · 客户端岛：交互时再回服务端</span></div>
+  <pre><code>"use client";
+
+import { useState } from "react";
+
+export default function FavoriteButton({ postId }: { postId: number }) {
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    await fetch(`/api/posts/${postId}/favorite`, { method: "POST" });
+    setSaved(true);
+  }
+
+  return &lt;button onClick={save} disabled={saved}&gt;{saved ? "已收藏" : "收藏"}&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>这个套路叫<strong>岛屿（islands）</strong>：服务端渲染页面主体这片「海面」，把<strong>必须交互</strong>的区域拆成小客户端组件嵌进去——受控输入、轮播、拖拽这些有事件的地方就是岛（第 24 篇的受控组件天然是岛）。和第 37 篇的 memo 对比着记：<strong>memo 省的是重复渲染，岛屿省的是根本不发</strong>，量级完全不同。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="岛屿模式示意图：服务端组件渲染的页面主体是一片海面，点赞按钮、筛选下拉、收藏按钮三个客户端组件是嵌在海面上的小岛，只有小岛进入 JS bundle">
+  <defs>
+    <marker id="arr44b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <rect x="70" y="44" width="400" height="212" rx="10" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="270" y="74" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">服务端组件渲染的页面主体</text>
+  <text x="270" y="92" text-anchor="middle" font-size="11" fill="#8C8676">零 JS · 直连数据库取数 · 密钥不出内网</text>
+  <rect x="100" y="116" width="100" height="50" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="150" y="137" text-anchor="middle" font-size="12" fill="#1C1C1C">点赞按钮</text>
+  <text x="150" y="154" text-anchor="middle" font-size="11" fill="#1C1C1C">客户端</text>
+  <rect x="240" y="116" width="110" height="50" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="295" y="137" text-anchor="middle" font-size="12" fill="#1C1C1C">筛选下拉</text>
+  <text x="295" y="154" text-anchor="middle" font-size="11" fill="#1C1C1C">客户端</text>
+  <rect x="390" y="116" width="60" height="50" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="420" y="137" text-anchor="middle" font-size="12" fill="#1C1C1C">收藏</text>
+  <text x="420" y="154" text-anchor="middle" font-size="11" fill="#1C1C1C">客户端</text>
+  <rect x="130" y="198" width="130" height="46" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="195" y="217" text-anchor="middle" font-size="12" fill="#1C1C1C">评论输入框</text>
+  <text x="195" y="234" text-anchor="middle" font-size="11" fill="#1C1C1C">客户端</text>
+  <line x1="474" y1="141" x2="500" y2="152" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr44b)"/>
+  <rect x="505" y="112" width="95" height="78" rx="6" fill="#FFFFFF" stroke="#177245" stroke-width="1.5"/>
+  <text x="552" y="138" text-anchor="middle" font-size="11" fill="#1C1C1C">只有岛进</text>
+  <text x="552" y="158" text-anchor="middle" font-size="12" font-weight="bold" fill="#177245">bundle</text>
+  <text x="552" y="178" text-anchor="middle" font-size="11" fill="#1C1C1C">主体零 JS</text>
+  <text x="310" y="282" text-anchor="middle" font-size="11" fill="#8C8676">有事件的地方就有岛，其余留在服务端</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>岛屿模式：服务端渲染主体海面，交互组件是嵌在海面上的小岛——只有小岛进 JS bundle。</figcaption>
+</figure>
+
+<div class="think">
+  <div class="think-q">反例预警：把整页都标上 'use client'，RSC 就白开了——等于花钱买了台服务器，继续跑 SPA。发现自己在页面顶部写 'use client'，先想想是不是只有那个搜索框需要它。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：收官 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>收官：缝合，然后开始流</h2></div>
+
+<p>最后补一块拼图：服务端取数有快有慢，把慢的部分包在 <code>&lt;Suspense fallback={骨架}&gt;</code> 里，Next 先把页面其余部分发出去，数据到了再补上——这就是 streaming SSR。它的机制下一篇第 45 篇正好展开，因为 LLM 响应本质上是同一件事：<strong>服务端不断产生，前端不断接收</strong>。</p>
+
+<p>收一张「组件放哪一端」的速查表，写代码前对一眼：</p>
+
+<table>
+  <thead>
+    <tr><th>需求</th><th>放哪端</th><th>原因</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>查数据库、调内部服务、读密钥</td><td>Server</td><td>内网与密钥天然不可外泄，还省一跳转发</td></tr>
+    <tr><td>纯展示（文章、列表、页脚）</td><td>Server（默认）</td><td>零 JS 发往浏览器，bundle 直接受益</td></tr>
+    <tr><td>点击、输入、拖拽等交互</td><td>Client</td><td>事件只存在于浏览器（第 6 篇）</td></tr>
+    <tr><td>受控表单输入</td><td>Client</td><td>受控组件依赖 useState（第 24 篇）</td></tr>
+    <tr><td>轮播、主题切换等浏览器能力</td><td>Client</td><td>localStorage 等浏览器 API（第 12 篇）</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>RSC 治两笔账：取数瀑布（服务端一次 await 搞定）和 bundle 膨胀（纯展示组件零 JS）。</li>
+    <li>App Router 下组件默认是 Server Component：async + await 直接取数，等于「async Controller 直接 return UI」。</li>
+    <li>'use client' 是客户端边界的入口：边界内才有 Hooks、事件、浏览器 API；边界以下整棵子树进 bundle。</li>
+    <li>跨边界 props 只能传可序列化数据，函数传不过去；传「UI」用 children 与组合（第 25 篇）。</li>
+    <li>组合套路：服务端页面负责取数与布局，交互区域拆成小客户端「岛」——只有岛进 bundle。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>范式转移的本质，是把「代码搬到浏览器里等数据」换成「组件搬到数据旁边渲染」。SPA 时代，页面在浏览器里醒来才发现自己没数据，只能一层层发请求去要；RSC 时代，组件在服务端执行完——数据已查好、HTML 已渲染——才发货，bundle 里只剩真正交互的岛。对你的 Java 直觉来说这不算新知识：Controller、Service、视图渲染被重新装进一个 async 函数。而「服务端不断产生、客户端不断接收」的极致形态，就是 LLM 的逐 token 响应——下一篇第 45 篇，我们用 SSE 把它一路流到打字机界面上。</p>
+</div>
+</section>
+
+</body>
+</html>

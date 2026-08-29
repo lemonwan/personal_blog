@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zustand：轻量状态管理实战</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：Context 的两个别扭 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>状态提升与 Context 之后，还差一块拼图</h2></div>
+
+<p>上一篇第 17 篇把状态劈成两类：服务端状态交给专用方案（第 33 篇 TanStack Query），客户端状态才是本篇的主角。商品页点「加入购物车」，导航栏徽章要 +1，购物车页要显示新条目——<strong>同一份状态，三四个不相邻的组件同时关心</strong>。</p>
+
+<p>你已经会两招。第一招<strong>状态提升</strong>（第 14 篇）：把 items 提到最近的公共祖先再层层下发。可公共祖先是 App——它拿着一份和自己毫无关系的购物车数据，中间每层组件被迫加两个 props 进出口，像「调用链上每个方法都得加个参数，只为传给最底层」。</p>
+
+<p>第二招 <strong>Context</strong>（第 15 篇）。能用，但有两处别扭：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>CartContext.tsx</b> · Context 版购物车：能跑，但别扭</span></div>
+  <pre><code>import { createContext, useState, type ReactNode } from "react";
+
+<span class="c">// CartValue = { items: CartItem[]; add: (i: CartItem) =&gt; void }（类型略）</span>
+const CartContext = createContext&lt;CartValue | null&gt;(null);
+
+function CartProvider({ children }: { children: ReactNode }) {
+  const [items, setItems] = useState&lt;CartItem[]&gt;([]);
+  <span class="c">// 每次渲染 value 都是新引用，items 一变则全体消费组件陪跑</span>
+  const value = { items, add: (i: CartItem) =&gt; setItems([...items, i]) };
+
+  return &lt;CartContext.Provider value={value}&gt;{children}&lt;/CartContext.Provider&gt;;
+}</code></pre>
+</div>
+
+<p><strong>别扭一：广播粒度太粗。</strong>value 是个整体，items 变一次，所有 <code>useContext</code> 消费者全部重渲染——没法「只订 items」。<strong>别扭二：离开组件树就够不着。</strong>想在路由守卫、工具函数里读购物车？Context 只在 React 树内可见，Provider 还必须包在所有消费者上方。</p>
+
+<p>更符合直觉的形态，是后端早就用熟的东西：<strong>组件树之外放一个全局单例，谁关心谁订阅，谁想改谁调用</strong>。这就是 Zustand——<code>npm install zustand</code> 一行装好，核心 API 只有一个 <code>create</code>，也是当下小型应用状态管理的事实标准。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：单例 Bean + 事件监听</div>
+  <p>Spring 里跨模块共享内存态，你的第一反应从来不是层层传参：建一个 <code>@Component</code> 单例 Bean 持有状态，各处直接注入；变更后 publish 一个 <code>ApplicationEvent</code>，关心方 <code>@EventListener</code> 按需响应。Zustand 的 store 就是那个单例 Bean，selector 就是那个监听器——订阅、退订、分发的接线全自动。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：create 定义 store ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>create&lt;T&gt;()：一个对象装下 state 和 action</h2></div>
+
+<p>Zustand 的全部魔法浓缩成一个函数 <code>create</code>：传入「初始化函数」，返回值直接就是 Hook。返回的对象里<strong>数据字段和修改函数肩并肩</strong>——没有 action type，没有 dispatch，没有 reducer。完整购物车 store 如下：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>cartStore.ts</b> · 购物车 store：state 与 action 一体</span></div>
+  <pre><code>import { create } from "zustand";
+
+export interface CartItem {
+  id: number;
+  name: string;
+  price: number;
+  quantity: number;
+}
+
+interface CartState {
+  items: CartItem[];
+  add: (item: Omit&lt;CartItem, "quantity"&gt;) =&gt; void;
+  remove: (id: number) =&gt; void;
+  clear: () =&gt; void;
+}
+
+export const useCartStore = create&lt;CartState&gt;()((set, get) =&gt; ({
+  items: [],
+
+  add: (item) =&gt; {
+    <span class="c">// get：随时读当前最新 state，这里做「最多 20 件」的守卫</span>
+    if (get().items.length &gt;= 20) return;
+
+    set((state) =&gt; {
+      const found = state.items.find((i) =&gt; i.id === item.id);
+      if (!found) {
+        return { items: [...state.items, { ...item, quantity: 1 }] };
+      }
+      <span class="c">// 不可变更新：map 造出新数组，命中的项换成新对象</span>
+      return {
+        items: state.items.map((i) =&gt;
+          i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
+        ),
+      };
+    });
+  },
+
+  remove: (id) =&gt;
+    set((state) =&gt; ({ items: state.items.filter((i) =&gt; i.id !== id) })),
+
+  clear: () =&gt; set({ items: [] }),
+}));</code></pre>
+</div>
+
+<p>五个值得停留的点：</p>
+
+<ol>
+  <li><code>create&lt;CartState&gt;()(...)</code> 双括号：先标泛型再调用，TypeScript 才能正确推断 Hook 类型——v4/v5 标准写法，照抄即可。</li>
+  <li><strong>state 与 action 一体</strong>：<code>items</code> 是数据，<code>add/remove/clear</code> 是普通函数字段，改状态 = 调函数。</li>
+  <li><code>set</code> 是<strong>浅合并</strong>：只更新你给的字段，其余原样保留——像只 UPDATE 指定的列。传函数时参数保证是<strong>最新 state</strong>，连续调用也读不到旧值。</li>
+  <li><code>get</code> 用来<strong>读</strong>最新 state，在 action 内部跨字段判断时用——上面做了「最多 20 件」的守卫。</li>
+  <li><strong>不可变更新是硬纪律</strong>：<code>map/filter/展开</code> 永远造新数组新对象，绝不 push/splice。为什么拧巴？回忆第 5 篇：React 靠 <code>Object.is</code> 引用比较判断「变没变」，原地改引用不变，等于「改了但没通知」，界面纹丝不动。</li>
+</ol>
+
+<div class="think">
+  <div class="think-q">set 内部默默做了三件事：把新状态合并进单例、逐个跑 selector 并用 Object.is 比对结果、通知「结果变了」的订阅组件。你一行监听器代码都没写——观察者的接线，create 已经焊死在 store 里了。</div>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：单例 Bean 的读写接口</div>
+  <p>对照一个 Spring 单例 Service 看：<code>items</code> 是它的字段，<code>add/remove/clear</code> 是三个 public 方法，<code>set</code>/<code>get</code> 就是方法里的读写。唯一多出的纪律是「换新对象而非原地改」——每次变更留下一版完整快照，而非改内存指针。快照式变更正是引用比较与回放的地基，第 19 篇会把它推到极致。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：选择器订阅 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>选择器订阅：Context 是广播，Zustand 是点播</h2></div>
+
+<p>store 写好了，组件怎么「用」它？关键动作是<strong>给 selector</strong>——一个从整个 state 里挑出你关心的那一小块的函数：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>components.tsx</b> · 用 selector 精准订阅</span></div>
+  <pre><code>import { useCartStore } from "./cartStore";
+
+<span class="c">// 导航栏徽章：只订阅「总件数」这一个原始值（派生 selector）</span>
+function CartBadge() {
+  const count = useCartStore((s) =&gt;
+    s.items.reduce((n, i) =&gt; n + i.quantity, 0)
+  );
+  return &lt;span className="badge"&gt;{count}&lt;/span&gt;;
+}
+
+<span class="c">// 购物车页：订阅 items 数组和 remove 函数本身</span>
+function CartList() {
+  const items = useCartStore((s) =&gt; s.items);
+  const remove = useCartStore((s) =&gt; s.remove);
+  return items.map((i) =&gt; &lt;CartRow key={i.id} item={i} onRemove={remove} /&gt;);
+}</code></pre>
+</div>
+
+<p>机制值得拆开看：store 每次变更，Zustand 会对每个订阅组件跑一遍它的 selector，把这次的结果和上次做 <code>Object.is</code> 比较——<strong>相等就当无事发生，组件不重渲染</strong>。于是 add 一件商品时：CartList 的 <code>items</code> 引用变了，重渲染；CartBadge 算出的 <code>count</code> 还是 5，跳过；用着别的 store 的组件毫不知情。</p>
+
+<p>顺带一个反例：<code>useCartStore()</code> 不带 selector 等于订阅整个 store，任何字段变都重渲染——精准订阅就白买了，别这么写。</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>Context（第 15 篇）</th><th>Zustand</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>数据放哪</td><td>组件树上层的 Provider</td><td>组件树之外的全局单例</td></tr>
+    <tr><td>更新传播</td><td>value 一变，所有 useContext 消费者全部重渲染</td><td>selector 结果没变就不重渲染</td></tr>
+    <tr><td>订阅粒度</td><td>整个 value，不可拆分</td><td>任意切片，还支持派生计算</td></tr>
+    <tr><td>组件外读写</td><td>不行，离开 React 树拿不到</td><td>行，store 是普通模块对象</td></tr>
+    <tr><td>适合的状态</td><td>低频、近乎只读的全局配置</td><td>高频交互的业务状态</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：全量广播 vs 精准推送</div>
+  <p>Context 像「全量推送」的配置中心：任何字段变了，整个 value 打包推给所有订阅方，谁拿到都得重算一遍。Zustand 的 selector 像带过滤条件的消息订阅（JMS 的 MessageSelector、MQTT 的 topic）：订阅方声明「我只关心 items 的引用」，比对没变就不投递。广播是「你猜要不要处理」，点播是「没点单不上菜」。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">selector 的返回值有个高频坑：返回「现造的对象/数组」，比如 <code>useCartStore((s) =&gt; ({ count: s.items.length, empty: !s.items.length }))</code>——每次都是新引用，Object.is 永远不等，重渲染比不订阅还勤。返回原始值（数字、字符串、布尔）或 store 里的原引用都安全；一次要拿多个字段，用 <code>useShallow</code>（<code>zustand/react/shallow</code>）做浅比较。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：persist 与 devtools ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>persist 与 devtools：store 身上的 AOP 切面</h2></div>
+
+<p>刷新页面，购物车空了——用户体验的直接扣分项。按第 22 篇的框架，持久化要做「写入存储、启动恢复、版本迁移」三件事，Zustand 把它们做成<strong>中间件</strong>：在 create 外包一层，业务代码零改动。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>cartStore.ts</b> · persist + devtools，业务零改动</span></div>
+  <pre><code>import { create } from "zustand";
+import { devtools, persist } from "zustand/middleware";
+
+<span class="c">// CartState 接口与 action 实现同第 2 站，略</span>
+export const useCartStore = create&lt;CartState&gt;()(
+  devtools(
+    persist(
+      (set) =&gt; ({
+        items: [],
+        <span class="c">// add / remove / clear 与第 2 站完全一致，略</span>
+        clear: () =&gt; set({ items: [] }),
+      }),
+      {
+        name: "cart-storage", <span class="c">// localStorage 里的 key，唯一必填项</span>
+        <span class="c">// 只挑数据字段持久化：函数不可序列化，UI 临时状态不该跨会话恢复</span>
+        partialize: (s) =&gt; ({ items: s.items }),
+      }
+    )
+  )
+);</code></pre>
+</div>
+
+<p>拆开看：</p>
+
+<ul>
+  <li><strong>persist</strong>：每次 set 后自动把（partialize 挑出的）状态写进 <code>localStorage</code>，下次启动自动读回当初始 state。「两行代码」毫不夸张——<code>name</code> 一行、<code>partialize</code> 一行。</li>
+  <li><strong>partialize 为什么必要</strong>：action 是函数，序列化不了；「抽屉开没开」这类临时 UI 状态也不该跨会话恢复。哪些字段该落盘，每次都要想清楚。</li>
+  <li><strong>devtools</strong>：接入浏览器 Redux DevTools 插件，每次 set 记一条变更，可查看、可回跳——线上问「购物车怎么变成这样」有账可查。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比：AOP 切面</div>
+  <p>这两个中间件对你毫无新意——它们就是 AOP。persist 是「写后通知」切面：业务只管改内存状态，切面在变更后把快照落盘（write-behind 缓存的思路），业务代码对存储零感知。devtools 是审计日志切面：每次变更自动记一条流水。换切面不改业务代码，正是「切面」的定义。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">localStorage 只有约 5MB、同步 IO、仅本标签页生效。数据量大、跨标签页同步、要和后端账号打通时就得升级——persist 的 version/migrate 迁移与多端同步，第 22 篇展开。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：规模判断 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>什么规模该上，什么规模不必</h2></div>
+
+<p>工具到手，最后一件事是判断：<strong>什么时候该请它出场</strong>。先给一张速查表：</p>
+
+<table>
+  <thead>
+    <tr><th>场景</th><th>建议</th><th>一句话理由</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>单组件内的开关、输入值</td><td>local state（第 4 篇）</td><td>别人的状态别外包</td></tr>
+    <tr><td>父子两层传递</td><td>状态提升（第 14 篇）</td><td>一层 props 就解决</td></tr>
+    <tr><td>低频全局配置（主题/语言）</td><td>Context（第 15 篇）</td><td>只读广播，够用</td></tr>
+    <tr><td>3 层以上共享、跨路由存活的客户端状态</td><td>Zustand</td><td>精准订阅 + 组件外可读写</td></tr>
+    <tr><td>超大团队、需要强规范与审计</td><td>Redux Toolkit（第 19 篇）</td><td>为纪律交样板税</td></tr>
+    <tr><td>服务端数据（列表、详情）</td><td>TanStack Query（第 33 篇）</td><td>别塞进任何 store</td></tr>
+  </tbody>
+</table>
+
+<p>该上的信号：同一状态被 <strong>3 个以上不相邻的组件</strong>使用（购物车横跨导航、详情、列表页）；状态需要<strong>跨路由存活</strong>，切到详情页再回来侧边栏不能被重置；Context 已出现「一处变更、全树骚动」的性能问题而状态偏偏更新频繁。</p>
+
+<p>不必上的信号：只有一个组件用，<code>useState</code> 就到头了（第 4 篇）；数据来自接口、要缓存要失效，那是服务端状态，TanStack Query 的事（第 17、33 篇）；表单输入这类高频临时值，连状态提升都该慎重，第 21 篇专门讲。</p>
+
+<p>一条红线：<strong>别把接口返回的数据塞进 Zustand 当缓存</strong>。一旦塞进去，缓存失效、去重、竞态、重试、乐观更新，每一件都得手搓且比看起来难——这正是第 17 篇把状态分成两类的全部理由。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>Zustand = 组件树外的全局单例 + 按需订阅：<code>create&lt;T&gt;()((set, get) =&gt; ({ ...数据, ...action }))</code>。</li>
+    <li>state 与 action 一体；set 浅合并、get 读最新值；不可变更新是硬纪律——引用比较决定 UI 是否更新。</li>
+    <li>selector 精准订阅：结果 Object.is 不变就不重渲染；别返回字面量新对象，多字段用 useShallow。</li>
+    <li>persist/devtools 是 AOP 式中间件：两行配置完成持久化与审计，业务代码零改动。</li>
+    <li>规模判断：3 层以上共享、跨路由存活的客户端状态才值得上；服务端数据一律交给 TanStack Query。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>第 17 篇问「状态分几类」，这一篇给了客户端状态的默认答案：几行代码的全局单例，无 Provider、无样板、精准订阅。但隐忧也在：Zustand 给的自由太大——action 随便定义、状态随便组织、变更没有强制记录。三五人的项目里这是优点，三十人的项目里这就是悬案工厂：「items 到底被谁改的？」下一篇第 19 篇，看 Redux Toolkit 如何用「一切变更都是事件」的纪律，换回大规模下的可预测性。</p>
+</div>
+</section>
+
+</body>
+</html>

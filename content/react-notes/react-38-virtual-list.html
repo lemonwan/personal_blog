@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>虚拟列表与大数据渲染</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：一万行为什么卡 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>一万行为什么卡：memo 管不到的地方</h2></div>
+
+<p>上一篇第 37 篇把 memo 讲透了：稳住引用、包住热点组件，无意义的重渲染该跳的都能跳过。但有一类卡顿 memo 救不了——<strong>列表本身有 1 万行</strong>。第 36 篇的分页管「数据一次拿多少」，本篇管「DOM 一次挂多少」，这是渲染性能的另一半。</p>
+
+<p>先算一笔账。1 万行、每行 6 个节点，就是 6 万个 DOM 节点；每个节点都是实打实的对象，挂着样式、布局盒、事件监听一整套元数据。后果分三层：</p>
+
+<ul>
+  <li><strong>内存</strong>：6 万节点轻松吃掉几十上百 MB，低端机 GC（垃圾回收）压力肉眼可见；</li>
+  <li><strong>首次挂载</strong>：解析、创建、插入 6 万节点，fiber 树同步建一遍——首屏白屏；</li>
+  <li><strong>reflow</strong>：滚动插入新行、窗口 resize、行内展开——任何布局改动都要重算布局树，树越大越慢。第 5 篇说过 diff 的便宜以「树小」为前提；虚拟 DOM 省的是桥接和全量重建，省不出 6 万节点的布局成本。</li>
+</ul>
+
+<table>
+  <thead>
+    <tr><th>列表规模</th><th>DOM 节点数（按每行 6 个估）</th><th>大致体感（量级示意）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>100 行</td><td>约 600</td><td>无感</td></tr>
+    <tr><td>1 000 行</td><td>约 6 000</td><td>中端手机滚动开始掉帧</td></tr>
+    <tr><td>10 000 行</td><td>约 60 000</td><td>首屏明显卡顿，滚动掉帧</td></tr>
+  </tbody>
+</table>
+
+<p>memo 为什么救不了？回看第 37 篇：memo 优化的是<strong>重复渲染</strong>，而这里的问题是<strong>一次渲染的绝对工作量</strong>太大——哪怕只挂载一次，6 万个节点也得实打实建出来。少做无用功，不等于少干活。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：全量物化 vs 流式读取</div>
+  <p>一次 SELECT 把 100 万行全部捞进 JVM，new 成对象塞进 List——内存暴涨、GC 频繁、接口超时，典型的反模式。老司机的做法是分页或流式读取（MyBatis 的 Cursor）：内存里永远只有当前一批。前端把 1 万行全部变成 DOM 节点，就是同一个反模式的浏览器版；虚拟列表就是前端的「流式读取」——DOM 里永远只有可视区那几十行。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">你也许见过「1 万行也没那么卡」——那是你的开发机。中端安卓机、再乘以 4 倍数据量，才是线上真相。性能要在目标设备上测。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：虚拟列表核心原理 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>核心原理：只渲染看得见的，外加两行缓冲</h2></div>
+
+<p>虚拟列表（virtual list）的思路一句话说完：<strong>数据全集留在 JS 数组里，DOM 只渲染可视区那一小片，滚动时换一片</strong>。拆成五个关键动作：</p>
+
+<ol>
+  <li>数据全集放内存（1 万条 JS 对象，不产生任何 DOM）；</li>
+  <li>按 scrollTop 和行高算出可视区行号区间 [start, end]；</li>
+  <li>只把切片渲染成 DOM，绝对定位到正确坐标；</li>
+  <li>上下多渲染几行<strong>缓冲区</strong>（overscan），快速滚动不露白；</li>
+  <li>用「总高元素」把滚动条撑到真实长度，滚动手感与完整列表一致。</li>
+</ol>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="虚拟列表示意图：左侧是 1 万行数据全集，只有可视区视口和上下缓冲区对应的内容被渲染成右侧的 DOM，滚动时重算 start 与 end 索引换一片切片，DOM 总量恒定">
+  <defs>
+    <marker id="arr38a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <text x="115" y="24" text-anchor="middle" font-size="12" font-weight="bold" fill="#1C1C1C">数据全集：10000 行</text>
+  <rect x="50" y="34" width="130" height="246" rx="6" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <line x1="50" y1="49" x2="180" y2="49" stroke="#EDE3C4" stroke-width="1"/>
+  <line x1="50" y1="64" x2="180" y2="64" stroke="#EDE3C4" stroke-width="1"/>
+  <line x1="50" y1="274" x2="180" y2="274" stroke="#EDE3C4" stroke-width="1"/>
+  <rect x="50" y="88" width="130" height="34" fill="#EDE3C4" stroke="#8C8676" stroke-width="1" stroke-dasharray="4 3"/>
+  <rect x="50" y="122" width="130" height="82" fill="#FAC94A" stroke="#C2410C" stroke-width="2"/>
+  <rect x="50" y="204" width="130" height="34" fill="#EDE3C4" stroke="#8C8676" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="115" y="168" text-anchor="middle" font-size="12" font-weight="bold" fill="#1C1C1C">可视区视口</text>
+  <text x="188" y="108" text-anchor="start" font-size="11" fill="#8C8676">上缓冲区 overscan</text>
+  <text x="188" y="228" text-anchor="start" font-size="11" fill="#8C8676">下缓冲区 overscan</text>
+  <line x1="248" y1="163" x2="350" y2="163" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr38a)"/>
+  <text x="299" y="150" text-anchor="middle" font-size="11" fill="#1C1C1C">滚动 → 重算 start/end</text>
+  <text x="299" y="180" text-anchor="middle" font-size="11" fill="#1C1C1C">增删几个节点，总量恒定</text>
+  <text x="461" y="106" text-anchor="middle" font-size="12" font-weight="bold" fill="#177245">实际渲染的 DOM</text>
+  <rect x="356" y="118" width="210" height="116" rx="8" fill="#FFFFFF" stroke="#177245" stroke-width="1.5"/>
+  <rect x="368" y="131" width="186" height="10" rx="2" fill="#EDE3C4" stroke="#8C8676" stroke-width="1"/>
+  <rect x="368" y="148" width="186" height="10" rx="2" fill="#EDE3C4" stroke="#8C8676" stroke-width="1"/>
+  <rect x="368" y="165" width="186" height="10" rx="2" fill="#FAC94A" stroke="#C2410C" stroke-width="1"/>
+  <rect x="368" y="182" width="186" height="10" rx="2" fill="#FAC94A" stroke="#C2410C" stroke-width="1"/>
+  <rect x="368" y="199" width="186" height="10" rx="2" fill="#EDE3C4" stroke="#8C8676" stroke-width="1"/>
+  <rect x="368" y="216" width="186" height="10" rx="2" fill="#EDE3C4" stroke="#8C8676" stroke-width="1"/>
+  <text x="461" y="252" text-anchor="middle" font-size="11" fill="#1C1C1C">黄 = 可视区切片，米色 = 缓冲</text>
+  <text x="310" y="290" text-anchor="middle" font-size="11" fill="#8C8676">其余 9900+ 行只是 JS 数组里的数据，不产生任何 DOM</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>虚拟列表的窗口：视口上下各留几行缓冲，滚动时只重算索引、换一片切片，DOM 里永远是那几十个节点。</figcaption>
+</figure>
+
+<p>关键在「滚动时发生了什么」：不是移动内容，而是<strong>内容坐标不动、窗口索引平移</strong>。每滚一格，diff 只增删两三行节点，DOM 总量恒定几十个——1 万行的体验，六万分之一的渲染成本。三个部件各司其职：</p>
+
+<table>
+  <thead>
+    <tr><th>部件</th><th>职责</th><th>后端直觉</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>总高撑高元素</td><td>撑出真实长度的滚动条，滚动手感正常</td><td>表的行数 COUNT</td></tr>
+    <tr><td>索引换算</td><td>scrollTop → start / end 行号</td><td>OFFSET 换算</td></tr>
+    <tr><td>切片渲染</td><td>可视区 ± 缓冲变成 DOM</td><td>当页数据</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：流式 ResultSet</div>
+  <p>JDBC 流式查询（Cursor）读 100 万行，内存里永远只有当前批，游标往后推一批换一批——虚拟列表一模一样，只是「批」的推进由滚动条驱动。数据一行没少，物化的对象永远只有一小窗。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：手写迷你虚拟列表 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>手写一个 30 行的迷你虚拟列表</h2></div>
+
+<p>原理这么简单，不如直接写一个。固定行高、一屏 600px、1 万行数据：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>MiniVirtualList.tsx</b> · 固定行高的最小实现</span></div>
+  <pre><code>import { useState, type UIEvent } from "react";
+
+const ROW_H = 40;    <span class="c">// 固定行高</span>
+const VIEW_H = 600;  <span class="c">// 视口高度</span>
+const OVERSCAN = 5;  <span class="c">// 上下各多渲染 5 行缓冲</span>
+const TOTAL = 10_000;
+
+function MiniVirtualList() {
+  const [scrollTop, setScrollTop] = useState(0);
+
+  function handleScroll(e: UIEvent&lt;HTMLDivElement&gt;) {
+    setScrollTop(e.currentTarget.scrollTop);
+  }
+
+  <span class="c">// 1. scrollTop → 起始行号：除以行高取整，再往前让出缓冲</span>
+  const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
+  <span class="c">// 2. 可视行数 + 两倍缓冲 = 本次要渲染的行数</span>
+  const count = Math.ceil(VIEW_H / ROW_H) + OVERSCAN * 2;
+  const end = Math.min(TOTAL, start + count);
+  <span class="c">// 3. 切片：只把 [start, end) 这段数据变成 DOM</span>
+  const rows: number[] = [];
+  for (let i = start; i &lt; end; i++) rows.push(i);
+
+  return (
+    &lt;div onScroll={handleScroll} style={{ height: VIEW_H, overflowY: "auto" }}&gt;
+      {/* 4. 内层容器撑出真实滚动条，并充当绝对定位的坐标系 */}
+      &lt;div style={{ height: TOTAL * ROW_H, position: "relative" }}&gt;
+        {rows.map((i) =&gt; (
+          &lt;div
+            key={i}
+            style={{
+              position: "absolute",
+              top: i * ROW_H,        <span class="c">// 5. 每行钉在自己的坐标上</span>
+              left: 0,
+              right: 0,
+              height: ROW_H,
+              lineHeight: "40px",
+              borderBottom: "1px solid #eee",
+            }}
+          &gt;
+            第 {i + 1} 行
+          &lt;/div&gt;
+        ))}
+      &lt;/div&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>整条数据流三步：scrollTop 除以行高取整得 start（往前让出缓冲），可视行数加两倍缓冲得 count，切片绝对定位到各自坐标。滚动时 setState 每秒触发几十次，但每次重渲染只剩「算两个索引 + diff 几十个节点」，DOM 只增删两三个——第 37 篇那句「<strong>重渲染 ≠ DOM 更新</strong>」在这里兑现：函数跑得勤，DOM 动得少。</p>
+
+<div class="think">
+  <div class="think-q">这里的 setState 没做任何节流防抖，滚动事件照单全收——却丝滑得很。方向对了，粗糙的实现也能飞快；方向错了（对着 6 万节点硬优化），精雕细琢也白搭。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：react-window ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>生产直接用 react-window</h2></div>
+
+<p>手写版帮你建立直觉，生产里别自己造轮子——<code>react-window</code> 把滚动兼容、边界情况都处理好了：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>BigList.tsx</b> · FixedSizeList：十几行搞定 1 万行</span></div>
+  <pre><code>import { FixedSizeList, type ListChildComponentProps } from "react-window";
+
+<span class="c">// 全集已在内存：日志查看器、导入预览这类场景</span>
+const data: string[] = Array.from(
+  { length: 10_000 },
+  (_, i) =&gt; `第 ${i + 1} 行数据`
+);
+
+function Row({ index, style, data }: ListChildComponentProps&lt;string[]&gt;) {
+  return (
+    &lt;div style={style}&gt;  <span class="c">// style 必须透传：内含定位坐标与行高</span>
+      {data[index]}
+    &lt;/div&gt;
+  );
+}
+
+export default function BigList() {
+  return (
+    &lt;FixedSizeList
+      height={600}          <span class="c">// 视口高度</span>
+      width="100%"
+      itemSize={40}         <span class="c">// 固定行高</span>
+      itemCount={data.length}
+      itemData={data}       <span class="c">// 透传给 Row 的数据</span>
+      overscanCount={5}     <span class="c">// 上下缓冲</span>
+    &gt;
+      {Row}
+    &lt;/FixedSizeList&gt;
+  );
+}</code></pre>
+</div>
+
+<p>唯一的坑写在注释里：<strong>Row 收到的 style 必须原样透传</strong>——撑高、绝对定位、top 偏移全在里面，丢了它列表会叠成一坨。手写版的全部数学，库都替你做了。</p>
+
+<p>换个视角看参数表，似曾相识：itemCount 是总数（COUNT），itemSize 是批大小（size），滚动位置换算成偏移量（OFFSET）——正是第 36 篇的分页三要素，只是全部发生在<strong>内存</strong>里：没有 SQL、没有网络往返，窗口随便滑、随便回滚。「内存放全集、视图只渲染窗口」，和后端「只查当页」是同一个窗口思想。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：浏览器里的分页游标</div>
+  <p>FixedSizeList 就是浏览器内的分页游标：COUNT 给出滚动条总长，itemSize 定批大小，scrollTop 换算 OFFSET——零延迟、可回滚、可乱跳。「只查当页」省服务端资源，「只渲染当窗」省浏览器资源，思想同源：数据该在服务端切的用分页（第 36 篇），已在客户端的用虚拟化（本篇）。</p>
+</div>
+
+<p><strong>行高不固定</strong>的场景：react-window 的 VariableSizeList 要预估每行高度、用着别扭；实际项目直接上 <code>react-virtuoso</code>——自动测量真实高度、支持聊天流反向滚动、可配合无限取数。</p>
+
+<div class="think">
+  <div class="think-q">什么时候<strong>不该</strong>用？总量几百行、DOM 一两千节点，直接渲染更省心——虚拟化会引入定位偏移、可访问性、Ctrl+F 搜不到等复杂度，要有回报才值得付。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：选型与过渡 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>选型：分页、无限滚动、虚拟列表</h2></div>
+
+<p>本篇和第 36 篇凑齐了「大数据渲染」的三张牌，放一张选型总表：</p>
+
+<table>
+  <thead>
+    <tr><th></th><th>分页（第 36 篇）</th><th>无限滚动（第 36 篇）</th><th>虚拟列表（本篇）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>数据在哪</strong></td><td>服务端，按页取</td><td>服务端，按游标推进</td><td>浏览器内存，一次到位</td></tr>
+    <tr><td><strong>DOM 数量</strong></td><td>一页的量</td><td>越滚越多，无上限</td><td>恒定：视口 + 缓冲</td></tr>
+    <tr><td><strong>跳转能力</strong></td><td>跳页、总数、URL 可收藏</td><td>只能顺序滚，无总数</td><td>随便滚，scrollToIndex 直达</td></tr>
+    <tr><td><strong>后端配合</strong></td><td>偏移分页接口</td><td>游标分页接口</td><td>一次性全量接口</td></tr>
+    <tr><td><strong>适用</strong></td><td>后台管理、报表</td><td>信息流、评论、feed</td><td>本地大数据：日志查看、大表格、导入预览</td></tr>
+    <tr><td><strong>常见组合</strong></td><td>—</td><td>无限滚动 + 虚拟列表（长 feed 标配）</td><td>与前两者叠加，只管渲染层</td></tr>
+  </tbody>
+</table>
+
+<p>记一条组合拳原则：<strong>取数和渲染是两层，可独立选型、叠着用</strong>——无限滚动管取数（游标推进），虚拟列表管渲染（DOM 恒定），react-virtuoso 一类库已把两层粘好，是超长信息流的标准解法。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>卡的根源是 DOM 数量：1 万行 ≈ 6 万节点，内存、首屏挂载、reflow 全线告急；memo 省重复劳动，省不了绝对工作量。</li>
+    <li>原理：全集留内存，按 scrollTop 算出切片 [start, end]，只渲染切片 + 上下缓冲（overscan），总高元素撑出真实滚动条，DOM 恒定几十个节点。</li>
+    <li>手写三步：scrollTop 除行高取整减缓冲得 start → 可视行数加两倍缓冲得 count → 切片绝对定位到 i × ROW_H。</li>
+    <li>生产用 react-window：Row 的 style 必须透传；行高不定用 react-virtuoso；超长 feed = 无限滚动取数 + 虚拟列表渲染。</li>
+    <li>选型口诀：管理端分页，信息流无限滚，本地大数据虚拟化；数据在远端又想随便滚，就把取数、渲染拆成两层叠起来。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>1 万行卡的不是 React，是 6 万个 DOM 节点带来的内存、挂载和布局成本。虚拟列表釜底抽薪：全集留在内存，视图永远只渲染「可视区 + 缓冲」那几十行，滚动只是索引平移——手写三十行领会精髓，生产交给 react-window / react-virtuoso。至此渲染层的性能牌打完：第 37 篇少做无用功（memo），本篇少渲染无用节点（虚拟化）。但卡还有另一个来源——不在运行时，在加载时：整个应用打成一个 JS 文件，首屏就要下载全部代码，其中九成用不上。下一篇第 39 篇：代码分割与懒加载，让「按需」从数据层延伸到代码层——用不到的代码，一开始就别下载。</p>
+</div>
+</section>
+
+</body>
+</html>

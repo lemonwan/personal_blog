@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重渲染剖析：memo 何时真正有用</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：重渲染的三个入口 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>重渲染的三个入口，只有三个</h2></div>
+
+<p>上一篇第 36 篇收官卷五：路由管「去哪」，Query 管「数据从哪来」，骨架齐了。卷六回答下一个问题——<strong>快不快</strong>。第一站先把「重渲染」这个词钉准确，结论拍在这：组件重渲染，<strong>只有三个入口</strong>：</p>
+
+<ol>
+  <li><strong>自身 setState</strong>（useReducer 的 dispatch 也算）；</li>
+  <li><strong>Context 变化</strong>——订阅了该 Context 的组件跟着重渲染（第 15 篇）；</li>
+  <li><strong>父组件重渲染</strong>——父渲染，子默认跟着渲染，<strong>不管 props 变没变</strong>。</li>
+</ol>
+
+<p>注意第三条：很多人以为「props 变了所以子组件重渲染」——这是因果倒置。props 变化不是触发器，它是父组件重渲染的<strong>伴生结果</strong>：父渲染时带着新 props 往下传，子组件默认重跑一遍。用代码验证：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Parent.tsx</b> · 一个永远不变的 props</span></div>
+  <pre><code>import { useState } from "react";
+
+function Child({ label }: { label: string }) {
+  console.log("Child 渲染了");
+  return &lt;p&gt;{label}&lt;/p&gt;;
+}
+
+function Parent() {
+  const [count, setCount] = useState(0);
+  console.log("Parent 渲染了");
+
+  return (
+    &lt;div&gt;
+      &lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count}&lt;/button&gt;
+      {/* label 从没变过，但 Parent 一渲染，Child 必跟着渲染 */}
+      &lt;Child label="固定文案" /&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>点五下按钮，控制台五组「Parent + Child」成对出现。可 Child 渲染了，DOM 动了吗？<strong>没有。</strong>重渲染是「重新执行函数组件 + 与上次输出做 diff」（第 5 篇）——Child 两次输出一样，diff 结果为空，DOM 纹丝不动。记住：<strong>重渲染 ≠ DOM 更新</strong>。固定成本是「函数执行 + diff」，通常便宜，贵的例外是组件树庞大、列表超长。优化的目标不是「零重渲染」，而是砍掉「输入没变还全量重算」的浪费。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：重算报表 ≠ 写库</div>
+  <p>重渲染像「把报表再算一遍」——重新执行只读方法；DOM 更新才像「写库」。只读方法跑一百遍数据库毫发无损，只是费 CPU。优化思路不是「让方法别跑」（那会破坏 UI = f(state) 的正确性），而是让「入参没变的方法」直接返回上次结果——这不就是缓存嘛，React.memo 马上登场。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">React 为什么默认不自动跳过？因为它假设组件是纯函数：同 props 必同输出。默认全量重渲染保证正确性优先，性能留给你主动声明——先保证对，再谈快。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：默认传染 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>默认传染：一个输入框，全家跟着跑</h2></div>
+
+<p>看一个真实形状的页面。订单页 OrderPage 持有关键词状态，侧边栏和订单表都不依赖它：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderPage.tsx</b> · 改造前的现场</span></div>
+  <pre><code>import { useState } from "react";
+
+function SidePanel() {
+  console.log("SidePanel 渲染了");
+  return &lt;aside&gt;侧边栏（与关键词无关）&lt;/aside&gt;;
+}
+
+function OrderTable({ orders }: { orders: string[] }) {
+  console.log("OrderTable 渲染了");
+  return &lt;ul&gt;{orders.map((o) =&gt; &lt;li key={o}&gt;{o}&lt;/li&gt;)}&lt;/ul&gt;;
+}
+
+export default function OrderPage() {
+  const [keyword, setKeyword] = useState("");
+  const orders = ["ORD-1001", "ORD-1002", "ORD-1003"];
+
+  return (
+    &lt;div&gt;
+      &lt;input
+        value={keyword}
+        onChange={(e) =&gt; setKeyword(e.target.value)} <span class="c">// 每敲一键触发一次 setState</span>
+      /&gt;
+      &lt;SidePanel /&gt;
+      &lt;OrderTable orders={orders} /&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>每敲一个字符，控制台三行一组地刷：OrderPage → SidePanel → OrderTable。订单表要是有 200 行、每行 8 个节点，等于每敲一键做一次两千节点规模的函数重跑 + diff。关键词只影响搜索框，另外两个组件纯属陪跑——<strong>重渲染会沿组件树向下传染，默认没有免疫机制。</strong></p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：全量跑批与增量</div>
+  <p>默认重渲染像全量跑批：上游批次一到，下游所有任务无条件重跑。你要的是增量——入参没变的任务直接跳过。React 给的开关就是 React.memo：给组件声明「入参没变就别叫我」。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：React.memo 与浅比较 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>React.memo：浅比较这道闸门</h2></div>
+
+<p>React.memo 是包在组件外面的一层 HOC（第 26 篇见过的模式）：重渲染从父组件传染过来时，memo 先拦一道，对<strong>旧 props 和新 props 做一遍浅比较</strong>——每个 key 用 Object.is 比对；全部相等就跳过整个组件的渲染，直接复用上次输出。试试：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderPage.tsx</b> · 包了 memo，但只成功了一半</span></div>
+  <pre><code>import { memo } from "react";
+
+// memo 包裹：重渲染传染过来时先做 props 浅比较，全相等就跳过
+const OrderTable = memo(function OrderTable({ orders }: { orders: string[] }) {
+  console.log("OrderTable 渲染了");
+  return &lt;ul&gt;{orders.map((o) =&gt; &lt;li key={o}&gt;{o}&lt;/li&gt;)}&lt;/ul&gt;;
+});
+
+export default function OrderPage() {
+  const [keyword, setKeyword] = useState("");
+
+  return (
+    &lt;div&gt;
+      &lt;input value={keyword} onChange={(e) =&gt; setKeyword(e.target.value)} /&gt;
+      {/* 坏了：每次渲染都新建数组，引用必不同，memo 白包 */}
+      &lt;OrderTable orders={["ORD-1001", "ORD-1002", "ORD-1003"]} /&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>每敲一键，OrderTable 照样渲染——数组字面量<strong>每次渲染都新建数组</strong>，引用必然不同，浅比较必然失败。这是 memo 最经典的失效场景，重灾区列全：</p>
+
+<ul>
+  <li>对象 / 数组字面量：<code>orders={[...]}</code>、<code>style={{ color: "red" }}</code>；</li>
+  <li>内联箭头函数：<code>onClick={() =&gt; doIt()}</code>——每次新引用；</li>
+  <li>children 塞 JSX：<code>&lt;Card&gt;&lt;b&gt;内容&lt;/b&gt;&lt;/Card&gt;</code> 的 children 也是 props，同理。</li>
+</ul>
+
+<p>memo 只看<strong>引用</strong>，不看内容。修复的钥匙第 11 篇早就给过你：useMemo 钉值的引用，useCallback 钉函数的引用：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderPage.tsx</b> · 稳定引用，memo 才能命中</span></div>
+  <pre><code>import { useCallback, useMemo, useState } from "react";
+
+export default function OrderPage() {
+  const [keyword, setKeyword] = useState("");
+
+  <span class="c">// 值用 useMemo 钉住引用：依赖不变就不造新数组（第 11 篇）</span>
+  const orders = useMemo(
+    () =&gt; ["ORD-1001", "ORD-1002", "ORD-1003"],
+    []
+  );
+
+  <span class="c">// 函数用 useCallback 钉住引用：keyword 变了才换新函数</span>
+  const handleExport = useCallback(() =&gt; {
+    console.log("导出订单，关键词：", keyword);
+  }, [keyword]);
+
+  return (
+    &lt;div&gt;
+      &lt;input value={keyword} onChange={(e) =&gt; setKeyword(e.target.value)} /&gt;
+      &lt;OrderTable orders={orders} onExport={handleExport} /&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>现在再敲关键词：OrderPage 渲染（自己 setState，天经地义），SidePanel 和 OrderTable 全部安静——传染被闸门拦下了。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="React.memo 的工作流程：父组件重渲染传染到子组件时，未包 memo 的整棵子树照常渲染；包了 memo 的先做 props 浅比较，全部引用相等则跳过渲染复用上次输出，有引用不同则照常重渲染">
+  <defs>
+    <marker id="arr37a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <rect x="210" y="16" width="200" height="36" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="310" y="39" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">父组件重渲染</text>
+  <line x1="310" y1="52" x2="310" y2="80" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr37a)"/>
+  <rect x="210" y="82" width="200" height="36" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="310" y="105" text-anchor="middle" font-size="13" fill="#1C1C1C">子组件被 memo 包裹？</text>
+  <line x1="410" y1="100" x2="450" y2="100" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr37a)"/>
+  <text x="430" y="92" text-anchor="middle" font-size="11" fill="#1C1C1C">否</text>
+  <rect x="454" y="82" width="152" height="36" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="530" y="98" text-anchor="middle" font-size="12" fill="#C2410C">不看 props，</text>
+  <text x="530" y="114" text-anchor="middle" font-size="12" fill="#C2410C">整棵子树照常渲染</text>
+  <line x1="310" y1="118" x2="310" y2="146" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr37a)"/>
+  <text x="322" y="137" text-anchor="start" font-size="11" fill="#1C1C1C">是</text>
+  <rect x="185" y="148" width="250" height="36" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="310" y="171" text-anchor="middle" font-size="13" fill="#1C1C1C">props 浅比较（Object.is）</text>
+  <line x1="310" y1="184" x2="178" y2="221" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr37a)"/>
+  <text x="218" y="200" text-anchor="middle" font-size="11" fill="#1C1C1C">全部相等</text>
+  <line x1="310" y1="184" x2="442" y2="221" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr37a)"/>
+  <text x="404" y="200" text-anchor="middle" font-size="11" fill="#1C1C1C">有引用不同</text>
+  <rect x="55" y="224" width="245" height="52" rx="8" fill="#EDE3C4" stroke="#177245" stroke-width="1.5"/>
+  <text x="177" y="246" text-anchor="middle" font-size="13" font-weight="bold" fill="#177245">跳过渲染</text>
+  <text x="177" y="264" text-anchor="middle" font-size="11" fill="#1C1C1C">直接复用上次的输出，DOM 零操作</text>
+  <rect x="320" y="224" width="245" height="52" rx="8" fill="#FFFFFF" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="442" y="246" text-anchor="middle" font-size="13" font-weight="bold" fill="#C2410C">照常重渲染</text>
+  <text x="442" y="264" text-anchor="middle" font-size="11" fill="#1C1C1C">对象字面量 / 内联函数永远「不同」</text>
+  <text x="310" y="292" text-anchor="middle" font-size="11" fill="#8C8676">浅比较只看引用，不看内容</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>memo 的闸门：包了的组件先做 props 浅比较，引用全等才放行跳过——稳定引用是生效前提。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：缓存命中条件——入参引用可哈希</div>
+  <p>@Cacheable(key = "#orderId") 能命中，因为 String 的 hashCode 稳定；每次 new 一个没重写 equals 的对象当 key，缓存永远 miss。memo 的 props 浅比较就是「对入参做相等性检查」，内联对象 / 函数 = 每次都换 key = 永远 miss。所以 useMemo / useCallback 不是点缀，它们是 memo 这张缓存表的 key 稳定性保证——先有稳定 key，才谈得上命中。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">memo 支持第二参数自定义比较函数（如深比较），慎用：深比较有成本，漏字段还会造成「该渲染不渲染」的灵异 bug。想深比较时，先想想是不是该把对象拆成几个原始值 props。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：三件套分工与成本 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>三件套分工，以及 memo 自身的成本</h2></div>
+
+<p>useMemo、useCallback、memo 经常被混着叫「性能优化三件套」，但各管一段，一张表钉死：</p>
+
+<table>
+  <thead>
+    <tr><th>工具</th><th>作用层级</th><th>管什么</th><th>后端类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>React.memo</code></td><td>组件级</td><td>props 浅比较全等 → 跳过整个组件的渲染</td><td>方法级缓存 @Cacheable</td></tr>
+    <tr><td><code>useCallback</code></td><td>值级（函数）</td><td>函数引用稳定，供 memo 比对、供依赖数组用</td><td>稳定的缓存 key</td></tr>
+    <tr><td><code>useMemo</code></td><td>值级（任意值）</td><td>对象 / 数组引用稳定 + 昂贵计算结果缓存</td><td>稳定的 key + 结果缓存</td></tr>
+  </tbody>
+</table>
+
+<p>记忆口诀：<strong>memo 管「组件跳不跳过」，useCallback 管「函数引用稳不稳」，useMemo 管「值引用稳不稳、重算要不要」</strong>。useCallback 单独用几乎没意义，它和 memo 是配套的。</p>
+
+<p>另一半真相：<strong>memo 不是免费的</strong>。每次父组件渲染它都要做一遍 props 比对；组件越小越纯，「重渲染」越便宜，「比对」的相对开销越高——给渲染成本约等于零的小组件包 memo 是负优化。memo 留给「渲染贵、props 经常不变」的体重级选手：列表项、大表格、图表。</p>
+
+<p>谁是体重级选手？<strong>先测量，再优化</strong>。用 React DevTools 的 Profiler 录一次交互，看谁渲染次数多、单次耗时长；也可以临时包一层 <code>&lt;Profiler&gt;</code> 组件，在 onRender 回调里拿 id / phase / duration 给热点排序（第 41 篇细讲）。</p>
+
+<p>标准流程由此固定：<strong>测量 → 找热点 → 稳定引用 → memo 包热点 → 再测量确认</strong>。跳过第一步的优化，大概率是 memo 撒胡椒面：代码量翻倍，热点那一个组件的收益却被平均掉。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>重渲染只有三个入口：自身 setState、Context 变化（第 15 篇）、父组件渲染。「props 变了」不是独立入口，是父渲染的伴生结果。</li>
+    <li>重渲染 ≠ DOM 更新：函数重跑 + diff（第 5 篇），DOM 多半纹丝不动；要防的是大树里的无效重跑。</li>
+    <li>memo 是 props 浅比较的闸门：内联对象 / 函数每次都是新引用，必穿闸——useMemo / useCallback 稳定引用是 memo 生效的前提（第 11 篇）。</li>
+    <li>memo 有比较成本：小而纯的组件别包；先 Profiler 测量（第 41 篇），对「渲染贵、props 稳」的热点下手。</li>
+    <li>分工：memo 管组件跳过，useCallback 管函数引用，useMemo 管值引用与昂贵计算——三件套要配套使用。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：收官与过渡 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>收官：memo 治不了的病，留给虚拟列表</h2></div>
+
+<p>把本篇的判断收进速查表，下次遇到「页面卡」对着开方：</p>
+
+<table>
+  <thead>
+    <tr><th>症状</th><th>处方</th><th>出处</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>父组件一打字，无关子组件跟着跑</td><td>memo + 稳定引用，挡住传染</td><td>本篇</td></tr>
+    <tr><td>包了 memo 还是每次都跑</td><td>揪出 props 里的内联对象 / 函数，useMemo / useCallback 钉住</td><td>本篇 + 第 11 篇</td></tr>
+    <tr><td>列表项全都 memo 了，滚动还是卡</td><td>病根是节点数量，不是重渲染——换思路</td><td>第 38 篇</td></tr>
+    <tr><td>不知道该从哪优化</td><td>先 Profiler 测出热点，再动手</td><td>第 41 篇</td></tr>
+  </tbody>
+</table>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>重渲染只有三个入口，且重渲染 ≠ DOM 更新——只是函数重跑加一次 diff，多数时候便宜且正确。memo 的价值是用 props 浅比较拦住「输入没变还重跑」的浪费，但命门是引用：内联对象和函数会让闸门永远失效，useMemo / useCallback 因此是配套件；memo 自身也有比较成本，先测量、对热点下手。然而 memo 有治不了的病：列表有 1 万行时，哪怕每行都 memo、一次都不重渲染，几万个 DOM 节点的挂载与布局照样卡——它省的是<strong>重复劳动</strong>，省不出<strong>绝对工作量</strong>。下一篇第 38 篇换釜底抽薪的思路：虚拟列表——1 万行数据，只渲染看得见的那 30 行。</p>
+</div>
+</section>
+
+</body>
+</html>

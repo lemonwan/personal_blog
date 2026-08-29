@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>集成 LLM 的前端实践</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：消息建模 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>先建模：一条消息在状态里长什么样</h2></div>
+
+<p>上一篇第 45 篇，你已经能让一条消息「打字机式」地流出来了。但真实产品里没有「一条消息」，只有<strong>一串消息</strong>：有你说的、有 AI 说的、有正在生成的、有失败了的。这一篇我们把它们全部装进一个 React 状态里，拆解一个 AI Chat 前端的完整骨架。第一步永远是建模——一条消息长什么样？</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>types.ts</b> · 用可辨识联合给消息分类</span></div>
+  <pre><code>type MessageStatus = "streaming" | "done" | "error";
+
+interface UserMessage {
+  id: string;            <span class="c">// 稳定唯一 id，列表的 key 全靠它（第 7 篇）</span>
+  role: "user";
+  content: string;
+  createdAt: number;
+}
+
+interface AssistantMessage {
+  id: string;
+  role: "assistant";
+  content: string;       <span class="c">// 流式过程中不断追加</span>
+  status: MessageStatus; <span class="c">// 占位 → 流式 → 完成/失败，UI 靠它分流</span>
+  error?: string;        <span class="c">// status 为 error 时的提示文案</span>
+  createdAt: number;
+}
+
+<span class="c">// 可辨识联合：role 就是那个「辨识字段」（第 28 篇）</span>
+type Message = UserMessage | AssistantMessage;</code></pre>
+</div>
+
+<p>注意一个细节：<strong>user 消息没有 status</strong>。用户的消息发出去就是完整的，不存在「生成中」；只有 assistant 消息才有生命周期。这正是第 28 篇讲的可辨识联合的价值——「哪类消息有哪些字段」由类型系统说死，而不是搞一个巨型接口全是可选字段，每处使用都得 <code>if ("status" in m)</code> 地防御。<strong>非法状态在类型层面就不可表示</strong>，编译器替你兜底。</p>
+
+<p>整个聊天界面的状态，就是这一个数组：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatApp.tsx</b> · 整个 Chat 只有一个状态源</span></div>
+  <pre><code>const [messages, setMessages] = useState&lt;Message[]&gt;([]);</code></pre>
+</div>
+
+<p>第 1 篇的心智模型原样适用：<code>UI = f(messages)</code>。转圈动画、失败横幅、「正在输入」的省略号——全部是从这个数组<strong>推导</strong>出来的，没有一个额外的布尔标志在手动开关界面。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：别建「万能宽表」</div>
+  <p>把 Message 建成一张什么都有的宽表——role、content、status、error 全塞一起、全可空——就像你设计 DTO 时不分语义，订单和订单日志共用一个类。可辨识联合就是 TS 版的「按类型建模」：每种消息一个形状，用 role 这个判别字段收窄。你在后端怎么抵制「一个 JSON 承载一切」，在前端就怎么抵制「一个接口承载一切」。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">试着回答：为什么把 status 放在 assistant 消息上，而不是单独用一个 generatingId: string | null 记录「正在生成的消息 id」？两种都可行——前者状态跟着数据走，持久化方便；后者天然约束「同时只有一条在生成」。没有标准答案，但你要意识到这是个设计决策，code review 和面试都爱问。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：发送流程 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>发送消息：一次前端版的「本地事务」</h2></div>
+
+<p>点下发送键之后，前端其实要连做四步，顺序不能乱：</p>
+
+<ol>
+  <li><strong>乐观插入</strong>：用户消息不等后端确认，立刻进列表——否则点完发送没反应，像卡死；</li>
+  <li><strong>占位</strong>：紧跟着插入一条 content 为空、status 为 streaming 的 assistant 消息，它是转圈动画的宿主；</li>
+  <li><strong>流式填充</strong>：第 45 篇的读流代码登场，每个 delta 到达就往这条占位消息里追加；</li>
+  <li><strong>收尾</strong>：流读完标 done；出错标 error，半截内容保留。</li>
+</ol>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatApp.tsx</b> · 发送 = 插入 → 填充 → 提交/标记失败</span></div>
+  <pre><code>async function sendMessage(text: string) {
+  const assistantId = crypto.randomUUID();
+  const userMsg: UserMessage = {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: text,
+    createdAt: Date.now(),
+  };
+
+  <span class="c">// 本地先拼好「下一版状态」：真实用户消息 + 占位 assistant 消息</span>
+  const next: Message[] = [
+    ...messages,
+    userMsg,
+    { id: assistantId, role: "assistant", content: "", status: "streaming" as const, createdAt: Date.now() },
+  ];
+  setMessages(next); <span class="c">// ①② 乐观提交：不等网络，界面立刻多两条消息</span>
+
+  const controller = new AbortController();
+  controllerRef.current = controller; <span class="c">// 停止生成的开关，第 4 站细讲</span>
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: toApiMessages(next) }), <span class="c">// 多轮上下文，第 5 站细讲</span>
+      signal: controller.signal,
+    });
+
+    <span class="c">// ③ 流式填充：readStream 的完整拆解在第 45 篇，这里只留骨架</span>
+    await readStream(res, (delta) =&gt; {
+      setMessages((prev) =&gt;
+        prev.map((m) =&gt; (m.id === assistantId ? { ...m, content: m.content + delta } : m))
+      );
+    });
+
+    <span class="c">// ④a 提交：streaming → done</span>
+    setMessages((prev) =&gt;
+      prev.map((m) =&gt; (m.id === assistantId ? { ...m, status: "done" as const } : m))
+    );
+  } catch {
+    <span class="c">// ④b 标记失败：半截内容保留；「主动中止」的区分第 4 站讲</span>
+    setMessages((prev) =&gt;
+      prev.map((m) =&gt;
+        m.id === assistantId ? { ...m, status: "error" as const, error: "生成失败，请重试" } : m
+      )
+    );
+  } finally {
+    controllerRef.current = null;
+  }
+}</code></pre>
+</div>
+
+<p>两个细节值得停留。第一，这里<strong>故意用快照 <code>next</code> 而不是函数式更新</strong>：请求体里的多轮上下文必须包含刚输入的这条消息，而函数式更新拿到的 <code>prev</code> 在异步回调里不方便直接取用。代价是快速连发两条会拿到旧快照——最简单的兜底是生成期间禁用输入框，第 34 篇的竞态思路照搬即可。第二，所有更新都是 <code>map</code> 出新数组、返回新对象，<strong>从不原地改</strong>——第 4 篇讲过的不可变纪律，在几十毫秒一次的流式更新里尤其要守。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="一条 assistant 消息的状态流转：点击发送后乐观插入用户消息与占位消息，流式填充期间 status 为 streaming，流读完进入 done，出错或中止进入 error，失败可重试重新发送">
+  <defs>
+    <marker id="arr46a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+  </defs>
+  <rect x="16" y="120" width="120" height="52" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="76" y="142" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">① 点击发送</text>
+  <text x="76" y="160" text-anchor="middle" font-size="11" fill="#1C1C1C">不等后端确认</text>
+  <line x1="136" y1="146" x2="162" y2="146" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr46a)"/>
+  <rect x="168" y="112" width="180" height="68" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="258" y="134" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">② 乐观插入两条</text>
+  <text x="258" y="152" text-anchor="middle" font-size="11" fill="#1C1C1C">user 消息（立即可见）</text>
+  <text x="258" y="168" text-anchor="middle" font-size="11" fill="#1C1C1C">assistant 占位（streaming）</text>
+  <line x1="348" y1="146" x2="374" y2="146" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr46a)"/>
+  <rect x="380" y="120" width="150" height="52" rx="8" fill="#EDE3C4" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="455" y="142" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">③ 流式填充</text>
+  <text x="455" y="160" text-anchor="middle" font-size="11" fill="#1C1C1C">delta 逐段追加</text>
+  <line x1="455" y1="120" x2="455" y2="88" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr46a)"/>
+  <text x="467" y="106" text-anchor="start" font-size="11" fill="#1C1C1C">流读完</text>
+  <rect x="390" y="36" width="152" height="48" rx="8" fill="#FFFFFF" stroke="#177245" stroke-width="1.5"/>
+  <text x="466" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#177245">status: done</text>
+  <text x="466" y="74" text-anchor="middle" font-size="11" fill="#1C1C1C">完整答案定格</text>
+  <line x1="455" y1="172" x2="455" y2="224" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr46a)"/>
+  <text x="467" y="202" text-anchor="start" font-size="11" fill="#1C1C1C">出错 / 中止</text>
+  <rect x="390" y="228" width="152" height="48" rx="8" fill="#FFFFFF" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="466" y="248" text-anchor="middle" font-size="13" font-weight="bold" fill="#C2410C">status: error</text>
+  <text x="466" y="266" text-anchor="middle" font-size="11" fill="#1C1C1C">保留半截内容</text>
+  <path d="M390,252 L258,252 L258,186" fill="none" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr46a)"/>
+  <text x="300" y="276" text-anchor="middle" font-size="11" fill="#C2410C">④ 重试：删失败消息，重新发送</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>一条 assistant 消息的一生：乐观插入时就是 streaming，流读完提交为 done，出错标记 error 并留给重试——所有界面表现都由 status 推导。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：本地事务 + 状态机</div>
+  <p>这四步你闭着眼都能对上号：乐观插入 = 开事务写两条「未提交」记录；流式填充 = 逐条追加明细；done = commit；error = rollback 后标记异常单。前端没有数据库事务，但「不可变更新 + status 状态机」就是你在 UI 层能拿到的最接近事务的东西——每一步要么整体成立，要么留一条明确的失败痕迹，绝不出现「界面显示成功但状态是失败」的脏数据。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：消息列表 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>消息列表：key、自动滚动与按角色渲染</h2></div>
+
+<p>状态有了，渲染层就是把数组画成列表。但 Chat 的列表有三个专属考点：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>MessageList.tsx</b> · 列表 + 自动滚动 + 按角色分流</span></div>
+  <pre><code>import { useEffect, useRef, memo } from "react";
+
+<span class="c">// memo：流式时只有最后一条在变，前面的消息别陪着重渲染（第 37 篇）</span>
+const MessageItem = memo(function MessageItem({
+  message,
+  onRetry,
+}: {
+  message: Message;
+  onRetry: (id: string) =&gt; void;
+}) {
+  if (message.role === "user") {
+    return &lt;div className="msg msg-user"&gt;{message.content}&lt;/div&gt;;
+  }
+  <span class="c">// 走到这里 TS 已收窄为 AssistantMessage：status / error 随便用</span>
+  if (message.status === "error") {
+    return (
+      &lt;div className="msg msg-assistant msg-error"&gt;
+        {message.content || "生成失败"}
+        &lt;button onClick={() =&gt; onRetry(message.id)}&gt;重试&lt;/button&gt;
+      &lt;/div&gt;
+    );
+  }
+  const empty = message.status === "streaming" &amp;&amp; message.content === "";
+  return (
+    &lt;div className="msg msg-assistant"&gt;
+      {empty ? &lt;span className="thinking-dot"&gt;思考中…&lt;/span&gt; : &lt;Markdown source={message.content} /&gt;}
+    &lt;/div&gt;
+  );
+});
+
+function MessageList({ messages, onRetry }: { messages: Message[]; onRetry: (id: string) =&gt; void }) {
+  const bottomRef = useRef&lt;HTMLDivElement&gt;(null);
+
+  useEffect(() =&gt; {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" }); <span class="c">// 消息一变就滚到底部</span>
+  }, [messages]);
+
+  return (
+    &lt;div className="msg-list"&gt;
+      {/* key 用稳定 id：流式、重试都会增删消息，用下标必乱（第 7 篇） */}
+      {messages.map((m) =&gt; (
+        &lt;MessageItem key={m.id} message={m} onRetry={onRetry} /&gt;
+      ))}
+      &lt;div ref={bottomRef} /&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p><strong>考点一：key。</strong>有人觉得 Chat 列表只在尾部追加，用 index 当 key 侥幸能活。但重试会<strong>删除中间消息</strong>、历史会话会整表载入，index 一错位，React 会把 A 消息的 DOM 复用给 B 消息——轻则样式串了，重则流式内容填进别人的气泡。主键思维（第 7 篇）：用 id，永远用 id。</p>
+
+<p><strong>考点二：自动滚动。</strong>底部放一个哨兵 <code>div</code>，useEffect 监听 messages 变化后 <code>scrollIntoView</code>。这是「无脑跟随」版，有个产品级缺陷：用户往上翻历史时会被强行拽回底部。讲究一点的做法是先判断 <code>scrollTop</code> 是否接近底部再滚——先能用，再好用。</p>
+
+<p><strong>考点三：按角色渲染。</strong>看 MessageItem 的写法：<code>if (message.role === "user")</code> 之后，TS 自动把类型收窄为 AssistantMessage，后面才能摸 <code>status</code>、<code>error</code>。这就是第 1 站那套可辨识联合的回报——<strong>建模时多花五分钟，使用处少写五处类型断言</strong>。至于 markdown：生产环境 assistant 的回答基本是 markdown，用 react-markdown 之类渲染、代码块加高亮即可，一行配置的事，不展开。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：key 是主键，diff 是按主键 upsert</div>
+  <p>React 拿新旧两份列表做 diff 时，靠 key 认「这是同一条消息」。用 index 当 key，等于用行号当主键：中间删一行，后面全部身份漂移，update 语句全打错目标。你不会这么设计数据库表，也别这么写列表。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：停止与重试 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>停止与重试：AbortController 请住进 useRef</h2></div>
+
+<p>生成到一半，用户不想等了，点「停止」——这个按钮要摸到 sendMessage 里创建的那个 AbortController。两者在不同的事件回调里，隔着无数次渲染。放 state 里？它的变化不需要触发任何渲染，白白多跑一遍；而且异步 setState 拿到的可能还是旧值。<strong>「跨渲染可变、但与视图无关」正是 useRef 的领地</strong>（第 12 篇）：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatApp.tsx</b> · 停止生成的全部代码</span></div>
+  <pre><code>const controllerRef = useRef&lt;AbortController | null&gt;(null);
+
+function stop() {
+  controllerRef.current?.abort(); <span class="c">// fetch 会立刻抛出 AbortError</span>
+  controllerRef.current = null;
+}</code></pre>
+</div>
+
+<p>abort 之后，sendMessage 里挂起的 <code>await fetch</code> 会抛 AbortError，落进 catch。但「用户主动停」和「网络真挂了」必须区别对待：前者是正常操作，半截答案应当保留并标 done（ChatGPT 就是这么做的）；后者才是 error：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatApp.tsx</b> · catch 里区分中止与失败</span></div>
+  <pre><code>} catch (e) {
+  const aborted = e instanceof DOMException &amp;&amp; e.name === "AbortError";
+  setMessages((prev) =&gt;
+    prev.map((m) =&gt; {
+      if (m.id !== assistantId) return m;
+      return aborted
+        ? { ...m, status: "done" as const } <span class="c">// 半截答案保留，别浪费 token</span>
+        : { ...m, status: "error" as const, error: "生成失败，请重试" };
+    })
+  );
+}</code></pre>
+</div>
+
+<p>重试更简单，本质是<strong>「删掉失败消息，把触发它的那条用户消息原样重发」</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatApp.tsx</b> · 重试 = 删除 + 重发</span></div>
+  <pre><code>function retry(failedId: string) {
+  const idx = messages.findIndex((m) =&gt; m.id === failedId);
+  const failed = messages[idx];
+  const lastUser = messages[idx - 1]; <span class="c">// 失败消息的前一条必是用户消息</span>
+  if (!failed || failed.role !== "assistant" || !lastUser || lastUser.role !== "user") return;
+
+  setMessages((prev) =&gt; prev.filter((m) =&gt; m.id !== failedId)); <span class="c">// 移除失败消息</span>
+  sendMessage(lastUser.content); <span class="c">// 原样重发，走一遍完整流程</span>
+}</code></pre>
+</div>
+
+<p>另一种流派是<strong>不删</strong>，把失败消息的 status 重置回 streaming、content 清空，原地重填。取舍一句话：删了重发实现最简单、上下文干净；原地重置能保住消息 id，适合消息上挂着其他关联（点赞、引用、客服工单号）的场景。选哪个，取决于你的消息有没有「身份之外的包袱」。</p>
+
+<div class="think">
+  <div class="think-q">推演一个产品需求：「停止生成后，用户可以就着半截答案继续追问。」用今天的模型走一遍：半截 content + status: done，追问时它作为上下文发给后端——你会发现这个需求几乎不用写新代码。状态建模对了，很多需求就是「改一个字段的事」。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：持久化与上下文 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>持久化与多轮上下文：前端是编排者，不是真相源</h2></div>
+
+<p>最后补两块底座。先是<strong>历史会话</strong>。小方案用 localStorage（第 22 篇的「本地优先」）：懒初始化读一次，每次变化写回去——</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatApp.tsx</b> · localStorage 持久化</span></div>
+  <pre><code>const [messages, setMessages] = useState&lt;Message[]&gt;(() =&gt; {
+  try {
+    const raw = localStorage.getItem("chat:history");
+    const list: Message[] = raw ? JSON.parse(raw) : [];
+    <span class="c">// 流式中途刷新会留下半截消息，恢复时统一收敛成 done</span>
+    return list.map((m) =&gt;
+      m.role === "assistant" &amp;&amp; m.status === "streaming" ? { ...m, status: "done" as const } : m
+    );
+  } catch {
+    return []; <span class="c">// JSON 损坏也别让整个聊天页白屏</span>
+  }
+});
+
+useEffect(() =&gt; {
+  localStorage.setItem("chat:history", JSON.stringify(messages));
+}, [messages]);</code></pre>
+</div>
+
+<p>要换设备不丢、多端同步，就得走后端：消息落 conversation 表，前端只持一个 conversationId，进页面拉取后 <code>setMessages</code>。这正对应第 22 篇的判断——<strong>localStorage 适合「缓存」，服务端才是「真相」</strong>。注意恢复时把半截的 streaming 收敛成 done：持久化的只能是完整状态，别把「生成中」这种瞬态存下来。</p>
+
+<p>然后是<strong>多轮上下文</strong>。LLM 本身无记忆，所谓「多轮对话」，就是每次把历史消息整包发给后端：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>ChatApp.tsx</b> · 出口处的 DTO 转换</span></div>
+  <pre><code>function toApiMessages(messages: Message[]) {
+  return messages
+    .filter((m) =&gt; m.role === "user" || m.status !== "error") <span class="c">// 顺便收窄：user 没有 status 字段</span>
+    .map((m) =&gt; ({ role: m.role, content: m.content }));
+}</code></pre>
+</div>
+
+<p>注意 filter 里那个写法：必须先 <code>m.role === "user"</code> 短路，TS 才允许在 <code>||</code> 的另一边摸 <code>status</code>——可辨识联合的纪律贯穿到最后一行。消息越攒越多、超出模型上下文窗口时按策略截断：只带最近 N 轮，或由后端做摘要。这是策略选择，前端只负责把选定的历史装进请求体。</p>
+
+<p>回头整篇看一件事：<strong>前端没有产出任何一个字的答案</strong>。它做的事是乐观插入、占位、追加、标记、回滚、持久化——把后端和 LLM 产生的「真相」编排成用户看得懂的界面。真相源永远在后端，<strong>前端是状态的编排者</strong>。这也是「前端会不会被 AI 取代」的答案：界面越动态，编排越值钱。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>消息建模成可辨识联合：<code>Message = UserMessage | AssistantMessage</code>，status 只属于 assistant，非法状态类型不可表示（第 28 篇）。</li>
+    <li>发送 = 一次本地事务：乐观插入用户消息 → 占位 streaming → 流式追加 → done 提交 / error 回滚，全程不可变更新。</li>
+    <li>列表 key 用稳定 id（第 7 篇），消息项包 memo 省流式陪跑（第 37 篇），自动滚动先做「无脑跟随」再优化。</li>
+    <li>停止生成：AbortController 存 useRef（第 12 篇），catch 里区分「主动中止」与「真失败」；重试 = 删失败消息重发。</li>
+    <li>历史会话 localStorage 是缓存、后端是真相（第 22 篇）；多轮上下文 = 整包 messages 发后端，超窗截断是策略问题。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>这一篇把第 45 篇的「流式读一条消息」拼装成了完整的 Chat 前端：消息是带 status 的可辨识联合数组，发送是一次「乐观插入 → 占位 → 流式填充 → 提交/回滚」的本地事务，列表靠 id 做 key、靠 status 分流渲染，停止靠 useRef 里的 AbortController，失败靠「删除重发」重试，会话靠 localStorage 或后端持久化，上下文靠整包 messages 喂给后端。贯穿始终的一句话：<strong>前端是状态的编排者，不是真相源</strong>——你编排得越利落，AI 的能力就越像产品。不过到今天为止，AI 在你手里还只是「被调用的服务」。下一篇换个方向：让 AI 坐到你的工位旁边，当你的结对搭子——第 47 篇，与 AI 结对编程。</p>
+</div>
+</section>
+
+</body>
+</html>

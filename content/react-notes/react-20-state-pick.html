@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context / Zustand / Redux 如何选型</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：三者本质 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>先认清三者本质：广播、单例、事件容器</h2></div>
+
+<p>卷三过半：第 17 篇把状态分成「客户端」与「服务端」两类，第 18 篇 Zustand、第 19 篇 Redux Toolkit 接管客户端状态。三件工具（加上第 15 篇的 Context）都摆上了货架，工作里被问得最多的却从来不是「怎么用」，而是「<strong>我的项目该用哪个</strong>」。回答之前，先把三者的本质摆平——它们对应后端三种你天天打交道的形态：</p>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>Context（第 15 篇）</th><th>Zustand（第 18 篇）</th><th>Redux Toolkit（第 19 篇）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>一句话本质</td><td>依赖注入式广播</td><td>组件树外的可订阅单例</td><td>纪律严格的事件驱动容器</td></tr>
+    <tr><td>后端类比</td><td>配置中心下发配置</td><td>进程内单例缓存 Bean</td><td>EventStore 事件溯源</td></tr>
+    <tr><td>状态放哪</td><td>组件树上层的 Provider</td><td>模块级全局单例</td><td>configureStore 单例</td></tr>
+    <tr><td>更新方式</td><td>重设 value（整体替换）</td><td>直接调用 action 函数</td><td>必须 dispatch action</td></tr>
+    <tr><td>订阅粒度</td><td>value 整体，不可拆</td><td>selector 精准到字段</td><td>useSelector + 引用比较</td></tr>
+    <tr><td>变更留痕</td><td>无</td><td>devtools 中间件可选</td><td>天然 action 流水</td></tr>
+    <tr><td>心智与样板成本</td><td>最低</td><td>低</td><td>中（RTK 已大幅缩减）</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：配置中心 vs 内存缓存 vs EventStore</div>
+  <p>三个类比展开说。<strong>Context</strong> 是配置中心（Nacos / <code>@Value</code> 那套）：启动时拉一次，运行期几乎不变；一旦变更就是全量推送，所有消费方一起刷新——所以它只配承载低频数据。<strong>Zustand</strong> 是进程内的单例缓存 Bean：谁都能读写，监听器按字段精准订阅，轻快自由，但默认没人记账。<strong>Redux</strong> 是 EventStore 事件溯源：一切写入先成为事件，状态是投影——审计、回放、规范全齐，代价是每次写入都要「走流程」。</p>
+</div>
+
+<p>没有高下，只有形态。选型问题其实是两个问题：你的数据<strong>更新频率</strong>多高？要不要<strong>变更留痕</strong>？带着这两个问题看下一站。</p>
+</section>
+
+<!-- ═══════════════ 第2站：主场与禁区 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>各自的主场与禁区</h2></div>
+
+<h3>Context：低频配置的只读广播</h3>
+<p>主场：主题与暗色模式、语言、当前登录人、组件库的全局配置——启动定一次、顶多变几次的「环境值」。禁区一：高频变更，输入框每敲一个字符就广播一次，全树消费者陪跑。禁区二：把它当大型应用唯一状态方案，很快退化成 Provider 嵌套地狱加全局重渲染风暴。口诀：<strong>一年变一次用 Context，一秒变一次快逃</strong>。</p>
+
+<h3>Zustand：中小型客户端状态的事实标准</h3>
+<p>主场：购物车、侧边栏开合、当前 tab、跨路由存活的操作草稿——更新频繁、但每次只影响少数组件的客户端状态。禁区一：服务端数据，接口列表塞进 store，缓存失效、去重、竞态全要手搓（第 17 篇的分野，第 33 篇的正解）。禁区二：selector 里返回字面量新对象，重渲染失控（第 18 篇的坑）；超大团队需要强制规范时，「自由」管不住人。</p>
+
+<h3>Redux Toolkit：大团队与强规范的主场</h3>
+<p>主场：变更需要审计与回放（撤销重做、协同编辑）、状态联动复杂、超大团队统一写法、依赖中间件生态。禁区：三五个组件共享一个开关也建 slice，样板税远超收益；小项目为了简历上写「会 Redux」而上，面试官问一句 reducer 纯度就露馅。</p>
+
+<p>反模式速查，对照自查：</p>
+
+<table>
+  <thead>
+    <tr><th>工具</th><th>典型反模式</th><th>后果</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Context</td><td>输入框值放进 Context</td><td>每敲一键，全树重渲染</td></tr>
+    <tr><td>Context</td><td>业务状态层层嵌套 Provider</td><td>数据来源难追，重构困难</td></tr>
+    <tr><td>Zustand</td><td>接口数据塞 store 当缓存</td><td>手搓残缺版 TanStack Query</td></tr>
+    <tr><td>Zustand</td><td>selector 返回字面量新对象</td><td>重渲染失控（第 18 篇）</td></tr>
+    <tr><td>RTK</td><td>reducer 里发请求、取当前时间</td><td>纯函数被污染，回放失真</td></tr>
+    <tr><td>RTK</td><td>页面级小状态也建 slice</td><td>样板税得不偿失</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第3站：决策树 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>可执行决策树：自上而下，命中即停</h2></div>
+
+<p>把三个工具和「都不选」排成一棵树，自上而下问，<strong>命中即停</strong>。注意：大多数项目会在第 2、3 问就停下——这不是偷懒，是正确。</p>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>自问</th><th>命中 → 用什么</th><th>详见</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>数据来自服务端，要缓存 / 失效 / 重试？</td><td><strong>都不选 → TanStack Query</strong></td><td>第 17 / 33 篇</td></tr>
+    <tr><td>2</td><td>只有一两个组件用到？</td><td>local state / 状态提升</td><td>第 4 / 14 篇</td></tr>
+    <tr><td>3</td><td>低频且近乎只读的全局配置？</td><td>Context</td><td>第 15 篇</td></tr>
+    <tr><td>4</td><td>超大团队，要审计回放与强规范？</td><td>Redux Toolkit</td><td>第 19 篇</td></tr>
+    <tr><td>5</td><td>其余中小型客户端状态</td><td>Zustand</td><td>第 18 篇</td></tr>
+  </tbody>
+</table>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="状态管理选型决策树">
+  <defs>
+    <marker id="arr-pick" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <rect x="30" y="24" width="170" height="42" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="115" y="49" text-anchor="middle" font-size="12" fill="#1C1C1C">数据来自服务端？</text>
+  <rect x="330" y="27" width="240" height="36" rx="6" fill="#177245"/>
+  <text x="450" y="49" text-anchor="middle" font-size="12" font-weight="bold" fill="#FFFFFF">都不选：TanStack Query</text>
+  <rect x="30" y="84" width="170" height="42" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="115" y="109" text-anchor="middle" font-size="12" fill="#1C1C1C">只有一两个组件用到？</text>
+  <rect x="330" y="87" width="240" height="36" rx="6" fill="#FAC94A"/>
+  <text x="450" y="109" text-anchor="middle" font-size="12" fill="#1C1C1C">local state / 状态提升</text>
+  <rect x="30" y="144" width="170" height="42" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="115" y="166" text-anchor="middle" font-size="12" fill="#1C1C1C">低频·近乎只读的配置？</text>
+  <rect x="330" y="147" width="240" height="36" rx="6" fill="#FAC94A"/>
+  <text x="450" y="169" text-anchor="middle" font-size="12" fill="#1C1C1C">Context</text>
+  <rect x="30" y="204" width="170" height="42" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="115" y="226" text-anchor="middle" font-size="12" fill="#1C1C1C">超大团队·要审计回放？</text>
+  <rect x="330" y="207" width="240" height="36" rx="6" fill="#FAC94A"/>
+  <text x="450" y="229" text-anchor="middle" font-size="12" fill="#1C1C1C">Redux Toolkit</text>
+  <rect x="330" y="256" width="240" height="36" rx="6" fill="#C2410C"/>
+  <text x="450" y="278" text-anchor="middle" font-size="12" font-weight="bold" fill="#FFFFFF">Zustand（默认落点）</text>
+  <line x1="204" y1="45" x2="324" y2="45" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-pick)"/>
+  <text x="262" y="36" text-anchor="middle" font-size="11" fill="#8C8676">yes</text>
+  <line x1="204" y1="105" x2="324" y2="105" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-pick)"/>
+  <text x="262" y="96" text-anchor="middle" font-size="11" fill="#8C8676">yes</text>
+  <line x1="204" y1="165" x2="324" y2="165" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-pick)"/>
+  <text x="262" y="156" text-anchor="middle" font-size="11" fill="#8C8676">yes</text>
+  <line x1="204" y1="225" x2="324" y2="225" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-pick)"/>
+  <text x="262" y="216" text-anchor="middle" font-size="11" fill="#8C8676">yes</text>
+  <path d="M115,246 L115,274 L324,274" fill="none" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-pick)"/>
+  <text x="130" y="264" font-size="11" fill="#8C8676">no（一路 no 到底）</text>
+  <text x="450" y="240" font-size="11" fill="#8C8676">前四问全 no，才到这里</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>状态管理选型决策树：自上而下五问，命中即停；大多数项目停在 local state / 状态提升，中小型客户端状态默认 Zustand</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：同款问题「要不要上微服务」</div>
+  <p>这套问法你在架构评审里见过：先问数据归属（业务库还是外部数据），再问规模与团队，最后才选技术。工具跟着问题走，不跟着热榜走——「为了用而用」的苦，服务端同学最有体会：引入 Kafka 救不了没有消费者的消息堆积，引入 Redux 同样救不了状态设计混乱。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：演进式选型 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>演进式选型：先 local state，需要时再上工具</h2></div>
+
+<p>最后修正一个常见误解：选型不是开工第一天就要锁死的「架构决策」，而是<strong>跟着功能长出来的</strong>。今天一个组件自己用——local state；明天第二个组件要共享——状态提升（第 14 篇）；后天提到三层之外——Zustand 十行迁完；大后天要审计回放——再迁 RTK。每一级的迁移成本都不高，尤其 Zustand → RTK：selector 换 <code>useSelector</code>，函数调用换 <code>dispatch</code>，状态实体几乎原样搬运。既然逐级上不贵，「一步到位」就更没必要。</p>
+
+<h3>误区一：一上来就 Redux</h3>
+<p>样板税先交齐，纪律却未必建立：没有 code review 兜底时，reducer 里照样塞请求、action 命名照样放飞。「用了 Redux」和「有了可预测性」之间，隔着一整套团队规范。等规范需求真的出现再引入，目标清晰，迁移也有方向——这是对第 19 篇「纪律买什么」最诚实的回答。</p>
+
+<h3>误区二：把服务端数据塞进全局 store</h3>
+<p>第 17 篇的分野值得再念一遍：服务端状态自带一套缓存协议——新鲜度、失效、去重、重试、乐观更新。TanStack Query 把这些全做好了（第 33 篇）；塞进 Zustand 或 Redux，等于手写一个残缺版缓存中间件，还把两类状态搅成一锅，最后谁也说不清哪份数据可信。</p>
+
+<p>收尾给一张「常见状态归位表」，可以直接贴进团队文档：</p>
+
+<table>
+  <thead>
+    <tr><th>常见状态</th><th>推荐方案</th><th>理由</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>主题 / 语言 / 当前登录人</td><td>Context（第 15 篇）</td><td>低频只读，注入一次全树可用</td></tr>
+    <tr><td>购物车 / 侧边栏 / tab 选中</td><td>Zustand（第 18 篇）</td><td>高频交互的客户端状态，精准订阅</td></tr>
+    <tr><td>撤销重做 / 协同 / 审计回放</td><td>RTK（第 19 篇）</td><td>action 流水天然是事件日志</td></tr>
+    <tr><td>表单输入值</td><td>local state（第 21 / 24 篇）</td><td>高频变更，不该广播给任何人</td></tr>
+    <tr><td>接口列表 / 详情 / 分页</td><td>TanStack Query（第 33 篇）</td><td>服务端状态，缓存竞态失效内置</td></tr>
+    <tr><td>动画坐标 / 拖拽位置</td><td>useRef（第 12 篇）</td><td>每帧变化，根本不需要触发渲染</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>三者本质：Context = 依赖注入式广播（配置中心）；Zustand = 外部可订阅单例（单例缓存 Bean）；RTK = 事件驱动容器（EventStore）。</li>
+    <li>决策树五问，命中即停：服务端数据 → TanStack Query；局部使用 → local state；低频只读配置 → Context；大团队要审计 → RTK；其余客户端状态 → Zustand。</li>
+    <li>两条红线：服务端数据不进任何客户端 store；高频变更不进 Context。</li>
+    <li>选型是演进不是豪赌：local state → 状态提升 → Zustand → RTK，逐级迁移成本可控，别「一步到位」。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>卷三至此收束：第 17 篇分清两类状态，第 18、19 篇交出两件客户端工具，这一篇把它们和 Context 放上同一张货架、给出决策树和红线。细心的你会发现归位表里有一行始终没展开——表单输入值。它是前端状态里最高频、最容易写崩的一类：受控还是非受控、一个字段一个 state 还是一个大对象、校验逻辑放哪。下一篇第 21 篇，专治表单状态管理。</p>
+</div>
+</section>
+
+</body>
+</html>

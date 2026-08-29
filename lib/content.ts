@@ -982,3 +982,30 @@ export function getReactArticle(slug: string): ReactArticleMeta | undefined {
 export function getReactContent(slug: string): string | null {
   return getGenericContent(`react-notes/${slug}`);
 }
+
+/* ── 文章右侧大纲：从正文 station 结构提取 id + 标题 ── */
+export interface TocItem {
+  id: string;
+  title: string;
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+export function extractToc(html: string): TocItem[] {
+  const items: TocItem[] = [];
+  const re = /<section class="station[^"]*"\s+id="([^"]+)"[^>]*>[\s\S]*?<div class="station-head[^"]*"[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const title = decodeEntities(m[2].replace(/<[^>]+>/g, "").trim());
+    if (title) items.push({ id: m[1], title });
+  }
+  return items;
+}

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分页与无限滚动</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：两种加载范式 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>数据一次拿不完：两种加载范式</h2></div>
+
+<p>第 33 篇把取数变成声明式缓存，第 34 篇收编了加载态、错误态、竞态。但还有一个「量」的问题：表里 100 万条订单，接口不可能一口气全吐给浏览器。「数据怎么切、用户怎么翻」，就是本篇的主题，也是卷五最后一块拼图。</p>
+
+<table>
+  <thead>
+    <tr><th></th><th>分页（Pagination）</th><th>无限滚动（Infinite Scroll）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>用户动作</strong></td><td>主动翻页：点「第 3 页」</td><td>被动供给：滚到底自动续</td></tr>
+    <tr><td><strong>典型场景</strong></td><td>后台管理、报表、搜索结果</td><td>朋友圈、抖音、评论区</td></tr>
+    <tr><td><strong>关键能力</strong></td><td>跳页、总数、URL 可收藏（?page=3）</td><td>沉浸、无感、移动端友好</td></tr>
+    <tr><td><strong>天生弱点</strong></td><td>每页一次等待，深翻疲劳</td><td>到不了「第 87 条」，DOM 越滚越多（第 38 篇收拾）</td></tr>
+  </tbody>
+</table>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Page&lt;T&gt; 与流式读取</div>
+  <p>分页像 JPA 的 <code>PageRequest + Page&lt;T&gt;</code>：页码、总条数一应俱全，适合管理端对账；无限滚动像流式处理：往后拉、拉到没有为止。两者可共用同一份领域模型，只是切片参数不同。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">抖音为什么不做页码？「停不下来」的前提是用户永远不用做决定。后台为什么必须能跳页？要「直接跳到第 5000 页对账」。范式不是技术偏好，是<strong>用户任务的形状</strong>。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：偏移分页与游标分页 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>偏移分页与游标分页：LIMIT 100000 的代价</h2></div>
+
+<p>范式落到接口上，就是两种切片方式。先把 SQL 摆出来：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>paging.sql</b> · 偏移分页 vs 游标分页</span></div>
+  <pre><code>-- 偏移分页：第 3 页，每页 20 条，跳过前 40 条，没问题
+SELECT id, title FROM article ORDER BY id DESC LIMIT 40, 20;
+
+-- 翻到第 5000 页：MySQL 没有捷径，按索引顺序扫过前 99980 行，
+-- 全部丢弃，再返回 20 行。页越深，白扔的越多
+SELECT id, title FROM article ORDER BY id DESC LIMIT 99980, 20;
+
+-- 游标分页（keyset pagination）：拿上一页最后一条的 id 做锚点
+SELECT id, title FROM article WHERE id &lt; 99981 ORDER BY id DESC LIMIT 20;</code></pre>
+</div>
+
+<p><code>LIMIT 99980, 20</code> 的问题：优化器不能「跳过」——必须按索引顺序真扫够 100000 行，扔掉 99980 行再返回 20 行。而游标分页（DBA 口中的 seek method）用 <code>WHERE id &lt; ?</code> 让 B+ 树直接定位到锚点，扫 20 行收工，<strong>性能与页深无关</strong>：</p>
+
+<table>
+  <thead>
+    <tr><th></th><th>偏移分页（offset / limit）</th><th>游标分页（cursor / keyset）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>深页性能</strong></td><td>越翻越慢：扫过再丢弃 N 行</td><td>恒定：索引直接定位，与深度无关</td></tr>
+    <tr><td><strong>跳页与总数</strong></td><td>支持（total、页码直达）</td><td>不支持，只能顺序翻</td></tr>
+    <tr><td><strong>接口形态</strong></td><td><code>?page=5000&amp;size=20</code> 返回 items + total</td><td><code>?cursor=Mzk5ODE=&amp;size=20</code> 返回 items + nextCursor</td></tr>
+  </tbody>
+</table>
+
+<p>两个细节：游标通常 base64 封一层（不暴露内部 id）；按时间排序要用 <code>(created_at, id)</code> 复合游标——同一秒多条记录只按 created_at 切会丢行重行，id 做第二排序键保证锚点唯一。</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="深分页对比：偏移分页要顺序扫过并丢弃前 99980 行，越翻越慢；游标分页用索引直接定位到锚点，性能与页深无关">
+  <defs>
+    <marker id="arr36o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/>
+    </marker>
+    <marker id="arr36g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#177245"/>
+    </marker>
+  </defs>
+  <text x="50" y="24" font-size="13" font-weight="bold" fill="#1C1C1C">偏移分页：LIMIT 99980, 20</text>
+  <rect x="50" y="36" width="360" height="30" rx="3" fill="#EDE3C4" stroke="#8C8676"/>
+  <rect x="418" y="36" width="152" height="30" rx="3" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="494" y="55" text-anchor="middle" font-size="12" fill="#1C1C1C">返回 20 行</text>
+  <line x1="50" y1="76" x2="410" y2="76" stroke="#C2410C" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr36o)"/>
+  <text x="230" y="94" text-anchor="middle" font-size="12" fill="#C2410C">先扫过并丢弃前 99980 行，越翻越慢</text>
+
+  <text x="50" y="150" font-size="13" font-weight="bold" fill="#1C1C1C">游标分页：WHERE id &lt; ?，以上页末尾 id 为锚</text>
+  <rect x="50" y="160" width="360" height="30" rx="3" fill="#EDE3C4" stroke="#8C8676"/>
+  <rect x="418" y="160" width="152" height="30" rx="3" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="494" y="179" text-anchor="middle" font-size="12" fill="#1C1C1C">返回 20 行</text>
+  <path d="M 80 196 C 200 244, 360 244, 490 198" fill="none" stroke="#177245" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr36g)"/>
+  <text x="270" y="258" text-anchor="middle" font-size="12" fill="#177245">索引直接定位到锚点（seek），前面的行碰都不碰</text>
+  <text x="310" y="284" text-anchor="middle" font-size="11" fill="#8C8676">偏移：页越深越慢｜游标：每页都快，但不能跳页</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>深分页的两条路：偏移分页把前面的行扫一遍再丢弃；游标分页拿锚点让索引直接 seek，代价是放弃跳页。</figcaption>
+</figure>
+
+<div class="crack">
+  <div class="crack-label">后端类比：seek method 与「页缝」</div>
+  <p>keyset pagination 就是后端处理深分页的标准答案：OFFSET 是「顺序数到第 N 条才开始要」，游标是「拿钥匙直接开那扇门」。还有「页缝」：翻页间隙有插入时 LIMIT 分页会重读漏读，游标锚定末尾 id 天然不重不漏——信息流永远用游标就是这个原因。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：useQuery + placeholderData 做页码分页 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>useQuery + placeholderData：每页一条缓存</h2></div>
+
+<p>管理端页码分页用 useQuery 就够，关键在 queryKey 设计：<strong>每页一条缓存</strong>。page 进 key，翻页就是换 key，第 33 篇的缓存机制原样生效——翻回第 1 页时缓存命中，秒出：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>OrderList.tsx</b> · 页码分页 + keepPreviousData</span></div>
+  <pre><code>import { useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { fetchOrders } from "./api";
+
+function OrderList() {
+  const [page, setPage] = useState(1);
+
+  const { data, isPending, isPlaceholderData } = useQuery({
+    <span class="c">// 每页一条缓存：page 进 key，翻回旧页直接命中</span>
+    queryKey: ["orders", "list", page],
+    queryFn: () =&gt; fetchOrders(page, 20),
+    <span class="c">// v5 写法：换页瞬间先用上一页数据占位，新页在后台取</span>
+    placeholderData: keepPreviousData,
+  });
+
+  if (isPending) return &lt;p&gt;首次加载中…&lt;/p&gt;;
+
+  return (
+    &lt;div style={{ opacity: isPlaceholderData ? 0.6 : 1 }}&gt;
+      &lt;ul&gt;
+        {data.items.map((o) =&gt; (
+          &lt;li key={o.id}&gt;{o.orderNo} · {o.amount} 元&lt;/li&gt;
+        ))}
+      &lt;/ul&gt;
+      &lt;button disabled={page &lt;= 1} onClick={() =&gt; setPage(page - 1)}&gt;
+        上一页
+      &lt;/button&gt;
+      &lt;span&gt;第 {page} / {data.totalPages} 页&lt;/span&gt;
+      &lt;button
+        disabled={isPlaceholderData || page &gt;= data.totalPages}
+        onClick={() =&gt; setPage(page + 1)}
+      &gt;
+        下一页
+      &lt;/button&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>不配 <code>placeholderData</code>，每次翻到没看过的页都是白屏抖动。配上之后，换页瞬间先用上一页数据占位，新页在后台无缝替换；isPlaceholderData 为 true 时把透明度降一点，告诉用户「这是旧页，新的在路上」。另外把 page 放进 URL（第 30 篇），刷新、回退、发链接给同事，现场都不丢。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：stale-while-revalidate</div>
+  <p>keepPreviousData 就是 HTTP 缓存的 stale-while-revalidate：先回旧值，同时后台刷新。看到 0.5 秒前的列表，远好于看到 0.5 秒白屏。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">为什么不把所有页塞进一个 key 自己 concat？合并、去重、回滚全得回到第 32 篇的手写时代。每页一条缓存，删除文章后 <code>invalidateQueries</code> 前缀一匹配，所有页一次失效。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：useInfiniteQuery 与 IntersectionObserver ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>useInfiniteQuery 与 IntersectionObserver：滚到底自动续杯</h2></div>
+
+<p>无限滚动是两层结构的组合：<strong>数据层</strong>负责游标推进、逐页累积，<strong>触发层</strong>负责滚到附近自动要下一页。先看数据层：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Feed.tsx</b> · useInfiniteQuery：一条 key 下挂一串页</span></div>
+  <pre><code>import { useInfiniteQuery } from "@tanstack/react-query";
+
+interface FeedPage {
+  items: { id: number; title: string }[];
+  nextCursor: number | null;
+}
+
+async function fetchFeed(cursor: number | null): Promise&lt;FeedPage&gt; {
+  const qs = cursor === null ? "" : `&amp;cursor=${cursor}`;
+  const res = await fetch(`/api/feed?size=20${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function Feed() {
+  const { data, isPending, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ["feed"],
+      queryFn: ({ pageParam }) =&gt; fetchFeed(pageParam),
+      initialPageParam: null as number | null, <span class="c">// v5 必填：第一页没有游标</span>
+      <span class="c">// 下一页的游标从上一页响应里取；返回 undefined 表示到底了</span>
+      getNextPageParam: (lastPage) =&gt; lastPage.nextCursor ?? undefined,
+    });
+
+  if (isPending) return &lt;p&gt;加载中…&lt;/p&gt;;
+
+  <span class="c">// pages 是已加载的每一页，flatMap 摊平成一条连续的流</span>
+  const items = data.pages.flatMap((p) =&gt; p.items);
+
+  return (
+    &lt;div&gt;
+      {items.map((it) =&gt; (
+        &lt;article key={it.id}&gt;{it.title}&lt;/article&gt;
+      ))}
+      &lt;button
+        onClick={() =&gt; fetchNextPage()}
+        disabled={!hasNextPage || isFetchingNextPage}
+      &gt;
+        {isFetchingNextPage ? "加载中…" : hasNextPage ? "加载更多" : "没有更多了"}
+      &lt;/button&gt;
+    &lt;/div&gt;
+  );
+}</code></pre>
+</div>
+
+<p>和页码分页「每页一条 key」不同，无限滚动是<strong>一条 key 下挂一个 pages 数组</strong>：已加载的 137 条是一个缓存条目，getNextPageParam 负责告诉库「下一页的 pageParam 怎么从上一页响应里算」。「加载更多」按钮已是九成，最后一步换成「滚到底自动触发」，专用 API：IntersectionObserver。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>useIntersection.ts</b> · 哨兵进入视口就开火</span></div>
+  <pre><code>import { useEffect, useRef } from "react";
+
+// 哨兵元素进入视口时回调 onIntersect
+function useIntersection(onIntersect: () =&gt; void, enabled: boolean) {
+  const sentinelRef = useRef&lt;HTMLDivElement | null&gt;(null);
+
+  <span class="c">// 回调放进 ref：观察器只注册一次，触发时拿到最新回调（防闭包过期，第 10 篇）</span>
+  const cbRef = useRef(onIntersect);
+  cbRef.current = onIntersect;
+
+  useEffect(() =&gt; {
+    const el = sentinelRef.current;
+    if (!el || !enabled) return;
+
+    const io = new IntersectionObserver(
+      (entries) =&gt; {
+        if (entries[0].isIntersecting) cbRef.current();
+      },
+      { rootMargin: "200px 0px" } <span class="c">// 还差 200px 就提前加载，用户无感</span>
+    );
+    io.observe(el);
+    return () =&gt; io.disconnect(); <span class="c">// 卸载断开观察（第 9 篇的清理纪律）</span>
+  }, [enabled]);
+
+  return sentinelRef;
+}
+
+export default useIntersection;</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Feed.tsx</b> · 把按钮换成哨兵</span></div>
+  <pre><code><span class="c">// Feed 里删掉按钮，列表末尾挂哨兵</span>
+const sentinelRef = useIntersection(
+  () =&gt; {
+    if (hasNextPage &amp;&amp; !isFetchingNextPage) fetchNextPage();
+  },
+  hasNextPage === true <span class="c">// 没有下一页就不再观察</span>
+);
+
+<span class="c">// JSX 末尾放哨兵元素：一个几乎不可见的 div，负责「露脸报信」</span>
+<span class="c">// &lt;div ref={sentinelRef} style={{ height: 1 }} /&gt;</span></code></pre>
+</div>
+
+<p>为什么不用 scroll 事件 + <code>getBoundingClientRect()</code> 手算？scroll 高频触发、每次读位置可能强制布局；IntersectionObserver 把「是否与视口相交」交给浏览器底层——滚动时你的代码一行不跑，只在相交状态变化的瞬间回调一次。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：轮询换订阅</div>
+  <p>scroll 监听像轮询——你不停问「到了吗」；IntersectionObserver 像消息订阅（观察者模式）——浏览器持续盯着，状态变化才推一条消息。把高频轮询换成事件推送，你做消息队列选型时的理由，在这里原样成立。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">fetchNextPage 连点会发两个请求吗？isFetchingNextPage 的守卫已挡住，Query 内部对相同 key 也会去重——但显式守卫语义更清楚。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：混用实践与卷五收官 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>混用范式，顺便给卷五收官</h2></div>
+
+<p>真实产品很少二选一，而是<strong>按页面任务各用各的</strong>：信息流用无限滚动（游标接口），管理后台用页码分页（偏移接口）。选型速查：</p>
+
+<table>
+  <thead>
+    <tr><th>场景</th><th>范式</th><th>切片方式</th><th>前端工具</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>管理后台、报表</td><td>页码分页</td><td>偏移（要 total、可跳页）</td><td>useQuery + keepPreviousData</td></tr>
+    <tr><td>信息流、评论区</td><td>无限滚动</td><td>游标（深页性能稳定）</td><td>useInfiniteQuery + IntersectionObserver</td></tr>
+    <tr><td>feed 滚到几百页</td><td>无限滚动 + 虚拟化</td><td>游标</td><td>再叠一层虚拟列表（第 38 篇）</td></tr>
+  </tbody>
+</table>
+
+<p>顺手两个组合技：信息流分享某条，靠详情页直达（第 31 篇动态路由）；管理端 URL 带 <code>?page=3</code>，配合第 35 篇路由守卫，回来现场还在。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>范式由用户任务决定：分页是「我主动要」（可跳页、要总数），无限滚动是「系统主动给」（沉浸无感）。</li>
+    <li>偏移分页对照 <code>LIMIT offset, size</code>，深页越翻越慢；游标分页对照 keyset（<code>WHERE id &lt; ?</code>），索引直接定位、性能恒定，代价是不能跳页。</li>
+    <li>页码分页：每页一个 queryKey + <code>placeholderData: keepPreviousData</code>——翻回旧页秒出，翻新页先占位后刷新。</li>
+    <li>无限滚动：useInfiniteQuery（v5 必填 initialPageParam；getNextPageParam 返回 undefined 即到底；<code>pages.flatMap</code> 摊平），一条 key 下挂一串 pages。</li>
+    <li>触发层用 IntersectionObserver + 哨兵元素，rootMargin 做预加载；回调塞进 useRef 防闭包过期，卸载 disconnect。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>本篇把「数据量」切干净：管理端偏移分页 + 每页一条缓存，信息流游标分页 + 哨兵自动续杯，共用第 33 篇的缓存底座。至此<strong>卷五（第 30~36 篇）收官</strong>：路由与参数（30、31）装上地址系统；取数三部曲（32、33、34）从手写 fetch 走到声明式缓存；认证与守卫（35）织进登录态；分页（36）让数据量不再失控。卷六开始问下一个问题：<strong>快不快</strong>。下一篇第 37 篇，从最常见的性能误区下手——重渲染剖析：父组件一动，子组件都要跟着刷吗？memo 该加在哪？</p>
+</div>
+</section>
+
+</body>
+</html>

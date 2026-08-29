@@ -1,35 +1,13 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getJavaContent, getJavaArticle, JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume } from "@/lib/content";
+import { getJavaContent, getJavaArticle, JAVA_ARTICLES, JAVA_VOLUMES, getJavaArticlesByVolume, extractToc } from "@/lib/content";
 import CommentSection from "../../CommentSection";
 import ArticleToc from "../../ArticleToc";
 
 type Props = { params: Promise<{ slug: string }> };
 
 const ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII"];
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;|&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
-/** 从正文 HTML 提取 station 的 id + 标题，生成右侧大纲 */
-function extractToc(html: string): { id: string; title: string }[] {
-  const items: { id: string; title: string }[] = [];
-  const re = /<section class="station[^"]*"\s+id="([^"]+)"[^>]*>[\s\S]*?<div class="station-head[^"]*"[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const title = decodeEntities(m[2].replace(/<[^>]+>/g, "").trim());
-    if (title) items.push({ id: m[1], title });
-  }
-  return items;
-}
 
 export function generateStaticParams() {
   const seen = new Set<string>();

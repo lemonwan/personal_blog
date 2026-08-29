@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redux Toolkit 与单向数据流</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：为什么会有 Redux ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>为什么会有 Redux：当「谁改的」变成悬案</h2></div>
+
+<p>第 18 篇的 Zustand 把「共享」解决得很漂亮——但它交到你手里的是一个谁都能调 <code>set</code>、action 随便命名的全局单例。三五个人这是灵活；三十个人、几百个组件，这就是悬案工厂：徽章少了一件，凶手可能是任何一行碰过 store 的代码，<strong>没有现场，没有笔录</strong>。</p>
+
+<p>Redux 的回答极其克制：<strong>把「改状态」收归国有</strong>：组件不得直接改状态，只能发一条「事件」，由统一的纯函数折叠出下一个状态。于是「谁改的」永远有答案——翻事件流水。</p>
+
+<p>这套思路你在服务端见过。账务系统的铁律：不改余额，只记流水：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Ledger.java</b> · 事件溯源：状态是事件折叠的结果</span></div>
+  <pre><code>List&lt;TxEvent&gt; events = txRepo.findByAccountId(id); <span class="c">// 只增不改的事件日志</span>
+
+BigDecimal balance = events.stream()
+    .reduce(BigDecimal.ZERO, (acc, e) -&gt; acc.add(e.signedAmount()));
+    <span class="c">// 余额是折叠出来的「视图」：可重算、可审计</span></code></pre>
+</div>
+
+<p>Redux 把这套纪律搬到前端的每一个状态上，一句话就是：<strong><code>state = actions.reduce(reducer, initialState)</code></strong>——从初始状态出发，重放全部 action，必然得到当前状态。「可预测」三个字的全部含义就在这条公式里。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：事件溯源（Event Sourcing）+ 审计日志</div>
+  <p>这就是 Event Sourcing 的前端版：不保存最新值，保存变更事件，最新值是投影。三笔收益：变更全留痕（审计）、重放事件可重建任意时刻状态（回溯）、写入路径唯一。Redux 对前端状态的全部要求，恰好就是这三条。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：核心三概念 ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>核心三概念：action、reducer、store</h2></div>
+
+<p>三个概念就够：</p>
+
+<table>
+  <thead>
+    <tr><th>概念</th><th>是什么</th><th>一句话类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>action</strong></td><td>描述「发生了什么」的普通对象：<code>{ type, payload }</code></td><td>一条事件、一笔流水</td></tr>
+    <tr><td><strong>reducer</strong></td><td><code>(state, action) =&gt; newState</code> 纯函数</td><td><code>Stream.reduce</code> 的折叠函数</td></tr>
+    <tr><td><strong>store</strong></td><td>持有状态的单例：<code>dispatch</code> / <code>getState</code> / <code>subscribe</code></td><td>持有投影的仓储 + 事件入口</td></tr>
+  </tbody>
+</table>
+
+<p>reducer 的「纯」是全部纪律的根，三条戒律：<strong>不许改入参</strong>（必须返回新对象）、<strong>不许有副作用</strong>（不发请求、不改外部变量）、<strong>同输入必同输出</strong>。任何一条破了，重放就失真。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>counterReducer.ts</b> · 素颜 Redux：reducer 长这样（示意）</span></div>
+  <pre><code>type CounterAction =
+  | { type: "counter/increment" }
+  | { type: "counter/addAmount"; payload: number };
+
+<span class="c">// reducer：(state, action) =&gt; newState 的纯函数</span>
+function counterReducer(state: { value: number }, action: CounterAction) {
+  switch (action.type) {
+    case "counter/increment":
+      return { value: state.value + 1 }; <span class="c">// 新对象，绝不动入参</span>
+    case "counter/addAmount":
+      return { value: state.value + action.payload };
+    default:
+      return state;                      <span class="c">// 不认识的事件：原样返回</span>
+  }
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Stream.reduce</div>
+  <p>reducer 这名字不是随便起的——把 action 流想成一个 Stream：<code>actions.stream().reduce(initialState, (acc, e) -&gt; fold(acc, e))</code>——acc 是旧状态，e 是一条事件，折叠函数就是 reducer 本尊，签名分毫不差：<code>(state, action) =&gt; newState</code>。唯一差别：事件随时间一条条到来，每来一条折叠一次。</p>
+</div>
+
+<p>这套流程画出来，就是<strong>单向数据流</strong>的闭环：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="Redux 单向数据流闭环示意图">
+  <defs>
+    <marker id="arr-redux" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C8676"/>
+    </marker>
+  </defs>
+  <rect x="40" y="40" width="150" height="50" rx="6" fill="#FAC94A"/>
+  <text x="115" y="62" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">UI 组件</text>
+  <text x="115" y="80" text-anchor="middle" font-size="11" fill="#1C1C1C">onClick 事件源</text>
+  <rect x="430" y="40" width="150" height="50" rx="6" fill="#EDE3C4" stroke="#8C8676"/>
+  <text x="505" y="62" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">action</text>
+  <text x="505" y="80" text-anchor="middle" font-size="11" fill="#1C1C1C">{ type, payload }</text>
+  <rect x="430" y="210" width="150" height="50" rx="6" fill="#C2410C"/>
+  <text x="505" y="232" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">reducer 纯函数</text>
+  <text x="505" y="250" text-anchor="middle" font-size="11" fill="#FFFFFF">(s, a) =&gt; newState</text>
+  <rect x="40" y="210" width="150" height="50" rx="6" fill="#177245"/>
+  <text x="115" y="232" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">store 新状态</text>
+  <text x="115" y="250" text-anchor="middle" font-size="11" fill="#FFFFFF">唯一数据源</text>
+  <line x1="194" y1="65" x2="424" y2="65" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-redux)"/>
+  <text x="308" y="54" text-anchor="middle" font-size="11" fill="#8C8676">dispatch（只能发事件）</text>
+  <line x1="505" y1="94" x2="505" y2="204" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-redux)"/>
+  <text x="516" y="152" font-size="11" fill="#8C8676">折叠新状态</text>
+  <line x1="424" y1="235" x2="194" y2="235" stroke="#8C8676" stroke-width="2" marker-end="url(#arr-redux)"/>
+  <text x="308" y="256" text-anchor="middle" font-size="11" fill="#8C8676">新状态入库</text>
+  <line x1="115" y1="204" x2="115" y2="96" stroke="#8C8676" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-redux)"/>
+  <text x="124" y="152" font-size="11" fill="#8C8676">useSelector 订阅</text>
+  <text x="308" y="150" text-anchor="middle" font-size="13" font-weight="bold" fill="#C2410C">state = actions.reduce(reducer, initialState)</text>
+  <text x="308" y="290" text-anchor="middle" font-size="12" fill="#8C8676">任何组件都不能绕过 dispatch 直接改状态</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>单向数据流闭环：UI dispatch 发 action，reducer 折叠出新状态入 store，经 useSelector 通知 UI 重渲染</figcaption>
+</figure>
+
+<p>可预测性不靠自觉，靠这条单行道<strong>物理隔离</strong>：数据沿一个方向循环，没有「组件 A 顺手改掉组件 B 状态」的后门。</p>
+</section>
+
+<!-- ═══════════════ 第3站：RTK 三件套 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>RTK 三件套：createSlice 砍掉大半样板</h2></div>
+
+<p>素颜 Redux 的痛点一眼可见：每加一个功能，type 常量、action 对象、switch case 三份劳动说的是同一件事。官方钦定的 Redux Toolkit（RTK）第一刀砍在这里：<code>createSlice</code> 把一个领域的 state、reducers、action creators 合成一次声明：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>counterSlice.ts</b> · action 与 reducer 合体</span></div>
+  <pre><code>import { createSlice } from "@reduxjs/toolkit";
+
+const counterSlice = createSlice({
+  name: "counter",                     <span class="c">// slice 名：action type 的前缀</span>
+  initialState: { value: 0 },
+  reducers: {
+    increment(state) {
+      state.value += 1;                <span class="c">// 看似「直接改」？！往下看</span>
+    },
+    addAmount(state, action) {
+      state.value += action.payload;
+    },
+  },
+});
+
+<span class="c">// action creator 自动生成，type 字符串不用你写</span>
+export const { increment, addAmount } = counterSlice.actions;
+export default counterSlice.reducer;</code></pre>
+</div>
+
+<p>注意 <code>state.value += 1</code>——「直接改」？！RTK 内置了 <strong>Immer</strong>：reducer 收到的 state 是一层 Proxy「草稿」，你怎么改都行；函数返回时，Immer 依据修改记录生成一棵<strong>全新的、不可变的状态树</strong>。写法自由，产出依旧不可变——纪律没破坏，只是框架代劳。</p>
+
+<p>为什么死咬「不可变」不放？和 Zustand 同一个原因（第 18 篇）：变更检测靠引用比较，原地改引用不变，订阅方永远不知道你改了；时间旅行更要求每一步都留下新对象，才能把状态串成一条可回放的历史线。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>store.ts</b> · configureStore：零配置装机</span></div>
+  <pre><code>import { configureStore } from "@reduxjs/toolkit";
+import counterReducer from "./counterSlice";
+
+export const store = configureStore({
+  reducer: { counter: counterReducer }, <span class="c">// 自动 combineReducers</span>
+  <span class="c">// 默认内置 thunk 中间件 + Redux DevTools，零配置</span>
+});
+
+export type RootState = ReturnType&lt;typeof store.getState&gt;;</code></pre>
+</div>
+
+<p>组件侧只剩两个 Hook：<code>useSelector</code> 与第 18 篇的 selector 同一思想（订阅切片、比较结果）；<code>dispatch(action)</code> 是通往 reducer 的唯一入口：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Counter.tsx</b> · useSelector 订阅，dispatch 派发</span></div>
+  <pre><code>import { useSelector, useDispatch } from "react-redux";
+import { increment } from "./counterSlice";
+import type { RootState } from "./store";
+
+function Counter() {
+  const value = useSelector((s: RootState) =&gt; s.counter.value);
+  const dispatch = useDispatch();
+  return &lt;button onClick={() =&gt; dispatch(increment())}&gt;{value}&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Hibernate 脏检查</div>
+  <p>Immer 的体验你在 JPA 里见过：托管实体上随便 <code>set</code> 字段，你以为在原地改，框架记的是「脏字段」，flush 时生成最小变更——你写命令式，框架产出「新版本」。Immer 同理。另外提醒：<code>useSelector</code> 的比较语义同样是引用比较，返回字面量新对象照样翻车，和第 18 篇的坑一模一样。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：异步三段式 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>createAsyncThunk：把异步请求写成状态机</h2></div>
+
+<p>reducer 必须纯，请求这类副作用往哪放？RTK 的答案：<code>createAsyncThunk</code> 生成「thunk」，dispatch 它时自动按序发出 <strong>pending / fulfilled / rejected</strong> 三条 action，reducer 只消费结果：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>todosSlice.ts</b> · 异步请求的三段式状态</span></div>
+  <pre><code>import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+
+export const fetchTodos = createAsyncThunk(
+  "todos/fetchAll",
+  async () =&gt; {
+    const res = await fetch("/api/todos");
+    if (!res.ok) throw new Error("fetch failed"); <span class="c">// 抛错 → rejected</span>
+    return (await res.json()) as Todo[];
+  }
+);
+
+const todosSlice = createSlice({
+  name: "todos",
+  initialState: {
+    items: [] as Todo[],
+    status: "idle" as "idle" | "loading" | "succeeded" | "failed",
+  },
+  reducers: {},
+  extraReducers: (builder) =&gt; {
+    builder
+      .addCase(fetchTodos.pending, (s) =&gt; { s.status = "loading"; })
+      .addCase(fetchTodos.fulfilled, (s, a) =&gt; {
+        s.status = "succeeded";
+        s.items = a.payload;            <span class="c">// Immer：写法随意，产出不可变</span>
+      })
+      .addCase(fetchTodos.rejected, (s) =&gt; { s.status = "failed"; });
+  },
+});</code></pre>
+</div>
+
+<p>组件侧只需 <code>dispatch(fetchTodos())</code> 发起，再用一个 <code>status</code> 驱动「加载中 / 失败 / 列表」三种视图。这就是<strong>三段式状态机</strong>：idle（没发过）→ loading（pending 到达）→ succeeded（fulfilled，items 更新）或 failed（rejected）——一次异步请求天然是个状态机，三条 action 就是三次状态迁移。第 34 篇把加载态、错误态、竞态当专门课题，这里的 <code>status</code> 就是它们在 Redux 世界的落点。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：异步 RPC 的三个回调</div>
+  <p>对应你调用下游服务时处理的三种结果：进行中、成功、失败。thunk 的妙处是把「我正在请求」本身也做成了 action——连副作用都进了事件流水，审计闭环。防重复提交、失败重试，都在事件流这一层加统一规则，而非散落在组件里。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">为什么 reducer 里不能 await？折叠函数必须同步且纯——重放事件时，第 1024 条事件不可能「等一个网络请求」。异步的全部不确定性关进 thunk，reducer 只消费确定的结果。</div>
+</div>
+
+<p>请求样板写得多，还有更高层的 <strong>RTK Query</strong>——声明 endpoint，缓存、去重、失效自动管，定位相当于 Redux 官方版 TanStack Query，第 33 篇对照着讲。</p>
+</section>
+
+<!-- ═══════════════ 第5站：回报与代价 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>单向数据流：纪律的回报与代价</h2></div>
+
+<p>把第 18 篇和这一篇放在一起，才看得清单向数据流这笔账。收益四条：</p>
+
+<ol>
+    <li><strong>可审计</strong>：任何变更都有一条 action 记录，DevTools 里从头播到尾，复现 bug 不靠玄学。</li>
+    <li><strong>可测试</strong>：reducer 是纯函数，<code>expect(reducer(initial, increment())).toEqual({ value: 1 })</code>——像单测无副作用的 Service 方法。</li>
+    <li><strong>可协作</strong>：slice 划分、action 命名、异步位置全有官方规范，新人只学一套。</li>
+  <li><strong>可回放</strong>：状态是事件的折叠结果，保存 action 流就能重建任意历史时刻（时间旅行调试）。</li>
+</ol>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>Zustand（第 18 篇）</th><th>Redux Toolkit</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>上手成本</td><td>一个 create，几分钟</td><td>slice + store + Hooks，半天</td></tr>
+    <tr><td>变更约束</td><td>自由，规范靠自觉</td><td>强制走 action，天然全流水</td></tr>
+    <tr><td>甜点位</td><td>中小型、快速迭代</td><td>大团队、复杂联动、强规范</td></tr>
+  </tbody>
+</table>
+
+<p>同一个计数器，Zustand 十行，RTK 三十行——多出的二十行，买的正是上面四条。团队小、状态简单，这是过度设计；团队大、状态联动复杂，这是救命稻草。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>Redux 的本质：状态 = 事件折叠，<code>state = actions.reduce(reducer, initialState)</code>——前端版 Event Sourcing。</li>
+    <li>三概念：action 描述「发生了什么」；reducer 是 <code>(state, action) =&gt; newState</code> 纯函数（≈ Stream.reduce）；store 持有状态。</li>
+    <li>RTK 三件套：configureStore（自动合并 + 内置 thunk 与 DevTools）、createSlice（action 与 reducer 合体，Immer 让「直接改」产出不可变）、useSelector/useDispatch。</li>
+    <li>异步：createAsyncThunk 自动发 pending/fulfilled/rejected，reducer 只消费结果；请求样板多时上 RTK Query（第 33 篇对照 TanStack Query）。</li>
+    <li>单向数据流闭环：UI → dispatch → reducer → store → useSelector → UI。样板买的是审计、测试、协作、回放。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>至此卷三货架上有两件客户端工具：Zustand 买「轻」，RTK 买「正」；加上第 15 篇的 Context，和「服务端数据交给 TanStack Query」的第四个选项。选错不致命，选错不肯换才致命。下一篇第 20 篇给一张照着走的决策树：何时 Context、何时 Zustand、何时为 RTK 交样板税、什么数据碰都别碰。</p>
+</div>
+</section>
+
+</body>
+</html>

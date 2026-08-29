@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>代码分割与懒加载</title>
+</head>
+<body>
+
+<!-- ═══════════════ 第1站：bundle 是怎么长成 fat jar 的 ═══════════════ -->
+<section class="station reveal" id="s1">
+<div class="station-head"><h2>你的 bundle 正在长成一个 fat jar</h2></div>
+
+<p>第 37、38 篇解决了「渲染慢」：memo 挡住多余重渲染，虚拟列表只画可视区。但还有个更前置的瓶颈——<strong>首屏要下载的 JS 本身太大</strong>。代码还没到浏览器，谈何执行得快。</p>
+
+<p>先看一个运行了半年的中后台项目里最常见的 App.tsx：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>App.tsx</b> · 所有页面静态 import，全进一个包</span></div>
+  <pre><code>import { Routes, Route } from "react-router-dom";
+import Home from "./pages/Home";
+import Dashboard from "./pages/Dashboard";  <span class="c">// 内部打包了 echarts，约 1 MB</span>
+import Admin from "./pages/Admin";          <span class="c">// 内部打包了 Monaco 编辑器，约 2 MB</span>
+
+export default function App() {
+  return (
+    &lt;Routes&gt;
+      &lt;Route path="/" element={&lt;Home /&gt;} /&gt;
+      &lt;Route path="/dashboard" element={&lt;Dashboard /&gt;} /&gt;
+      &lt;Route path="/admin" element={&lt;Admin /&gt;} /&gt;
+    &lt;/Routes&gt;
+  );
+}</code></pre>
+</div>
+
+<p>三行 import 都是<strong>静态依赖</strong>：打包器只能忠实把关联代码（连同 echarts、Monaco）全部打进同一个 bundle。而一个真实用户可能一辈子只访问首页。bundle 越滚越大，无非三个来源：</p>
+
+<ul>
+  <li><strong>依赖膨胀</strong>：npm install 一时爽——图表、编辑器、工具库层层叠叠。类比 Maven 传递依赖：引一个 starter，拖进来半个生态；</li>
+  <li><strong>全页面打包</strong>：SPA 把所有路由的代码合进一个文件，首屏一次性全量下载；</li>
+  <li><strong>静态 import 的原罪</strong>：只要顶部写了 import，打包器就必须全收——它只能假设你「随时可能用到」。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比：fat jar、微服务与 OSGi 插件化</div>
+  <p>Spring Boot 的 fat jar 把全部依赖塞进一个 jar，部署省事，代价是启动全量加载。前端单 bundle 就是这个 fat jar：加载即启动。Java 世界的答案是<strong>拆分与按需</strong>：微服务按业务域拆部署单元，Eclipse 的 OSGi 插件按需激活。前端对应方案叫代码分割（Code Splitting）——把 app 拆成按需加载的 chunk。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第2站：React.lazy + Suspense ═══════════════ -->
+<section class="station reveal" id="s2">
+<div class="station-head"><h2>React.lazy + Suspense：用到再加载</h2></div>
+
+<p>拆包的钥匙是<strong>动态 import()</strong>：把静态 <code>import Dashboard from ...</code> 改成函数调用 <code>import("./pages/Dashboard")</code>，它就从「打包期依赖」变成「运行时返回 Promise」。打包器一看到 <code>import()</code> 就切出独立 chunk；lazy 和 Suspense 负责把「异步到达的组件」接进渲染树：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>App.tsx</b> · 组件级懒加载三件套</span></div>
+  <pre><code>import { useState, lazy, Suspense } from "react";
+import PageLoading from "./components/PageLoading";
+
+<span class="c">// 静态写法（打包期依赖，进主包）：</span>
+<span class="c">// import Dashboard from "./pages/Dashboard";</span>
+
+<span class="c">// 懒加载写法：Dashboard 被切成独立 chunk，首次渲染才下载执行</span>
+const Dashboard = lazy(() =&gt; import("./pages/Dashboard"));
+
+export default function App() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    &lt;&gt;
+      &lt;button onClick={() =&gt; setOpen(true)}&gt;打开数据看板&lt;/button&gt;
+      {open &amp;&amp; (
+        &lt;Suspense fallback={&lt;PageLoading /&gt;}&gt;
+          &lt;Dashboard /&gt;
+        &lt;/Suspense&gt;
+      )}
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>三个角色各司其职：</p>
+
+<ol>
+  <li><strong><code>import("./pages/Dashboard")</code></strong>：告诉打包器「单独切一个 chunk」，运行时按需下载；</li>
+  <li><strong><code>lazy(...)</code></strong>：把「返回组件 Promise 的函数」包装成能写进 JSX 的组件，首次渲染时触发下载；它约定取模块的 <strong>default 导出</strong>，被懒加载的页面记得 <code>export default</code>；</li>
+  <li><strong><code>&lt;Suspense fallback&gt;</code></strong>：声明「children 还没就绪时渲染什么」，转圈、骨架屏都行。</li>
+</ol>
+
+<div class="crack">
+  <div class="crack-label">后端类比：@Lazy 的 Bean 与 JVM 懒加载</div>
+  <p>Spring 容器默认启动时实例化所有单例 Bean；加上 @Lazy 后，第一次 getBean 才初始化。React.lazy 就是显式的 @Lazy：延迟到第一次渲染才加载。再往底层想，JVM 的类加载本来就是懒的——.class 要等第一次 new 才加载、初始化。React.lazy 相当于把这套默认行为搬到了组件粒度。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">两个细节：chunk 小、网快时 fallback 会闪一下，骨架屏反而不如保持原界面；lazy 的 Promise 一旦 reject，组件树渲染失败，需要 ErrorBoundary 兜底给重试入口——加载态和错误态要分开设计。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第3站：按路由拆包 ═══════════════ -->
+<section class="station reveal" id="s3">
+<div class="station-head"><h2>按路由拆包：最自然的切割线</h2></div>
+
+<p>lazy 可以包任何组件，但粒度选在哪最划算？答案是<strong>路由</strong>。第 30 篇说过，路由是用户访问的自然边界：切页本来就有「过渡」的心理预期——这里多 200ms 用户毫无怨言；弹窗里多 200ms 就是「卡」。</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>App.tsx</b> · 第 30 篇的路由表，升级成按需加载版</span></div>
+  <pre><code>import { lazy, Suspense } from "react";
+import { Routes, Route } from "react-router-dom";
+import PageLoading from "./components/PageLoading";
+
+<span class="c">// 每个页面一个 chunk；首屏页想极致一点也可以不拆</span>
+const Home = lazy(() =&gt; import("./pages/Home"));
+const Dashboard = lazy(() =&gt; import("./pages/Dashboard"));
+const Admin = lazy(() =&gt; import("./pages/Admin"));
+
+export default function App() {
+  return (
+    &lt;Suspense fallback={&lt;PageLoading /&gt;}&gt;
+      &lt;Routes&gt;
+        &lt;Route path="/" element={&lt;Home /&gt;} /&gt;
+        &lt;Route path="/dashboard" element={&lt;Dashboard /&gt;} /&gt;
+        {/* 嵌套路由整棵子树，一起进一个 chunk */}
+        &lt;Route path="/admin/*" element={&lt;Admin /&gt;} /&gt;
+      &lt;/Routes&gt;
+    &lt;/Suspense&gt;
+  );
+}</code></pre>
+</div>
+
+<p>效果立竿见影，一张图看明白：</p>
+
+<figure class="fig">
+<svg viewBox="0 0 620 300" role="img" aria-label="拆分前首屏一次性下载 1.8 MB 的单个 bundle；拆分后 main.js 首屏加载，Dashboard 与 Admin chunk 首次访问对应路由时按需拉取并进入缓存">
+  <defs>
+    <marker id="arr39a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1C1C1C"/>
+    </marker>
+    <marker id="arr39g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#177245"/>
+    </marker>
+  </defs>
+
+  <text x="310" y="24" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">拆分前：一个 fat bundle</text>
+  <rect x="60" y="42" width="110" height="56" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="115" y="66" text-anchor="middle" font-size="12" fill="#1C1C1C">浏览器</text>
+  <text x="115" y="84" text-anchor="middle" font-size="11" fill="#8C8676">首屏请求</text>
+  <rect x="350" y="38" width="200" height="64" rx="8" fill="#EDE3C4" stroke="#C2410C" stroke-width="1.5"/>
+  <text x="450" y="64" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">app.js · 1.8 MB</text>
+  <text x="450" y="86" text-anchor="middle" font-size="11" fill="#8C8676">全部页面 + 全部依赖</text>
+  <line x1="174" y1="70" x2="344" y2="70" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr39a)"/>
+  <text x="260" y="60" text-anchor="middle" font-size="11" fill="#1C1C1C">一次性下载 1.8 MB</text>
+  <text x="450" y="122" text-anchor="middle" font-size="11" fill="#C2410C">其中首页用不到的占大头</text>
+
+  <line x1="30" y1="140" x2="590" y2="140" stroke="#8C8676" stroke-width="1" stroke-dasharray="5 4"/>
+
+  <text x="310" y="162" text-anchor="middle" font-size="13" font-weight="bold" fill="#1C1C1C">拆分后：路由级拆包 + 按需加载</text>
+  <rect x="60" y="178" width="110" height="100" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="115" y="232" text-anchor="middle" font-size="12" fill="#1C1C1C">浏览器</text>
+  <rect x="300" y="174" width="170" height="38" rx="8" fill="#FAC94A" stroke="#1C1C1C" stroke-width="1.5"/>
+  <text x="385" y="192" text-anchor="middle" font-size="12" font-weight="bold" fill="#1C1C1C">main.js · 240 KB</text>
+  <text x="385" y="206" text-anchor="middle" font-size="11" fill="#8C8676">首屏立即加载</text>
+  <line x1="174" y1="193" x2="294" y2="193" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arr39a)"/>
+  <rect x="300" y="222" width="170" height="28" rx="8" fill="#FFFFFF" stroke="#8C8676" stroke-width="1.5"/>
+  <text x="385" y="241" text-anchor="middle" font-size="11" fill="#1C1C1C">Dashboard chunk · 620 KB</text>
+  <rect x="300" y="258" width="170" height="28" rx="8" fill="#FFFFFF" stroke="#8C8676" stroke-width="1.5"/>
+  <text x="385" y="277" text-anchor="middle" font-size="11" fill="#1C1C1C">Admin chunk · 890 KB</text>
+  <path d="M 174 250 C 230 250, 244 238, 294 236" fill="none" stroke="#177245" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr39g)"/>
+  <path d="M 174 256 C 240 274, 252 274, 294 272" fill="none" stroke="#177245" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr39g)"/>
+  <text x="234" y="224" text-anchor="middle" font-size="11" fill="#177245">首次访问时按需拉取</text>
+  <text x="545" y="252" text-anchor="middle" font-size="11" fill="#177245">拉取一次即缓存</text>
+</svg>
+<figcaption class="figcaption"><span class="fig-no">图 1</span>拆包前后对比：拆分前首屏全量下载单个 bundle；拆分后只加载 main.js，各路由 chunk 首次访问时按需拉取，之后走缓存。</figcaption>
+</figure>
+
+<p>从图里读出三个要点：主包从 1.8 MB 降到 240 KB；重组件首次访问才下载；下载一次就进缓存，第二次访问零成本。拆包粒度一共三级：</p>
+
+<table>
+  <thead>
+    <tr><th>粒度</th><th>切什么</th><th>典型场景</th><th>后端类比</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>路由级</strong></td><td>每个页面一个 chunk，默认首选</td><td>多页面中后台：首页、看板、后台互不拖累</td><td>按业务域拆微服务</td></tr>
+    <tr><td><strong>组件级</strong></td><td>「首次交互才出现」的重组件</td><td>点「预览」才弹的全屏编辑器、抽屉里的大表格</td><td>重对象延迟到首次使用才初始化</td></tr>
+    <tr><td><strong>重库级</strong></td><td>大第三方库单独收口</td><td>echarts、Monaco、xlsx：包一层 lazy 组件全局复用</td><td>重依赖收进独立模块，谁用谁引</td></tr>
+  </tbody>
+</table>
+
+<p>路由级是默认粒度还有两个工程理由：<strong>边界稳定</strong>——页面天然是低耦合区，切出来不纠结循环依赖；<strong>缓存友好</strong>——改 Dashboard 不会让 Admin chunk 的 hash 变化（第 40 篇细讲），没访问过的页面缓存永不失效。</p>
+</section>
+
+<!-- ═══════════════ 第4站：动态 import() 与 tree-shaking ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>动态 import() 不是 tree-shaking</h2></div>
+
+<p>这两个词经常一起出现，但干的完全是两码事：</p>
+
+<ul>
+  <li><strong>tree-shaking（打包期剪枝）</strong>：静态分析 ESM 的 import/export 图谱，把没人引用的导出从产物里删掉。减少的是<strong>打进包里的代码量</strong>，剩下的仍首屏全量到达；</li>
+  <li><strong>动态 import()（运行期按需）</strong>：一行不删，只是把活代码推迟到需要的那一刻才下载。优化的是<strong>到达的时机</strong>。</li>
+</ul>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>export.ts</b> · 两种机制各管一段</span></div>
+  <pre><code>type Row = { id: number; title: string };
+
+<span class="c">// tree-shaking：ESM 静态结构可分析，产物里只留下用到的 debounce</span>
+import { debounce } from "lodash-es";
+const debouncedSave = debounce(save, 500);
+
+<span class="c">// 动态 import：xlsx 整个库不进主包，点「导出」那一刻才下载</span>
+export async function exportRows(rows: Row[]) {
+  const { toXlsx } = await import("./lib/export-xlsx");
+  toXlsx(rows);
+}</code></pre>
+</div>
+
+<table>
+  <thead>
+    <tr><th>维度</th><th>tree-shaking</th><th>动态 import()</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>发生时机</td><td>构建期（静态分析）</td><td>运行时（用户触发）</td></tr>
+    <tr><td>处理对象</td><td>没人引用的死代码</td><td>真实会用的活代码</td></tr>
+    <tr><td>产物形态</td><td>变小，但还在同一个 chunk 里</td><td>独立 chunk，按需请求</td></tr>
+    <tr><td>前提条件</td><td>ESM 的静态 import/export</td><td>打包器识别 import()（Vite/Rollup 原生支持）</td></tr>
+    <tr><td>后端类比</td><td>ProGuard 删未用类、依赖裁剪</td><td>插件按需激活、ClassLoader 延迟加载</td></tr>
+  </tbody>
+</table>
+
+<p>两者经常配合：先剪掉死代码，再把活代码分批送达。顺带一个实用小技巧——<strong>预加载</strong>：悬停到点击之间有 100~300ms，给导航入口加一句 <code>onMouseEnter={() =&gt; import("./pages/Admin")}</code>，chunk 提前进缓存，真点击时 lazy 直接命中，几乎零等待。一行代码，抹掉大半延迟感。</p>
+
+<div class="think">
+  <div class="think-q">为什么 tree-shaking 只对 ESM 好使？CommonJS 的 require 路径运行时才算得出，打包器不敢删；ESM 的 import 编译期就完全定型。这个「静态可分析」特性，也是下一篇 Vite 敢在 dev 用原生 ESM 的底气。</div>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：拆到什么程度算合适 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>拆到什么程度算合适</h2></div>
+
+<p>最后泼一盆冷水：<strong>拆包不是越细越好</strong>。拆得太碎，一次页面切换拉起几十个几 KB 的小文件——HTTP/2 解决了队头阻塞，但每个请求仍有头部与调度开销，碎片化请求的总耗时可能反超一个大文件；缓存也跟着碎片化，一团乱麻。</p>
+
+<p>经验法则：<strong>以「用户的访问单元」为切割粒度</strong>：路由级是默认，组件级留给重组件，其余不拆；小于 20~30KB 的模块单独拆不划算，省下的流量抵不上一次请求的开销。自查表：</p>
+
+<table>
+  <thead>
+    <tr><th>Network 面板的症状</th><th>诊断</th><th>处理</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>首屏一个 1.5 MB+ 的 app.js</td><td>从没拆过包</td><td>路由级 lazy 起步</td></tr>
+    <tr><td>点击菜单后白屏转圈 1~2 秒</td><td>目标页面 chunk 太大，或没预载</td><td>检查页面内的重依赖；入口 hover 预取</td></tr>
+    <tr><td>一次页面切换拉起 30+ 个小文件</td><td>拆得太碎</td><td>收敛到路由级 + 重组件两层，其余合并</td></tr>
+    <tr><td>每次发版全部 chunk 缓存失效</td><td>分包与 hash 策略不合理</td><td>第 40 篇：manualChunks 固定依赖 + 内容 hash</td></tr>
+  </tbody>
+</table>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>bundle 膨胀的根因：静态 import 全量打包 + 首屏全量下载——你部署了一个前端 fat jar。</li>
+    <li><code>React.lazy(() =&gt; import())</code> 把组件切成独立 chunk、首次渲染才加载；<code>Suspense</code> 负责 fallback 占位，失败要 ErrorBoundary 兜底。</li>
+    <li>路由级拆包是默认粒度（边界稳、缓存友好），组件级与重库级（echarts / Monaco / xlsx）按需补充。</li>
+    <li>tree-shaking 是构建期剪枝（删死代码），动态 import() 是运行期按需下载——常配合使用，不是一回事。</li>
+    <li>hover 时一句 <code>import()</code> 即可预取；警惕过度拆包的请求碎片化，20~30KB 以下不值得单独拆。</li>
+  </ul>
+</div>
+
+<div class="recap">
+  <h3>本章回顾</h3>
+  <p>本篇把「应用启动」按需化了：lazy + Suspense 让代码第一次使用才到达，路由级拆包给出最自然的切割线，动态 import 与 tree-shaking 一个管时机、一个管体积。但这些 chunk 是谁切的、怎么切的？为什么 dev 模式下根本看不到带 hash 的文件名？下一篇第 40 篇走进 Vite 构建原理，把这台「前端的 Maven」拆开给你看。</p>
+</div>
+</section>
+
+</body>
+</html>
