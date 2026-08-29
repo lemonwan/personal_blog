@@ -1,0 +1,81 @@
+# 自动部署：推送到 main 后，在 GitHub Actions 上构建静态产物，
+# 并通过 rsync + SSH 同步到服务器的 nginx 根目录。
+#
+# 首次使用前需要做两件事（见 README 或对话说明）：
+# 1. 把下面 DEPLOY_PATH 改成服务器上 nginx 的根目录；
+# 2. 在仓库 Settings → Secrets and variables → Actions 里配置：
+#    - SSH_HOST          服务器 IP 或域名
+#    - SSH_USER          SSH 登录用户（需对 DEPLOY_PATH 有写权限）
+#    - SSH_PRIVATE_KEY   部署专用私钥（公钥需加入服务器 ~/.ssh/authorized_keys）
+#    - SSH_PORT          可选，非 22 端口时才需要
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 允许在 Actions 页面手动触发
+
+# 同一时间只跑一个部署，新推送会取消还在跑的旧部署
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # TODO: 改成你服务器上 nginx 的根目录
+      DEPLOY_PATH: /home/wanzhijun/workspace/docker/nginx/html
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v5
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # npm run build 会依次执行 next build 和 postbuild（fix-cjk-paths），
+      # 中文文章路径会在这一步被解码修复，产物在 out/
+      - name: 构建
+        run: npm run build
+
+      - name: 配置 SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          # tr -d '\r' 防止在 Windows 上生成/粘贴的私钥带 CRLF 导致格式无效
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${SSH_PORT:-22}" "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      # --delete 会把服务器上已在新构建中删除的文件一并清掉，保持两端一致
+      - name: 同步产物到服务器
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          rsync -az --delete \
+            -e "ssh -p ${SSH_PORT:-22} -i ~/.ssh/deploy_key" \
+            out/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+      # 在仓库 Settings → Variables 里配置 SITE_URL（如 https://xxx.com）后，
+      # 这一步会自动检查首页是否返回 200；不配置则跳过
+      - name: 部署后检查
+        if: vars.SITE_URL != ''
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$SITE_URL")
+          echo "$SITE_URL -> $code"
+          [ "$code" = "200" ] || { echo "首页状态码异常"; exit 1; }
