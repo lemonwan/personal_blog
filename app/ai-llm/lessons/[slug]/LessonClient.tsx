@@ -97,44 +97,99 @@ export function LessonClient({ content }: { content: string }) {
       b.textContent = parseFloat(slider.value).toFixed(1);
     });
 
-    /* ── Lab drag ── */
+    /* ── Lab drag（Pointer Events + 屏幕坐标精确映射，参照 xuanyuancode 原版交互）── */
     root.querySelectorAll(".lab svg, .fruit-lab svg").forEach((svg) => {
       const handle = svg.querySelector('g[style*="cursor:grab"], g[style*="cursor: grab"]');
-      if (!handle) return;
       const readout = svg.parentNode?.querySelector(".readout");
+      const link = svg.querySelector('line[stroke-dasharray]');
+      if (!handle) return;
+
+      // 固定点：只取「<g> 的直属子节点是 circle + text」的点（跳过外层包裹 g 与把手）
       const fixed = [];
       svg.querySelectorAll("g").forEach((g) => {
         if (g === handle) return;
-        const c = g.querySelector("circle");
-        const t = g.querySelector("text");
-        if (c && t) fixed.push({ x: +c.getAttribute("cx"), y: +c.getAttribute("cy"), name: t.textContent.trim() });
+        let c = null;
+        let t = null;
+        for (const child of Array.from(g.children)) {
+          if (child.tagName === "circle") c = child;
+          else if (child.tagName === "text") t = child;
+        }
+        if (c && t && c.getAttribute("cx") && c.getAttribute("cy")) {
+          fixed.push({ x: parseFloat(c.getAttribute("cx")), y: parseFloat(c.getAttribute("cy")), name: (t.textContent || "").trim(), circle: c });
+        }
       });
-      const link = svg.querySelector('line[stroke-dasharray]');
-      let dragging = false;
-      function pt(evt) {
-        const r = svg.getBoundingClientRect();
-        const vb = (svg as SVGSVGElement).viewBox.baseVal;
-        const cx = evt.touches ? evt.touches[0].clientX : evt.clientX;
-        const cy = evt.touches ? evt.touches[0].clientY : evt.clientY;
-        return { x: (cx - r.left) / r.width * vb.width, y: (cy - r.top) / r.height * vb.height };
+
+      // 坐标归一化（math-01 动物地图）：data-vec-map="x0,y0,sx,sy" 把 SVG 像素映射到 [0,1] 向量空间
+      let vecMap = null;
+      const mapAttr = svg.getAttribute("data-vec-map");
+      if (mapAttr) {
+        const [X0, Y0, SX, SY] = mapAttr.split(",").map(parseFloat);
+        vecMap = { X0, Y0, SX, SY };
+        fixed.forEach((f) => { f.nx = (f.x - X0) / SX; f.ny = (Y0 - f.y) / SY; });
       }
-      function move(p) {
+
+      // 初始位置：内容里没写 transform 时，用固定点重心（否则会停在 SVG 左上角 (0,0)）
+      let cur = { x: 0, y: 0 };
+      if (fixed.length) {
+        cur = { x: fixed.reduce((s, f) => s + f.x, 0) / fixed.length, y: fixed.reduce((s, f) => s + f.y, 0) / fixed.length };
+      } else {
+        const vb = (svg as SVGSVGElement).viewBox.baseVal;
+        cur = { x: vb.width / 2, y: vb.height / 2 };
+      }
+      const existing = handle.getAttribute("transform");
+      if (existing) {
+        const m = /translate\(\s*([-\d.eE]+)[,\s]+([-\d.eE]+)\)/.exec(existing);
+        if (m) cur = { x: parseFloat(m[1]), y: parseFloat(m[2]) };
+      }
+
+      function draw(p) {
         handle.setAttribute("transform", `translate(${p.x},${p.y})`);
         if (!fixed.length) return;
-        let best = null, bd = Infinity;
-        fixed.forEach((f) => { const d = Math.hypot(f.x - p.x, f.y - p.y); if (d < bd) { bd = d; best = f; } });
-        if (best && link) { link.setAttribute("x1", String(p.x)); link.setAttribute("y1", String(p.y)); link.setAttribute("x2", String(best.x)); link.setAttribute("y2", String(best.y)); }
-        if (readout && best) readout.textContent = `离它最近的是「${best.name}」`;
+        const np = vecMap ? { x: (p.x - vecMap.X0) / vecMap.SX, y: (vecMap.Y0 - p.y) / vecMap.SY } : null;
+        let best = fixed[0], bd = Infinity;
+        fixed.forEach((f) => {
+          const d = np ? Math.hypot(f.nx - np.x, f.ny - np.y) : Math.hypot(f.x - p.x, f.y - p.y);
+          f.circle.setAttribute("fill", "#3E6B8F");
+          f.circle.setAttribute("r", "7");
+          if (d < bd) { bd = d; best = f; }
+        });
+        best.circle.setAttribute("fill", "#C0481E");
+        best.circle.setAttribute("r", "9");
+        if (link) { link.setAttribute("x1", String(p.x)); link.setAttribute("y1", String(p.y)); link.setAttribute("x2", String(best.x)); link.setAttribute("y2", String(best.y)); }
+        if (readout) {
+          readout.innerHTML = np
+            ? `神秘动物 = [ ${np.x.toFixed(2)} , ${np.y.toFixed(2)} ] —— 离它最近的是 <strong>${best.name}</strong>（距离 ${bd.toFixed(2)}）`
+            : `离它最近的是「${best.name}」`;
+        }
       }
-      function down(e) { dragging = true; handle.style.cursor = "grabbing"; move(pt(e)); e.preventDefault(); }
-      function drag(e) { if (dragging) move(pt(e)); }
-      function up() { dragging = false; handle.style.cursor = "grab"; }
-      handle.addEventListener("mousedown", down);
-      window.addEventListener("mousemove", drag);
-      window.addEventListener("mouseup", up);
-      handle.addEventListener("touchstart", down, { passive: false });
-      window.addEventListener("touchmove", (e) => { if (dragging) { drag(e); e.preventDefault(); } }, { passive: false });
-      window.addEventListener("touchend", up);
+
+      function toSvg(evt) {
+        const s = svg as SVGSVGElement;
+        const p = s.createSVGPoint();
+        p.x = evt.clientX; p.y = evt.clientY;
+        const ctm = s.getScreenCTM();
+        if (!ctm) return cur;
+        const m = p.matrixTransform(ctm.inverse());
+        return { x: m.x, y: m.y };
+      }
+
+      let dragging = false;
+      const down = (e) => {
+        dragging = true;
+        try { (svg as SVGSVGElement).setPointerCapture(e.pointerId); } catch {}
+        handle.style.cursor = "grabbing";
+        draw(toSvg(e));
+        e.preventDefault();
+      };
+      const move = (e) => { if (dragging) draw(toSvg(e)); };
+      const up = () => { dragging = false; handle.style.cursor = "grab"; };
+
+      svg.addEventListener("pointerdown", down);
+      svg.addEventListener("pointermove", move);
+      svg.addEventListener("pointerup", up);
+      svg.addEventListener("pointercancel", up);
+
+      draw(cur); // 初始绘制：定位 + 最近点高亮 + 连线 + 读数
     });
 
     /* ── act-btn 变体切换（nn-02 激活曲线 / nlp-03 上下文词读数）── */

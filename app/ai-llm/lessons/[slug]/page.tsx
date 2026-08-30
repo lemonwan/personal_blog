@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getLessonContent, getLessonBySlug, AI_LESSONS, getLessonsByVolume, VOLUMES } from "@/lib/content";
+import { getLessonContent, getLessonBySlug, AI_LESSONS, getLessonsByVolume, VOLUMES, extractToc } from "@/lib/content";
 import { LessonClient } from "./LessonClient";
 import ReadingProgress from "./ReadingProgress";
+import ArticleToc from "../../../ArticleToc";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -27,6 +28,7 @@ export default async function LessonPage({ params }: Props) {
   if (!meta) notFound();
 
   const content = getLessonContent(slug);
+  const tocItems = content ? extractToc(content) : [];
   const lessonIdx = AI_LESSONS.findIndex((l) => l.slug === slug);
   const prev = lessonIdx > 0 ? AI_LESSONS[lessonIdx - 1] : null;
   const next = lessonIdx < AI_LESSONS.length - 1 ? AI_LESSONS[lessonIdx + 1] : null;
@@ -41,12 +43,10 @@ export default async function LessonPage({ params }: Props) {
       <ReadingProgress />
 
       {/* ── Lesson layout ── */}
-      <div className="lesson-layout" style={{ maxWidth: "1280px", margin: "0 auto", padding: "0 48px" }}>
-        <div style={{ display: "flex", gap: "48px" }}>
+      <div className="article-shell">
+        <div className="article-grid">
           {/* ── Left sidebar: lesson rail ── */}
-          <aside className="lesson-rail" style={{
-            width: "var(--rail-w, 220px)", flexShrink: 0, paddingTop: "56px",
-          }}>
+          <aside className="article-side">
             <div style={{ position: "sticky", top: "80px" }}>
               {vol && (
                 <div style={{ marginBottom: "24px" }}>
@@ -90,10 +90,7 @@ export default async function LessonPage({ params }: Props) {
           </aside>
 
           {/* ── Main lesson content ── */}
-          <article className="lesson-content" style={{
-            flex: 1, minWidth: 0, maxWidth: "var(--content-w, 788px)",
-            paddingTop: "48px", paddingBottom: "80px"
-          }}>
+          <article className="article-main">
             {/* Breadcrumb */}
             <div className="lesson-breadcrumb" style={{ fontSize: "14px", color: "var(--ink-faint)", marginBottom: "32px" }}>
               <Link href="/" style={{ color: "var(--ink-faint)", textDecoration: "none" }}>首页</Link>
@@ -157,6 +154,9 @@ export default async function LessonPage({ params }: Props) {
               ) : <span />}
             </nav>
           </article>
+
+          {/* ── Right sidebar: article outline (scroll-spy) ── */}
+          <ArticleToc items={tocItems} />
         </div>
       </div>
 
