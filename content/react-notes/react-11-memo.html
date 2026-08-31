@@ -106,6 +106,17 @@ function Stats({ rows }: { rows: Row[] }) {
 
 <p>不包 <code>useMemo</code> 会怎样？每敲一个字、每勾一次「紧凑模式」，组件重渲染，十万行的过滤汇总就重跑一次。包上之后，<code>rows</code>、<code>query</code> 不变，重算直接跳过。判断标准很朴素：<strong>没有 useMemo，这个计算每次渲染都会跑——它有多贵？渲染有多频繁？</strong>对几十条数据做一次 <code>filter</code>，微秒级，包了纯属浪费；对十万行做统计，才值得包。</p>
 
+<p>「贵不贵」不靠猜，量一下就知道。最顺手的手法是 <code>console.time</code>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Stats.tsx</b> · 测量一次计算的真实耗时</span></div>
+  <pre><code>console.time("stats");
+const stats = computeStats(rows, query);
+console.timeEnd("stats");  <span class="c">// 控制台打印：stats: 37.4ms</span></code></pre>
+</div>
+
+<p>经验刻度：<strong>1ms 以内</strong>（多数小数据的 filter/map）放心裸算；<strong>几毫秒到十几毫秒</strong>，若伴随高频输入（每敲一个字就重算）就该包；<strong>几十毫秒以上</strong>，不包等于每次渲染卡一帧。量出来的数字比直觉可靠——后端「先 profile 再优化」的纪律，前端一字不差地适用（第 41 篇讲正式的 Profiler）。</p>
+
 <h3>场景二：结果不贵，但「引用稳定」很重要</h3>
 
 <p>两个子场景，都和第一站的引用相等有关：</p>
@@ -229,6 +240,8 @@ function TodoList() {
   <p>你不会给每个查询都套 Redis：查询本身 2ms，引入缓存后多一次网络往返、多一份一致性维护，可能变成 5ms。<code>useMemo</code> 同理——它是给「贵的计算」和「必须稳的引用」准备的工具，不是荣誉勋章，不是每个函数体都该穿的衣服。</p>
 </div>
 
+<p>还有一条容易被忽略的「免责条款」：<strong>useMemo 的缓存只是性能提示，不是正确性保证</strong>。官方明确允许 React 在必要时丢弃缓存、重新计算（比如为释放内存），语义上它也可能在组件渲染失败重试时重跑。所以：<strong>绝不能把「只执行一次」的语义托付给 useMemo</strong>——发请求、建连接这类副作用必须进 effect（第 9 篇的规矩）；缓存里只放「重算一遍也无所谓」的纯计算结果。后端对照：这就像缓存穿透兜底——缓存没了，回源必须总能重新算出同样的东西。</p>
+
 <p>顺带一个「免费的 useMemo」常识：把常量提到组件外面，比任何 Hook 都干净——</p>
 
 <div class="srcbox">
@@ -264,7 +277,8 @@ function FilterBar() {
     <li><strong>useMemo 缓存值，useCallback 缓存函数</strong>——后者就是 <code>useMemo(() =&gt; fn, deps)</code> 的语法糖。</li>
     <li>真正需要的场景只有两类：<strong>计算重</strong>、<strong>引用要稳</strong>（供依赖数组 / memo 子组件用）。</li>
     <li>与 <code>React.memo</code> 是组合拳，单独用常常白忙。</li>
-    <li>缓存有成本：先测量（第 41 篇 Profiler）再优化，别无脑全包。</li>
+    <li>缓存只是性能提示：React 可丢弃缓存重算，「只执行一次」的语义永远托付给 effect，不托付给 useMemo。</li>
+    <li>缓存有成本：先用 <code>console.time</code> 或 Profiler（第 41 篇）测量再优化，别无脑全包。</li>
   </ul>
 </div>
 

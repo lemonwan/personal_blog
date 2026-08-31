@@ -260,6 +260,30 @@ function Badge({ items }: { items: string[] }) {
 
 <p>顺带一段历史：React 18 及之前，想把 ref 传进<strong>自定义函数组件</strong>，必须用 <code>forwardRef</code> 包一层才收得到；<strong>React 19 起 ref 就是普通 prop</strong>，直接写进 props 类型即可，<code>forwardRef</code> 光荣退休。你在旧代码里见到它，知道是时代产物就好。</p>
 
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>MyInput.tsx</b> · 新旧写法对照：收 ref 的姿势变了，用法没变</span></div>
+  <pre><code>import { forwardRef } from "react";
+import type { Ref } from "react";
+
+<span class="c">// React 18 及更早：forwardRef 包一层，ref 从第二个参数进来</span>
+const MyInput = forwardRef&lt;HTMLInputElement&gt;(function MyInput(props, ref) {
+  return &lt;input ref={ref} placeholder={props.placeholder} /&gt;;
+});
+
+<span class="c">// React 19+：ref 就是普通 prop，直接写进 props 类型</span>
+function MyInput19({ ref, placeholder }: {
+  ref?: Ref&lt;HTMLInputElement&gt;;
+  placeholder?: string;
+}) {
+  return &lt;input ref={ref} placeholder={placeholder} /&gt;;
+}
+
+<span class="c">// 两种写法，调用方完全一样：</span>
+&lt;MyInput ref={inputRef} placeholder="搜索…" /&gt;</code></pre>
+</div>
+
+<p>旧项目里见到 <code>forwardRef</code> 不必慌：它的语义就是「替这个组件转发 ref」，内部照样 <code>ref={ref}</code> 挂到真实节点上。新代码直接用 prop 写法；升级老库时也不急着改写，它不会坏，只是啰嗦。</p>
+
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>

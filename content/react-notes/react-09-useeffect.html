@@ -75,6 +75,12 @@ function Cart() {
 </table>
 
 <p>把这张表翻译成 Spring 的语言：<code>[]</code> 就是 <code>@PostConstruct</code>，依赖数组就是「监听变化、销毁重建」，清理函数就是 <code>@PreDestroy</code>。区别是：Bean 的生命周期只走一轮，effect 的「初始化 → 销毁」由依赖数组驱动，可以反复多轮。</p>
+
+<p>一个组件里可以声明多个 effect，它们的执行顺序很朴素：<strong>按书写顺序依次执行</strong>——先声明的先跑；同一轮渲染里，各 effect 的 cleanup 也按声明顺序先于各自的新一轮执行。不存在并发，也不存在「谁依赖先满足谁先跑」。</p>
+
+<div class="think">
+  <div class="think-q">自测时序：组件有两个 effect，甲的依赖是 <code>[roomId]</code>，乙的依赖是 <code>[]</code>。挂载时谁先执行？切换 <code>roomId</code> 时，乙会被带着重跑吗？——答案：甲先（声明在前的话）；乙的依赖没变，本轮被跳过，只有甲清理并重跑。每个 effect 的「阀门」各管各的，互不牵连。</div>
+</div>
 </section>
 
 <!-- ═══════════════ 第3站：清理函数 ═══════════════ -->
@@ -257,6 +263,8 @@ createRoot(document.getElementById("root")!).render(
 
 <p>演练的目的：其一，<strong>提前暴露隐患</strong>——双调用会出事的 effect（漏 cleanup、不幂等），放到真实世界的「快速切路由、反复开弹窗」场景一样会出事；其二，为未来「组件树可复用、状态可保留」铺路。<strong>生产构建完全不受影响</strong>，effect 只执行一轮。正确态度是把 cleanup 写全、让 effect 可重入，而不是摘掉 StrictMode——那等于拆掉烟雾报警器。</p>
 
+<p>最后认识一位「急脾气亲戚」：<code>useLayoutEffect</code>。它和 <code>useEffect</code> 写法一模一样，唯一区别在时机——<strong>DOM 提交之后、浏览器绘制之前</strong>同步执行。普通 effect 是「先让用户看到画面，回头再补副作用」；<code>useLayoutEffect</code> 则抢在绘制前动手。只有一种场景值得用它：你需要先测量或改动 DOM 布局，又不想让用户看到「改之前」的闪烁一帧（比如按内容宽度校正 tooltip 位置）。其余所有场景——请求、定时器、订阅、改标题——一律用 <code>useEffect</code>：它不阻塞绘制，快。<strong>useLayoutEffect 是罕见的特例工具，不是默认选项。</strong></p>
+
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>
@@ -264,7 +272,8 @@ createRoot(document.getElementById("root")!).render(
     <li>deps 四种形态：<strong>不传</strong>=每次渲染、<code>[]</code>=仅挂载（≈<code>@PostConstruct</code>）、<code>[a]</code>=a 变化时、<code>[a, b]</code>=任一变化时。</li>
     <li>cleanup 是 effect 的「finally」：下一轮执行前 + 卸载前必跑，≈ try-with-resources + <code>@PreDestroy</code>。</li>
     <li>一个 effect 一件事；事件驱动的逻辑放事件处理器；能算出来的值不要用 effect 同步成 state。</li>
-    <li>StrictMode 的开发模式双调用是健壮性体检，cleanup 写全即可免疫。</li>
+    <li>多个 effect 按声明顺序执行，依赖阀门各管各的，互不牵连。</li>
+    <li>StrictMode 的开发模式双调用是健壮性体检，cleanup 写全即可免疫；<code>useLayoutEffect</code> 只留给「绘制前同步改 DOM」的罕见场景。</li>
   </ul>
 </div>
 

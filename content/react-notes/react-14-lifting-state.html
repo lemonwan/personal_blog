@@ -112,6 +112,33 @@ function FahrenheitInput() {
 </svg>
 <figcaption class="figcaption"><span class="fig-no">图 1</span>状态提升后的单向数据流：props 向下、回调向上，兄弟组件经父组件中转</figcaption>
 </figure>
+
+<h3>换个壳，同一道题：筛选框与列表</h3>
+
+<p>温度换算器很小，这套模式却无处不在。再看一例：页面上方是关键词输入框，下方列表按关键词过滤。输入框和列表是兄弟组件，<code>keyword</code> 是要共享的状态——提升到页面级父组件：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>UserPage.tsx</b> · keyword 提升，过滤结果派生</span></div>
+  <pre><code>import { useState } from "react";
+
+<span class="c">// 假设 User = { id: number; name: string }</span>
+function UserPage({ users }: { users: User[] }) {
+  <span class="c">// 共享状态提升到公共父组件，只存一份</span>
+  const [keyword, setKeyword] = useState("");
+
+  <span class="c">// 过滤结果是派生值：渲染时现算，绝不另存一份 state（第 9 篇）</span>
+  const filtered = users.filter(u =&gt; u.name.includes(keyword));
+
+  return (
+    &lt;&gt;
+      &lt;FilterBar keyword={keyword} onKeywordChange={setKeyword} /&gt;
+      &lt;UserList users={filtered} /&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>公式与温度换算器一字不差：state 住父组件，<code>FilterBar</code> 领「值 + 回调」做纯受控组件，<code>UserList</code> 领结果只管渲染。日后想再加第三个组件——「显示命中条数的徽标」——只需把它挂在同一个父组件下，分发同一份数据的切片即可，前两个组件一行不用改。<strong>数据源头唯一，扩展就只是「多挂一个读者」。</strong></p>
 </section>
 
 <!-- ═══════════════ 第3站：完整可运行例子 ═══════════════ -->
@@ -174,6 +201,14 @@ function Calculator() {
 
 <p>提升是手段，不是信仰。给 state 选家的原则一句话：<strong>放在「需要读写它的所有组件」的最小公共处，就低不就高</strong>：</p>
 
+<h3>提升前自检三问</h3>
+
+<ol>
+  <li><strong>真的是「同一份」吗？</strong>——两个组件需要的是同一份数据，还是 B 的值能从 A 推导？能推导就只提升源头，派生值渲染时现算（温度换算器只存一个框，正是此问的示范）；</li>
+  <li><strong>最近的公共父组件在哪一层？</strong>——提升到恰好那一层，一步不多。提得越高，中间越多组件沦为搬运站（props drilling 的苗头，见第 5 站）；</li>
+  <li><strong>子组件的私有状态要不要一起动？</strong>——只提升「需要共享的那部分」。输入框焦点、悬浮高亮这类纯 UI 细节留在子组件内部，全提上去只会平白放大渲染面。</li>
+</ol>
+
 <table>
   <thead>
     <tr><th>谁要用这份数据</th><th>放哪</th><th>典型例子</th></tr>
@@ -216,6 +251,7 @@ function Calculator() {
     <li>兄弟共享状态 = <strong>提升到最近公共父组件</strong>：父管 state，props 下发值，回调上报改动。</li>
     <li>单向数据流的纪律：数据只能向下（props）、改动请求只能向上（回调），状态源头唯一 → 界面可预测。</li>
     <li>能推导出来的值不要提升成第二份 state——另一个输入框的值，渲染时现算。</li>
+    <li>提升前自检三问：是不是「同一份」、最近的公共父组件在哪层、子组件私有状态要不要一起动。</li>
     <li>状态放哪逐级升级：局部 → 提升到父 → Context → 全局 store，就低不就高，别一上来就全局。</li>
     <li>props drilling 三层以上是换 Context 的信号；但先透传，苗头出现再优化。</li>
   </ul>

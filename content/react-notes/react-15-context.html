@@ -114,6 +114,28 @@ function UserCard() {
 }</code></pre>
 </div>
 
+<h3>嵌套 Provider：就近覆盖</h3>
+
+<p>同一条频道可以在组件树的不同高度「多次开播」：当消费者上方有多个 Provider 时，<code>useContext</code> 取的是<strong>离自己最近的那一层</strong>的值，外层被内层覆盖：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>App.tsx</b> · 内层 Provider 覆盖外层</span></div>
+  <pre><code>&lt;ThemeContext.Provider value="light"&gt;
+  &lt;Header /&gt;          <span class="c">// useContext 读到 "light"</span>
+
+  &lt;ThemeContext.Provider value="dark"&gt;
+    &lt;SettingsPanel /&gt; <span class="c">// 读到 "dark"——离它最近的 Provider 说了算</span>
+  &lt;/ThemeContext.Provider&gt;
+
+  &lt;Footer /&gt;          <span class="c">// 仍是 "light"，不受里面那段覆盖影响</span>
+&lt;/ThemeContext.Provider&gt;</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：配置源的就近覆盖</div>
+  <p>Spring Boot 里 <code>application-dev.yml</code> 会覆盖 <code>application.yml</code> 的同名配置项——<strong>越具体、越靠近使用者的配置源优先级越高</strong>。Context 的嵌套覆盖同款思路：全局开播一个默认值，局部子树想特例，就地再包一层 Provider 即可，不必改全局。</p>
+</div>
+
 <p><strong>一个必须现在就说清的机制</strong>：Provider 的 <code>value</code> 一旦变化，所有调用了 <code>useContext</code> 的组件都会<strong>强制重新渲染</strong>——这是广播，不是点播，代价在第 4 站细讲。（React 19 可简写成 <code>&lt;ThemeContext value={theme}&gt;</code>，本文沿用 <code>.Provider</code> 兼容 React 18。）</p>
 </section>
 
@@ -135,7 +157,8 @@ function UserCard() {
   <pre><code>import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-type ThemeContextValue = { theme: "light" | "dark"; toggleTheme: () =&gt; void };
+type Theme = "light" | "dark";
+type ThemeContextValue = { theme: Theme; toggleTheme: () =&gt; void };
 
 <span class="c">// 故意不给默认值：用 null 明确表达「必须在 Provider 内使用」</span>
 const ThemeContext = createContext&lt;ThemeContextValue | null&gt;(null);
@@ -291,7 +314,7 @@ return &lt;ThemeContext.Provider value={value}&gt;&lt;Page /&gt;&lt;/ThemeContex
 
 <div class="recap">
   <h3>本章回顾</h3>
-  <p>props drilling 的本质是「人人皆快递员」；Context 换了个模型——<strong>Provider 开播，任意后代直接收听</strong>，中间层彻底退场。规范做法：Context 与 <code>useXxx()</code> 同文件、默认值给 <code>null</code>、Hook 里 fail-fast。性能口诀：<strong>订阅面就是重渲染面</strong>——value 用 useMemo 稳定、按领域拆分、children 透传不变。</p>
+  <p>props drilling 的本质是「人人皆快递员」；Context 换了个模型——<strong>Provider 开播，任意后代直接收听</strong>，中间层彻底退场。嵌套开播时就近覆盖：内层 Provider 的值赢，局部特例不动全局。规范做法：Context 与 <code>useXxx()</code> 同文件、默认值给 <code>null</code>、Hook 里 fail-fast。性能口诀：<strong>订阅面就是重渲染面</strong>——value 用 useMemo 稳定、按领域拆分、children 透传不变。</p>
 </div>
 
 <p>下一篇是卷二收官——第 16 篇「Hooks 规则与十大常见陷阱」。本篇里 <code>useTheme</code> 为什么必须写在组件顶层、不能塞进 <code>if</code>？答案指向同一个底层机制：<strong>React 靠调用顺序识别每一个 Hook</strong>。想透这个机制，十个常见的坑会同时揭开谜底。</p>

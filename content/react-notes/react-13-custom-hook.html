@@ -231,6 +231,26 @@ function useDebouncedFetch&lt;T&gt;(url: string, delay = 300) {
 </ul>
 
 <p>经验值：一个「值 + 设置器」就学 useState 用元组；一旦有「返回包」的味道就学 useFetch 用对象。拿不准就对象，最不容易坏。</p>
+
+<h3>设计提醒：返回值的「身份」也是合同的一部分</h3>
+
+<p>返回对象（或函数）时，第 11 篇的引用相等立刻跟进：<strong>你的返回值每次渲染是不是同一个引用？</strong>调用方一旦把整个返回对象塞进某个 effect 的依赖数组，引用天天变，effect 就天天跑。规矩和第 11 篇一致：原始值（<code>useDebounce</code> 返回的 <code>debounced</code>）和 state 本身无需操心；<strong>你亲手拼的函数和对象，要用 <code>useCallback</code>/<code>useMemo</code> 稳住</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>usePlayer.ts</b> · 返回包里的函数也要引用稳定</span></div>
+  <pre><code>import { useCallback, useState } from "react";
+
+function usePlayer() {
+  const [playing, setPlaying] = useState(false);
+
+  <span class="c">// ✅ useCallback 稳住：调用方把 toggle 写进依赖数组也不会误触发</span>
+  const toggle = useCallback(() =&gt; setPlaying(p =&gt; !p), []);
+
+  return { playing, toggle };
+}</code></pre>
+</div>
+
+<p>顺带记一条福利：<code>useState</code> 返回的 setter 由 React 保证终生同一引用，可以放心进任何依赖数组——这也是「返回 setter 学 useState」省心的原因。而 <code>useFetch</code> 的返回对象每次都是新引用，属于已知取舍：它的消费方要么逐项解构（<code>const { data } = useFetch(url)</code>），要么依赖数组只写原始值。</p>
 </section>
 
 <!-- ═══════════════ 第5站：何时抽与回顾 ═══════════════ -->
@@ -258,6 +278,7 @@ function useDebouncedFetch&lt;T&gt;(url: string, delay = 300) {
     <li>它复用的是「有状态的逻辑」，<strong>不是状态本身</strong>——每次调用状态各自隔离（new 实例，不是单例）。</li>
     <li>三个模板在手：<code>useLocalStorage</code>（读写同步）、<code>useDebounce</code>（值停稳再传）、<code>useFetch</code>（state 管结果 + effect 管同步 + cleanup 善后）。</li>
     <li>Hook 可组合 Hook，规则与内置 Hook 一致；返回值双值用元组 <code>as const</code>、多值用对象。</li>
+    <li>返回值的「身份」也是合同：亲手拼的函数/对象用 <code>useCallback</code>/<code>useMemo</code> 稳住；<code>useState</code> 的 setter 终生稳定，可直接进依赖数组。</li>
     <li><strong>自定义 Hook 是 Hook 规则约束下的最小复用单元</strong>——再往下的复用诉求，就该想想是不是「共享状态」而非「复用逻辑」了。</li>
   </ul>
 </div>

@@ -153,6 +153,37 @@ useEffect(() =&gt; {
 </ol>
 
 <p>闭包本身没有 bug，它忠实地记住了「出生那次」的作用域。真正的问题是——<strong>我们让一张快照里的函数活得太久，还指望它知道后面快照的事</strong>。</p>
+
+<h3>快照模型不只属于 effect：事件处理器同款发病</h3>
+
+<p>别以为这是定时器的专利。下面这段代码没有任何 effect，照样翻车——点击按钮，3 秒后弹窗显示什么？</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Mystery.tsx</b> · ❌ 弹窗里的 count 永远慢一拍</span></div>
+  <pre><code>import { useState } from "react";
+
+function Mystery() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+    setTimeout(() =&gt; {
+      alert(count); <span class="c">// 3 秒后显示的是「点击那次渲染」的 count</span>
+    }, 3000);
+  }
+
+  return &lt;button onClick={handleClick}&gt;{count}&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>答案是<strong>点击前的旧值</strong>：点一下，界面变成 1，弹窗却弹出 0。复盘走一遍快照模型——<code>handleClick</code> 是本次渲染创建的函数，闭包捕获本次渲染的 <code>count</code>；<code>setCount</code> 引发下一轮渲染没错，但 <code>setTimeout</code> 的回调出生于上一张快照，它眼里的 <code>count</code> 永远定格在出生那一刻。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：异步线程拿到的永远是提交时的 DTO 快照</div>
+  <p>Java 里你把一个不可变 DTO 提交给线程池异步处理，主线程随后改了数据库——异步任务看到的仍是提交那一刻的快照，不会「实时刷新」。React 的每次渲染就是那次「提交」，事件处理器、定时器、Promise 回调都是「异步任务」：谁出生在哪张快照里，谁就只认得那张快照。</p>
+</div>
+
+<p>这个案例值得亲手跑一遍：它是「每次渲染都是一张快照」最直观的证据。想通了它，本篇所有修复手段（下一站）都只是同一个问题的不同侧面。</p>
 </section>
 
 <!-- ═══════════════ 第4站：修复三板斧 ═══════════════ -->
@@ -253,6 +284,7 @@ useEffect(() =&gt; {
   <ul>
     <li>心智模型一句话：<strong>每次渲染都有自己的 props、state、effect</strong>——effect 是被某次渲染创建、活到被清理为止的「快照函数」。</li>
     <li>闭包陷阱的根源：effect 活了很久，却只认识「出生那次渲染」的变量绑定。</li>
+    <li>快照是渲染的根本性质，不是 effect 专利——事件处理器、<code>setTimeout</code> 里的闭包同样只认出生那帧的值。</li>
     <li>修复三板斧：<code>setX(c =&gt; …)</code> 函数式更新 → 诚实补全依赖 → <code>useRef</code> 存最新值（第 12 篇）。</li>
     <li><code>react-hooks/exhaustive-deps</code> 是 React 生态最重要的 lint 规则：报警先修代码，disable 前想清楚代价。</li>
   </ul>

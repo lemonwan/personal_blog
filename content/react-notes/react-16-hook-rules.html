@@ -51,6 +51,44 @@
   <div class="crack-label">后端类比：MyBatis / JDBC 的 ? 占位符</div>
   <p>参数绑定靠的是<strong>位置</strong>：<code>WHERE id = ? AND status = ?</code>，<code>setString(1, ...)</code>、<code>setString(2, ...)</code>。如果动态拼 SQL 时少拼了一个条件，后面的参数全部错位绑定——字符串绑到了日期列上。React 的 Hook 与槽位就是这组 <code>?</code>：<strong>第 n 次调用对第 n 个槽位，插队或缺席，后面全错</strong>。为什么不能按名字绑定？因为 <code>useState</code> 可能被调用多次，同一个「名字」出现多次时，顺序是唯一能依赖的标识。</p>
 </div>
+
+<h3>规则二深挖：为什么事件处理器里也不能调 Hook</h3>
+
+<p>规则二还有个高频误区：「条件调用只是会错位，那我保证顺序不变，写在别处总行吧？」不行——事件处理器、普通工具函数里一律不能调，这与顺序无关。槽位只在「<strong>渲染正在进行</strong>」时开放登记：React 渲染某个组件时才打开它的槽位链表，渲染一结束就封存。事件处理器要等用户点击后才运行，那时链表早已封存，里面的 <code>useState</code> 无处登记：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌/✅ LikeButton.tsx</b> · 状态要在渲染期「预报」，事件里只许改值</span></div>
+  <pre><code>function LikeButton() {
+  const [liked, setLiked] = useState(false);
+
+  function handleClick() {
+    <span class="c">// ❌ 事件处理器运行在渲染结束之后，槽位链表早已封存</span>
+    <span class="c">//    React 直接报 Invalid hook call</span>
+    const [popup, setPopup] = useState(false);
+    setLiked(true);
+  }
+
+  return &lt;button onClick={handleClick}&gt;点赞&lt;/button&gt;;
+}
+
+function LikeButtonFixed() {
+  <span class="c">// ✅ 需要哪些状态，在渲染顶层「预报」好</span>
+  const [liked, setLiked] = useState(false);
+  const [popup, setPopup] = useState(false);
+
+  function handleClick() {
+    setLiked(true);  <span class="c">// 事件处理器只负责「改值」，不负责「建槽」</span>
+    setPopup(true);
+  }
+
+  return &lt;button onClick={handleClick}&gt;点赞&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：Bean 注册只在容器启动期</div>
+  <p>Spring 里你往容器里注册 Bean，只能发生在启动阶段；请求处理到一半想再塞一个新 Bean 定义，框架不认。运行期要用的资源，必须在装配阶段提前声明——React 的规矩一模一样：<strong>状态在渲染期预报（顶层声明），运行期只许读写</strong>。</p>
+</div>
 </section>
 
 <!-- ═══════════════ 第2站：State 类陷阱 ═══════════════ -->
