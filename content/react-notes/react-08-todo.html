@@ -38,6 +38,7 @@ type Todo = {
 <div class="crack">
   <div class="crack-label">关键心法</div>
   <p>「先定 state、再写 JSX」是最重要的分水岭动作。就像后端「先建表结构、再写 Controller」——state 就是前端的「表结构」。state 定清楚了，界面只是它的投影（还记得第 1 篇的 <code>UI = f(state)</code> 吗？）。</p>
+  <p>顺带验证一下上一站学的「哪些数据不配进 state」：剩余条数能由 <code>todos</code> 推导，不进；输入框内容会被用户持续修改、且参与渲染，进。</p>
 </div>
 </section>
 
@@ -51,11 +52,15 @@ type Todo = {
   <div class="srcbox-head"><span class="srcbox-file"><b>TodoApp.tsx · 完整实现</b></span></div>
   <pre><code>import { useState } from "react";
 
+type Todo = { id: number; text: string; done: boolean };
+
+<span class="c">// 计数器放在组件外：模块只加载一次，不会随重渲染重置</span>
+let nextId = 1;
+
 function TodoApp() {
   <span class="c">// ── 状态（先定 state）──</span>
-  const [todos, setTodos] = useState([]);
+  const [todos, setTodos] = useState&lt;Todo[]&gt;([]);
   const [input, setInput] = useState("");
-  let nextId = 1;   <span class="c">// 演示用；真实项目建议用自增/时间戳/uuid</span>
 
   <span class="c">// ── ① 新增：不可变更新，append 新项 ──</span>
   function addTodo() {
@@ -83,12 +88,14 @@ function TodoApp() {
   <span class="c">// ── ⑤ 视图：状态 → 界面 ──</span>
   return (
     &lt;div className="todo"&gt;
-      &lt;input
-        value={input}
-        onChange={e =&gt; setInput(e.target.value)}
-        placeholder="输入待办…"
-      /&gt;
-      &lt;button onClick={addTodo}&gt;添加&lt;/button&gt;
+      &lt;form onSubmit={e =&gt; { e.preventDefault(); addTodo(); }}&gt;
+        &lt;input
+          value={input}
+          onChange={e =&gt; setInput(e.target.value)}
+          placeholder="输入待办…"
+        /&gt;
+        &lt;button type="submit"&gt;添加&lt;/button&gt;
+      &lt;/form&gt;
 
       &lt;ul&gt;
         {todos.map(t =&gt; (
@@ -113,9 +120,15 @@ function TodoApp() {
   );
 }</code></pre>
 </div>
+
+<p>建议你在本地把它跑起来，依次验证：回车能添加（<code>onSubmit</code> 在发力）、空内容添加不了、勾选后文字划线、底部数字跟着变。</p>
+
+<div class="think">
+  <div class="think-q">注意 <code>let nextId = 1</code> 的位置——它在组件函数<strong>外面</strong>。如果写进函数里，每次重渲染都会被重置回 1，新条目的 id 就会和旧条目撞车，key 一重复，第 7 篇讲的所有灾难都会上演。这是「变量作用域」这个最基础的知识在 React 里的投影：组件函数会反复执行，<strong>想跨渲染保存的值，要么交给 state / ref，要么放到函数外面</strong>。真实项目里，id 通常来自后端数据库；纯前端临时用 <code>crypto.randomUUID()</code> 也很稳。</div>
+</div>
 </section>
 
-<!-- ═══════════════ 第3站：代码背后的 5 个知识点 ═══════════════ -->
+<!-- ═══════════════ 第3站：代码背后的知识点 ═══════════════ -->
 <section class="station reveal" id="s3">
 <div class="station-head"><h2>这段代码里藏着的「第一章全部精华」</h2></div>
 
@@ -128,41 +141,87 @@ function TodoApp() {
     <tr><td><code>&lt;input value={input} onChange=...&gt;</code></td><td><strong>JSX</strong>：<code>{}</code> 插值、驼峰属性、<strong>受控组件</strong></td><td>第 2 篇</td></tr>
     <tr><td><code>function TodoApp()</code> / 无任何 props</td><td><strong>组件</strong>：一个函数</td><td>第 3 篇</td></tr>
     <tr><td><code>useState</code> + <code>[...todos, x]</code> 不可变更新</td><td><strong>State</strong>：不直接 mutate，返回新数组</td><td>第 4 篇</td></tr>
-    <tr><td><code>remaining = todos.filter(...)</code></td><td><strong>派生值不存 state</strong>（渲染模型的「纯函数」思想）</td><td>第 5 篇</td></tr>
-    <tr><td><code>onChange={() =&gt; toggle(t.id)}</code> 箭头函数传参</td><td><strong>事件</strong>：传函数引用/箭头包装</td><td>第 6 篇</td></tr>
+    <tr><td><code>remaining = todos.filter(...)</code></td><td><strong>派生值不存 state</strong>（渲染模型的「纯函数」思想）</td><td>第 4、5 篇</td></tr>
+    <tr><td><code>onSubmit</code> + <code>preventDefault</code>、<code>onChange={() =&gt; toggle(t.id)}</code></td><td><strong>事件</strong>：拦截默认行为、箭头函数传参</td><td>第 6 篇</td></tr>
     <tr><td><code>key={t.id}</code></td><td><strong>列表 + key</strong>：稳定唯一标识</td><td>第 7 篇</td></tr>
   </tbody>
 </table>
+</section>
 
-<div class="think">
-  <div class="think-q">有没有发现一个「后遗症」：<code>let nextId = 1</code> 写在组件函数里，每次重渲染都会被重置，所以 id 可能重复。这是我这句「演示用」注释在回避的问题——真实项目里，id 应该来自后端数据库、<code>Date.now()</code>、或 <code>crypto.randomUUID()</code>。发现问题、意识到边界，正是后端工程师「抠细节」的好习惯。</div>
+<!-- ═══════════════ 第4站：进阶重构 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>进阶：把 TodoItem 拆成子组件</h2></div>
+
+<p>上面的版本能跑，但列表项的 JSX 还嵌在大组件里。按第 3 篇的标准——「这块能用一句话描述吗？会被复用吗？」——<code>TodoItem</code> 完全够格独立成组件。拆：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoItem.tsx</b> · 子组件：只收数据 + 回调</span></div>
+  <pre><code>function TodoItem({ todo, onToggle, onRemove }) {
+  return (
+    &lt;li&gt;
+      &lt;label&gt;
+        &lt;input
+          type="checkbox"
+          checked={todo.done}
+          onChange={() =&gt; onToggle(todo.id)}
+        /&gt;
+        &lt;span style={{ textDecoration: todo.done ? "line-through" : "none" }}&gt;
+          {todo.text}
+        &lt;/span&gt;
+      &lt;/label&gt;
+      &lt;button onClick={() =&gt; onRemove(todo.id)}&gt;删除&lt;/button&gt;
+    &lt;/li&gt;
+  );
+}</code></pre>
+</div>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>TodoApp.tsx</b> · 父组件：列表渲染变成一行</span></div>
+  <pre><code>&lt;ul&gt;
+  {todos.map(t =&gt; (
+    &lt;TodoItem key={t.id} todo={t} onToggle={toggle} onRemove={remove} /&gt;
+  ))}
+&lt;/ul&gt;</code></pre>
+</div>
+
+<p>停下来品一品这次拆分里的每个决定，它们全是前几篇讲过的规矩：</p>
+
+<ul>
+  <li><strong>key 挂在 <code>TodoItem</code> 上</strong>——它是 <code>map</code> 直接生成的最外层元素（第 7 篇）；</li>
+  <li><strong>子组件自己不持有任何 state</strong>——数据全部来自父组件的 props，自己只是「投影」；</li>
+  <li><strong>想改数据？调用传进来的 <code>onToggle</code> / <code>onRemove</code></strong>——数据向下流、动作向上传，子组件永远不越权改数据（第 3 篇）。</li>
+</ul>
+
+<div class="crack">
+  <div class="crack-label">后端类比</div>
+  <p>这就是前端版的「Controller 不含业务逻辑，只做转发」：<code>TodoItem</code> 是无状态的展示层，所有「写操作」都上抛给持有数据的父组件处理。谁持有数据谁负责改——职责边界清清楚楚，这正是卷二「状态提升」要系统化的东西，你已经提前用上了。</p>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：扩展练习 ═══════════════ -->
-<section class="station reveal" id="s4">
+<!-- ═══════════════ 第5站：扩展练习 ═══════════════ -->
+<section class="station reveal" id="s5">
 <div class="station-head"><h2>给自己留三道「课后题」</h2></div>
 
 <p>把这个 Todo 组件在你自己的项目里跑起来，然后依次完成三个小目标：</p>
 
 <ol>
-  <li><strong>加「全部完成」按钮</strong>：一键把所有 <code>done</code> 设为 <code>true</code>（练 <code>map</code> 批量置换）；</li>
-  <li><strong>加「编辑」功能</strong>：双击待办文字变成输入框，回车保存（练「受控组件 + 局部状态」）；</li>
-  <li><strong>拆成子组件</strong>：把 <code>TodoItem</code> 抽出来，通过 props 接收 <code>todo</code> 和数据回调（练<strong>组合 + 单向数据流 + 状态提升</strong>，正好接上第 2 卷）。</li>
+  <li><strong>加「全部完成」按钮</strong>：一键把所有 <code>done</code> 设为 <code>true</code>（练 <code>map</code> 批量置换）。<br /><span style="color: var(--ink-faint); font-size: 14px;">提示：<code>setTodos(todos.map(t =&gt; ({ ...t, done: true })))</code>。</span></li>
+  <li><strong>加「编辑」功能</strong>：双击待办文字变成输入框，回车保存（练「受控组件 + 局部状态」）。<br /><span style="color: var(--ink-faint); font-size: 14px;">提示：在 TodoItem 里加一个 <code>editing</code> state 控制两种样子，别忘了第 4 篇的「界面有几种样子」。</span></li>
+  <li><strong>加「筛选」功能</strong>：全部 / 未完成 / 已完成三个页签（练「派生值」）。<br /><span style="color: var(--ink-faint); font-size: 14px;">提示：新 state 只有一个 <code>filter</code>；展示的列表是 <code>todos</code> + <code>filter</code> 的派生值，就地 <code>filter</code> 出来再 <code>map</code>，别存进 state。</span></li>
 </ol>
 
 <div class="recap">
   <h3>第一章总结</h3>
   <p>你已经完成了从「后端思维」到「React 心智」的第一次完整跨越：</p>
   <ul>
-    <li><strong>声明式</strong>：<code>UI = f(state)</code>；</li>
-    <li><strong>JSX</strong>：HTML 的外壳、JavaScript 的骨；</li>
-    <li><strong>组件 + Props</strong>：函数 + 不可变单向参数；</li>
-    <li><strong>State</strong>：组件字段，不可变更新；</li>
-    <li><strong>渲染模型</strong>：虚拟 DOM 三阶段 diff；</li>
+    <li><strong>声明式</strong>：<code>UI = f(state)</code>，先穷举状态再画映射；</li>
+    <li><strong>JSX</strong>：HTML 的外壳、JavaScript 的骨，条件渲染三板斧；</li>
+    <li><strong>组件 + Props</strong>：函数 + 不可变单向参数，数据向下、动作向上；</li>
+    <li><strong>State</strong>：组件字段，不可变更新、函数式更新、快照心智；</li>
+    <li><strong>渲染模型</strong>：虚拟 DOM 三阶段，重渲染 ≠ 重写 DOM；</li>
     <li><strong>事件 + 列表 key</strong>：委托分发 + 稳定身份。</li>
   </ul>
-  <p>这些就是 React 的「地基」。第 2 卷开始，我们进入真正让 React 强大的部分——<strong>Hooks 与状态管理</strong>。</p>
+  <p>这些就是 React 的「地基」。第 2 卷开始，我们进入真正让 React 强大的部分——<strong>Hooks 精讲</strong>：先从那个坑倒无数人的 <code>useEffect</code> 开始。</p>
 </div>
 </section>
 

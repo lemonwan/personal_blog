@@ -21,7 +21,7 @@
 <p>你第一反应可能是：「这不就是 HTML 吗？」——<strong>但不是</strong>。它写在 <code>.tsx</code>/<code>.jsx</code> 文件里，是 <strong>JavaScript 代码</strong>，不是字符串，也不是服务器端模板。</p>
 
 <div class="think">
-  <div class="think-q">看到 <code>className</code> 而不是 <code>class</code> 了吗？这是第一个线索：JSX 并不是原封不动的 HTML，它有自己的规则。为什么？因为它本质上是 JavaScript 表达式。</div>
+  <div class="think-q">看到 <code>className</code> 而不是 <code>class</code> 了吗？这是第一个线索：JSX 并不是原封不动的 HTML，它有自己的规则。为什么？因为它本质上是 JavaScript 表达式——长得像 HTML，只是为了让「界面长什么样」这件事一眼可读。</div>
 </div>
 </section>
 
@@ -38,13 +38,13 @@ const el = &lt;h1 className="title"&gt;Hello, {name}&lt;/h1&gt;;
 
 <span class="c">// 编译后（简化）</span>
 const el = React.createElement(
-  "h1",                <span class="c">// 元素名</span>
+  "h1",                   <span class="c">// 元素名</span>
   { className: "title" }, <span class="c">// 属性对象</span>
-  "Hello, ", name       <span class="c">// 子节点</span>
+  "Hello, ", name         <span class="c">// 子节点</span>
 );</code></pre>
 </div>
 
-<p>这揭示了一个重要事实：<strong>JSX 是 <code>React.createElement</code> 的语法糖</strong>。React 17 之后换成了 <code>react/jsx-runtime</code> 的 <code>jsx()</code> 函数，但本质完全一样——一段「描述界面结构」的 JavaScript 表达式。</p>
+<p>这揭示了一个重要事实：<strong>JSX 是 <code>React.createElement</code> 的语法糖</strong>。React 17 之后，编译器默认改写为自动导入的 <code>jsx()</code>（来自 <code>react/jsx-runtime</code>），你不再需要手动 <code>import React</code>，但本质完全一样——一段「描述界面结构」的 JavaScript 表达式。</p>
 
 <div class="crack">
   <div class="crack-label">后端类比</div>
@@ -53,6 +53,7 @@ const el = React.createElement(
     <li><strong>JSP/Thymeleaf</strong>：在 HTML 里嵌入少量代码，本质还是<strong>模板字符串</strong>，运行时靠字符串拼接生成 HTML。</li>
     <li><strong>JSX</strong>：整段都是<strong>代码</strong>，编译成对象（称为「React 元素」），最终由 React 转成真实 DOM。</li>
   </ul>
+  <p>用 Java 世界打个比方：JSP 是 <code>String.format()</code>，JSX 则是 <code>Builder</code> 模式构建出来的对象树——一个是拼字符串，一个是搭数据结构，后者才能被 diff、被复用、被类型检查。</p>
 </div>
 </section>
 
@@ -90,6 +91,7 @@ return (
   &lt;/&gt;   <span class="c">{/* Fragment：编译后不产生任何 DOM 节点 */}</span>
 );</code></pre>
 </div>
+<p>为什么非要一个根？回到编译真相：JSX 编译成的是 <strong>一个</strong> 函数调用的返回值，函数 <code>return</code> 只能返回「一个东西」。Fragment（<code>&lt;&gt;&lt;/&gt;</code>）就是为「想并列多个元素、又不想多加一层无意义 <code>div</code>」准备的标准解法。</p>
 
 <h3>规则 3：属性名用「驼峰」</h3>
 <table>
@@ -103,28 +105,144 @@ return (
 </table>
 
 <h3>规则 4：注释要写在 <code>{}</code> 里</h3>
-<p>JSX 里直接 <code>&lt;!-- --&gt;</code> 是无效的，要用 <code>{/* 注释 */}</code>。</p>
+<p>JSX 里直接 <code>&lt;!-- --&gt;</code> 是无效的，要用 <code>{/* 注释 */}</code>。因为它不是 HTML 注释的宿主，而是 JS 表达式——注释自然也要用 JS 的语法。</p>
 
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>
     <li>JSX 是<strong>代码</strong>，不是字符串模板，编译成 <code>createElement</code>/<code>jsx()</code> 调用。</li>
     <li><code>{}</code> 里放任意 JS 表达式（不能放语句），用来「插值」。</li>
-    <li>属性名驼峰、单个根、注释用 <code>{/* */}</code>。</li>
+    <li>属性名驼峰、单个根（或 Fragment）、注释用 <code>{/* */}</code>。</li>
   </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<!-- ═══════════════ 第4站：条件渲染 ═══════════════ -->
 <section class="station reveal" id="s4">
-<div class="station-head"><h2>一句话 + 一个动作</h2></div>
+<div class="station-head"><h2>条件渲染：把 if/else 搬进 JSX</h2></div>
+
+<p>规则 1 说「<code>{}</code> 里不能写 <code>if</code>」，那「根据条件显示不同内容」这个最常见的需求怎么办？答案是用<strong>表达式</strong>来表达条件。三板斧，覆盖所有场景：</p>
+
+<h3>板斧 1：三目运算符 —— 二选一</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>登录态两种样子</b></span></div>
+  <pre><code>&lt;div&gt;
+  {isLoggedIn
+    ? &lt;button onClick={logout}&gt;退出登录&lt;/button&gt;
+    : &lt;button onClick={login}&gt;去登录&lt;/button&gt;}
+&lt;/div&gt;</code></pre>
+</div>
+
+<h3>板斧 2：<code>&amp;&amp;</code> 短路 —— 有则显示，无则不显示</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>有未读消息才显示角标</b></span></div>
+  <pre><code>&lt;div&gt;
+  消息中心
+  {unreadCount &gt; 0 &amp;&amp; &lt;span className="badge"&gt;{unreadCount}&lt;/span&gt;}
+&lt;/div&gt;</code></pre>
+</div>
+<p><code>&amp;&amp;</code> 读作「前者成立时，才渲染后者」。对应 Java 里 <code>if (x &gt; 0) show(x)</code> 的单分支。</p>
+
+<h3>板斧 3：提前 return —— 分支太复杂时跳出 JSX</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>多分支：先处理边界情况</b></span></div>
+  <pre><code>function UserList({ loading, error, users }) {
+  if (loading) return &lt;p&gt;加载中…&lt;/p&gt;;
+  if (error)   return &lt;p&gt;出错了：{error.message}&lt;/p&gt;;
+  if (users.length === 0) return &lt;p&gt;暂无用户&lt;/p&gt;;
+
+  <span class="c">// 走到这里，只剩「正常渲染」一条路，JSX 干干净净</span>
+  return &lt;ul&gt;{users.map(u =&gt; &lt;li key={u.id}&gt;{u.name}&lt;/li&gt;)}&lt;/ul&gt;;
+}</code></pre>
+</div>
+
+<div class="think">
+  <div class="think-q">三板斧怎么选？经验法则：<strong>一个布尔值决定「显示/隐藏」用 <code>&amp;&amp;</code>；「A 或 B」二选一看三目；超过两个分支就提前 return</strong>。JSX 里嵌套超过两层三目，可读性会断崖式下跌——这时候跳出 JSX 才是正解，这和 Java 里「用卫语句消灭深层嵌套」是同一种品味。</div>
+</div>
+
+<div class="crack">
+  <div class="crack-label">一个必踩的坑：<code>0 &amp;&amp; &lt;X /&gt;</code></div>
+  <p><code>&amp;&amp;</code> 左侧是数字 <code>0</code> 时，React 会把 <code>0</code> 渲染出来（页面上凭空多个「0」），因为 <code>0</code> 在 React 里是合法的可渲染内容。写 <code>{count &gt; 0 &amp;&amp; ...}</code> 让左侧恒为布尔值，就能躲开。</p>
+</div>
+</section>
+
+<!-- ═══════════════ 第5站：属性、样式与安全 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>动态属性、内联样式与 XSS 防线</h2></div>
+
+<h3>属性值也能用 <code>{}</code></h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>属性插值与展开</b></span></div>
+  <pre><code>&lt;img src={user.avatar} alt={user.name} /&gt;
+
+<span class="c">// 属性太多？像传参一样整体「展开」：</span>
+const props = { type: "text", placeholder: "请输入", maxLength: 20 };
+&lt;input {...props} /&gt;   <span class="c">// 等价于把三个属性逐个写上</span></code></pre>
+</div>
+<p><code>{...props}</code> 就是 JS 的对象展开语法，对应 Java 里把一整个 <code>Map</code> 传进工具方法，而不是一个个取值。</p>
+
+<h3>内联样式：注意，是「对象」不是字符串</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>style 的正确写法</b></span></div>
+  <pre><code><span class="c">// ❌ HTML 习惯：字符串。在 JSX 里直接报错</span>
+&lt;div style="color: red; font-size: 14px"&gt;...&lt;/div&gt;
+
+<span class="c">// ✅ JSX：双层花括号 = 外层是「JS 表达式」，内层是「样式对象」</span>
+&lt;div style={{ color: "red", fontSize: 14 }}&gt;...&lt;/div&gt;
+
+<span class="c">// 样式随状态变化时尤其顺手：</span>
+&lt;div style={{ color: done ? "#999" : "#1C1C1C" }}&gt;{text}&lt;/div&gt;</code></pre>
+</div>
+<p>外层 <code>{}</code> 是 JSX 插值，内层 <code>{}</code> 是 JS 对象字面量——两层各干各的。属性名同样驼峰：<code>font-size</code> 写成 <code>fontSize</code>。日常开发里静态样式仍以 CSS 文件为主，内联样式主要用在「样式由 state 算出来」的场景。</p>
+
+<h3>JSX 天然防 XSS：自动转义</h3>
+<p>后端同学对 XSS（跨站脚本）再熟悉不过：用户输入直接拼进 HTML，就可能被注入 <code>&lt;script&gt;</code>。React 在这一点上是默认安全的——<strong>JSX 里插值的内容一律当纯文本处理</strong>，渲染前自动转义：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>恶意输入会被原样「显示」，而不是「执行」</b></span></div>
+  <pre><code>const evil = "&lt;script&gt;alert('xss')&lt;/script&gt;";
+
+&lt;p&gt;{evil}&lt;/p&gt;
+<span class="c">// 页面上显示字符串 "&lt;script&gt;alert('xss')&lt;/script&gt;"</span>
+<span class="c">// 而不是真的插入一个 script 标签 ✅</span></code></pre>
+</div>
+
+<p>对应到 Java 世界：这相当于模板引擎默认开了 <code>th:text</code> 式的 HTML 转义。唯一的例外是 <code>dangerouslySetInnerHTML</code>（等价于 <code>th:utext</code>），用来渲染富文本——名字起得这么吓人，就是提醒你：用它之前，必须先在服务端做过净化。</p>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>条件渲染三板斧：<code>&amp;&amp;</code> 显隐、三目二选一、提前 return 处理多分支。</li>
+    <li>属性可插值、可 <code>{...spread}</code> 展开；内联 <code>style</code> 是<strong>对象</strong>，属性名驼峰。</li>
+    <li>JSX 插值自动转义，默认免疫 XSS；<code>dangerouslySetInnerHTML</code> 是唯一例外，慎用。</li>
+  </ul>
+</div>
+</section>
+
+<!-- ═══════════════ 第6站：常见报错清单 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><h2>新手报错清单：看见这些别慌</h2></div>
+
+<p>把最容易撞上的编译/运行时报错汇总成一张表，遇到的时候对号入座：</p>
+
+<table>
+  <thead><tr><th>报错/现象</th><th>八成原因</th><th>修法</th></tr></thead>
+  <tbody>
+    <tr><td><code>Adjacent JSX elements must be wrapped in an enclosing tag</code></td><td>return 里有多个并列根元素</td><td>包 Fragment <code>&lt;&gt;...&lt;/&gt;</code></td></tr>
+    <tr><td><code>class is a reserved word</code> / 样式不生效</td><td>写了 <code>class=</code></td><td>改成 <code>className=</code></td></tr>
+    <tr><td><code>style prop expects a mapping</code></td><td>style 传了字符串</td><td>改成对象 <code>style={{ }}</code></td></tr>
+    <tr><td><code>SyntaxError: Unexpected token, expected ","</code></td><td>在 <code>{}</code> 里写了 <code>if</code>/<code>for</code> 语句</td><td>换成三目、<code>&amp;&amp;</code> 或提前 return</td></tr>
+    <tr><td>页面凭空出现一个 <code>0</code></td><td><code>{count &amp;&amp; &lt;X/&gt;}</code> 且 count 为 0</td><td>改成 <code>{count &gt; 0 &amp;&amp; ...}</code></td></tr>
+    <tr><td>JSX 里的 <code>&lt;!-- --&gt;</code> 显示在页面上</td><td>用了 HTML 注释语法</td><td>改成 <code>{/* */}</code></td></tr>
+  </tbody>
+</table>
 
 <div class="recap">
   <h3>本章回顾</h3>
-  <p>JSX 的本质是「用 HTML 的壳，写 JavaScript 的骨」。理解这一点，你就不会再把 JSX 当成模板语言去死记它的「限制」，而是会用 JavaScript 的思维去驾驭它——因为 <code>{}</code> 里本来就是一个完整的 JS 表达式世界。</p>
+  <p>JSX 的本质是「用 HTML 的壳，写 JavaScript 的骨」。理解这一点，你就不会再把 JSX 当成模板语言去死记它的「限制」，而是会用 JavaScript 的思维去驾驭它——因为 <code>{}</code> 里本来就是一个完整的 JS 表达式世界：能插值、能条件、能循环、能展开。</p>
 </div>
 
-<p>动手试一遍最能建立手感：把上一节那个 <code>Counter</code> 组件里的 <code>{count}</code> 换成 <code>{count % 2 === 0 ? "偶数" : "奇数"}</code>，看看会发生什么。</p>
+<p>动手试一遍最能建立手感：把上一篇那个 <code>Counter</code> 组件里的 <code>{count}</code> 换成 <code>{count % 2 === 0 ? "偶数" : "奇数"}</code>，再加一行 <code>{count &gt; 10 &amp;&amp; &lt;p&gt;超过十次了！&lt;/p&gt;}</code>。两个都跑通，本篇的三板斧就是你的了。</p>
 </section>
 
 </body>

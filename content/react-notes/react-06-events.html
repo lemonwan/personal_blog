@@ -37,6 +37,8 @@ btn.addEventListener("click", handleClick);
 &lt;button onClick={handleClick}&gt;...&lt;/button&gt;</code></pre>
 </div>
 
+<p>两种写法的差别不只是语法：原生写法是「命令式地去某个节点上挂监听」，你得自己记得在哪里挂、何时摘；React 的写法是「声明这个元素有这个行为」，绑定和清理都由 React 在渲染时自动完成。这又是第 1 篇那句 <code>UI = f(state)</code> 的延伸——<strong>事件也是界面描述的一部分</strong>。</p>
+
 <p>看起来只是语法糖，但背后有个重要区别——<strong>React 用的不是浏览器原生事件对象，而是「合成事件（SyntheticEvent）」</strong>。</p>
 </section>
 
@@ -48,6 +50,10 @@ btn.addEventListener("click", handleClick);
 
 <figure class="fig">
   <svg viewBox="0 0 620 280" role="img" aria-label="React 事件委托示意图">
+    <defs>
+      <marker id="evt" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker>
+    </defs>
+
     <rect x="230" y="20" width="160" height="46" rx="10" fill="#1C1C1C"/>
     <text x="310" y="48" text-anchor="middle" font-weight="800" font-size="13" fill="#FAC94A">根容器（唯一监听）</text>
 
@@ -60,9 +66,9 @@ btn.addEventListener("click", handleClick);
     <rect x="380" y="180" width="100" height="40" rx="8" fill="#FFFFFF" stroke="#1C1C1C" stroke-width="2"/>
     <text x="430" y="205" text-anchor="middle" font-size="12" fill="#1C1C1C">按钮 C</text>
 
-    <path d="M300,120 L240,178" stroke="#C2410C" stroke-width="2" fill="none" stroke-dasharray="6,4" marker-end="url(#evt)"/>
-    <path d="M320,120 L410,178" stroke="#C2410C" stroke-width="2" fill="none" stroke-dasharray="6,4" marker-end="url(#evt)"/>
-    <defs><marker id="evt" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#C2410C"/></marker></defs>
+    <path d="M190,180 L270,66" stroke="#C2410C" stroke-width="2" fill="none" stroke-dasharray="6,4" marker-end="url(#evt)"/>
+    <path d="M310,100 L310,66" stroke="#C2410C" stroke-width="2" fill="none" stroke-dasharray="6,4" marker-end="url(#evt)"/>
+    <path d="M430,180 L350,66" stroke="#C2410C" stroke-width="2" fill="none" stroke-dasharray="6,4" marker-end="url(#evt)"/>
 
     <text x="310" y="255" text-anchor="middle" font-size="12" fill="#57544E">事件冒泡到根容器，React 按「谁被点的」分发到对应 handler</text>
   </svg>
@@ -78,14 +84,86 @@ btn.addEventListener("click", handleClick);
 
 <div class="crack">
   <div class="crack-label">后端类比：从「每个类自己处理」到「DispatcherServlet 统一分发」</div>
-  <p>你写过 Servlet 就知道：早期一个 URL 一个 Servlet，后来 Spring MVC 用 <code>DispatcherServlet</code> 统一拦截所有请求，再按注解分发给具体的 <code>@Controller</code>。React 的合成事件就是前端版的 DispatcherServlet。</p>
+  <p>你写过 Servlet 就知道：早期一个 URL 一个 Servlet，后来 Spring MVC 用 <code>DispatcherServlet</code> 统一拦截所有请求，再按注解分发给具体的 <code>@Controller</code>。React 的合成事件就是前端版的 DispatcherServlet：入口唯一、按「目标」路由、业务函数只管自己的事。</p>
 </div>
 
-<p>注意一个小点：React 事件对象是<strong>被池化复用的</strong>（旧版本行为，React 17 起已废弃事件池但 API 仍兼容）。所以如果你要<strong>异步</strong>访问事件对象（比如 <code>setTimeout</code> 里），先做同步取出或调用 <code>e.persist()</code>（后者旧版才需要）。</p>
+<p>一段历史包袱，知道即可：React 16 及更早，合成事件对象是「池化复用」的——事件处理一结束，对象属性就被清空回收，想在 <code>setTimeout</code> 里异步访问得先调 <code>e.persist()</code>。<strong>React 17 起彻底废除了事件池</strong>，事件对象就是普通对象，同步异步随便用，不用再记这些暗坑。</p>
 </section>
 
-<!-- ═══════════════ 第3站：this、闭包与传参 ═══════════════ -->
+<!-- ═══════════════ 第3站：事件对象与常用事件 ═══════════════ -->
 <section class="station reveal" id="s3">
+<div class="station-head"><h2>事件对象与最常用的一批事件</h2></div>
+
+<p>处理函数可以接收一个参数——事件对象 <code>e</code>，里面装着这次交互的全部信息：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>事件对象里有什么</b></span></div>
+  <pre><code>function handleChange(e) {
+  console.log(e.target.value);      <span class="c">// 触发事件的元素（输入框 → 当前输入值）</span>
+  console.log(e.type);              <span class="c">// 事件类型，如 "change"</span>
+  e.preventDefault();               <span class="c">// 阻止浏览器默认行为</span>
+  e.stopPropagation();              <span class="c">// 阻止事件继续冒泡</span>
+}</code></pre>
+</div>
+
+<p>日常开发出场率最高的事件，整理成一张表：</p>
+
+<table>
+  <thead><tr><th>属性</th><th>触发时机</th><th>典型用途</th></tr></thead>
+  <tbody>
+    <tr><td><code>onClick</code></td><td>点击（含键盘回车触发）</td><td>按钮、链接、任何可点区域</td></tr>
+    <tr><td><code>onChange</code></td><td>输入框内容变化 / 单选多选切换</td><td>受控输入、表单联动</td></tr>
+    <tr><td><code>onSubmit</code></td><td>表单提交</td><td>登录、搜索、下单</td></tr>
+    <tr><td><code>onKeyDown</code></td><td>键盘按键按下</td><td>回车提交、快捷键、方向键</td></tr>
+    <tr><td><code>onFocus / onBlur</code></td><td>聚焦 / 失焦</td><td>校验提示、埋点</td></tr>
+    <tr><td><code>onScroll</code></td><td>滚动</td><td>回到顶部按钮、懒加载（注意节流）</td></tr>
+  </tbody>
+</table>
+
+<h3>表单提交：<code>preventDefault</code> 的主场</h3>
+<p>最常用 <code>preventDefault</code> 的场景就是表单。浏览器对 <code>&lt;form&gt;</code> 提交的默认行为是「整页刷新发请求」——这正是单页应用最不想要的：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>LoginForm.tsx</b> · 拦住整页刷新，自己接管提交</span></div>
+  <pre><code>import { useState } from "react";
+
+function LoginForm({ onLogin }) {
+  const [name, setName] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();          <span class="c">// ← 拦住浏览器的整页刷新</span>
+    if (!name.trim()) return;    <span class="c">// 参数校验（对应后端 @Valid）</span>
+    onLogin(name);               <span class="c">// 剩下的交给父组件 / 请求层</span>
+  }
+
+  return (
+    &lt;form onSubmit={handleSubmit}&gt;
+      &lt;input value={name} onChange={e =&gt; setName(e.target.value)} /&gt;
+      &lt;button type="submit"&gt;登录&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+</div>
+
+<p>两个小习惯值得养成：<strong>能用 <code>onSubmit</code> 就别用按钮的 <code>onClick</code> 提交表单</strong>——这样回车键提交、无障碍支持全都自动有了；<strong>输入框记得写 <code>value</code> + <code>onChange</code></strong>，这就是「受控组件」，第 24 篇会正式展开。</p>
+
+<h3>冒泡与 <code>stopPropagation</code></h3>
+<p>事件默认会从目标元素一路「冒泡」到根。有时这不是你想要的——典型场景：整行可点击的列表里嵌了一个「删除」按钮，点删除不该触发整行的点击：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>阻止冒泡</b></span></div>
+  <pre><code>&lt;li onClick={() =&gt; openDetail(item.id)}&gt;
+  {item.name}
+  &lt;button onClick={(e) =&gt; {
+    e.stopPropagation();          <span class="c">// 事件到此为止，不再冒泡到 li</span>
+    remove(item.id);
+  }}&gt;删除&lt;/button&gt;
+&lt;/li&gt;</code></pre>
+</div>
+</section>
+
+<!-- ═══════════════ 第4站：this、闭包与传参 ═══════════════ -->
+<section class="station reveal" id="s4">
 <div class="station-head"><h2>函数组件没有 this，但有个「闭包」</h2></div>
 
 <p>老 React（类组件）里，事件处理最大的坑是 <code>this</code> 指向问题，需要 <code>.bind(this)</code> 或箭头函数。而现在的<strong>函数组件</strong>彻底没有 <code>this</code>，你直接写函数即可——但这引出了一个「新的坑」：<strong>闭包</strong>（第 2 卷第 10 篇细讲）。这里先扫一眼。</p>
@@ -97,37 +175,44 @@ btn.addEventListener("click", handleClick);
   function del(id) { console.log("删除", id); }
 
   return (
-    &lt;div&gt;
-      {/* ❌ 错误：渲染时立刻执行了 del(id)，而不是点击时 */}
-      &lt;button onClick={del(user.id)}&gt;删&lt;/button&gt;
+    &lt;ul&gt;
+      {users.map(user =&gt; (
+        &lt;li key={user.id}&gt;
+          {/* ❌ 错误：渲染时立刻执行了 del(id)，而不是点击时 */}
+          &lt;button onClick={del(user.id)}&gt;删&lt;/button&gt;
 
-      {/* ✅ 正确：返回一个新函数，点击时才调用 */}
-      &lt;button onClick={() =&gt; del(user.id)}&gt;删&lt;/button&gt;
-    &lt;/div&gt;
+          {/* ✅ 正确：返回一个新函数，点击时才调用 */}
+          &lt;button onClick={() =&gt; del(user.id)}&gt;删&lt;/button&gt;
+        &lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
   );
 }</code></pre>
 </div>
 
-<p>记一条铁律：<strong><code>onClick</code> 需要的是一个「函数」，而不是「函数的调用结果」</strong>。所以要么传函数引用 <code>onClick={handleClick}</code>，要么用箭头函数包一层 <code>onClick={() =&gt; handleClick(id)}</code>。</p>
+<p>记一条铁律：<strong><code>onClick</code> 需要的是一个「函数」，而不是「函数的调用结果」</strong>。所以要么传函数引用 <code>onClick={handleClick}</code>，要么用箭头函数包一层 <code>onClick={() =&gt; handleClick(id)}</code>。用 Java 类比：前者是传 <code>Runnable</code>，后者是传 <code>Runnable</code> 的 <code>run()</code> 返回值——签名都不对。</p>
 
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>
     <li>React 事件是<strong>合成事件</strong>，靠<strong>事件委托</strong>统一分发——类比 DispatcherServlet。</li>
     <li>事件处理器传<strong>函数引用</strong>，需要参数就用<strong>箭头函数包装</strong>，别写 <code>onClick={fn()}</code>。</li>
+    <li>表单用 <code>onSubmit</code> + <code>e.preventDefault()</code>；嵌套点击用 <code>stopPropagation()</code>。</li>
     <li>函数组件无 <code>this</code>，但要注意闭包读取旧 state 的问题（第 2 卷展开）。</li>
   </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：小结 ═══════════════ -->
-<section class="station reveal" id="s4">
+<!-- ═══════════════ 第5站：小结 ═══════════════ -->
+<section class="station reveal" id="s5">
 <div class="station-head"><h2>这一篇的关键动作</h2></div>
 
 <div class="recap">
   <h3>本章回顾</h3>
   <p>事件处理本身不难，难的是理解「合成事件 + 事件委托」这层封装。它解释了为什么 React 能优雅地管理几百个事件的绑定和清理——<strong>把重复、易错的底层细节，交给框架统一收口</strong>，这正是 React 一贯的设计哲学。</p>
 </div>
+
+<p>到此为止，「用户操作 → 改 state → 界面更新」这条完整链路你已经全部打通。下一篇我们把链路跑在一个真实的小项目上：手写一个待办清单，把第一章全部知识点串成闭环。</p>
 </section>
 
 </body>

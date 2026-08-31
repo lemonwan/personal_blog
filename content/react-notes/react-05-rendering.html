@@ -56,7 +56,7 @@
 
 <div class="crack">
   <div class="crack-label">后端类比</div>
-  <p>这很像数据库的<strong>「索引 + 只更新脏页」</strong>的思路：不是每条数据变更都立刻刷盘，而是先在内存里算清楚，再批量落盘。虚拟 DOM 就是在内存里「批量对比 + 最小化刷屏」。</p>
+  <p>这很像数据库的<strong>「索引 + 只更新脏页」</strong>的思路：不是每条数据变更都立刻刷盘，而是先在内存里算清楚，再批量落盘。虚拟 DOM 就是在内存里「批量对比 + 最小化刷屏」。也可以类比 ORM 的脏检查：Hibernate 不会把整个对象图无脑 <code>UPDATE</code> 一遍，而是比对快照、只生成变更字段的 SQL——React 干的是同一件事，对象是 DOM。</p>
 </div>
 </section>
 
@@ -75,32 +75,68 @@
   </tbody>
 </table>
 
-<p>第三条 <code>key</code> 尤其重要，下一篇（第 7 篇）会专门展开。先看一个对比，建立直觉：</p>
+<p>这三条本质上是三个「赌注」：赌界面很少跨层搬节点、赌类型切换不常见、赌你能提供稳定的 key。赌对了，O(n) 的线性扫描足够快；赌错了（比如滥用 index 做 key），diff 照样会做大量无用功。第三条 <code>key</code> 尤其重要，第 7 篇会专门展开。先看一张对比图，建立直觉：</p>
 
 <figure class="fig">
-  <svg viewBox="0 0 620 320" role="img" aria-label="无 key 与有 key 的 diff 对比示意图">
-    <text x="30" y="40" font-weight="800" font-size="15" fill="#1C1C1C">无 key（或不稳定 key）</text>
+  <svg viewBox="0 0 620 268" role="img" aria-label="无 key 与有稳定 key 的列表 diff 对比示意图">
+    <defs>
+      <marker id="diffarr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8C8676"/></marker>
+    </defs>
+
+    <!-- ── 左：无 key ── -->
+    <text x="30" y="24" font-weight="800" font-size="14" fill="#1C1C1C">无 key（按下标比对）</text>
+
+    <text x="30" y="52" font-size="11" fill="#8C8676">更新前</text>
     <g font-size="13">
-      <rect x="40" y="65" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#8C8676"/><text x="85" y="87" text-anchor="middle" fill="#1C1C1C">A</text>
-      <rect x="150" y="65" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#8C8676"/><text x="195" y="87" text-anchor="middle" fill="#1C1C1C">B</text>
-      <rect x="260" y="65" width="90" height="34" rx="6" fill="#EDE3C4" stroke="#8C8676"/><text x="305" y="87" text-anchor="middle" fill="#1C1C1C">C</text>
-    </g>
-    <text x="30" y="150" font-size="12" fill="#C2410C">在头部插入 X → React 认为 A/B/C 全都「变了」</text>
-    <g font-size="13">
-      <rect x="40" y="170" width="90" height="34" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/><text x="85" y="192" text-anchor="middle" fill="#1C1C1C">X</text>
-      <rect x="150" y="170" width="90" height="34" rx="6" fill="#FFFFFF" stroke="#C2410C"/><text x="195" y="192" text-anchor="middle" fill="#C2410C">B</text>
-      <rect x="260" y="170" width="90" height="34" rx="6" fill="#FFFFFF" stroke="#C2410C"/><text x="305" y="192" text-anchor="middle" fill="#C2410C">C</text>
+      <rect x="30" y="60" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="59" y="81" text-anchor="middle" fill="#1C1C1C">A</text>
+      <rect x="96" y="60" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="125" y="81" text-anchor="middle" fill="#1C1C1C">B</text>
+      <rect x="162" y="60" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="191" y="81" text-anchor="middle" fill="#1C1C1C">C</text>
     </g>
 
-    <text x="330" y="40" font-weight="800" font-size="15" fill="#1C1C1C">稳定 key</text>
+    <line x1="154" y1="100" x2="154" y2="122" stroke="#8C8676" stroke-width="2" marker-end="url(#diffarr)"/>
+    <text x="164" y="115" font-size="11" fill="#57544E">头部插入 X</text>
+
+    <text x="30" y="140" font-size="11" fill="#8C8676">更新后</text>
     <g font-size="13">
-      <rect x="360" y="65" width="90" height="34" rx="6" fill="#fff"/><text x="405" y="87" text-anchor="middle" fill="#1C1C1C">A</text>
-      <rect x="470" y="65" width="90" height="34" rx="6" fill="#fff"/><text x="515" y="87" text-anchor="middle" fill="#1C1C1C">B</text>
-      <rect x="360" y="115" width="90" height="34" rx="6" fill="#fff"/><text x="405" y="137" text-anchor="middle" fill="#1C1C1C">C</text>
+      <rect x="30" y="148" width="58" height="32" rx="6" fill="#FAC94A" stroke="#1C1C1C" stroke-width="2"/><text x="59" y="169" text-anchor="middle" fill="#1C1C1C">X</text>
+      <rect x="96" y="148" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#C2410C" stroke-width="2"/><text x="125" y="169" text-anchor="middle" fill="#C2410C">A</text>
+      <rect x="162" y="148" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#C2410C" stroke-width="2"/><text x="191" y="169" text-anchor="middle" fill="#C2410C">B</text>
+      <rect x="228" y="148" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#C2410C" stroke-width="2"/><text x="257" y="169" text-anchor="middle" fill="#C2410C">C</text>
     </g>
-    <text x="340" y="188" font-size="12" fill="#177245">同位置插入 X → 只需新增 X，A/B/C 复用不走样</text>
+
+    <text x="30" y="212" font-size="12" fill="#C2410C">逐位比对：A→X、B→A、C→B「都变了」</text>
+    <text x="30" y="230" font-size="12" fill="#C2410C">→ 四项全部重写，白白干活</text>
+
+    <!-- ── 右：稳定 key ── -->
+    <text x="330" y="24" font-weight="800" font-size="14" fill="#1C1C1C">稳定 key（按身份比对）</text>
+
+    <text x="330" y="52" font-size="11" fill="#8C8676">更新前</text>
+    <g font-size="13">
+      <rect x="330" y="60" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="359" y="81" text-anchor="middle" fill="#1C1C1C">A</text>
+      <rect x="396" y="60" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="425" y="81" text-anchor="middle" fill="#1C1C1C">B</text>
+      <rect x="462" y="60" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="491" y="81" text-anchor="middle" fill="#1C1C1C">C</text>
+    </g>
+    <g font-size="10" fill="#8C8676">
+      <text x="359" y="102" text-anchor="middle">key="a"</text>
+      <text x="425" y="102" text-anchor="middle">key="b"</text>
+      <text x="491" y="102" text-anchor="middle">key="c"</text>
+    </g>
+
+    <line x1="454" y1="110" x2="454" y2="130" stroke="#8C8676" stroke-width="2" marker-end="url(#diffarr)"/>
+    <text x="464" y="123" font-size="11" fill="#57544E">头部插入 X</text>
+
+    <text x="330" y="148" font-size="11" fill="#8C8676">更新后</text>
+    <g font-size="13">
+      <rect x="330" y="156" width="58" height="32" rx="6" fill="#DFF2E4" stroke="#177245" stroke-width="2"/><text x="359" y="177" text-anchor="middle" fill="#177245">X</text>
+      <rect x="396" y="156" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="425" y="177" text-anchor="middle" fill="#1C1C1C">A</text>
+      <rect x="462" y="156" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="491" y="177" text-anchor="middle" fill="#1C1C1C">B</text>
+      <rect x="528" y="156" width="58" height="32" rx="6" fill="#FFFFFF" stroke="#8C8676"/><text x="557" y="177" text-anchor="middle" fill="#1C1C1C">C</text>
+    </g>
+
+    <text x="330" y="220" font-size="12" fill="#177245">key 对上号：a/b/c 都还在，只新增 x</text>
+    <text x="330" y="238" font-size="12" fill="#177245">→ 只做一次插入，A/B/C 原样复用</text>
   </svg>
-  <figcaption class="figcaption"><span class="fig-no">图 1</span>没有稳定 key 时，列表头部插入会让 React 误判所有项都变化；有了 key，React 能精准识别「只新增了 X」。主动画原因见第 7 篇。</figcaption>
+  <figcaption class="figcaption"><span class="fig-no">图 1</span>同样的「头部插入 X」：没有稳定 key 时，React 逐位比对会误判每一项都变了；有了 key，它能精准识别「只有 X 是新增」。key 的完整机制见第 7 篇。</figcaption>
 </figure>
 
 <div class="takeaway">
@@ -113,16 +149,71 @@
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<!-- ═══════════════ 第4站：重渲染 ≠ 重写 DOM ═══════════════ -->
 <section class="station reveal" id="s4">
+<div class="station-head"><h2>最重要的澄清：重渲染 ≠ 重写 DOM</h2></div>
+
+<p>把三阶段模型攥在手里之后，一个流传极广的误解必须当场拆掉：<strong>「组件重渲染」发生在第 1 阶段（重新执行组件函数、生成新虚拟 DOM），而真实 DOM 动没动、动了多少，取决于第 2、3 阶段的 diff 结果。</strong>两者经常不相等：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>重渲染了，但 DOM 一点没变</b></span></div>
+  <pre><code>function Profile({ user }) {
+  console.log("我被重新执行了");   <span class="c">// 每次父组件更新都会打印</span>
+  return &lt;div&gt;{user.name}&lt;/div&gt;;
+}
+
+<span class="c">// 父组件因为别的 state 变化而更新，把 user 原样传下来：</span>
+<span class="c">// 1. Profile 被重新执行（重渲染）✅</span>
+<span class="c">// 2. diff 发现新旧 JSX 一模一样 ✅</span>
+<span class="c">// 3. 这一步对真实 DOM 零操作 ✅</span></code></pre>
+</div>
+
+<p>所以「页面卡」的时候先别怪 DOM，先分清瓶颈在哪一段：</p>
+
+<table>
+  <thead><tr><th>瓶颈阶段</th><th>症状</th><th>对策（后文篇目）</th></tr></thead>
+  <tbody>
+    <tr><td>渲染阶段：组件函数执行太频繁 / 太重</td><td>交互掉帧，明明界面没怎么变</td><td>memo / useMemo、状态下移（第 11、37 篇）</td></tr>
+    <tr><td>提交阶段：DOM 变更量真的很大</td><td>一次性插入上万节点</td><td>虚拟列表（第 38 篇）</td></tr>
+    <tr><td>两者都不是</td><td>其实不卡</td><td>别做没有证据的优化 😄</td></tr>
+  </tbody>
+</table>
+
+<h3>顺便说句公道话：虚拟 DOM 不是「更快的 DOM」</h3>
+<p>还有一句流行口号需要修正：「虚拟 DOM 比直接操作 DOM 快」。<strong>不对</strong>——论单次更新的极限速度，手写精准 <code>textContent = x</code> 永远比「建树 → diff → 提交」三步快。虚拟 DOM 赢的不是极限速度，而是：</p>
+
+<ul>
+  <li><strong>下限高</strong>：不需要你手动找最小更新集，闭着眼写也有不错的性能；</li>
+  <li><strong>正确性兜底</strong>：更新路径集中收口，杜绝「忘了同步某处」的命令式经典 bug；</li>
+  <li><strong>可移植</strong>：同一套描述能渲染到 DOM、原生移动端、甚至服务端——这是「字符串拼 HTML」永远做不到的。</li>
+</ul>
+
+<p>用后端的话说：这就像 ORM 对比手写 SQL——极致场景下手写更快，但团队规模的工程里，「够快 + 不会错 + 好维护」的 ORM 才是默认选项。</p>
+
+<h3>那到底是谁触发了重渲染？</h3>
+<p>把「何时会重渲染」也一次讲清，只有四种来源：</p>
+
+<ol>
+  <li><strong>自己的 state 变了</strong>——调用了 <code>setState</code>；</li>
+  <li><strong>父组件重渲染了</strong>——默认「父渲染，子跟着渲染」，无论 props 变没变；</li>
+  <li><strong>消费的 Context 变了</strong>（卷二第 15 篇）；</li>
+  <li><strong>订阅的外部数据源变了</strong>（如第 18/19 篇的状态库）。</li>
+</ol>
+
+<p>注意第 2 条：<strong>父组件更新会带着所有子组件一起重新执行</strong>——这是 React 的默认行为（宁可多算，不可算错）。别慌，重执行的只是函数调用，贵不贵还要看 diff；而「跳过不必要的子渲染」的优化手段（<code>memo</code> 等），第 11 篇和第 37 篇会系统讲。</p>
+</section>
+
+<!-- ═══════════════ 第5站：小结 ═══════════════ -->
+<section class="station reveal" id="s5">
 <div class="station-head"><h2>为什么这跟你（后端）有关</h2></div>
 
 <div class="recap">
   <h3>本章回顾</h3>
   <p>很多后端同学把 React 当「魔法」，其实它的渲染模型非常工程化：<strong>用一层轻量对象隔离昂贵的 DOM，再通过 diff 最小化副作用</strong>。这和你熟悉的「缓存 + 只刷脏数据」「连接池复用」是同一类工程智慧——先理解它、再利用它，而不是敬畏它。</p>
+  <p>本篇再多背三句话：<strong>重渲染是「重新执行函数」，不是「重写页面」</strong>；<strong>虚拟 DOM 赢在下限和正确性，不在极限速度</strong>；<strong>性能问题先定位在渲染阶段还是提交阶段</strong>。</p>
 </div>
 
-<p>学完这篇，你已经能理解 React 性能问题的根源了：<strong>组件重渲染 ≠ 真实 DOM 更新</strong>。真正的性能瓶颈往往在「渲染阶段算得太多」，后面第 6 卷会深入。</p>
+<p>学完这篇，你已经能理解 React 性能问题的根源了：<strong>组件重渲染 ≠ 真实 DOM 更新</strong>。真正的性能瓶颈往往在「渲染阶段算得太多」，后面第 6 卷会深入。下一篇先回到日常开发，看看用户交互的入口——事件处理。</p>
 </section>
 
 </body>

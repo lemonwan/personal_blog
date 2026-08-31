@@ -42,6 +42,8 @@ function UserList() {
 </div>
 
 <p>同样的「把集合映射成另一个集合」，只不过 React 里映射出来的是一堆<strong>JSX 元素</strong>。这里唯一的「新东西」，就是每个元素上的那个 <code>key</code> —— 而它恰恰是这一篇的重点。</p>
+
+<p>顺带一个工程细节：<strong>别在 JSX 里手动拼 <code>for</code> 循环或用 <code>forEach</code> 往数组里 push</strong>。<code>forEach</code> 返回 <code>undefined</code>，塞进 <code>{}</code> 里什么都不显示——这是新手常见翻车点。<code>map</code> 的「一进一出」特性正好契合 JSX 的表达式本质：一段 JSX 就是一个值，可以返回、可以放进数组。</p>
 </section>
 
 <!-- ═══════════════ 第2站：key 是 diff 的「身份证」 ═══════════════ -->
@@ -79,6 +81,11 @@ function UserList() {
 <span class="c">// 插入 X（key="x"）后，React 一眼看出：</span>
 <span class="c">//   a/b/c 都在，只是多了个 x → 只新增 x，其余全部复用 ✅</span></code></pre>
 </div>
+
+<div class="crack">
+  <div class="crack-label">后端类比：主键与「物理行」</div>
+  <p>这跟数据库是一回事：更新一张表，你是靠 <code>WHERE id = ?</code> 精准定位行，还是靠「第几行」去改？靠行号做定位，一旦中间插了一行，后面所有更新全错位——所以才有主键。key 就是列表项的主键，React 的 diff 就是那条 <code>UPDATE ... WHERE key = ?</code>。</p>
+</div>
 </section>
 
 <!-- ═══════════════ 第3站：key 的三条铁律 ═══════════════ -->
@@ -90,14 +97,39 @@ function UserList() {
   <tbody>
     <tr><td><code>key={user.id}</code>（数据库主键）</td><td>✅ 最佳</td><td>稳定、唯一，完美的身份标识</td></tr>
     <tr><td><code>key={user.name}</code>（业务唯一字段）</td><td>✅ 可用</td><td>唯一即可，但确保不会重复</td></tr>
-    <tr><td><code>key={index}</code>（数组下标）</td><td>⚠️ 谨慎</td><td>列表一旦增删/排序就会错位，见上面</td></tr>
+    <tr><td><code>key={index}</code>（数组下标）</td><td>⚠️ 谨慎</td><td>列表一旦增删/排序就会错位，见下文实例</td></tr>
     <tr><td><code>key={Math.random()}</code></td><td>❌ 禁止</td><td>每次渲染都变，等于让 React 全部重建</td></tr>
   </tbody>
 </table>
 
 <div class="think">
-  <div class="think-q">什么时候 <code>index</code> 做 key 也算「凑合能用」？——当一个列表<strong>永远不会增删、排序、重排</strong>（纯静态展示），且项内没有内部状态时。<code>index</code> 才勉强安全。但为了省心，能用业务唯一 id 就永远用唯一 id。</div>
+  <div class="think-q">什么时候 <code>index</code> 做 key 也算「凑合能用」？——当列表<strong>永远不会增删、排序、重排</strong>（纯静态展示），且项内没有内部状态时，<code>index</code> 才勉强安全。但为了省心，能用业务唯一 id 就永远用唯一 id。</div>
 </div>
+
+<p>「项内有内部状态 + 用了 index 做 key」会炸成什么样？看一个真实可复现的场景：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>❌ 状态错位实例：两个输入框，点一下删除</b></span></div>
+  <pre><code>function Drafts({ drafts }) {
+  return drafts.map((d, index) =&gt; (
+    &lt;li key={index}&gt;
+      {/* input 是「非受控」的：用户打的字存在 DOM 自己身上 */}
+      &lt;input defaultValue={d.text} /&gt;
+      &lt;button onClick={() =&gt; remove(index)}&gt;删除&lt;/button&gt;
+    &lt;/li&gt;
+  ));
+}
+
+<span class="c">// 列表：[0] 周报   [1] 会议纪要</span>
+<span class="c">// 你在第 0 行输入框里敲了「本周完成了…」</span>
+<span class="c">// 然后点击第 0 行的「删除」，删掉「周报」</span>
+<span class="c">//</span>
+<span class="c">// 你以为：「周报」整行消失</span>
+<span class="c">// 实际：「本周完成了…」这段字留在了第 0 行，</span>
+<span class="c">//       挂在了「会议纪要」头上！💀</span></code></pre>
+</div>
+
+<p>原因顺着 diff 推一遍就通：删除后列表从两项变一项，React 按下标比对——<code>[0]</code> 还在（只是内容从「周报」变成「会议纪要」），<code>[1]</code> 没了。于是它「更新第 0 行的文字、删掉第 1 行」，而<strong>第 0 行那个输入框 DOM 被原样保留</strong>，用户敲进去的字自然纹丝不动——文字换了壳，输入留了下来。换成 <code>key={d.id}</code>，React 才知道是 <code>key=周报id</code> 的整个节点被删除，连同它肚子里的输入框一起销毁。这类「删了 A 却把 A 的输入留在 B 身上」的 bug，是前端面试和线上事故里的高频常客。</p>
 
 <p>把 key 放在<strong>哪一层</strong>也有讲究：key 应该写在 <code>map</code> 直接生成的那个元素上，而不是元素内部的某个子元素上：</p>
 
@@ -110,24 +142,63 @@ users.map(u =&gt; &lt;li key={u.id}&gt;&lt;b&gt;{u.name}&lt;/b&gt;&lt;/li&gt;)
 users.map(u =&gt; &lt;li&gt;&lt;b key={u.id}&gt;{u.name}&lt;/b&gt;&lt;/li&gt;)</code></pre>
 </div>
 
+<p>原因和 diff 的「同层比较」规则一脉相承：key 只在<strong>同一层兄弟节点之间</strong>起识别作用。把 key 藏在里层，等于在最需要身份认证的那一层没带身份证。</p>
+</section>
+
+<!-- ═══════════════ 第4站：key 的隐藏用法 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>key 的隐藏用法：换一个身份，强制「重生」</h2></div>
+
+<p>理解了「key 是身份」，反过来还能主动利用它：<strong>故意改 key，就是命令 React「销毁旧节点、重建一个全新的」</strong>。这在想重置组件内部状态时极其顺手：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>切换用户时，让表单彻底重置</b></span></div>
+  <pre><code>function Admin() {
+  const [userId, setUserId] = useState(1);
+
+  return (
+    &lt;&gt;
+      &lt;select value={userId} onChange={e =&gt; setUserId(Number(e.target.value))}&gt;
+        &lt;option value={1}&gt;Alice&lt;/option&gt;
+        &lt;option value={2}&gt;Bob&lt;/option&gt;
+      &lt;/select&gt;
+
+      {/* key 随 userId 变：切换用户 = 销毁旧表单、建一个全新的 */}
+      {/* 表单里填了一半的内容、勾选状态，全部自动清零 ✅ */}
+      &lt;UserForm key={userId} userId={userId} /&gt;
+    &lt;/&gt;
+  );
+}</code></pre>
+</div>
+
+<p>不用 <code>key</code> 的话，你得在 <code>UserForm</code> 里写一堆 <code>useEffect</code> 监听 <code>userId</code> 变化、手动重置每个字段——又啰嗦又容易漏。一个 <code>key</code> 解决一切：<strong>key 变 = 组件实例重建 = 内部 state 全部归零</strong>。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比</div>
+  <p>这相当于「换一个 Bean 实例」而不是「往旧 Bean 里塞新数据」：与其给单例的各种字段做清空重置，不如直接 <code>new</code> 一个。销毁重建往往比小心翼翼地清理更不容易出错——这个判断在后端成立，在前端同样成立。</p>
+</div>
+
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>
     <li>列表用 <code>map</code> 渲染——后端最熟悉的集合映射。</li>
     <li><code>key</code> 让 React 在 diff 时精准识别「谁是谁」，避免错位与全量重建。</li>
     <li>key 三原则：<strong>稳定、唯一、加在 map 的最外层元素</strong>，优先用业务主键，慎用 index。</li>
+    <li>key 只在兄弟间生效；反过来「改 key」还能强制销毁重建，是重置组件状态的利器。</li>
   </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：小结 ═══════════════ -->
-<section class="station reveal" id="s4">
+<!-- ═══════════════ 第5站：小结 ═══════════════ -->
+<section class="station reveal" id="s5">
 <div class="station-head"><h2>一句话总结</h2></div>
 
 <div class="recap">
   <h3>本章回顾</h3>
-  <p><code>key</code> 别看只是个属性，它是「虚拟 DOM diff 是否正确高效」的关键。一个列表因为缺了正确 key 而导致的性能问题和状态错乱 bug，是前端面试和线上事故里的高频常客。下一篇我们把本章所有知识串起来，写一个完整的 Todo 组件实战。</p>
+  <p><code>key</code> 别看只是个属性，它是「虚拟 DOM diff 是否正确高效」的关键：<strong>它是列表项的主键，让 React 像 <code>WHERE id = ?</code> 一样精准定位每一行</strong>。记住本篇的两个现场：没有稳定 key，头部插入会全量重建；用 index 做 key 配上带状态的列表项，状态会张冠李戴。</p>
 </div>
+
+<p>下一篇我们把第一章所有知识串起来，写一个完整的 Todo 组件实战——声明式、JSX、组件、state、事件、key，一个都不少。</p>
 </section>
 
 </body>

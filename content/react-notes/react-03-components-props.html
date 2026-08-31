@@ -40,8 +40,19 @@
 <p>一个接收「数据」（参数），返回「界面描述」（JSX）的函数，就是 React 组件。就这么简单。</p>
 
 <div class="think">
-  <div class="think-q">如果组件是函数、Props 是参数，那组件的「返回值」是什么？——是 JSX（界面描述）。所以 React 应用的整个界面，本质是「一堆接收数据、返回界面的函数」层层嵌套组成的树。</div>
+  <div class="think-q">如果组件是函数、Props 是参数，那组件的「返回值」是什么？——是 JSX（界面描述）。所以 React 应用的整个界面，本质是「一堆接收数据、返回界面的函数」层层嵌套组成的树。App 调用 Header，Header 调用 Logo……一路调到底，全是函数调用。</div>
 </div>
+
+<p>有一个语法细节必须马上记住——<strong>组件名必须以大写字母开头</strong>：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>大小写决定「它是谁」</b></span></div>
+  <pre><code>&lt;UserCard /&gt;    <span class="c">// ✅ 大写开头 → React 知道这是你的组件函数</span>
+&lt;userCard /&gt;    <span class="c">// ❌ 小写开头 → React 当成原生 HTML 标签 &lt;usercard&gt;</span>
+&lt;div /&gt;         <span class="c">// 小写 → 原生标签，这反而是对的</span></code></pre>
+</div>
+
+<p>React 就靠「首字母大小写」区分「自定义组件」和「内置标签」。所以 <code>UserCard</code> 不能叫 <code>userCard</code>，这不是代码风格偏好，是语法要求——就像 Java 的类名必须能过编译器检查一样硬性。</p>
 </section>
 
 <!-- ═══════════════ 第2站：Props 是不可变参数 ═══════════════ -->
@@ -65,7 +76,29 @@
 <div class="crack">
   <div class="crack-label">后端类比：构造注入 vs 可变字段</div>
   <p>你可以把 Props 理解为 Spring 的<strong>构造器注入</strong>：依赖（数据）在创建时传入，之后不可变更；而组件自己的 <code>state</code>（下一篇讲）则对应<strong>实例字段</strong>——它是组件内部自持、可以变化的数据。</p>
+  <p>再借一个词：<strong>Props 就像 DTO</strong>——跨层传递、只读消费；谁要改数据，谁就得回到数据的「源头」去改（改 state），再把新值一路传下来。</p>
 </div>
+
+<p>那「我想给 props 加个默认值 / 换个名字」总行吧？行——但做法是「在本地另起炉灶」，而不是改参数本身：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>解构 + 默认值（推荐写法）</b></span></div>
+  <pre><code><span class="c">// ✅ 解构出字段，顺便给默认值——完全没碰 props 本身</span>
+function UserCard({ name, title = "工程师", avatar }) {
+  return (
+    &lt;div className="card"&gt;
+      &lt;img src={avatar} alt={name} /&gt;
+      &lt;h3&gt;{name}&lt;/h3&gt;
+      &lt;p&gt;{title}&lt;/p&gt;
+    &lt;/div&gt;
+  );
+}
+
+<span class="c">// 调用方可以省略 title：</span>
+&lt;UserCard name="wan" avatar="/wan.png" /&gt;</code></pre>
+</div>
+
+<p>解构默认值对应 Java 里的「方法重载给缺省参数」，让调用方更省事，组件内部更清爽。props 一多，这种写法还能顺带起到「文档化参数列表」的作用——函数签名一眼看清这个组件吃什么数据。</p>
 </section>
 
 <!-- ═══════════════ 第3站：单向数据流与组合 ═══════════════ -->
@@ -120,19 +153,85 @@
 }</code></pre>
 </div>
 
-<div class="takeaway">
-  <div class="takeaway-label">核心要点</div>
-  <ul>
-    <li>组件 = 接收 Props、返回 JSX 的<strong>函数</strong>。</li>
-    <li>Props 是<strong>只读</strong>的「参数」，数据沿组件树<strong>单向</strong>流动。</li>
-    <li>组合（嵌套）是拼出整棵界面树的唯一方式，没有继承那套包袱。</li>
-  </ul>
+<p>这里藏着一个对 Java 工程师特别亲切的事实：<strong>React 没有继承</strong>。你永远不会写 <code>class ProfileCard extends BaseCard</code> 这样的东西——复用全靠「组合」：把公共部分抽成组件，然后嵌套使用。这就是那句被说烂但确实成立的话：<em>组合优于继承</em>。你在后端推崇的「多用组合、少用继承」，在前端被贯彻得更彻底。</p>
+
+<h3>特殊的孩子：<code>children</code></h3>
+<p>有一类 props 不需要显式声明——写进标签「肚子里」的内容，会自动装进一个叫 <code>children</code> 的 prop：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Card.tsx</b> · 用 children 做「容器组件」</span></div>
+  <pre><code>function Card({ title, children }) {
+  return (
+    &lt;div className="card"&gt;
+      &lt;h3&gt;{title}&lt;/h3&gt;
+      &lt;div className="card-body"&gt;{children}&lt;/div&gt;
+    &lt;/div&gt;
+  );
+}
+
+<span class="c">// 使用：标签之间的任何东西，都是 children</span>
+&lt;Card title="个人信息"&gt;
+  &lt;p&gt;姓名：wan&lt;/p&gt;
+  &lt;p&gt;职业：后端工程师&lt;/p&gt;
+&lt;/Card&gt;</code></pre>
+</div>
+
+<p>这让你能写出「外壳固定、内容随意」的容器组件——卡片、弹窗、布局框全靠它。对应 Java 里的「模板方法模式」：骨架我定，填充物你给。</p>
+
+<h3>把「函数」也当 props 传</h3>
+<p>props 能传任何值，自然也能传函数。这是子组件「向父组件汇报」的标准通道：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>回调 props：子组件喊父组件干活</b></span></div>
+  <pre><code>function DeleteButton({ onDelete }) {
+  <span class="c">// 子组件不知道也不关心「删除」具体怎么做，</span>
+  <span class="c">// 它只负责在合适的时机调用传进来的函数</span>
+  return &lt;button onClick={onDelete}&gt;删除&lt;/button&gt;;
+}
+
+<span class="c">// 父组件掌握实际逻辑：</span>
+&lt;DeleteButton onDelete={() =&gt; removeUser(user.id)} /&gt;</code></pre>
+</div>
+
+<p>注意数据流依然是单向的：<strong>数据向下流（props），动作向上传（回调函数）</strong>。子组件不直接改任何东西，它只是「通知」父亲：嘿，该你了。这个模式在第 8 篇 Todo 实战里会大量出现，卷二讲「状态提升」时它还是主角。</p>
+</section>
+
+<!-- ═══════════════ 第4站：什么时候拆组件 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>什么时候该拆组件？</h2></div>
+
+<p>会写组件之后，下一个问题马上到来：一个页面写成一个巨型组件，还是拆成二十个小件？这条界线画在哪里，直接决定代码的可维护性。给你三条和后端完全同源的判断标准：</p>
+
+<table>
+  <thead><tr><th>判断标准</th><th>后端世界的对应说法</th></tr></thead>
+  <tbody>
+    <tr><td><strong>职责是否单一</strong>：这块 JSX 能用一句话描述吗？（「用户头像卡片」「订单状态徽章」）</td><td>单一职责原则——一个 Service 干一件事</td></tr>
+    <tr><td><strong>是否会被复用</strong>：同样的结构要在两处以上出现？</td><td>抽取公共工具类 / 基类方法</td></tr>
+    <tr><td><strong>读起来是否费劲</strong>：JSX 超过一屏、嵌套超过三四层、中间隔着大段不相干的逻辑？</td><td>方法超过 80 行就该拆了</td></tr>
+  </tbody>
+</table>
+
+<p>拆出来的组件之间，用 props 把「接缝」定义清楚，就像微服务之间用接口契约通信。一个可参考的手感：<strong>小组件 20~50 行，大组件不超过一屏；拆不出有意义的 props 时，先别硬拆</strong>——过早拆分会造成一堆只在一处使用、参数签名却复杂得吓人的「伪组件」，和过早抽象一样有害。</p>
+
+<div class="think">
+  <div class="think-q">拆组件还有一个隐性收益：缩小「重新计算」的范围。父组件重新渲染时，拆出去且 props 没变的子组件，未来有机会被 React 优化跳过（第 37 篇讲）。就像把热点数据拆成独立缓存区——边界清晰了，优化才有着力点。</div>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：小结 ═══════════════ -->
-<section class="station reveal" id="s4">
+<!-- ═══════════════ 第5站：小结 ═══════════════ -->
+<section class="station reveal" id="s5">
 <div class="station-head"><h2>这一篇要背下来的东西</h2></div>
+
+<div class="takeaway">
+  <div class="takeaway-label">核心要点</div>
+  <ul>
+    <li>组件 = 接收 Props、返回 JSX 的<strong>函数</strong>；组件名必须大写开头。</li>
+    <li>Props 是<strong>只读</strong>的「参数」（对应构造注入 / DTO），解构 + 默认值是标准姿势。</li>
+    <li><strong>单向数据流</strong>：数据向下流（props），动作向上传（回调函数）。</li>
+    <li><code>children</code> 做容器组件；复用靠组合，没有继承。</li>
+    <li>拆组件看三点：职责单一、会被复用、读着费劲。</li>
+  </ul>
+</div>
 
 <div class="recap">
   <h3>本章回顾</h3>
@@ -143,7 +242,7 @@
   </ul>
 </div>
 
-<p>下一篇我们讲 <code>state</code>——组件自己的「实例字段」，以及它和 Props 这对「一对多 / 多对一」搭档如何用数据驱动整个界面。</p>
+<p>下一篇我们讲 <code>state</code>——组件自己的「实例字段」。Props 是别人给的、不能动；state 是自己的、可以变。这对「一静一动」的搭档凑齐，界面才能真正活起来。</p>
 </section>
 
 </body>

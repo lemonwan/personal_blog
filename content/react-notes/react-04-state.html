@@ -49,6 +49,23 @@ function LikeButton() {
 </ul>
 
 <p>这里 <code>useState</code> 就是 React 的 <strong>Hook</strong>（钩子）之一。Hook 是一类特殊的函数，只能在组件或其它 Hook 里调用，它们让函数组件「记住」数据。</p>
+
+<div class="crack">
+  <div class="crack-label">等一下：函数哪来的「记忆」？</div>
+  <p>你可能会疑惑：函数每次执行完局部变量就销毁了，<code>likes</code> 怎么记得住？答案是——数据根本不存放在你的函数里，而是存在 <strong>React 内部</strong>。React 为每个组件实例维护一份「状态档案」，<code>useState</code> 读的是档案里的值，<code>setLikes</code> 改的也是档案，然后 React 重新调用你的函数，让你用新值再渲染一遍。你的组件函数只是「执行一遍 = 拍一张快照」，真正持有状态的是 React。</p>
+</div>
+
+<h3>组件需要一个以上 state？多调几次就行</h3>
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>多个 state 并列</b></span></div>
+  <pre><code>function RegisterForm() {
+  const [name, setName] = useState("");
+  const [age, setAge] = useState(0);
+  const [agreed, setAgreed] = useState(false);
+  <span class="c">// ……每个 useState 都是独立的「字段」</span>
+}</code></pre>
+</div>
+<p>每个 <code>useState</code> 声明一个独立字段，就像类里并排写三个字段声明。命名约定：<code>[xxx, setXxx]</code>——setter 永远是 <code>set</code> 加字段名的驼峰形式。</p>
 </section>
 
 <!-- ═══════════════ 第2站：setState 触发重渲染 ═══════════════ -->
@@ -84,8 +101,24 @@ function updateObj() {
 }</code></pre>
 </div>
 
+<p>「修改」和「不可变替换」在 JS 里是两套不同的方法族，把这张对照表存下来，日常开发照着抄：</p>
+
+<table>
+  <thead><tr><th>意图</th><th>❌ 原地修改（mutate）</th><th>✅ 不可变（返回新引用）</th></tr></thead>
+  <tbody>
+    <tr><td>数组追加</td><td><code>arr.push(x)</code></td><td><code>[...arr, x]</code></td></tr>
+    <tr><td>数组删除</td><td><code>arr.splice(i, 1)</code></td><td><code>arr.filter((_, idx) =&gt; idx !== i)</code></td></tr>
+    <tr><td>按条件删</td><td>循环 + <code>splice</code></td><td><code>arr.filter(t =&gt; t.id !== id)</code></td></tr>
+    <tr><td>数组逐项变换</td><td><code>for</code> 循环改元素</td><td><code>arr.map(t =&gt; ({ ...t, done: true }))</code></td></tr>
+    <tr><td>数组排序</td><td><code>arr.sort()</code>（原地！）</td><td><code>[...arr].sort(...)</code></td></tr>
+    <tr><td>对象改字段</td><td><code>obj.age = 27</code></td><td><code>{ ...obj, age: 27 }</code></td></tr>
+  </tbody>
+</table>
+
+<p>规律就一句话：<strong>所有返回 <code>void</code>、悄悄改原数据的方法都不能直接用在 state 上</strong>；换成返回新数据的那一个。对应 Java 世界：就像 <code>String</code> 的 <code>concat</code> 返回新串，而不是 <code>StringBuilder.append</code> 改自己。</p>
+
 <div class="think">
-  <div class="think-q">「不可变」听着反直觉，但换个角度想：Java 里 <code>String</code> 为什么设计成不可变？——因为不可变让多线程共享、缓存、比较都变得安全。React 的不可变 state 带来同样的好处：可预测、易追踪、好优化（能配合 <code>memo</code> 做浅比较）。</div>
+  <div class="think-q">「不可变」听着反直觉，但换个角度想：Java 里 <code>String</code> 为什么设计成不可变？——因为不可变让多线程共享、缓存、比较都变得安全。React 的不可变 state 带来同样的好处：可预测、易追踪、好优化（能配合 <code>memo</code> 做浅比较）。不可变不是「仪式感」，是实打实的工程决策。</div>
 </div>
 </section>
 
@@ -108,7 +141,7 @@ function updateObj() {
   <span class="c">// 结果：count 只变成 1，不是 2。两次 set 被「批处理」合并了</span>
 }</code></pre>
 </div>
-<p>React 会把同一事件里的多次 <code>setState</code> <strong>合并成一次重渲染</strong>，并且每次读取的 <code>count</code> 都是「本次渲染时」的旧值（这叫<strong>闭包快照</strong>）。</p>
+<p>React 会把同一事件里的多次 <code>setState</code> <strong>合并成一次重渲染</strong>，并且每次读取的 <code>count</code> 都是「本次渲染时」的旧值（这叫<strong>闭包快照</strong>）。这和数据库的「批量提交」一个道理：攒一批一起刷，比逐条刷高效得多。</p>
 
 <h3>问题 2：想基于「最新值」连续累加，怎么办？</h3>
 <div class="srcbox">
@@ -121,27 +154,99 @@ function updateObj() {
 </div>
 <p>当你需要基于<strong>上一次 state</strong> 计算新值时，把「值」换成「函数」——<code>setCount(c =&gt; c + 1)</code>。React 会按顺序把更新函数依次应用。</p>
 
+<div class="crack">
+  <div class="crack-label">后端类比：值覆盖 vs CAS 更新</div>
+  <p><code>setCount(count + 1)</code> 像「读出来、加一、写回去」的非原子操作——两个并发请求都读到旧值，就丢了一次更新；<code>setCount(c =&gt; c + 1)</code> 则像数据库的 <code>UPDATE t SET n = n + 1</code> 或 <code>AtomicInteger.incrementAndGet()</code>——基于最新值原地递增，天然无竞态。<strong>只要新值依赖旧值，就用函数式</strong>，这条规则可以无脑执行。</p>
+</div>
+
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>
     <li><code>state</code> 是组件的「实例字段」，<code>setState</code> 是触发重渲染的「setter」。</li>
-    <li><strong>不可变更新</strong>：永远生成新对象/新数组，再传给 setState。</li>
+    <li><strong>不可变更新</strong>：永远生成新对象/新数组，再传给 setState；原地 mutate 的方法一律不用。</li>
     <li>基于旧值更新，用<strong>函数式</strong> <code>setState(c =&gt; c + 1)</code>，避免闭包陷阱。</li>
   </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：小结 ═══════════════ -->
+<!-- ═══════════════ 第4站：渲染快照心智模型 ═══════════════ -->
 <section class="station reveal" id="s4">
+<div class="station-head"><h2>每次渲染都是一张「快照」</h2></div>
+
+<p>批处理那节提到「闭包快照」，这里把它升格为一个正式的心智模型，它能解释日后困扰你的大半「灵异现象」：</p>
+
+<div class="crack">
+  <div class="crack-label">快照模型</div>
+  <p><strong>组件函数的每次执行，都在一份冻结的 state 快照上进行。</strong>这次渲染里读到的所有 state/props，都是渲染开始那一刻的值；事件处理器、<code>setTimeout</code> 回调里读到的，也是「它被创建的那次渲染」的快照，而不是「点击发生时」的最新值。</p>
+</div>
+
+<p>用一道经典面试题检验一下：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>点一次按钮，3 秒后弹窗显示几？</b></span></div>
+  <pre><code>function App() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+    setTimeout(() =&gt; {
+      alert(count);      <span class="c">// 显示 0，不是 1！</span>
+    }, 3000);
+  }
+
+  return &lt;button onClick={handleClick}&gt;点我 ({count})&lt;/button&gt;;
+}</code></pre>
+</div>
+
+<p>答案：显示 <code>0</code>。因为 <code>setTimeout</code> 里的 <code>count</code> 捕获的是「这次渲染」的快照值 0；<code>setCount</code> 引发的是下一次渲染，和这个已经创建好的回调互不相干。想在 3 秒后拿到最新值？要么用函数式更新的思路，要么等第 12 篇的 <code>useRef</code>——它就是为「跨渲染共享一个可变值」准备的。</p>
+
+<p>初学觉得这违反直觉，但换个角度看：<strong>快照让每次渲染都成为一次纯函数调用</strong>——输入确定，输出确定，可以放心重放、可以安全丢弃。这正是 React 并发特性（第 50 篇会谈）的地基。后端的你会立刻认出它：这就是「不可变快照 + 写时复制」，和 <code>CopyOnWriteArrayList</code> 是同一种思想。</p>
+</section>
+
+<!-- ═══════════════ 第5站：state 该放哪 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>最后一问：哪些数据配得上 state？</h2></div>
+
+<p>会用 useState 之后，最容易犯的错是「什么都往 state 里塞」。判断标准只有一条——<strong>它是「源」，还是「流」？</strong>源数据进 state，由源数据推导出来的一律不进：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>派生值：算出来，别存</b></span></div>
+  <pre><code>function OrderSummary({ order, user }) {
+  <span class="c">// ❌ 冗余：总价可以从明细推出来，存了就多了一个「不同步」的机会</span>
+  const [total, setTotal] = useState(0);
+
+  <span class="c">// ✅ 每次渲染直接算：</span>
+  const total = order.items.reduce((sum, it) =&gt; sum + it.price, 0);
+  const paidCount = order.items.filter(it =&gt; it.paid).length;
+  const fullName = `${user.firstName} ${user.lastName}`;
+
+  return &lt;p&gt;共 {total} 元（已付 {paidCount} 项）&lt;/p&gt;;
+}</code></pre>
+</div>
+
+<p>判断流程也简单，对着每个候选数据问三个问题：</p>
+
+<ol>
+  <li><strong>它是从别的 state / props 算出来的吗？</strong>——是，就地计算，不进 state。</li>
+  <li><strong>它在整个渲染周期内会变吗？</strong>——不会（如常量、初始配置），用普通 <code>const</code> 即可。</li>
+  <li><strong>它需要跨渲染「记住」吗？</strong>——需要，且不直接参与渲染（如定时器 id），那是 <code>useRef</code> 的活儿（第 12 篇）。</li>
+</ol>
+
+<p>三问都过了，才轮到 <code>useState</code>。<strong>state 越少，组件越好维护</strong>——这和 Java 里「字段尽量少、能局部变量就别用实例字段」是同一个道理：可变状态是所有复杂度的源头，你在后端为减少可变状态做过的所有斗争（无状态服务、不可变对象），在前端原样适用。</p>
+</section>
+
+<!-- ═══════════════ 第6站：小结 ═══════════════ -->
+<section class="station reveal" id="s6">
 <div class="station-head"><h2>State 与 Props 如何配合</h2></div>
 
 <div class="recap">
   <h3>本章回顾</h3>
   <p>到这一篇，React 数据模型的两块积木就齐了：<strong>Props</strong>（外部只读参数）+ <strong>State</strong>（内部可变字段）。记住一条经验法则：</p>
-  <p><strong>「数据能推出来，就不要放进 state」</strong>——state 越少，组件越好维护。这和 Java 里「字段尽量少、能局部变量就别用实例字段」是同一个道理。</p>
+  <p><strong>「数据能推出来，就不要放进 state」</strong>——state 越少，组件越好维护。</p>
+  <p>以及本篇的三个关键动作：不可变更新、新值依赖旧值时用函数式更新、把每次渲染当成一张冻结的快照。</p>
 </div>
 
-<p>下一篇文章我们退后一步，看看 React 到底是怎么在 state 变化时，高效地把新界面「画」出来的——虚拟 DOM 与 diff。</p>
+<p>下一篇文章我们退后一步，看看 React 到底是怎么在 state 变化时，高效地把新界面「画」出来的——虚拟 DOM 与 diff。理解了它，「为什么必须不可变」「为什么 key 那么重要」这些规矩背后的原因就全通了。</p>
 </section>
 
 </body>

@@ -17,12 +17,13 @@
   <div class="srcbox-head"><span class="srcbox-file"><b>imperative.html</b> · 命令式写法</span></div>
   <pre><code>// 1. 先找到 DOM 节点
 const countEl = document.getElementById("count");
+const btn = document.getElementById("btn");
 
 // 2. 自己手动维护一个「当前值」
 let count = 0;
 
 // 3. 点击时：改数据 + 手动更新视图
-button.addEventListener("click", () =&gt; {
+btn.addEventListener("click", () =&gt; {
   count = count + 1;              <span class="c">// 改数据</span>
   countEl.textContent = count;    <span class="c">// 别忘了同步视图！</span>
 });</code></pre>
@@ -31,10 +32,10 @@ button.addEventListener("click", () =&gt; {
 <p>这段代码的问题藏在最后一行注释里——<strong>「别忘了同步视图」</strong>。数据（<code>count</code>）和界面（<code>countEl.textContent</code>）是两件事，你必须自己记得每当数据变化时，去手动改一次 DOM。</p>
 
 <div class="think">
-  <div class="think-q">现在想象一下：如果这个界面有 100 个地方依赖 <code>count</code>——计数徽章、进度条、列表数量、统计图表……你每次改 <code>count</code>，都要记得去更新这 100 个 DOM 节点。漏掉一个，界面就和数据「不同步」了。</div>
+  <div class="think-q">现在想象一下：如果这个界面有 100 个地方依赖 <code>count</code>——计数徽章、进度条、列表数量、统计图表……你每次改 <code>count</code>，都要记得去更新这 100 个 DOM 节点。漏掉一个，界面就和数据「不同步」了。这类 bug 有个共同点：<strong>数据没错，界面错了</strong>——排查起来最折磨人，因为你盯着数据看半天也看不出问题。</div>
 </div>
 
-<p>这就是<strong>命令式（Imperative）</strong>编程的代价：你要一步步告诉计算机「怎么做」，包括每一个 DOM 操作的细节。界面越复杂，这份心智负担越重。</p>
+<p>这就是<strong>命令式（Imperative）</strong>编程的代价：你要一步步告诉计算机「怎么做」，包括每一个 DOM 操作的细节。界面越简单，这还能忍；界面越复杂，这份心智负担越重，直到某一天你发现一半的代码都在做「同步数据和视图」这一件事。</p>
 </section>
 
 <!-- ═══════════════ 第2站：React 的答案 ═══════════════ -->
@@ -45,7 +46,9 @@ button.addEventListener("click", () =&gt; {
 
 <div class="srcbox">
   <div class="srcbox-head"><span class="srcbox-file"><b>Counter.tsx</b> · React 声明式写法</span></div>
-  <pre><code>function Counter() {
+  <pre><code>import { useState } from "react";
+
+function Counter() {
   const [count, setCount] = useState(0);
 
   return (
@@ -69,6 +72,7 @@ button.addEventListener("click", () =&gt; {
   <div class="crack-label">一句话点破</div>
   <p>这就是 React 最核心的心智模型，一行伪代码记一辈子：</p>
   <p><strong><code>UI = f(state)</code></strong> —— 界面是状态的<strong>函数</strong>。状态定了，界面长什么样就定了。</p>
+  <p>命令式的公式则是 <code>UI = 一堆散落各处的赋值语句</code>——没有中心，没有契约，全靠自觉。</p>
 </div>
 
 <p>这种「描述结果、而非描述过程」的编程方式，就叫做<strong>声明式（Declarative）</strong>。</p>
@@ -88,25 +92,61 @@ button.addEventListener("click", () =&gt; {
     <tr><td><strong>SQL</strong>：<code>SELECT * FROM user WHERE age &gt; 18</code></td><td>你描述「要什么」，数据库自己决定走哪个索引、怎么扫描——你不管过程。</td></tr>
     <tr><td><strong>Spring + Thymeleaf</strong>：模板里写 <code>${user.name}</code></td><td>你描述「数据放哪」，渲染引擎自己负责生成 HTML。</td></tr>
     <tr><td><strong>MyBatis Mapper</strong>：<code>List&lt;User&gt; selectByAge(int age)</code></td><td>你描述「接口 + 结果」，框架帮你执行 SQL、映射结果集。</td></tr>
+    <tr><td><strong>Spring 注解</strong>：<code>@Transactional</code>、<code>@Cacheable</code></td><td>你声明「要什么行为」，框架织入开关事务、读写缓存的全部命令式细节。</td></tr>
   </tbody>
 </table>
 
-<p>这三样东西的共同点是：<strong>你描述「目标」，框架负责「执行」</strong>。你不会去手写 JDBC 的每一步连接、预编译、遍历 ResultSet——那正是命令式。</p>
+<p>这四样东西的共同点是：<strong>你描述「目标」，框架负责「执行」</strong>。你不会去手写 JDBC 的每一步连接、预编译、遍历 ResultSet——那正是命令式。</p>
 
-<p>React 在 <strong>前端</strong> 做了同样的事：你描述「每个状态下的界面」，React 负责「把界面从旧状态变到新状态」的所有 DOM 操作。</p>
+<p>React 在 <strong>前端</strong> 做了同样的事：你描述「每个状态下的界面」，React 负责「把界面从旧状态变到新状态」的所有 DOM 操作。你已经在后端享受了十几年声明式的红利，现在只是把同一种思维搬到浏览器里。</p>
+</section>
+
+<!-- ═══════════════ 第4站：思维落地：拿到需求先干嘛 ═══════════════ -->
+<section class="station reveal" id="s4">
+<div class="station-head"><h2>拿到需求，声明式思维的第一步是什么</h2></div>
+
+<p>心智模型听懂了，落到键盘上还差一步。命令式写法的习惯是「先想操作步骤」，声明式的习惯恰恰相反——<strong>先穷举状态，再画映射</strong>。拿到任何界面需求，先问自己三个问题：</p>
+
+<ol>
+  <li><strong>这个界面有几种「样子」？</strong>——加载中、成功、失败、空列表、有数据，每一种样子对应一种状态。</li>
+  <li><strong>哪些数据能唯一决定当前样子？</strong>——这就是要建模的 state，宁少勿多。</li>
+  <li><strong>什么动作会改变这些数据？</strong>——点击、输入、请求返回，每个动作对应一次 setState。</li>
+</ol>
+
+<p>以「一个带搜索的用户列表」为例，两种思维的差异一目了然：</p>
+
+<table>
+  <thead>
+    <tr><th>命令式思维（操作步骤）</th><th>声明式思维（状态 → 视图）</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>页面加载时发请求，拿到数据塞进表格</td><td rowspan="4">state：<code>keyword</code>、<code>users</code>、<code>loading</code><br /><br />视图映射：<br />· <code>loading === true</code> → 显示骨架屏<br />· <code>users.length === 0</code> → 显示「无结果」<br />· 否则 → 渲染列表</td></tr>
+    <tr><td>输入框内容变化时，重新发请求</td></tr>
+    <tr><td>请求回来先清空表格再逐行插入</td></tr>
+    <tr><td>结果为空时记得隐藏表格、显示提示文案</td></tr>
+  </tbody>
+</table>
+
+<p>左边四步是「过程清单」，少写一步就是一个「界面和数据不同步」的 bug；右边只有两件事：<strong>state 长什么样</strong>、<strong>每种 state 画什么</strong>。界面怎么从旧变新？不归你管。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比</div>
+  <p>这就是「先建表、再写接口、最后写页面」的顺序倒过来用：state 是表结构，组件函数是 Controller 里的组装逻辑，界面只是 DTO 的投影。表结构定了，接口和页面都是顺着推出来的；反过来边写页面边拍脑袋加字段，就是前端版的「没设计就建表」。</p>
+</div>
 
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>
     <li><strong>命令式</strong>：你写「怎么一步步改 DOM」——细节多、易漏、难维护。</li>
     <li><strong>声明式</strong>：你写「状态 → 界面」的映射——清晰、可预测、可复用。</li>
+    <li>动手前先穷举状态：<strong>界面有几种样子 → 什么数据决定样子 → 什么动作改变数据</strong>。</li>
     <li>React 的核心承诺：<code>UI = f(state)</code>。你负责定义 <code>f</code>，React 负责在 <code>state</code> 变化时重算并更新界面。</li>
   </ul>
 </div>
 </section>
 
-<!-- ═══════════════ 第4站：为什么值得？ ═══════════════ -->
-<section class="station reveal" id="s4">
+<!-- ═══════════════ 第5站：为什么值得？ ═══════════════ -->
+<section class="station reveal" id="s5">
 <div class="station-head"><h2>声明式到底「赢」在哪里</h2></div>
 
 <p>听完可能还是有个疑问：React 底层不也得做 DOM 操作吗？是的，但关键在于<strong>「谁来做」</strong>——是每个开发者各自手写，还是集中由一套成熟的引擎来做。</p>
@@ -114,19 +154,60 @@ button.addEventListener("click", () =&gt; {
 <p>就像你写 SQL 时，不用关心数据库内部用 B+ 树还是哈希索引；React 声明式带来的三个直接好处：</p>
 
 <ol>
-  <li><strong>可预测</strong>：给定相同的 state，渲染结果永远相同。排查问题时，你只需要看 state，不用追踪一堆 DOM 操作的历史。</li>
+  <li><strong>可预测</strong>：给定相同的 state，渲染结果永远相同。排查问题时，你只需要看 state，不用追踪一堆 DOM 操作的历史。后端同学对此再熟悉不过——这就是「无状态服务好扩容、好排障」的同一个道理。</li>
   <li><strong>可维护</strong>：增改界面时，改「状态的映射」就行，不用在代码里大海捞针找那 100 处 <code>textContent =</code>。</li>
-  <li><strong>可优化</strong>：因为界面是状态的纯函数，React 可以在背后做虚拟 DOM 对比（下一篇第 5 篇专门讲），只更新真正变化的部分。</li>
+  <li><strong>可优化</strong>：因为界面是状态的纯函数，React 可以在背后做虚拟 DOM 对比（第 5 篇专门讲），只更新真正变化的部分——你什么都不用做，优化自动生效。</li>
 </ol>
 
 <div class="think">
   <div class="think-q">回忆一下你自己写过的最乱的前端代码：是不是满屏的 <code>$("#xxx").html(...)</code> 或 <code>element.style.display = "none"</code>？那种「改了一处、别处就不同步」的恐惧，就是声明式要消灭的东西。</div>
 </div>
+</section>
+
+<!-- ═══════════════ 第6站：声明式不是万能的 ═══════════════ -->
+<section class="station reveal" id="s6">
+<div class="station-head"><h2>说句公道话：声明式也有边界</h2></div>
+
+<p>为了不把你带偏，这里提前打个「预防针」：声明式覆盖 95% 的日常场景，但总有些活儿天然命令式——</p>
+
+<ul>
+  <li><strong>聚焦输入框、滚动到指定位置</strong>：「把光标放到那里」是一次性的动作指令，没法用「状态 → 视图」表达；</li>
+  <li><strong>Canvas 绘图、接入 ECharts/地图等第三方库</strong>：库要的是一个真实 DOM 句柄，自己往里画；</li>
+  <li><strong>测量元素尺寸</strong>：比如根据窗口宽度决定布局断点。</li>
+</ul>
+
+<p>React 没有假装这些不存在，而是留了一个官方「逃生舱」——<code>useRef</code>，让你拿到真实 DOM 节点直接操作（第 12 篇细讲）。这很像 Spring：能用注解声明解决的绝不手写，但永远留着一个 <code>ApplicationContext.getBean()</code> 让你必要时摸到底层。<strong>框架的成熟，恰恰体现在它承认自己的边界。</strong></p>
+
+<p>顺带澄清两个常见误区：</p>
+
+<table>
+  <thead><tr><th>误区</th><th>真相</th></tr></thead>
+  <tbody>
+    <tr><td>「声明式 = 屏蔽底层，学不到真东西」</td><td>恰恰相反。第 5 篇会拆开虚拟 DOM 和 diff 算法，底层原理一个不少——你只是不必在业务代码里重复手搓它们。</td></tr>
+    <tr><td>「React 每次更新都重画整个页面，所以慢」</td><td>React 只更新 diff 出来的最小变化集；真正慢的往往是「组件函数里做了太多计算」，那是第 6 卷性能优化的主题。</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ═══════════════ 第7站：小结 ═══════════════ -->
+<section class="station reveal" id="s7">
+<div class="station-head"><h2>本章回顾与自测</h2></div>
 
 <div class="recap">
   <h3>本章回顾</h3>
   <p>后端转 React 的第一课，不是记住什么语法，而是完成一次<strong>心智转变</strong>：从「手动指挥 DOM 怎么变」切换到「声明状态和界面之间的映射」。这个模型一旦建立，后面所有 React 知识——JSX、组件、State、Hooks——都只是在为「定义这个 <code>f</code>」提供更优雅的写法而已。</p>
 </div>
+
+<p>合上页面之前，用三秒钟自测一下。下面这些事，你现在应该能不假思索地回答：</p>
+
+<ul class="check-list">
+  <li>命令式代码最大的隐患是什么？（答案：数据与视图靠人肉同步，漏一处就不同步）</li>
+  <li><code>UI = f(state)</code> 里的 <code>f</code>，在 React 代码里具体指什么？（答案：组件函数——输入 props/state，输出 JSX）</li>
+  <li>拿到一个新界面需求，声明式思维的第一步做什么？（答案：穷举界面有几种样子，倒推需要什么 state）</li>
+  <li>哪三类场景声明式搞不定，需要用逃生舱？（答案：DOM 动作类操作、第三方库集成、尺寸测量）</li>
+</ul>
+
+<p>下一站，我们认识 <code>return</code> 后面那段「长得很像 HTML」的东西——JSX。它到底是模板还是代码？答案会颠覆不少人的第一直觉。</p>
 </section>
 
 </body>
