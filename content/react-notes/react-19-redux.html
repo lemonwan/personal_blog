@@ -259,6 +259,17 @@ const todosSlice = createSlice({
 
 <p>同一个计数器，Zustand 十行，RTK 三十行——多出的二十行，买的正是上面四条。团队小、状态简单，这是过度设计；团队大、状态联动复杂，这是救命稻草。</p>
 
+<h3>手里有旧 Redux 资产？渐进式迁移</h3>
+
+<p>接手存量项目时常见老写法：<code>connect(mapState, mapDispatch)(Component)</code>，外加手写的 action type 常量和 switch-case reducer。好消息是 RTK 与 react-redux 完全兼容，迁移可以逐文件进行：新代码一律 <code>createSlice</code> + <code>useSelector</code>/<code>useDispatch</code>；老 slice 原样共存，等下次业务改动落到它头上时顺手换掉 <code>connect</code>。action 与 reducer 的语义自始至终没变，变的全是样板。</p>
+
+<p>最忌讳的是「停下业务三个月，重写整个状态层」——迁移该跟着业务改动的节奏走，一次迁一个 slice，每一步都能独立上线。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：绞杀者模式（Strangler Fig）</div>
+  <p>和拆单体一个路数：新功能走新链路，老模块谁改动谁顺手迁，两套代码长期共存直到老的自然枯死。一次性停机重写在后端几乎总是灾难，前端同理。</p>
+</div>
+
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>

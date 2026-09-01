@@ -166,6 +166,31 @@ function CartList() {
 <div class="think">
   <div class="think-q">selector 的返回值有个高频坑：返回「现造的对象/数组」，比如 <code>useCartStore((s) =&gt; ({ count: s.items.length, empty: !s.items.length }))</code>——每次都是新引用，Object.is 永远不等，重渲染比不订阅还勤。返回原始值（数字、字符串、布尔）或 store 里的原引用都安全；一次要拿多个字段，用 <code>useShallow</code>（<code>zustand/react/shallow</code>）做浅比较。</div>
 </div>
+
+<h3>组件外也要读写？store 是普通模块对象</h3>
+
+<p>表格里「组件外读写：行」这一条不是虚言——store 就是一个导出的模块对象，没有 Hook 也能碰它：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>checkout.ts</b> · 路由守卫 / 埋点 / 工具函数里的 store 用法</span></div>
+  <pre><code>import { useCartStore } from "./cartStore";
+
+<span class="c">// 埋点上报：不在 React 树里，没有 Hook 可调</span>
+export function reportCartSize() {
+  const { items } = useCartStore.getState(); <span class="c">// 直接读当前快照</span>
+  track("cart_size", { size: items.length });
+}
+
+<span class="c">// 写也一样：路由拦截里直接调 action</span>
+export function blockCheckoutIfEmpty() {
+  if (useCartStore.getState().items.length === 0) {
+    return "/cart"; <span class="c">// 购物车为空，拦回购物车页</span>
+  }
+  return null;
+}</code></pre>
+</div>
+
+<p>两点语义要记牢：<code>getState()</code> 返回的是调用那一刻的快照，不订阅、不触发任何重渲染——组件外要「持续跟踪」变更，用 <code>useCartStore.subscribe(listener)</code> 手动挂监听、记得适时取消。而 Context 离了 React 树连影子都摸不到——这正是第 1 站说「离开组件树就够不着」那处别扭的解药。</p>
 </section>
 
 <!-- ═══════════════ 第4站：persist 与 devtools ═══════════════ -->
@@ -245,7 +270,7 @@ export const useCartStore = create&lt;CartState&gt;()(
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
   <ul>
-    <li>Zustand = 组件树外的全局单例 + 按需订阅：<code>create&lt;T&gt;()((set, get) =&gt; ({ ...数据, ...action }))</code>。</li>
+    <li>Zustand = 组件树外的全局单例 + 按需订阅：<code>create&lt;T&gt;()((set, get) =&gt; ({ ...数据, ...action }))</code>；store 是普通模块对象，组件外 <code>getState()</code> 读快照、直接调 action。</li>
     <li>state 与 action 一体；set 浅合并、get 读最新值；不可变更新是硬纪律——引用比较决定 UI 是否更新。</li>
     <li>selector 精准订阅：结果 Object.is 不变就不重渲染；别返回字面量新对象，多字段用 useShallow。</li>
     <li>persist/devtools 是 AOP 式中间件：两行配置完成持久化与审计，业务代码零改动。</li>

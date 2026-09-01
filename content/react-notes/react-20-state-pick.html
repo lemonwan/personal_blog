@@ -158,6 +158,55 @@
     <tr><td>动画坐标 / 拖拽位置</td><td>useRef（第 12 篇）</td><td>每帧变化，根本不需要触发渲染</td></tr>
   </tbody>
 </table>
+</section>
+
+<!-- ═══════════════ 第5站：混合使用 ═══════════════ -->
+<section class="station reveal" id="s5">
+<div class="station-head"><h2>真实项目：四种工具同时上岗</h2></div>
+
+<p>选型的终点不是「挑出一个赢家」。真实的中型项目里，几种工具几乎总是同时在场——各管各的状态，谁也不抢谁的活。看一个电商后台的布局组件，每一处状态都标注了它在决策树上命中的那一问：</p>
+
+<div class="srcbox">
+  <div class="srcbox-head"><span class="srcbox-file"><b>Dashboard.tsx</b> · 五种状态，四个答案</span></div>
+  <pre><code>import { createContext, useContext, useState } from "react";
+import { create } from "zustand";
+
+<span class="c">// 第 3 问命中：主题这类低频、近乎只读的全局配置 → Context</span>
+const ThemeContext = createContext&lt;"light" | "dark"&gt;("light");
+
+<span class="c">// 第 5 问命中：要跨路由存活的布局偏好 → Zustand</span>
+const useLayoutStore = create&lt;{ collapsed: boolean; toggle: () =&gt; void }&gt;()(
+  (set) =&gt; ({
+    collapsed: false,
+    toggle: () =&gt; set((s) =&gt; ({ collapsed: !s.collapsed })),
+  })
+);
+
+function Dashboard() {
+  <span class="c">// 第 2 问命中：只有本组件用的搜索词 → local state</span>
+  const [keyword, setKeyword] = useState("");
+
+  const theme = useContext(ThemeContext);
+  <span class="c">// 订阅只挑需要的字段：侧边栏折叠态变了，才重渲染</span>
+  const collapsed = useLayoutStore((s) =&gt; s.collapsed);
+
+  <span class="c">// 第 1 问命中：订单列表是服务端数据，不进任何 store</span>
+  <span class="c">// → useQuery({ queryKey: ["orders", keyword], ... })，第 33 篇展开</span>
+
+  return (/* 侧边栏、搜索框、订单表：各取所需，略 */);
+}</code></pre>
+</div>
+
+<p>五种状态、四个答案，没有一种工具「垄断」这个项目：Context 不碰订单列表，Zustand 不碰搜索词，谁也没越界。注意最后一行——服务端数据连登场的机会都没有，红线在写第一行代码时就划好了。这才是决策树的正确用法：<strong>不是面试背书的流程图，而是每天落笔时的路标</strong>——每写一份新状态，先过一遍五问，归属自然浮现。</p>
+
+<div class="crack">
+  <div class="crack-label">后端类比：混合存储架构</div>
+  <p>后端从没人争论「MySQL、Redis、Kafka 哪个最好」：业务事实进 MySQL，热点读走 Redis，事件流进 Kafka，请求级临时值留在方法栈里——数据性质决定容器，工具天然分工。前端状态管理是同一个问题换了舞台：真源在哪、频率多高、共享多广，三个性质问完，容器自己就选好了。「全家桶信仰」和「一刀切微服务」是同一种病。</p>
+</div>
+
+<div class="think">
+  <div class="think-q">两个工具看着都合适时，选更轻的那个，等真实的痛信号出现再升级：第三个不相邻的组件要读它，是 local state 升 Zustand 的信号；需要审计与回放，是 Zustand 升 RTK 的信号。信号来自痛点，不来自热榜——这也是本篇五站合起来的最后一句话。</div>
+</div>
 
 <div class="takeaway">
   <div class="takeaway-label">核心要点</div>
@@ -166,6 +215,7 @@
     <li>决策树五问，命中即停：服务端数据 → TanStack Query；局部使用 → local state；低频只读配置 → Context；大团队要审计 → RTK；其余客户端状态 → Zustand。</li>
     <li>两条红线：服务端数据不进任何客户端 store；高频变更不进 Context。</li>
     <li>选型是演进不是豪赌：local state → 状态提升 → Zustand → RTK，逐级迁移成本可控，别「一步到位」。</li>
+    <li>真实项目是混合使用：Context 管环境值、Zustand 管交互状态、local state 管局部临时值、取数库管服务端数据——每份状态都能说出自己命中的是哪一问。</li>
   </ul>
 </div>
 
