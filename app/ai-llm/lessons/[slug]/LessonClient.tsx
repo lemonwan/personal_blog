@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { bindFigureInteractions } from "./figure-interactions";
 
 export function LessonClient({ content }: { content: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -517,6 +518,13 @@ export function LessonClient({ content }: { content: string }) {
         btn.innerHTML = k === 0 ? `<span aria-hidden="true">▶</span>开始训练：逐步推演` : k === 6 ? `↺ 重新开始` : `下一步（${k}/6）`;
       });
     });
+
+    /* ── 交互式 SVG 演示（nn-01 / nn-02 / nn-03-network / nn-04 等）── */
+    try {
+      bindFigureInteractions(root);
+    } catch (e) {
+      console.error("[figure-interactions] failed", e);
+    }
 
     /* ── bpx 标签页（nn-06 完整案例六页）── */
     root.querySelectorAll(".bpx-nav").forEach((nav) => {
