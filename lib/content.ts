@@ -989,7 +989,7 @@ export interface TocItem {
   title: string;
 }
 
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")

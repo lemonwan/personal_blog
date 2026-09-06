@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/java-basics/", label: "Java笔记", match: (p: string) => p.startsWith("/java-basics") || p.startsWith("/java-interview") },
   { href: "/react-notes/", label: "React笔记", match: (p: string) => p.startsWith("/react-notes") },
   { href: "/about/", label: "关于我", match: (p: string) => p.startsWith("/about") },
+  { href: "/search/", label: "搜索", match: (p: string) => p.startsWith("/search"), icon: true },
 ];
 
 export default function HeaderNav() {
@@ -31,7 +32,23 @@ export default function HeaderNav() {
             }
             aria-current={active ? "page" : undefined}
           >
-            <span>{l.label}</span>
+            <span className="flex items-center gap-1">
+              {l.icon && (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  className="h-3 w-3"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+              )}
+              {l.label}
+            </span>
             <span
               className={"mt-1 h-0.5 w-full rounded-full transition-colors " + (active ? "bg-[#FAC94A]" : "bg-transparent")}
               aria-hidden="true"
