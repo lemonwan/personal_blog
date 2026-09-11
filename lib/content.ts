@@ -249,7 +249,7 @@ export const JAVA_ARTICLES: JavaArticleMeta[] = [
     volume: 2, lessonNum: 16,
     tags: ["并发", "核心", "锁"],
     difficulty: "深度", interviewFreq: "极高",
-    desc: "AQS 的 state + CLH 队列是一切锁的基石。ReentrantLock 的 lock/unlock 全流程、公平 vs 非公平的实现差异。" },
+    desc: "AQS 的 state + CLH 队列是一切锁的基石。ReentrantLock 的 lock/unlock 全流程、公平 vs 非公平的实现差异，以及「锁竞争最后不还是 CAS 竞争吗」这个追问的答案。" },
   { slug: "readwritelock-stampedlock",
     title: "读写锁 ReentrantReadWriteLock 与 StampedLock",
     volume: 2, lessonNum: 17,

@@ -193,7 +193,6 @@
 </table>
 <p>选型的心法就一句话：<strong>临界区越短、竞争越低，CAS 越划算；临界区越长、竞争越高，锁越划算</strong>。临界区长意味着每次 CAS 失败后「重新读+重算」的窗口大、失败率高，自旋烧掉的 CPU 比 park 一次的代价高得多——这是「乐观 vs 悲观」的本质：赌冲突发生的概率。</p>
 <div class="takeaway"><span class="takeaway-label">面试回答要点</span>"AtomicInteger 底层是 volatile int value 加 CAS 自旋。getAndIncrement() 用 do-while 循环，先 volatile 读当前值，再 CAS 尝试将其加 1，失败则重新读重试。低竞争时性能远超 synchronized，高竞争时自旋开销增大——所以高并发计数器要用 LongAdder 分散竞争（第 13 站）。</div>
-</div>
 </section>
 
 <!-- ═══════════════ 第7站：自旋的艺术 ═══════════════ -->
@@ -215,6 +214,7 @@
   <li><strong>自旋有「次数兜底」</strong>：JVM 的轻量级锁（synchronized 升级链路的第一级）就是「先自旋 N 次再 park」的混合策略——短冲突自旋解决，长冲突交给操作系统。JDK 15+ 移除了偏向锁，但「短则自旋、长则挂起」的思路贯穿整个并发设计。</li>
 </ul>
 <div class="think"><div class="think-q">面试追问「自旋和 park 的代价怎么量化」：一次 park/unpark ≈ 一次上下文切换 ≈ 10~100 微秒级（取决于 OS 负载）；一次失败的 CAS ≈ 几十纳秒。临界区耗时在微秒级以下时，哪怕竞争率 50%，自旋的期望成本也往往低于 park 一次——这就是「临界区短 → CAS」的定量依据。</div></div>
+<p>这套取舍在锁框架层还有一个更漂亮的解法：AQS 没有二选一，而是让赢家付自旋的钱（一两次 CAS 定输赢），让输家付阻塞的钱（入队 park）。于是「N 个线程抢一个变量」被重组成「1 个赢 + N−1 个睡」，对 state 的 CAS 频率与排队人数解耦。详见「AQS 框架与 ReentrantLock」篇第 11 站——那一站正好在回答「锁竞争最后不还是变成 CAS 竞争吗」这个追问。</p>
 </section>
 
 <!-- ═══════════════ 第8站：ABA 问题 ═══════════════ -->
@@ -306,7 +306,7 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
 <div class="station-head"><span class="station-no">第 10 站</span><h2>CAS 第三大问题：一次只能保护一个变量</h2></div>
 <p>前两个问题（ABA、自旋）大家背得熟，第三个问题最容易漏答：<strong>CAS 只能保证单个共享变量的原子性</strong>。当「逻辑上的一个操作」需要同时改多个变量时，两条 CAS 之间没有原子性可言：</p>
 <div class="srcbox">
-<div class="srcbox-head"><b>反例：两个变量必须一起改</b></span>
+<div class="srcbox-head"><span class="srcbox-file"><b>反例：两个变量必须一起改</b></span></div>
 <pre><code><span class="k">class</span> <span class="t">Config</span> {
     <span class="k">volatile int</span> version;    <span class="c">// 配置版本号</span>
     <span class="k">volatile</span> <span class="t">String</span> content; <span class="c">// 配置内容</span>
@@ -314,12 +314,12 @@ ref.compareAndSet(val, newNode, <span class="k">false</span>, <span class="k">tr
 
 <span class="c">// ❌ 更新线程：两条 CAS 之间可能被读线程插进来</span>
 config.content = <span class="s">"v2-内容"</span>;   <span class="c">// ① 先写了内容</span>
-config.version = <span class="n">2</span>;           <span class="c">// ② 再改版本号
+config.version = <span class="n">2</span>;           <span class="c">// ② 再改版本号</span>
 <span class="c">// 读线程在 ① 和 ② 之间看到：version=1 + content="v2-内容" —— 版本和内容错配！</span></code></pre>
 </div>
 <p>三种标准解法：</p>
 <ul>
-  <li><strong>把多个字段封装成不可变对象，CAS 一个引用</strong>（最常用）：每次更新都 new 一个新对象，用 <code>AtomicReference&lt;Config&gt;</code> 原子换指针。读线程拿到的引用要么全旧、要么全新，永远不会错配——和第 14 站讲 volatile 引用「安全发布」是同一招。</li>
+  <li><strong>把多个字段封装成不可变对象，CAS 一个引用</strong>（最常用）：每次更新都 new 一个新对象，用 <code>AtomicReference&lt;Config&gt;</code> 原子换指针。读线程拿到的引用要么全旧、要么全新，永远不会错配——和「volatile 深入」篇讲的 volatile 引用「安全发布」是同一招。</li>
   <li><strong>用锁</strong>：两个字段必须一致地更新，直接 synchronized / ReentrantLock 包住两条赋值——锁天然保护任意多个变量。</li>
   <li><strong>单字段承载全部状态</strong>：能建模成一个值（比如「版本号+状态」压成一个 int 的不同位段，像 AQS 的 ctl、线程池的 ctl 那样），一次 CAS 搞定。</li>
 </ul>
@@ -536,7 +536,7 @@ config.version = <span class="n">2</span>;           <span class="c">// ② 再�
 <div class="station-head"><span class="station-no">第 15 站</span><h2>生产落地：接口打点与 QPS 计数</h2></div>
 <p>CAS 家族在真实系统里的第一落点就是<strong>指标打点</strong>——每个请求都可能来自不同线程，高频累加，典型的高竞争计数器场景：</p>
 <div class="srcbox">
-<div class="srcbox-head"><b>MetricsCounter.java</b> —— 可直接抄的打点模板</span>
+<div class="srcbox-head"><span class="srcbox-file"><b>MetricsCounter.java</b> —— 可直接抄的打点模板</span></div>
 <pre><code><span class="k">public final class</span> <span class="t">MetricsCounter</span> {
     <span class="c">// 高竞争计数：LongAdder（只写不读，sum 弱一致完全够）</span>
     <span class="k">private final</span> <span class="t">LongAdder</span> qps = <span class="k">new</span> <span class="t">LongAdder</span>();
